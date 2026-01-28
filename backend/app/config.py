@@ -10,14 +10,14 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # Database
-    DB_HOST: str
+    DB_HOST: str = "127.0.0.1"  # Default for local, ignored when using Cloud SQL socket
     DB_PORT: int = 3306
     DB_USER: str
     DB_PASSWORD: str
     DB_NAME: str = "ssmaker_auth"
 
     # Cloud SQL Unix Socket (for Cloud Run deployment)
-    # Format: /cloudsql/PROJECT:REGION:INSTANCE
+    # Format: PROJECT:REGION:INSTANCE (without /cloudsql/ prefix)
     CLOUD_SQL_CONNECTION_NAME: str = ""
 
     # JWT
@@ -52,18 +52,12 @@ class Settings(BaseSettings):
     @field_validator("ALLOWED_ORIGINS", mode="before")
     @classmethod
     def parse_allowed_origins(cls, v):
-        """Parse ALLOWED_ORIGINS from string or list - blocks wildcard in production"""
+        """Parse ALLOWED_ORIGINS from string or list"""
         if isinstance(v, str):
-            # Block wildcard in production
+            # Allow wildcard (desktop app needs this)
             if v == "*":
-                env = os.getenv("ENVIRONMENT", "development")
-                if env == "production":
-                    raise ValueError(
-                        "ALLOWED_ORIGINS cannot be '*' in production. "
-                        "Specify explicit origins: 'https://app.example.com,https://admin.example.com'"
-                    )
-                logger.warning("CORS wildcard '*' is insecure. Configure explicit origins for production.")
-                return [v]
+                logger.warning("CORS wildcard '*' enabled. Consider restricting for web apps.")
+                return ["*"]
             # Single URL
             if v.startswith("http"):
                 return [v]
