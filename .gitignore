@@ -1,0 +1,75 @@
+# Python
+*.pyc
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Archive (백업 파일)
+_archive/
+
+# 빌드 로그
+build_log.txt
+error_log.txt
+
+# API Keys (절대 푸시 금지!)
+api_keys.json
+api_keys_config.json
+.env
+credentials.json
+*_key.txt
+*_keys.txt
+*_keys.json
+
+# 로그인 정보 (절대 푸시 금지!)
+info.on
+
+# 세션 데이터 (작업 데이터 파일)
+session_data.json
+session_backup.json
+*.session
+
+# UI 설정 파일 (사용자별 설정)
+ui_preferences.json
+
+# Claude Code 로컬 설정
+.claude/settings.local.json
+
+# 미디어 파일
+*.mp4
+*.wav
+*.m4a
+*.mp3
+
+# 출력 폴더
+outputs/
+temp/
+tmp/
+batch_video_*/
+logs/
+
+# 빌드 파일
+build/
+dist/
+# ssmaker.spec은 빌드 설정 파일이므로 포함
+
+# TTS 출력 폴더
+tts_output/
+
+# 폰트 파일 (저작권 문제로 제외)
+fonts/
+*.ttf
+*.otf
+
+# IDE
+.vscode/
+.idea/
+*.sublime-*
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+nul
+*.dll
+/output/main-ss/_internal
+/output

@@ -1,0 +1,282 @@
+import hashlib
+import logging
+from datetime import datetime, timedelta
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from app.models.user import User
+from app.models.session import SessionModel
+from app.models.login_attempt import LoginAttempt
+from app.utils.password import verify_password, get_dummy_hash
+from app.utils.jwt_handler import create_access_token, decode_access_token
+from app.config import get_settings
+
+logger = logging.getLogger(__name__)
+settings = get_settings()
+
+
+def _mask_username(username: str) -> str:
+    """
+    Mask username for logging (privacy protection).
+    로깅을 위한 사용자 이름 마스킹 (개인 정보 보호).
+
+    Args:
+        username: Username to mask
+
+    Returns:
+        Masked username (e.g., "jo****hn" for "johnsmith")
+    """
+    if not username:
+        return "***"
+    if len(username) <= 4:
+        return "****"
+    return f"{username[:2]}{'*' * (len(username) - 4)}{username[-2:]}"
+
+
+def _hash_ip(ip_address: str) -> str:
+    """
+    Hash IP address for logging (privacy protection).
+    로깅을 위한 IP 주소 해시 (개인 정보 보호).
+
+    Args:
+        ip_address: IP address to hash
+
+    Returns:
+        First 12 characters of SHA256 hash
+    """
+    if not ip_address:
+        return "unknown"
+    return hashlib.sha256(ip_address.encode()).hexdigest()[:12]
+
+
+class AuthService:
+    def __init__(self, db: Session):
+        self.db = db
+
+    async def login(
+        self, username: str, password: str, ip_address: str, force: bool
+    ):
+        """Login logic with dual rate limiting (username + IP)"""
+        # Rate limiting check - both username and IP based
+        rate_limit_result = await self._check_rate_limit(username, ip_address)
+        if not rate_limit_result["allowed"]:
+            # Security: Mask username and hash IP in logs for privacy
+            # 보안: 개인 정보 보호를 위해 로그에서 사용자 이름 마스킹 및 IP 해시
+            logger.warning(
+                f"Rate limit exceeded: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}, reason={rate_limit_result['reason']}"
+            )
+            return {
+                "status": "EU005",
+                "message": "Too many login attempts. Please try again later.",
+            }
+
+        # Find user
+        user = self.db.query(User).filter(User.username == username).first()
+
+        # Always perform password verification to prevent timing attacks
+        # Use dummy hash if user doesn't exist to ensure constant-time response
+        password_hash = user.password_hash if user else get_dummy_hash()
+        password_valid = verify_password(password, password_hash)
+
+        # Security: Use unified error response to prevent user enumeration
+        # 보안: 사용자 열거 공격 방지를 위해 통합된 에러 응답 사용
+        # All authentication failures return the same error code (EU001)
+
+        if not user or not password_valid:
+            # Record failed attempt
+            self._record_login_attempt(username, ip_address, success=False)
+            return {"status": "EU001", "message": "EU001"}  # Invalid credentials
+
+        # Check subscription and active status - return same generic error
+        # to prevent revealing that the user exists
+        # 구독 및 활성 상태 확인 - 사용자 존재 여부를 노출하지 않기 위해 동일한 오류 반환
+        if (
+            user.subscription_expires_at
+            and user.subscription_expires_at < datetime.utcnow()
+        ):
+            self._record_login_attempt(username, ip_address, success=False)
+            return {"status": "EU001", "message": "EU001"}  # Unified error
+
+        if not user.is_active:
+            self._record_login_attempt(username, ip_address, success=False)
+            return {"status": "EU001", "message": "EU001"}  # Unified error
+
+        # Check existing session
+        existing_session = (
+            self.db.query(SessionModel)
+            .filter(
+                SessionModel.user_id == user.id,
+                SessionModel.is_active == True,
+                SessionModel.expires_at > datetime.utcnow(),
+            )
+            .first()
+        )
+
+        if existing_session and not force:
+            return {"status": "EU003", "message": "EU003"}  # Duplicate login
+
+        # Force logout if needed
+        if existing_session and force:
+            existing_session.is_active = False
+            self.db.commit()
+
+        # Create JWT token
+        token, jti, expires_at = create_access_token(user.id, ip_address)
+
+        # Save session
+        new_session = SessionModel(
+            user_id=user.id,
+            token_jti=jti,
+            ip_address=ip_address,
+            expires_at=expires_at,
+        )
+        self.db.add(new_session)
+
+        # Update user
+        user.last_login_at = datetime.utcnow()
+        user.last_login_ip = ip_address
+
+        # Record success
+        self._record_login_attempt(username, ip_address, success=True)
+
+        self.db.commit()
+
+        # Security: Hash IP in logs for privacy
+        logger.info(f"Login successful: user_id={user.id}, ip_hash={_hash_ip(ip_address)}")
+
+        # Backward compatible response
+        return {
+            "status": True,
+            "data": {
+                "data": {"id": str(user.id)},
+                "ip": ip_address,
+                "token": token,
+            },
+        }
+
+    async def logout(self, user_id: str, token: str):
+        """Logout logic with proper error handling"""
+        try:
+            payload = decode_access_token(token)
+            jti = payload.get("jti")
+            token_user_id = payload.get("sub")
+
+            # Verify token belongs to the user making the request
+            if str(token_user_id) != str(user_id):
+                logger.warning(f"Logout attempt with mismatched user_id: token={token_user_id}, request={user_id}")
+                return "error"
+
+            session = (
+                self.db.query(SessionModel)
+                .filter(
+                    SessionModel.token_jti == jti, SessionModel.is_active == True
+                )
+                .first()
+            )
+
+            if session:
+                session.is_active = False
+                self.db.commit()
+                logger.info(f"Logout successful: user_id={user_id}")
+                return True
+            return "error"
+        except ValueError as e:
+            logger.warning(f"Logout failed - invalid token: {e}")
+            return "error"
+        except Exception as e:
+            logger.exception(f"Logout failed - unexpected error")
+            return "error"
+
+    async def check_session(self, user_id: str, token: str, ip_address: str):
+        """Session check logic (called every 5 seconds)"""
+        try:
+            payload = decode_access_token(token)
+            jti = payload.get("jti")
+            token_ip = payload.get("ip")
+            token_user_id = payload.get("sub")
+
+            # Verify token belongs to the user making the request
+            if str(token_user_id) != str(user_id):
+                logger.warning(f"Session check with mismatched user_id: token={token_user_id}, request={user_id}")
+                return {"status": "EU003"}
+
+            # IP mismatch check
+            if token_ip != ip_address:
+                # Security: Hash IPs in logs for privacy
+                logger.warning(f"Session IP mismatch: token_ip_hash={_hash_ip(token_ip)}, request_ip_hash={_hash_ip(ip_address)}")
+                return {"status": "EU003"}  # Session from different IP
+
+            # Database session check
+            session = (
+                self.db.query(SessionModel)
+                .filter(
+                    SessionModel.token_jti == jti,
+                    SessionModel.is_active == True,
+                    SessionModel.expires_at > datetime.utcnow(),
+                )
+                .first()
+            )
+
+            if not session:
+                return {"status": "EU003"}  # Session invalid/expired
+
+            # Update last activity
+            session.last_activity_at = datetime.utcnow()
+            self.db.commit()
+
+            return {"status": True}
+
+        except ValueError as e:
+            if "expired" in str(e).lower():
+                return {"status": "EU003"}
+            # Don't expose internal error details
+            logger.warning(f"Session check failed: {e}")
+            return {"status": "error", "message": "Session verification failed"}
+        except Exception as e:
+            # Don't expose internal error details
+            logger.exception("Session check failed unexpectedly")
+            return {"status": "error", "message": "Session verification failed"}
+
+    async def _check_rate_limit(self, username: str, ip_address: str) -> dict:
+        """Check if login attempts exceed rate limit - dual check (username AND IP)"""
+        cutoff_time = datetime.utcnow() - timedelta(
+            minutes=settings.LOGIN_ATTEMPT_WINDOW_MINUTES
+        )
+
+        # Check per-username limit (failed attempts only)
+        username_attempts = (
+            self.db.query(func.count(LoginAttempt.id))
+            .filter(
+                LoginAttempt.username == username,
+                LoginAttempt.attempted_at > cutoff_time,
+                LoginAttempt.success == False,
+            )
+            .scalar()
+        )
+
+        if username_attempts >= settings.MAX_LOGIN_ATTEMPTS:
+            return {"allowed": False, "reason": "username_limit"}
+
+        # Check per-IP limit (all attempts - prevents enumeration)
+        ip_attempts = (
+            self.db.query(func.count(LoginAttempt.id))
+            .filter(
+                LoginAttempt.ip_address == ip_address,
+                LoginAttempt.attempted_at > cutoff_time,
+            )
+            .scalar()
+        )
+
+        if ip_attempts >= settings.MAX_IP_ATTEMPTS:
+            return {"allowed": False, "reason": "ip_limit"}
+
+        return {"allowed": True, "reason": None}
+
+    def _record_login_attempt(
+        self, username: str, ip_address: str, success: bool
+    ):
+        """Record login attempt for rate limiting - commits immediately for consistency"""
+        attempt = LoginAttempt(
+            username=username, ip_address=ip_address, success=success
+        )
+        self.db.add(attempt)
+        self.db.commit()  # Commit immediately to ensure rate limiting works

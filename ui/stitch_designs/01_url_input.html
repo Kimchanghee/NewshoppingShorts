@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+
+<html class="light" lang="ko"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Shorts Maker Dashboard - URL Input</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        "primary": "#e31639",
+                        "background-light": "#f8f6f6",
+                        "background-dark": "#211113",
+                    },
+                    fontFamily: {
+                        "display": ["Inter", "sans-serif"]
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .sidebar-item-active {
+            background-color: #fce8eb;
+            color: #e31639;
+        }
+        .dark .sidebar-item-active {
+            background-color: #3d1a1e;
+            color: #ff4d6a;
+        }
+    </style>
+</head>
+<body class="bg-background-light dark:bg-background-dark font-display text-slate-900 dark:text-slate-100 antialiased">
+<div class="flex h-screen overflow-hidden">
+<!-- Side Navigation Bar -->
+<aside class="w-64 flex-shrink-0 border-r border-slate-200 dark:border-slate-800 bg-white dark:bg-[#1a0d0e] flex flex-col justify-between py-6">
+<div>
+<div class="px-6 mb-10">
+<div class="flex items-center gap-3">
+<div class="w-10 h-10 bg-primary rounded-lg flex items-center justify-center text-white">
+<span class="material-symbols-outlined fill-1">play_circle</span>
+</div>
+<div class="flex flex-col">
+<h1 class="text-[#1b0e10] dark:text-white text-base font-bold leading-none">쇼핑 숏폼 메이커</h1>
+<p class="text-slate-500 dark:text-slate-400 text-xs mt-1">SaaS Dashboard</p>
+</div>
+</div>
+</div>
+<nav class="px-3 space-y-1">
+<div class="sidebar-item-active flex items-center gap-3 px-4 py-3 rounded-xl transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[22px]">link</span>
+<p class="text-sm font-bold">01 URL 입력</p>
+</div>
+<div class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer group">
+<span class="material-symbols-outlined text-[22px] group-hover:text-primary">palette</span>
+<p class="text-sm font-semibold">02 스타일 선택</p>
+</div>
+<div class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer group">
+<span class="material-symbols-outlined text-[22px] group-hover:text-primary">schedule</span>
+<p class="text-sm font-semibold">03 작업 대기열</p>
+</div>
+</nav>
+</div>
+<div class="px-3 space-y-1">
+<div class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[22px]">help</span>
+<p class="text-sm font-medium">도움말</p>
+</div>
+<div class="flex items-center gap-3 px-4 py-3 rounded-xl text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors cursor-pointer">
+<span class="material-symbols-outlined text-[22px]">settings</span>
+<p class="text-sm font-medium">설정</p>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 flex flex-col overflow-y-auto">
+<!-- Top Navigation Bar -->
+<header class="h-16 flex items-center justify-between px-8 border-b border-slate-200 dark:border-slate-800 bg-white dark:bg-[#1a0d0e] sticky top-0 z-10">
+<div class="flex items-center gap-2 text-sm text-slate-500 dark:text-slate-400">
+<span>대시보드</span>
+<span class="material-symbols-outlined text-xs">chevron_right</span>
+<span class="text-slate-900 dark:text-white font-medium">URL 입력</span>
+</div>
+<div class="flex items-center gap-4">
+<div class="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-lg">
+<button class="p-1.5 rounded-md bg-white dark:bg-slate-700 shadow-sm text-slate-900 dark:text-white">
+<span class="material-symbols-outlined text-lg">light_mode</span>
+</button>
+<button class="p-1.5 rounded-md text-slate-500 dark:text-slate-400">
+<span class="material-symbols-outlined text-lg">dark_mode</span>
+</button>
+</div>
+<button class="p-2 text-slate-500 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors">
+<span class="material-symbols-outlined">notifications</span>
+</button>
+<div class="h-8 w-[1px] bg-slate-200 dark:border-slate-700 mx-1"></div>
+<div class="flex items-center gap-3 pl-2">
+<div class="w-9 h-9 rounded-full bg-slate-200"></div>
+<span class="text-sm font-semibold text-slate-700 dark:text-slate-200">김관리님</span>
+</div>
+</div>
+</header>
+<!-- Workspace -->
+<div class="p-12 max-w-5xl mx-auto w-full">
+<!-- Page Heading -->
+<div class="mb-10">
+<h2 class="text-[#1b0e10] dark:text-white text-4xl font-extrabold leading-tight tracking-tight mb-3">
+                        쇼핑 영상 제작을 위한 <br/>URL을 입력하세요
+                    </h2>
+<p class="text-slate-500 dark:text-slate-400 text-lg">
+                        상품 상세 페이지 주소를 붙여넣으세요 (Douyin, TikTok 지원)
+                    </p>
+</div>
+<!-- Input Card -->
+<div class="bg-white dark:bg-[#1a0d0e] rounded-2xl shadow-sm border border-slate-200 dark:border-slate-800 overflow-hidden">
+<div class="p-6">
+<div class="flex flex-col gap-4">
+<div class="flex items-center justify-between">
+<span class="text-sm font-bold text-slate-700 dark:text-slate-300">상품 URL 입력</span>
+<span class="text-xs text-slate-400">복수 입력 시 엔터로 구분 가능합니다.</span>
+</div>
+<!-- Text Field -->
+<div class="relative">
+<textarea class="w-full h-48 p-5 rounded-xl border-2 border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900/50 text-[#1b0e10] dark:text-white placeholder:text-slate-400 focus:border-primary focus:ring-0 transition-all resize-none text-base leading-relaxed" placeholder="https://v.douyin.com/..."></textarea>
+<div class="absolute bottom-4 right-4 text-xs text-slate-400">
+                                    0/30 URL 입력됨
+                                </div>
+</div>
+<div class="flex items-center justify-between mt-2">
+<div class="flex gap-4">
+<div class="flex items-center gap-1.5 text-xs text-slate-500">
+<span class="material-symbols-outlined text-sm text-green-500">check_circle</span>
+                                        Douyin 지원
+                                    </div>
+<div class="flex items-center gap-1.5 text-xs text-slate-500">
+<span class="material-symbols-outlined text-sm text-green-500">check_circle</span>
+                                        TikTok 지원
+                                    </div>
+</div>
+<!-- Single Action Button -->
+<button class="flex items-center gap-2 bg-primary hover:bg-[#c41231] text-white px-8 py-4 rounded-xl font-bold text-base transition-all shadow-lg shadow-primary/20 active:scale-[0.98]">
+<span class="material-symbols-outlined">add_link</span>
+                                    URL 추가하기
+                                </button>
+</div>
+</div>
+</div>
+</div>
+<!-- Tips -->
+<div class="mt-12 grid grid-cols-2 gap-6">
+<div class="bg-primary/5 dark:bg-primary/10 border border-primary/10 rounded-xl p-5">
+<div class="flex items-center gap-2 mb-2 text-primary">
+<span class="material-symbols-outlined text-xl">info</span>
+<h4 class="font-bold text-sm">도움말: URL 입력 팁</h4>
+</div>
+<p class="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                            Douyin 또는 TikTok 영상 공유 링크를 복사하여 붙여넣으세요. 짧은 URL(v.douyin.com)도 지원합니다.
+                        </p>
+</div>
+<div class="bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-800 rounded-xl p-5">
+<div class="flex items-center gap-2 mb-2 text-slate-600 dark:text-slate-400">
+<span class="material-symbols-outlined text-xl">history</span>
+<h4 class="font-bold text-sm">최근 작업</h4>
+</div>
+<div class="flex flex-col gap-2">
+<div class="flex items-center justify-between text-xs">
+<span class="truncate max-w-[180px] text-slate-500">무선 게이밍 마우스...</span>
+<span class="text-slate-400">어제</span>
+</div>
+<div class="flex items-center justify-between text-xs">
+<span class="truncate max-w-[180px] text-slate-500">4K 모니터 거치대...</span>
+<span class="text-slate-400">2일 전</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Footer -->
+<footer class="mt-auto p-8 text-center text-xs text-slate-400">
+                © 2024 Shorts Maker. All rights reserved.
+            </footer>
+</main>
+</div>
+</body></html>
