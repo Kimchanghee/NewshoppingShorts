@@ -5,18 +5,18 @@ Utility Functions
 """
 from app.utils.jwt_handler import (
     create_access_token,
-    verify_token,
-    decode_token,
+    decode_access_token,
 )
 from app.utils.password import (
     hash_password,
     verify_password,
+    get_dummy_hash,
 )
 
 __all__ = [
     'create_access_token',
-    'verify_token',
-    'decode_token',
+    'decode_access_token',
     'hash_password',
     'verify_password',
+    'get_dummy_hash',
 ]
