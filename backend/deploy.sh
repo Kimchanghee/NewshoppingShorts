@@ -34,6 +34,7 @@ gcloud run deploy $SERVICE_NAME \
   --set-env-vars "ALLOWED_ORIGINS=*" \
   --set-secrets "DB_PASSWORD=ssmaker-db-password:latest" \
   --set-secrets "JWT_SECRET_KEY=ssmaker-jwt-secret:latest" \
+  --set-secrets "ADMIN_API_KEY=ssmaker-admin-api-key:latest" \
   --min-instances 0 \
   --max-instances 10 \
   --memory 512Mi \

@@ -24,7 +24,7 @@ echo.
 echo [3/3] Cloud Run 배포 중... (약 2-5분 소요)
 echo.
 cd /d "%~dp0"
-call gcloud run deploy ssmaker-auth-api --source . --region us-central1 --platform managed --allow-unauthenticated --add-cloudsql-instances project-d0118f2c-58f4-4081-864:us-central1:ssmaker-auth --set-env-vars "DB_USER=ssmaker_user,DB_NAME=ssmaker_auth,CLOUD_SQL_CONNECTION_NAME=project-d0118f2c-58f4-4081-864:us-central1:ssmaker-auth,ENVIRONMENT=production,ALLOWED_ORIGINS=*" --set-secrets "DB_PASSWORD=ssmaker-db-password:latest,JWT_SECRET_KEY=ssmaker-jwt-secret:latest"
+call gcloud run deploy ssmaker-auth-api --source . --region us-central1 --platform managed --allow-unauthenticated --add-cloudsql-instances project-d0118f2c-58f4-4081-864:us-central1:ssmaker-auth --set-env-vars "DB_USER=ssmaker_user,DB_NAME=ssmaker_auth,CLOUD_SQL_CONNECTION_NAME=project-d0118f2c-58f4-4081-864:us-central1:ssmaker-auth,ENVIRONMENT=production,ALLOWED_ORIGINS=*" --set-secrets "DB_PASSWORD=ssmaker-db-password:latest,JWT_SECRET_KEY=ssmaker-jwt-secret:latest,ADMIN_API_KEY=ssmaker-admin-api-key:latest"
 
 echo.
 echo ====================================
