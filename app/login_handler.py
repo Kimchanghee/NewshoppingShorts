@@ -46,6 +46,10 @@ class LoginHandler:
                 data = {'userId': userId, "key": "ssmaker", "ip": userIp}
                 res = rest.loginCheck(**data)
                 st = res.get('status') if isinstance(res, dict) else None
+                if st == "skip":
+                    # 검증 실패 - 조용히 재시도
+                    time.sleep(5)
+                    continue
                 if st == "EU003":
                     # Tkinter 스레드 안전 호출
                     self.app.root.after(0, lambda: self.exit_program_other_place("EU003"))

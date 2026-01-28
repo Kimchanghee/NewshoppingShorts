@@ -52,6 +52,8 @@ class UserResponse(BaseModel):
     is_active: bool
     last_login_at: Optional[datetime] = None
     login_count: int = 0
+    work_count: int = -1  # -1 = 무제한
+    work_used: int = 0
 
     class Config:
         from_attributes = True

@@ -38,15 +38,15 @@ class LoadingSplash:
         self.text_color = "#1b0e10"
         self.secondary_text = "#64748b"
 
-        self.window.configure(bg=self.bg_color)
+        self.window.configure(bg=self.bg_color, highlightthickness=1, highlightbackground="#e0e0e0")
 
         self.create_widgets()
 
     def create_widgets(self):
         """위젯 생성"""
         # 메인 컨테이너
-        main_frame = tk.Frame(self.window, bg=self.bg_color, bd=2, relief=tk.RAISED)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        main_frame = tk.Frame(self.window, bg=self.bg_color)
+        main_frame.pack(fill=tk.BOTH, expand=True)
 
         # 헤더
         header = tk.Frame(main_frame, bg=self.header_bg, height=80)

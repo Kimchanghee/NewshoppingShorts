@@ -86,6 +86,7 @@ class ApproveRequest(BaseModel):
     """가입 승인 요청 스키마"""
     request_id: int = Field(..., description="승인할 요청 ID")
     subscription_days: int = Field(default=30, ge=1, le=365, description="구독 기간 (일)")
+    work_count: int = Field(default=-1, ge=-1, description="작업 횟수 (-1 = 무제한)")
 
 
 class RejectRequest(BaseModel):

@@ -20,3 +20,6 @@ class User(Base):
     last_login_at = Column(TIMESTAMP, nullable=True)
     last_login_ip = Column(String(45), nullable=True)
     login_count = Column(Integer, default=0, nullable=False)
+    # 작업 횟수 관리 (-1 = 무제한)
+    work_count = Column(Integer, default=-1, nullable=False)
+    work_used = Column(Integer, default=0, nullable=False)

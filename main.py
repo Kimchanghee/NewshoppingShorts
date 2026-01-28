@@ -25,7 +25,7 @@ except ImportError:
     winsound = None
 
 from caller import rest
-from ssmaker import get_safe_tts_base_dir
+from utils.tts_config import get_safe_tts_base_dir
 from ui.panels import HeaderPanel, URLInputPanel, VoicePanel, QueuePanel, ProgressPanel
 from ui.panels.settings_tab import SettingsTab
 from ui.panels.style_tab import StyleTab
@@ -817,7 +817,7 @@ class VideoAnalyzerGUI:
         )
         self._sub_title_label.pack(side=tk.LEFT, padx=(12, 0))
 
-        # 우측: 설정 버튼 + 테마 토글
+        # 우측: 구독 정보 + 설정 버튼 + 테마 토글
         self._right_frame = tk.Frame(self._header_frame, bg=self.header_bg)
         self._right_frame.pack(side=tk.RIGHT, padx=20, pady=10)
 
@@ -836,6 +836,40 @@ class VideoAnalyzerGUI:
             on_click=self._open_settings_modal
         )
         self.settings_button.pack(side=tk.RIGHT, padx=(0, 12))
+
+        # 구독 정보 프레임
+        self._subscription_frame = tk.Frame(self._right_frame, bg=self.header_bg)
+        self._subscription_frame.pack(side=tk.RIGHT, padx=(0, 20))
+
+        self._sub_info_labels = {}
+        sub_info_style = {"font": ("맑은 고딕", 9), "bg": self.header_bg, "fg": self.secondary_text}
+
+        # 남은 횟수
+        self._sub_info_labels['count'] = tk.Label(
+            self._subscription_frame, text="횟수: -", **sub_info_style
+        )
+        self._sub_info_labels['count'].pack(side=tk.RIGHT, padx=(8, 0))
+
+        # 구분선
+        tk.Label(self._subscription_frame, text="|", **sub_info_style).pack(side=tk.RIGHT, padx=4)
+
+        # 남은 구독
+        self._sub_info_labels['expires'] = tk.Label(
+            self._subscription_frame, text="구독: -", **sub_info_style
+        )
+        self._sub_info_labels['expires'].pack(side=tk.RIGHT, padx=(8, 0))
+
+        # 구분선
+        tk.Label(self._subscription_frame, text="|", **sub_info_style).pack(side=tk.RIGHT, padx=4)
+
+        # 최근 로그인
+        self._sub_info_labels['login'] = tk.Label(
+            self._subscription_frame, text="로그인: -", **sub_info_style
+        )
+        self._sub_info_labels['login'].pack(side=tk.RIGHT)
+
+        # 구독 정보 업데이트
+        self._update_subscription_info()
 
         # 헤더 하단 구분선
         self._header_divider = tk.Frame(self.root, bg=self.border_color, height=1)
@@ -1078,6 +1112,68 @@ class VideoAnalyzerGUI:
         # 여기서는 추가 작업 불필요 (옵저버가 _on_theme_changed 호출)
         pass
 
+    def _update_subscription_info(self):
+        """구독 정보 업데이트"""
+        from datetime import datetime
+
+        if not hasattr(self, '_sub_info_labels') or not self._sub_info_labels:
+            return
+
+        try:
+            # login_data에서 구독 정보 추출
+            user_data = {}
+            if self.login_data:
+                user_data = self.login_data.get('data', {}).get('data', {})
+
+            # 최근 로그인
+            last_login = user_data.get('last_login_at', '')
+            if last_login:
+                try:
+                    dt = datetime.fromisoformat(last_login.replace('Z', '+00:00'))
+                    login_str = dt.strftime('%m/%d %H:%M')
+                except:
+                    login_str = '-'
+            else:
+                login_str = datetime.now().strftime('%m/%d %H:%M')
+            self._sub_info_labels['login'].config(text=f"로그인: {login_str}")
+
+            # 구독 만료일
+            expires_at = user_data.get('subscription_expires_at', '')
+            if expires_at:
+                try:
+                    exp_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
+                    now = datetime.now(exp_dt.tzinfo) if exp_dt.tzinfo else datetime.now()
+                    days_left = (exp_dt - now).days
+                    if days_left < 0:
+                        expires_str = "만료됨"
+                        color = "#e31639"
+                    elif days_left <= 7:
+                        expires_str = f"{days_left}일"
+                        color = "#ffc107"
+                    else:
+                        expires_str = f"{days_left}일"
+                        color = self.secondary_text
+                    self._sub_info_labels['expires'].config(text=f"구독: {expires_str}", fg=color)
+                except:
+                    self._sub_info_labels['expires'].config(text="구독: -")
+            else:
+                self._sub_info_labels['expires'].config(text="구독: -")
+
+            # 남은 작업 횟수
+            work_count = user_data.get('work_count', -1)
+            work_used = user_data.get('work_used', 0)
+            if work_count == -1:
+                count_str = "무제한"
+                color = "#00c853"
+            else:
+                remaining = max(0, work_count - work_used)
+                count_str = f"{remaining}회"
+                color = "#ffc107" if remaining <= 10 else self.secondary_text
+            self._sub_info_labels['count'].config(text=f"횟수: {count_str}", fg=color)
+
+        except Exception as e:
+            logger.debug(f"구독 정보 업데이트 실패: {e}")
+
     def _on_theme_changed(self, new_theme: str):
         """테마 변경 시 호출"""
         self._apply_theme_colors()
@@ -1124,24 +1220,32 @@ class VideoAnalyzerGUI:
             # 헤더 프레임 배경색 업데이트
             if hasattr(self, '_header_frame'):
                 self._header_frame.configure(bg=self.header_bg)
-            
+
             if hasattr(self, '_title_frame'):
                 self._title_frame.configure(bg=self.header_bg)
-            
+
             if hasattr(self, '_right_frame'):
                 self._right_frame.configure(bg=self.header_bg)
-            
+
             # 타이틀 레이블 색상 업데이트
             if hasattr(self, '_main_title_label'):
                 self._main_title_label.configure(bg=self.header_bg, fg=self.primary_color)
-            
+
             if hasattr(self, '_sub_title_label'):
                 self._sub_title_label.configure(bg=self.header_bg, fg=self.secondary_text)
-            
+
+            # 구독 정보 프레임 테마 업데이트
+            if hasattr(self, '_subscription_frame'):
+                self._subscription_frame.configure(bg=self.header_bg)
+                for child in self._subscription_frame.winfo_children():
+                    child.configure(bg=self.header_bg)
+                # 색상 정보 재설정
+                self._update_subscription_info()
+
             # 헤더 하단 구분선 색상 업데이트
             if hasattr(self, '_header_divider'):
                 self._header_divider.configure(bg=self.border_color)
-                
+
         except Exception as e:
             logger.error(f"[테마] 헤더 업데이트 실패: {e}")
 

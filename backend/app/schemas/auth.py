@@ -60,3 +60,26 @@ class CheckRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=50, description="User ID")
     key: str = Field(..., min_length=10, max_length=1024, description="JWT token")
     ip: str = Field(..., max_length=45, description="Client IP (legacy)")
+
+
+class UseWorkRequest(BaseModel):
+    """Work usage request - 작업 횟수 사용 요청"""
+    user_id: str = Field(..., min_length=1, max_length=50, description="User ID")
+    token: str = Field(..., min_length=10, max_length=1024, description="JWT token")
+
+
+class UseWorkResponse(BaseModel):
+    """Work usage response - 작업 횟수 사용 응답"""
+    success: bool
+    message: str
+    remaining: Optional[int] = None  # -1 = unlimited
+    used: Optional[int] = None
+
+
+class CheckWorkResponse(BaseModel):
+    """Work count check response - 작업 횟수 확인 응답"""
+    success: bool
+    can_work: bool
+    work_count: int  # -1 = unlimited
+    work_used: int
+    remaining: int  # -1 = unlimited
