@@ -42,6 +42,20 @@ class Settings(BaseSettings):
     MAX_IP_ATTEMPTS: int = 20  # Higher threshold for IP-based limiting
     LOGIN_ATTEMPT_WINDOW_MINUTES: int = 15
 
+    # Admin API Key for protected endpoints
+    # Generate with: openssl rand -hex 32
+    ADMIN_API_KEY: str = ""
+
+    @field_validator("ADMIN_API_KEY")
+    @classmethod
+    def validate_admin_api_key(cls, v, info):
+        """Admin API key validation - required in production"""
+        # Get environment from values if available
+        env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
+        if env == "production" and (not v or len(v) < 32):
+            raise ValueError("ADMIN_API_KEY must be at least 32 characters in production")
+        return v
+
     # Environment
     ENVIRONMENT: str = "development"
 

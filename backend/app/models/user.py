@@ -19,3 +19,4 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     last_login_at = Column(TIMESTAMP, nullable=True)
     last_login_ip = Column(String(45), nullable=True)
+    login_count = Column(Integer, default=0, nullable=False)

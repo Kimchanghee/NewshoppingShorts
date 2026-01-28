@@ -1,8 +1,10 @@
+import logging
 from sqlalchemy import create_engine, URL
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.config import get_settings
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
 
 # Connection pool configuration
@@ -51,3 +53,13 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+def init_db():
+    """
+    Initialize database tables
+    데이터베이스 테이블 초기화
+    """
+    # Import all models to register them with Base
+    from app.models import user, session, login_attempt, registration_request
+    Base.metadata.create_all(bind=engine)

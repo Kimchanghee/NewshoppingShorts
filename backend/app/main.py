@@ -4,9 +4,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from app.routers import auth
+from app.routers import auth, registration, admin
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.config import get_settings
+from app.database import init_db
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -21,6 +22,19 @@ app = FastAPI(
     docs_url=docs_url,
     redoc_url=redoc_url,
 )
+
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize database tables on startup"""
+    logger.info("Initializing database tables...")
+    try:
+        init_db()
+        logger.info("Database tables initialized successfully")
+    except Exception as e:
+        logger.error(f"Failed to initialize database tables: {e}")
+        raise
+
 
 # Register rate limiter with app state
 app.state.limiter = limiter
@@ -55,11 +69,13 @@ app.add_middleware(
     allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Admin-API-Key"],
 )
 
 # Include routers
 app.include_router(auth.router)
+app.include_router(registration.router)
+app.include_router(admin.router)
 
 
 @app.get("/")
