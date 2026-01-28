@@ -369,7 +369,6 @@ from PyQt5.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 )
 from PyQt5.QtGui import QIcon, QFont, QColor, QPixmap
-import webbrowser
 import time
 # Note: sys already imported at line 5
 from caller import rest
@@ -1067,7 +1066,7 @@ class Login(QMainWindow, login_Ui.Ui_LoginWindow):
             self.loginButton.clicked.connect(self._loginCheck)
             self.minimumButton.clicked.connect(self._minimumWindow)
             self.exitButton.clicked.connect(self._closeWindow)
-            self.remoteButton.clicked.connect(self.openRemote)
+            self.registerRequestButton.clicked.connect(self._openRegistrationDialog)
         
         else :
             self.showCustomMessageBox('프로그램 실행 오류', '이미 실행중인 프로그램이 있습니다') 
@@ -1297,8 +1296,59 @@ class Login(QMainWindow, login_Ui.Ui_LoginWindow):
         msgBox.setText(f" \nㅤㅤ{message}ㅤㅤㅤ\n ")
         msgBox.exec_()
     
-    def openRemote(self) :
-        webbrowser.open("https://www.helpu.kr/agcglobal")
+    def _openRegistrationDialog(self):
+        """회원가입 요청 다이얼로그 열기"""
+        from ui.login_ui_modern import RegistrationRequestDialog
+
+        # 다이얼로그 생성
+        self.registrationDialog = RegistrationRequestDialog(self)
+        self.registrationDialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
+        self.registrationDialog.setFixedSize(400, 580)
+
+        # 시그널 연결
+        self.registrationDialog.backRequested.connect(self._closeRegistrationDialog)
+        self.registrationDialog.registrationRequested.connect(self._submitRegistrationRequest)
+
+        # 중앙에 위치
+        self.registrationDialog.move(
+            self.x() + (self.width() - self.registrationDialog.width()) // 2,
+            self.y() + (self.height() - self.registrationDialog.height()) // 2
+        )
+        self.registrationDialog.show()
+
+    def _closeRegistrationDialog(self):
+        """회원가입 요청 다이얼로그 닫기"""
+        if hasattr(self, 'registrationDialog') and self.registrationDialog:
+            self.registrationDialog.close()
+            self.registrationDialog = None
+
+    def _submitRegistrationRequest(self, name: str, username: str, password: str, contact: str):
+        """회원가입 요청 제출"""
+        try:
+            # 백엔드 API 호출
+            result = rest.submitRegistrationRequest(
+                name=name,
+                username=username,
+                password=password,
+                contact=contact
+            )
+
+            if result.get('success'):
+                self.showCustomMessageBox(
+                    '가입 요청 완료',
+                    '회원가입 요청이 접수되었습니다.\n관리자 승인 후 로그인이 가능합니다.'
+                )
+                self._closeRegistrationDialog()
+            else:
+                error_msg = result.get('message', '회원가입 요청에 실패했습니다.')
+                self.showCustomMessageBox('요청 실패', error_msg)
+
+        except Exception as e:
+            logger.error("[Registration] 회원가입 요청 실패: %s", e, exc_info=True)
+            self.showCustomMessageBox(
+                '요청 실패',
+                '서버 연결에 실패했습니다.\n잠시 후 다시 시도해주세요.'
+            )
         
     def _minimumWindow(self):
         self.showMinimized()

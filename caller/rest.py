@@ -368,6 +368,81 @@ def getVersion() -> str:
         logger.exception(f"Unexpected version check error: {e} - using default version")
         return "1.0.0"
 
+
+def submitRegistrationRequest(name: str, username: str, password: str, contact: str) -> Dict[str, Any]:
+    """
+    Submit a registration request to the server.
+    서버에 회원가입 요청을 제출합니다.
+
+    Args:
+        name: 가입자 명
+        username: 사용할 아이디
+        password: 비밀번호
+        contact: 연락처
+
+    Returns:
+        Response dict with 'success' boolean and optional 'message'
+    """
+    # HTTPS security check
+    if not _check_https_security():
+        return {"success": False, "message": "보안 연결이 필요합니다."}
+
+    # Input validation
+    if not name or len(name.strip()) < 2:
+        return {"success": False, "message": "가입자 명은 2자 이상이어야 합니다."}
+
+    if not validate_user_id(username):
+        return {"success": False, "message": "아이디 형식이 올바르지 않습니다."}
+
+    if not password or len(password) < 6:
+        return {"success": False, "message": "비밀번호는 6자 이상이어야 합니다."}
+
+    if not contact or len(contact.strip()) < 10:
+        return {"success": False, "message": "연락처를 올바르게 입력해주세요."}
+
+    body = {
+        'name': name.strip(),
+        'username': username.strip(),
+        'password': password,
+        'contact': contact.strip()
+    }
+
+    try:
+        response = _secure_session.post(
+            main_server + 'user/register/request',
+            json=body,
+            timeout=30
+        )
+
+        if response.status_code == 409:
+            # Username already exists or pending
+            return {"success": False, "message": "이미 사용 중이거나 승인 대기 중인 아이디입니다."}
+
+        response.raise_for_status()
+        result = response.json()
+
+        if result.get('success'):
+            logger.info(f"Registration request submitted for: {_sanitize_user_id_for_logging(username)}")
+            return {"success": True, "message": "회원가입 요청이 접수되었습니다."}
+        else:
+            return {"success": False, "message": result.get('message', '요청 처리에 실패했습니다.')}
+
+    except requests.exceptions.Timeout:
+        logger.error("Registration request timed out")
+        return {"success": False, "message": _ERROR_MESSAGES['timeout']}
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Registration connection error: {e}")
+        return {"success": False, "message": _ERROR_MESSAGES['connection']}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Registration network error: {str(e)[:100]}")
+        return {"success": False, "message": _ERROR_MESSAGES['network']}
+    except json.JSONDecodeError as e:
+        logger.error(f"Registration JSON parsing error: {str(e)[:50]}")
+        return {"success": False, "message": _ERROR_MESSAGES['parse']}
+    except Exception as e:
+        logger.exception(f"Unexpected registration error: {e}")
+        return {"success": False, "message": _ERROR_MESSAGES['unexpected']}
+
 def setPort() -> bool:
     """
     Set port configuration from info.on file.

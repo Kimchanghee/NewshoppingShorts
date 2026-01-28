@@ -134,6 +134,7 @@ class AuthService:
         # Update user
         user.last_login_at = datetime.utcnow()
         user.last_login_ip = ip_address
+        user.login_count = (user.login_count or 0) + 1
 
         # Record success
         self._record_login_attempt(username, ip_address, success=True)
