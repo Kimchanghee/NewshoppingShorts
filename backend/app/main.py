@@ -1,4 +1,5 @@
 import logging
+import sys
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
@@ -8,6 +9,19 @@ from app.routers import auth, registration, admin
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.config import get_settings
 from app.database import init_db
+
+# 로깅 설정 - 모든 로그를 터미널에 출력
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# SQLAlchemy 로그 레벨 조정 (너무 많은 로그 방지)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
@@ -45,6 +59,23 @@ app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 
+class RequestLoggingMiddleware(BaseHTTPMiddleware):
+    """Log all API requests and responses"""
+    async def dispatch(self, request: Request, call_next) -> Response:
+        # 요청 로깅
+        client_ip = request.client.host if request.client else "unknown"
+        logger.info(f">>> {request.method} {request.url.path} | IP: {client_ip}")
+
+        try:
+            response = await call_next(request)
+            # 응답 로깅
+            logger.info(f"<<< {request.method} {request.url.path} | Status: {response.status_code}")
+            return response
+        except Exception as e:
+            logger.error(f"!!! {request.method} {request.url.path} | Error: {str(e)}")
+            raise
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to all responses"""
     async def dispatch(self, request: Request, call_next) -> Response:
@@ -61,6 +92,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
 # Security headers middleware (added first, executed last)
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Request logging middleware
+app.add_middleware(RequestLoggingMiddleware)
 
 # CORS middleware - validate credentials with origins
 allow_credentials = "*" not in settings.ALLOWED_ORIGINS

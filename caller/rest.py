@@ -104,14 +104,32 @@ def _check_token_expiration(token: str) -> bool:
 
 def _create_secure_session() -> requests.Session:
     """
-    Create a requests session with explicit SSL verification enabled.
-    명시적 SSL 검증이 활성화된 requests 세션 생성.
+    Create a requests session with connection pooling and SSL verification.
+    연결 풀링 및 SSL 검증이 활성화된 requests 세션 생성.
 
     Returns:
-        Configured requests.Session with SSL verification
+        Configured requests.Session with SSL verification and connection pooling
     """
+    from requests.adapters import HTTPAdapter
+    from urllib3.util.retry import Retry
+
     session = requests.Session()
     session.verify = True  # Explicit SSL certificate verification
+
+    # 연결 풀링 및 재시도 설정으로 속도 향상
+    retry_strategy = Retry(
+        total=1,  # 최대 1회 재시도
+        backoff_factor=0.1,
+        status_forcelist=[500, 502, 503, 504],
+    )
+    adapter = HTTPAdapter(
+        pool_connections=5,
+        pool_maxsize=10,
+        max_retries=retry_strategy
+    )
+    session.mount("https://", adapter)
+    session.mount("http://", adapter)
+
     return session
 
 # Create a module-level secure session for reuse
@@ -190,7 +208,7 @@ def login(**data) -> Dict[str, Any]:
         response = _secure_session.post(
             main_server + 'user/login/god',
             json=body,
-            timeout=60
+            timeout=(3, 10)  # (connect_timeout, read_timeout) - 빠른 연결, 적절한 읽기 시간
         )
         response.raise_for_status()
         loginObject = json.loads(response.text)
@@ -286,8 +304,8 @@ def logOut(**data) -> str:
 
 def loginCheck(**data) -> Dict[str, Any]:
     """
-    Check login status with input validation.
-    입력 검증이 포함된 로그인 상태 확인.
+    Check login status (heartbeat).
+    로그인 상태 확인 (하트비트).
 
     Args:
         data: Check data containing userId, key, ip
@@ -295,11 +313,10 @@ def loginCheck(**data) -> Dict[str, Any]:
     Returns:
         Check response dict
     """
-    # Input validation
     user_id = data.get('userId', '')
-    if not validate_user_id(user_id):
-        logger.error(f"Invalid user ID format: {_sanitize_user_id_for_logging(user_id)}")
-        return {"status": "error", "message": _ERROR_MESSAGES['invalid_input']}
+    # 하트비트 체크는 검증 실패 시 조용히 스킵 (에러 로그 없이)
+    if not user_id:
+        return {"status": "skip", "message": "No user ID"}
 
     ip_address = data.get('ip', '')
     if not validate_ip_address(ip_address):
@@ -408,11 +425,16 @@ def submitRegistrationRequest(name: str, username: str, password: str, contact: 
     }
 
     try:
+        logger.info(f"Sending registration request to: {main_server}user/register/request")
         response = _secure_session.post(
             main_server + 'user/register/request',
             json=body,
             timeout=30
         )
+
+        # 모든 응답 로깅 (디버깅용)
+        logger.info(f"Registration response status: {response.status_code}")
+        logger.info(f"Registration response body: {response.text[:500]}")
 
         if response.status_code == 409:
             # Username already exists or pending
@@ -425,7 +447,10 @@ def submitRegistrationRequest(name: str, username: str, password: str, contact: 
             logger.info(f"Registration request submitted for: {_sanitize_user_id_for_logging(username)}")
             return {"success": True, "message": "회원가입 요청이 접수되었습니다."}
         else:
-            return {"success": False, "message": result.get('message', '요청 처리에 실패했습니다.')}
+            # 서버에서 온 에러 메시지 그대로 전달
+            server_message = result.get('message', '요청 처리에 실패했습니다.')
+            logger.error(f"Registration failed: {server_message}")
+            return {"success": False, "message": server_message}
 
     except requests.exceptions.Timeout:
         logger.error("Registration request timed out")
@@ -442,6 +467,105 @@ def submitRegistrationRequest(name: str, username: str, password: str, contact: 
     except Exception as e:
         logger.exception(f"Unexpected registration error: {e}")
         return {"success": False, "message": _ERROR_MESSAGES['unexpected']}
+
+def checkWorkAvailable(user_id: str) -> Dict[str, Any]:
+    """
+    Check if user has remaining work count available.
+    사용자의 잔여 작업 횟수 확인.
+
+    Args:
+        user_id: User ID
+
+    Returns:
+        dict with success, can_work, work_count, work_used, remaining
+    """
+    stored_token = _get_auth_token()
+    if not stored_token:
+        return {
+            "success": False,
+            "can_work": False,
+            "work_count": 0,
+            "work_used": 0,
+            "remaining": 0,
+            "message": "No auth token"
+        }
+
+    body = {
+        "user_id": str(user_id),
+        "token": stored_token
+    }
+
+    try:
+        response = _secure_session.post(
+            main_server + 'user/work/check',
+            json=body,
+            timeout=10
+        )
+        response.raise_for_status()
+        result = response.json()
+        return result
+    except requests.exceptions.Timeout:
+        logger.error("Work check request timed out")
+        return {"success": False, "can_work": True, "message": _ERROR_MESSAGES['timeout']}
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Work check connection error: {e}")
+        return {"success": False, "can_work": True, "message": _ERROR_MESSAGES['connection']}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Work check network error: {str(e)[:100]}")
+        return {"success": False, "can_work": True, "message": _ERROR_MESSAGES['network']}
+    except Exception as e:
+        logger.exception(f"Unexpected work check error: {e}")
+        return {"success": False, "can_work": True, "message": _ERROR_MESSAGES['unexpected']}
+
+
+def useWork(user_id: str) -> Dict[str, Any]:
+    """
+    Increment work_used count after successful work completion.
+    작업 완료 후 사용 횟수 증가.
+
+    Args:
+        user_id: User ID
+
+    Returns:
+        dict with success, message, remaining, used
+    """
+    stored_token = _get_auth_token()
+    if not stored_token:
+        return {
+            "success": False,
+            "message": "No auth token",
+            "remaining": None,
+            "used": None
+        }
+
+    body = {
+        "user_id": str(user_id),
+        "token": stored_token
+    }
+
+    try:
+        response = _secure_session.post(
+            main_server + 'user/work/use',
+            json=body,
+            timeout=10
+        )
+        response.raise_for_status()
+        result = response.json()
+        logger.info(f"Work used: remaining={result.get('remaining')}")
+        return result
+    except requests.exceptions.Timeout:
+        logger.error("Use work request timed out")
+        return {"success": False, "message": _ERROR_MESSAGES['timeout']}
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Use work connection error: {e}")
+        return {"success": False, "message": _ERROR_MESSAGES['connection']}
+    except requests.exceptions.RequestException as e:
+        logger.error(f"Use work network error: {str(e)[:100]}")
+        return {"success": False, "message": _ERROR_MESSAGES['network']}
+    except Exception as e:
+        logger.exception(f"Unexpected use work error: {e}")
+        return {"success": False, "message": _ERROR_MESSAGES['unexpected']}
+
 
 def setPort() -> bool:
     """

@@ -70,6 +70,7 @@ async def submit_registration_request(
     Rate limited to 5 requests per hour per IP to prevent abuse.
     IP당 시간당 5회로 제한하여 남용 방지.
     """
+    logger.info(f"Registration request received: username={data.username}, name={data.name}")
     try:
         # Check if username already exists in users table
         existing_user = db.query(User).filter(User.username == data.username).first()
@@ -116,10 +117,19 @@ async def submit_registration_request(
 
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"Database error during registration request: {e}")
+        logger.error(f"Database error during registration request: {e}", exc_info=True)
+        # 에러 메시지에 실제 에러 힌트 포함 (디버깅용)
+        error_hint = str(e)[:200] if str(e) else "Unknown DB error"
         return RegistrationResponse(
             success=False,
-            message="서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+            message=f"서버 오류가 발생했습니다. [{error_hint}]"
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Unexpected error during registration request: {e}", exc_info=True)
+        return RegistrationResponse(
+            success=False,
+            message=f"예기치 않은 오류가 발생했습니다. [{str(e)[:100]}]"
         )
 
 
@@ -174,11 +184,13 @@ async def approve_registration(
 
     Requires X-Admin-API-Key header.
     """
+    logger.info(f"Approve request received: request_id={data.request_id}, days={data.subscription_days}, work_count={data.work_count}")
     try:
         # Find the registration request
         reg_request = db.query(RegistrationRequest).filter(
             RegistrationRequest.id == data.request_id
         ).first()
+        logger.info(f"Registration request found: {reg_request is not None}")
 
         if not reg_request:
             return RegistrationResponse(
@@ -206,15 +218,19 @@ async def approve_registration(
 
         # Create the user
         subscription_expires_at = datetime.utcnow() + timedelta(days=data.subscription_days)
+        logger.info(f"Creating user: username={reg_request.username}, expires={subscription_expires_at}, work_count={data.work_count}")
 
         new_user = User(
             username=reg_request.username,
             password_hash=reg_request.password_hash,
             subscription_expires_at=subscription_expires_at,
-            is_active=True
+            is_active=True,
+            work_count=data.work_count,  # -1 = 무제한
+            work_used=0
         )
 
         db.add(new_user)
+        logger.info(f"User added to session, committing...")
 
         # Update registration request status
         reg_request.status = RequestStatus.APPROVED
@@ -224,22 +240,31 @@ async def approve_registration(
 
         logger.info(f"Registration approved: user_id={new_user.id}, username={new_user.username}")
 
+        work_count_str = "무제한" if data.work_count == -1 else f"{data.work_count}회"
         return RegistrationResponse(
             success=True,
-            message=f"회원가입이 승인되었습니다. (구독 기간: {data.subscription_days}일)",
+            message=f"회원가입이 승인되었습니다. (구독: {data.subscription_days}일, 작업: {work_count_str})",
             data={
                 "user_id": new_user.id,
                 "username": new_user.username,
-                "subscription_expires_at": subscription_expires_at.isoformat()
+                "subscription_expires_at": subscription_expires_at.isoformat(),
+                "work_count": data.work_count
             }
         )
 
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"Database error during approval: {e}")
+        logger.error(f"Database error during approval: {e}", exc_info=True)
         return RegistrationResponse(
             success=False,
-            message="승인 처리 중 오류가 발생했습니다."
+            message=f"승인 처리 중 오류가 발생했습니다: {str(e)[:100]}"
+        )
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Unexpected error during approval: {e}", exc_info=True)
+        return RegistrationResponse(
+            success=False,
+            message=f"승인 처리 중 예기치 않은 오류: {str(e)[:100]}"
         )
 
 

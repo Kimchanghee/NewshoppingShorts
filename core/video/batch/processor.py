@@ -16,6 +16,7 @@ from datetime import datetime
 from typing import List
 
 from utils.logging_config import get_logger
+from caller import rest
 
 logger = get_logger(__name__)
 
@@ -264,6 +265,29 @@ def dynamic_batch_processing_thread(app):
                     _safe_set_url_status(app, url, 'completed')
                     successful_count += 1
                     app.add_log(f"[OK] [{current_index}/{total_in_queue}] 완료!")
+
+                    # 작업 횟수 차감 (Work count decrement)
+                    try:
+                        user_id = app.login_data.get('data', {}).get('data', {}).get('id', '') if app.login_data else ''
+                        if user_id:
+                            work_result = rest.useWork(user_id)
+                            if work_result.get('success'):
+                                remaining = work_result.get('remaining', -1)
+                                if remaining == -1:
+                                    logger.debug("[작업횟수] 무제한")
+                                else:
+                                    app.add_log(f"[작업횟수] 잔여: {remaining}회")
+                                # Update local login_data for header display
+                                if app.login_data and 'data' in app.login_data:
+                                    if 'data' in app.login_data['data']:
+                                        app.login_data['data']['data']['work_used'] = work_result.get('used', 0)
+                                # Refresh subscription info display
+                                if hasattr(app, '_update_subscription_info'):
+                                    app.root.after(0, app._update_subscription_info)
+                            else:
+                                logger.warning("[작업횟수] 업데이트 실패: %s", work_result.get('message', ''))
+                    except Exception as work_err:
+                        logger.warning("[작업횟수] 차감 실패 (무시됨): %s", work_err)
 
                     try:
                         # 개별 작업 완료 시 팝업 없이 저장만 수행

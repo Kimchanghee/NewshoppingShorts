@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from datetime import datetime
 import tkinter as tk
 import os
-from ssmaker import get_safe_tts_base_dir
+from utils.tts_config import get_safe_tts_base_dir
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)

@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from ui.components.custom_dialog import show_warning, show_info, show_error, show_question
 import core.video.DynamicBatch as DynamicBatch
 from utils.logging_config import get_logger
+from caller import rest
 import config
 
 logger = get_logger(__name__)
@@ -87,6 +88,30 @@ class BatchHandler:
                 # 사용자가 "예"를 선택하면 API 키 관리 창 열기
                 self.app.show_api_key_manager()
             return
+
+        # 작업 횟수 확인 (Work count check)
+        try:
+            user_id = self.app.login_data.get('data', {}).get('data', {}).get('id', '')
+            if user_id:
+                work_check = rest.checkWorkAvailable(user_id)
+                if work_check.get('success'):
+                    if not work_check.get('can_work', True):
+                        self.app.add_log("[작업] 잔여 작업 횟수가 없습니다.")
+                        show_warning(
+                            self.app.root,
+                            "작업 횟수 초과",
+                            "잔여 작업 횟수가 없습니다.\n\n"
+                            "관리자에게 문의하여 작업 횟수를 추가해 주세요."
+                        )
+                        return
+                    remaining = work_check.get('remaining', -1)
+                    if remaining != -1:
+                        self.app.add_log(f"[작업] 잔여 작업 횟수: {remaining}회")
+                    else:
+                        self.app.add_log("[작업] 작업 횟수: 무제한")
+        except Exception as e:
+            logger.warning(f"Work count check failed (continuing): {e}")
+            # 체크 실패 시 계속 진행 (네트워크 오류 등)
 
         # Gemini 클라이언트 초기화
         if not getattr(self.app, "genai_client", None):

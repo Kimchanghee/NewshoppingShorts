@@ -56,6 +56,8 @@ class AuthService:
         self, username: str, password: str, ip_address: str, force: bool
     ):
         """Login logic with dual rate limiting (username + IP)"""
+        logger.info(f"Login attempt: username={_mask_username(username)}, ip={ip_address}, force={force}")
+
         # Rate limiting check - both username and IP based
         rate_limit_result = await self._check_rate_limit(username, ip_address)
         if not rate_limit_result["allowed"]:
@@ -144,11 +146,17 @@ class AuthService:
         # Security: Hash IP in logs for privacy
         logger.info(f"Login successful: user_id={user.id}, ip_hash={_hash_ip(ip_address)}")
 
-        # Backward compatible response
+        # Backward compatible response with subscription info
         return {
             "status": True,
             "data": {
-                "data": {"id": str(user.id)},
+                "data": {
+                    "id": str(user.id),
+                    "subscription_expires_at": user.subscription_expires_at.isoformat() if user.subscription_expires_at else None,
+                    "work_count": getattr(user, 'work_count', -1),
+                    "work_used": getattr(user, 'work_used', 0),
+                    "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+                },
                 "ip": ip_address,
                 "token": token,
             },
@@ -281,3 +289,148 @@ class AuthService:
         )
         self.db.add(attempt)
         self.db.commit()  # Commit immediately to ensure rate limiting works
+
+    async def check_work_available(self, user_id: str, token: str) -> dict:
+        """
+        Check if user can perform work (has remaining work count).
+        작업 가능 여부 확인 (잔여 작업 횟수 확인)
+
+        Returns:
+            dict with can_work, work_count, work_used, remaining
+        """
+        try:
+            payload = decode_access_token(token)
+            token_user_id = payload.get("sub")
+
+            if str(token_user_id) != str(user_id):
+                return {
+                    "success": False,
+                    "can_work": False,
+                    "work_count": 0,
+                    "work_used": 0,
+                    "remaining": 0
+                }
+
+            user = self.db.query(User).filter(User.id == int(user_id)).first()
+            if not user:
+                return {
+                    "success": False,
+                    "can_work": False,
+                    "work_count": 0,
+                    "work_used": 0,
+                    "remaining": 0
+                }
+
+            work_count = getattr(user, 'work_count', -1)
+            work_used = getattr(user, 'work_used', 0)
+
+            # -1 means unlimited
+            if work_count == -1:
+                remaining = -1
+                can_work = True
+            else:
+                remaining = max(0, work_count - work_used)
+                can_work = remaining > 0
+
+            return {
+                "success": True,
+                "can_work": can_work,
+                "work_count": work_count,
+                "work_used": work_used,
+                "remaining": remaining
+            }
+
+        except ValueError as e:
+            logger.warning(f"Work check failed - invalid token: {e}")
+            return {
+                "success": False,
+                "can_work": False,
+                "work_count": 0,
+                "work_used": 0,
+                "remaining": 0
+            }
+        except Exception as e:
+            logger.exception("Work check failed unexpectedly")
+            return {
+                "success": False,
+                "can_work": False,
+                "work_count": 0,
+                "work_used": 0,
+                "remaining": 0
+            }
+
+    async def use_work(self, user_id: str, token: str) -> dict:
+        """
+        Increment work_used count after successful work completion.
+        작업 완료 후 사용 횟수 증가
+
+        Returns:
+            dict with success, message, remaining, used
+        """
+        try:
+            payload = decode_access_token(token)
+            token_user_id = payload.get("sub")
+
+            if str(token_user_id) != str(user_id):
+                return {
+                    "success": False,
+                    "message": "Token mismatch",
+                    "remaining": None,
+                    "used": None
+                }
+
+            user = self.db.query(User).filter(User.id == int(user_id)).first()
+            if not user:
+                return {
+                    "success": False,
+                    "message": "User not found",
+                    "remaining": None,
+                    "used": None
+                }
+
+            work_count = getattr(user, 'work_count', -1)
+            work_used = getattr(user, 'work_used', 0)
+
+            # Check if work is available (unless unlimited)
+            if work_count != -1:
+                remaining = work_count - work_used
+                if remaining <= 0:
+                    return {
+                        "success": False,
+                        "message": "No remaining work count",
+                        "remaining": 0,
+                        "used": work_used
+                    }
+
+            # Increment work_used
+            user.work_used = work_used + 1
+            self.db.commit()
+
+            new_remaining = -1 if work_count == -1 else max(0, work_count - user.work_used)
+
+            logger.info(f"Work used: user_id={user_id}, used={user.work_used}, remaining={new_remaining}")
+
+            return {
+                "success": True,
+                "message": "Work count updated",
+                "remaining": new_remaining,
+                "used": user.work_used
+            }
+
+        except ValueError as e:
+            logger.warning(f"Use work failed - invalid token: {e}")
+            return {
+                "success": False,
+                "message": "Invalid token",
+                "remaining": None,
+                "used": None
+            }
+        except Exception as e:
+            logger.exception("Use work failed unexpectedly")
+            self.db.rollback()
+            return {
+                "success": False,
+                "message": "Internal error",
+                "remaining": None,
+                "used": None
+            }

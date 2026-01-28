@@ -14,6 +14,9 @@ from app.schemas.auth import (
     LoginResponse,
     LogoutRequest,
     CheckRequest,
+    UseWorkRequest,
+    UseWorkResponse,
+    CheckWorkResponse,
 )
 from app.services.auth_service import AuthService
 
@@ -161,4 +164,34 @@ async def check_session(
     service = AuthService(db)
     return await service.check_session(
         user_id=data.id, token=data.key, ip_address=client_ip
+    )
+
+
+@router.post("/work/check", response_model=CheckWorkResponse)
+@limiter.limit("60/minute")
+async def check_work(
+    request: Request, data: UseWorkRequest, db: Session = Depends(get_db)
+):
+    """
+    Check if user can perform work (has remaining work count).
+    작업 가능 여부 확인 (잔여 작업 횟수 확인)
+    """
+    service = AuthService(db)
+    return await service.check_work_available(
+        user_id=data.user_id, token=data.token
+    )
+
+
+@router.post("/work/use", response_model=UseWorkResponse)
+@limiter.limit("60/minute")
+async def use_work(
+    request: Request, data: UseWorkRequest, db: Session = Depends(get_db)
+):
+    """
+    Increment work_used after successful work completion.
+    작업 완료 후 사용 횟수 증가
+    """
+    service = AuthService(db)
+    return await service.use_work(
+        user_id=data.user_id, token=data.token
     )
