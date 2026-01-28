@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     DB_PASSWORD: str
     DB_NAME: str = "ssmaker_auth"
 
+    # Cloud SQL Unix Socket (for Cloud Run deployment)
+    # Format: /cloudsql/PROJECT:REGION:INSTANCE
+    CLOUD_SQL_CONNECTION_NAME: str = ""
+
     # JWT
     JWT_SECRET_KEY: str  # Generate with: openssl rand -hex 32
     JWT_ALGORITHM: str = "HS256"
