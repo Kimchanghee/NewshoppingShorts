@@ -8,7 +8,7 @@ from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QLabel, QPushButton, QTableWidget,
     QTableWidgetItem, QHeaderView, QComboBox, QLineEdit,
-    QMessageBox, QDialog, QSpinBox, QTextEdit
+    QMessageBox, QDialog, QSpinBox, QTextEdit, QScrollArea
 )
 from PyQt5.QtGui import QFont, QColor, QBrush
 from datetime import datetime
@@ -32,6 +32,8 @@ DARK = {
     "table_bg": "#0f0f23",
     "table_alt": "#1a1a35",
     "table_header": "#252550",
+    "online": "#00e676",
+    "offline": "#757575",
 }
 
 
@@ -76,6 +78,7 @@ class AdminDashboard(QMainWindow):
         self.admin_api_key = admin_api_key
         self.workers = []
         self.current_tab = 0  # 0: 회원가입 요청, 1: 사용자 관리
+        self.last_update_time = None
         self._setup_ui()
         self._load_data()
         self._start_auto_refresh()
@@ -89,9 +92,15 @@ class AdminDashboard(QMainWindow):
         self.refresh_timer.timeout.connect(self._load_data)
         self.refresh_timer.start(5000)
 
+    def _update_last_refresh_time(self):
+        """마지막 업데이트 시간 갱신"""
+        self.last_update_time = datetime.now()
+        time_str = self.last_update_time.strftime("%Y-%m-%d %H:%M:%S")
+        self.last_update_label.setText(f"마지막 업데이트: {time_str}")
+
     def _setup_ui(self):
         self.setWindowTitle("관리자 대시보드")
-        self.setFixedSize(1280, 800)
+        self.setFixedSize(1600, 900)
         self.setStyleSheet(f"background-color: {DARK['bg']};")
 
         # 중앙 위젯
@@ -100,13 +109,20 @@ class AdminDashboard(QMainWindow):
 
         # 타이틀
         title = QLabel("관리자 대시보드", self.central)
-        title.setGeometry(40, 25, 400, 40)
+        title.setGeometry(40, 20, 400, 40)
         title.setFont(QFont(FONT_FAMILY, 22, QFont.Bold))
         title.setStyleSheet(f"color: {DARK['text']};")
 
+        # 마지막 업데이트 시간 라벨
+        self.last_update_label = QLabel("마지막 업데이트: -", self.central)
+        self.last_update_label.setGeometry(900, 25, 300, 30)
+        self.last_update_label.setFont(QFont(FONT_FAMILY, 10))
+        self.last_update_label.setStyleSheet(f"color: {DARK['text_dim']};")
+        self.last_update_label.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+
         # 새로고침 버튼
         refresh_btn = QPushButton("새로고침", self.central)
-        refresh_btn.setGeometry(1120, 25, 120, 40)
+        refresh_btn.setGeometry(1220, 20, 120, 40)
         refresh_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
         refresh_btn.setStyleSheet(f"""
             QPushButton {{
@@ -122,40 +138,55 @@ class AdminDashboard(QMainWindow):
         refresh_btn.setCursor(Qt.PointingHandCursor)
         refresh_btn.clicked.connect(self._load_data)
 
-        # 통계 카드들 (Y: 85)
+        # 연결 상태 표시
+        self.connection_label = QLabel("", self.central)
+        self.connection_label.setGeometry(1360, 25, 200, 30)
+        self.connection_label.setFont(QFont(FONT_FAMILY, 10))
+        self.connection_label.setStyleSheet(f"color: {DARK['success']};")
+
+        # 통계 카드들 (Y: 75)
         self._create_stat_cards()
 
-        # 탭 버튼들 (Y: 200)
+        # 탭 버튼들 (Y: 180)
         self._create_tab_buttons()
 
-        # 필터/검색 영역 (Y: 260)
+        # 필터/검색 영역 (Y: 240)
         self._create_filter_area()
 
-        # 테이블 (Y: 310)
+        # 테이블 (Y: 290)
         self._create_tables()
 
     def _create_stat_cards(self):
         """통계 카드 생성 - 절대 좌표"""
-        card_y = 85
-        card_h = 90
-        card_w = 280
-        gap = 25
+        card_y = 75
+        card_h = 85
+        card_w = 240
+        gap = 20
+        start_x = 40
 
         # 대기 중 요청
-        self._create_card(40, card_y, card_w, card_h, "대기 중 요청", DARK['warning'])
-        self.pending_label = self._get_value_label(40, card_y, card_w, card_h)
+        self._create_card(start_x, card_y, card_w, card_h, "대기 중 요청", DARK['warning'])
+        self.pending_label = self._get_value_label(start_x, card_y, card_w, card_h)
 
         # 승인된 요청
-        self._create_card(40 + card_w + gap, card_y, card_w, card_h, "승인된 요청", DARK['success'])
-        self.approved_label = self._get_value_label(40 + card_w + gap, card_y, card_w, card_h)
+        self._create_card(start_x + (card_w + gap), card_y, card_w, card_h, "승인된 요청", DARK['success'])
+        self.approved_label = self._get_value_label(start_x + (card_w + gap), card_y, card_w, card_h)
 
         # 거부된 요청
-        self._create_card(40 + (card_w + gap) * 2, card_y, card_w, card_h, "거부된 요청", DARK['danger'])
-        self.rejected_label = self._get_value_label(40 + (card_w + gap) * 2, card_y, card_w, card_h)
+        self._create_card(start_x + (card_w + gap) * 2, card_y, card_w, card_h, "거부된 요청", DARK['danger'])
+        self.rejected_label = self._get_value_label(start_x + (card_w + gap) * 2, card_y, card_w, card_h)
 
         # 전체 사용자
-        self._create_card(40 + (card_w + gap) * 3, card_y, card_w, card_h, "전체 사용자", DARK['info'])
-        self.users_label = self._get_value_label(40 + (card_w + gap) * 3, card_y, card_w, card_h)
+        self._create_card(start_x + (card_w + gap) * 3, card_y, card_w, card_h, "전체 사용자", DARK['info'])
+        self.users_label = self._get_value_label(start_x + (card_w + gap) * 3, card_y, card_w, card_h)
+
+        # 온라인 사용자
+        self._create_card(start_x + (card_w + gap) * 4, card_y, card_w, card_h, "온라인 사용자", DARK['online'])
+        self.online_label = self._get_value_label(start_x + (card_w + gap) * 4, card_y, card_w, card_h)
+
+        # 활성 구독자
+        self._create_card(start_x + (card_w + gap) * 5, card_y, card_w, card_h, "활성 구독자", DARK['primary'])
+        self.active_sub_label = self._get_value_label(start_x + (card_w + gap) * 5, card_y, card_w, card_h)
 
     def _create_card(self, x, y, w, h, title, color):
         """카드 생성"""
@@ -163,33 +194,33 @@ class AdminDashboard(QMainWindow):
         card.setGeometry(x, y, w, h)
         card.setStyleSheet(f"""
             background-color: {DARK['card']};
-            border-radius: 12px;
+            border-radius: 10px;
             border-left: 4px solid {color};
         """)
 
         title_lbl = QLabel(title, card)
-        title_lbl.setGeometry(20, 12, w - 40, 20)
-        title_lbl.setFont(QFont(FONT_FAMILY, 11))
+        title_lbl.setGeometry(15, 10, w - 30, 20)
+        title_lbl.setFont(QFont(FONT_FAMILY, 10))
         title_lbl.setStyleSheet(f"color: {DARK['text_dim']}; background: transparent;")
 
     def _get_value_label(self, x, y, w, h) -> QLabel:
         """값 라벨 생성 및 반환"""
         lbl = QLabel("0", self.central)
-        lbl.setGeometry(x + 20, y + 38, w - 40, 40)
-        lbl.setFont(QFont(FONT_FAMILY, 28, QFont.Bold))
+        lbl.setGeometry(x + 15, y + 35, w - 30, 40)
+        lbl.setFont(QFont(FONT_FAMILY, 24, QFont.Bold))
         lbl.setStyleSheet(f"color: {DARK['text']}; background: transparent;")
         return lbl
 
     def _create_tab_buttons(self):
         """탭 버튼 생성"""
         self.tab_requests = QPushButton("회원가입 요청", self.central)
-        self.tab_requests.setGeometry(40, 200, 150, 42)
+        self.tab_requests.setGeometry(40, 180, 150, 42)
         self.tab_requests.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
         self.tab_requests.setCursor(Qt.PointingHandCursor)
         self.tab_requests.clicked.connect(lambda: self._switch_tab(0))
 
         self.tab_users = QPushButton("사용자 관리", self.central)
-        self.tab_users.setGeometry(200, 200, 150, 42)
+        self.tab_users.setGeometry(200, 180, 150, 42)
         self.tab_users.setFont(QFont(FONT_FAMILY, 12))
         self.tab_users.setCursor(Qt.PointingHandCursor)
         self.tab_users.clicked.connect(lambda: self._switch_tab(1))
@@ -239,12 +270,12 @@ class AdminDashboard(QMainWindow):
         """필터/검색 영역 생성"""
         # 회원가입 요청 필터
         self.filter_label = QLabel("상태 필터:", self.central)
-        self.filter_label.setGeometry(40, 265, 80, 30)
+        self.filter_label.setGeometry(40, 245, 80, 30)
         self.filter_label.setFont(QFont(FONT_FAMILY, 11))
         self.filter_label.setStyleSheet(f"color: {DARK['text']};")
 
         self.filter_combo = QComboBox(self.central)
-        self.filter_combo.setGeometry(125, 262, 140, 36)
+        self.filter_combo.setGeometry(125, 242, 140, 36)
         self.filter_combo.setFont(QFont(FONT_FAMILY, 11))
         self.filter_combo.addItems(["전체", "대기 중", "승인됨", "거부됨"])
         self.filter_combo.setStyleSheet(f"""
@@ -268,13 +299,13 @@ class AdminDashboard(QMainWindow):
 
         # 사용자 검색
         self.search_label = QLabel("아이디 검색:", self.central)
-        self.search_label.setGeometry(40, 265, 90, 30)
+        self.search_label.setGeometry(40, 245, 90, 30)
         self.search_label.setFont(QFont(FONT_FAMILY, 11))
         self.search_label.setStyleSheet(f"color: {DARK['text']};")
         self.search_label.setVisible(False)
 
         self.search_edit = QLineEdit(self.central)
-        self.search_edit.setGeometry(135, 262, 200, 36)
+        self.search_edit.setGeometry(135, 242, 200, 36)
         self.search_edit.setFont(QFont(FONT_FAMILY, 11))
         self.search_edit.setPlaceholderText("검색어 입력...")
         self.search_edit.setStyleSheet(f"""
@@ -295,23 +326,29 @@ class AdminDashboard(QMainWindow):
     def _create_tables(self):
         """테이블 생성"""
         table_x = 40
-        table_y = 310
-        table_w = 1200
-        table_h = 460
+        table_y = 290
+        table_w = 1520
+        table_h = 580
 
         # 회원가입 요청 테이블
         self.requests_table = QTableWidget(self.central)
         self.requests_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.requests_table.setColumnCount(6)
-        self.requests_table.setHorizontalHeaderLabels(["ID", "가입자 명", "아이디", "연락처", "상태", "작업"])
-        self._style_table(self.requests_table, [60, 180, 200, 200, 120, 300])
+        self.requests_table.setColumnCount(7)
+        self.requests_table.setHorizontalHeaderLabels(
+            ["ID", "가입자 명", "아이디", "연락처", "요청일시", "상태", "작업"]
+        )
+        self._style_table(self.requests_table, [60, 150, 180, 180, 180, 100, 200])
+        self.requests_table.setRowHeight(0, 50)
 
-        # 사용자 관리 테이블
+        # 사용자 관리 테이블 (확장된 컬럼)
         self.users_table = QTableWidget(self.central)
         self.users_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.users_table.setColumnCount(6)
-        self.users_table.setHorizontalHeaderLabels(["ID", "아이디", "구독 만료일", "상태", "로그인 횟수", "작업"])
-        self._style_table(self.users_table, [60, 200, 180, 100, 120, 400])
+        self.users_table.setColumnCount(10)
+        self.users_table.setHorizontalHeaderLabels([
+            "ID", "아이디", "구독시작", "구독만료", "상태",
+            "로그인", "마지막 로그인", "접속", "현재작업", "작업"
+        ])
+        self._style_table(self.users_table, [50, 120, 100, 100, 70, 60, 150, 60, 150, 280])
         self.users_table.setVisible(False)
 
     def _style_table(self, table: QTableWidget, widths: list):
@@ -326,7 +363,7 @@ class AdminDashboard(QMainWindow):
                 gridline-color: {DARK['border']};
             }}
             QTableWidget::item {{
-                padding: 8px;
+                padding: 5px;
                 border-bottom: 1px solid {DARK['border']};
             }}
             QTableWidget::item:selected {{
@@ -336,15 +373,25 @@ class AdminDashboard(QMainWindow):
                 background-color: {DARK['table_header']};
                 color: {DARK['text']};
                 font-weight: bold;
-                padding: 12px;
+                padding: 10px 5px;
                 border: none;
                 border-bottom: 2px solid {DARK['primary']};
+            }}
+            QScrollBar:vertical {{
+                background-color: {DARK['bg']};
+                width: 12px;
+                border-radius: 6px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {DARK['border']};
+                border-radius: 6px;
+                min-height: 30px;
             }}
         """)
         table.setAlternatingRowColors(True)
         table.setSelectionBehavior(QTableWidget.SelectRows)
         table.verticalHeader().setVisible(False)
-        table.horizontalHeader().setStretchLastSection(True)
+        table.verticalHeader().setDefaultSectionSize(50)
 
         for i, w in enumerate(widths):
             table.setColumnWidth(i, w)
@@ -353,6 +400,7 @@ class AdminDashboard(QMainWindow):
         """데이터 로드"""
         self._load_requests()
         self._load_users()
+        self._update_last_refresh_time()
 
     def _load_requests(self):
         """회원가입 요청 로드"""
@@ -376,6 +424,8 @@ class AdminDashboard(QMainWindow):
         pending = approved = rejected = 0
 
         for row, req in enumerate(items):
+            self.requests_table.setRowHeight(row, 50)
+
             status = req.get("status", "")
             if status == "pending":
                 pending += 1
@@ -389,21 +439,33 @@ class AdminDashboard(QMainWindow):
             self._set_cell(self.requests_table, row, 2, req.get("username", ""))
             self._set_cell(self.requests_table, row, 3, req.get("contact", ""))
 
+            # 요청 일시
+            created = req.get("created_at", "")
+            if created:
+                try:
+                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    created = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    pass
+            self._set_cell(self.requests_table, row, 4, created or "-")
+
             # 상태
             status_text = {"pending": "대기 중", "approved": "승인됨", "rejected": "거부됨"}.get(status, status)
             status_color = {"pending": DARK['warning'], "approved": DARK['success'], "rejected": DARK['danger']}.get(status, DARK['text'])
-            self._set_cell(self.requests_table, row, 4, status_text, status_color)
+            self._set_cell(self.requests_table, row, 5, status_text, status_color)
 
             # 작업 버튼
             if status == "pending":
                 widget = self._create_request_actions(req.get("id"))
-                self.requests_table.setCellWidget(row, 5, widget)
+                self.requests_table.setCellWidget(row, 6, widget)
             else:
-                self._set_cell(self.requests_table, row, 5, "-")
+                self._set_cell(self.requests_table, row, 6, "-")
 
         self.pending_label.setText(str(pending))
         self.approved_label.setText(str(approved))
         self.rejected_label.setText(str(rejected))
+        self.connection_label.setText("연결됨")
+        self.connection_label.setStyleSheet(f"color: {DARK['success']};")
 
     def _load_users(self):
         """사용자 목록 로드"""
@@ -424,48 +486,111 @@ class AdminDashboard(QMainWindow):
         self.users_table.setRowCount(len(items))
         self.users_label.setText(str(len(items)))
 
+        online_count = 0
+        active_sub_count = 0
+        now = datetime.utcnow()
+
         for row, user in enumerate(items):
+            self.users_table.setRowHeight(row, 50)
+
             self._set_cell(self.users_table, row, 0, str(user.get("id", "")))
             self._set_cell(self.users_table, row, 1, user.get("username", ""))
 
-            # 구독 만료일
-            expires = user.get("subscription_expires_at", "")
-            if expires:
+            # 구독 시작일
+            created = user.get("created_at", "")
+            if created:
                 try:
-                    dt = datetime.fromisoformat(expires.replace("Z", "+00:00"))
-                    expires = dt.strftime("%Y-%m-%d")
+                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    created = dt.strftime("%Y-%m-%d")
                 except:
                     pass
-            self._set_cell(self.users_table, row, 2, expires or "-")
+            self._set_cell(self.users_table, row, 2, created or "-")
 
-            # 상태
+            # 구독 만료일
+            expires = user.get("subscription_expires_at", "")
+            expires_dt = None
+            if expires:
+                try:
+                    expires_dt = datetime.fromisoformat(expires.replace("Z", "+00:00"))
+                    expires_str = expires_dt.strftime("%Y-%m-%d")
+                    # 만료 임박 (7일 이내) 또는 만료됨
+                    if expires_dt.replace(tzinfo=None) < now:
+                        self._set_cell(self.users_table, row, 3, expires_str, DARK['danger'])
+                    elif (expires_dt.replace(tzinfo=None) - now).days <= 7:
+                        self._set_cell(self.users_table, row, 3, expires_str, DARK['warning'])
+                    else:
+                        self._set_cell(self.users_table, row, 3, expires_str, DARK['success'])
+                        active_sub_count += 1
+                except:
+                    self._set_cell(self.users_table, row, 3, "-")
+            else:
+                self._set_cell(self.users_table, row, 3, "-")
+
+            # 계정 상태 (활성/비활성)
             is_active = user.get("is_active", False)
-            self._set_cell(self.users_table, row, 3, "활성" if is_active else "비활성",
+            self._set_cell(self.users_table, row, 4, "활성" if is_active else "정지",
                           DARK['success'] if is_active else DARK['danger'])
 
             # 로그인 횟수
-            self._set_cell(self.users_table, row, 4, str(user.get("login_count", 0)))
+            self._set_cell(self.users_table, row, 5, str(user.get("login_count", 0)))
+
+            # 마지막 로그인
+            last_login = user.get("last_login_at", "")
+            if last_login:
+                try:
+                    dt = datetime.fromisoformat(last_login.replace("Z", "+00:00"))
+                    last_login = dt.strftime("%Y-%m-%d %H:%M")
+                except:
+                    pass
+            self._set_cell(self.users_table, row, 6, last_login or "-")
+
+            # 접속 상태 (마지막 로그인이 5분 이내면 온라인으로 간주)
+            is_online = False
+            if last_login and user.get("last_login_at"):
+                try:
+                    last_dt = datetime.fromisoformat(user.get("last_login_at").replace("Z", "+00:00"))
+                    if (now - last_dt.replace(tzinfo=None)).total_seconds() < 300:
+                        is_online = True
+                        online_count += 1
+                except:
+                    pass
+            online_text = "ON" if is_online else "OFF"
+            online_color = DARK['online'] if is_online else DARK['offline']
+            self._set_cell(self.users_table, row, 7, online_text, online_color)
+
+            # 현재 작업 (세션 정보에서 가져올 수 있음 - 현재는 미구현)
+            current_task = user.get("current_task", "-")
+            self._set_cell(self.users_table, row, 8, current_task)
 
             # 작업 버튼
             widget = self._create_user_actions(user.get("id"), user.get("username"))
-            self.users_table.setCellWidget(row, 5, widget)
+            self.users_table.setCellWidget(row, 9, widget)
+
+        self.online_label.setText(str(online_count))
+        self.active_sub_label.setText(str(active_sub_count))
 
     def _set_cell(self, table, row, col, text, color=None):
         """셀 설정"""
         item = QTableWidgetItem(text)
         item.setFlags(item.flags() & ~Qt.ItemIsEditable)
+        item.setTextAlignment(Qt.AlignCenter)
         if color:
             item.setForeground(QBrush(QColor(color)))
         table.setItem(row, col, item)
 
     def _create_request_actions(self, request_id) -> QWidget:
-        """요청 작업 버튼"""
+        """요청 작업 버튼 - 절대 좌표로 정확히 배치"""
         widget = QWidget()
+        widget.setMinimumSize(200, 50)
         widget.setStyleSheet("background: transparent;")
 
+        btn_y = 10
+        btn_h = 30
+        btn_gap = 5
+
         approve_btn = QPushButton("승인", widget)
-        approve_btn.setGeometry(10, 5, 70, 30)
-        approve_btn.setFont(QFont(FONT_FAMILY, 10))
+        approve_btn.setGeometry(5, btn_y, 80, btn_h)
+        approve_btn.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
         approve_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK['success']};
@@ -481,8 +606,8 @@ class AdminDashboard(QMainWindow):
         approve_btn.clicked.connect(lambda: self._approve_request(request_id))
 
         reject_btn = QPushButton("거부", widget)
-        reject_btn.setGeometry(90, 5, 70, 30)
-        reject_btn.setFont(QFont(FONT_FAMILY, 10))
+        reject_btn.setGeometry(90, btn_y, 80, btn_h)
+        reject_btn.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
         reject_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK['danger']};
@@ -500,13 +625,19 @@ class AdminDashboard(QMainWindow):
         return widget
 
     def _create_user_actions(self, user_id, username) -> QWidget:
-        """사용자 작업 버튼"""
+        """사용자 작업 버튼 - 절대 좌표로 정확히 배치"""
         widget = QWidget()
+        widget.setMinimumSize(280, 50)
         widget.setStyleSheet("background: transparent;")
 
-        extend_btn = QPushButton("구독 연장", widget)
-        extend_btn.setGeometry(10, 5, 90, 30)
-        extend_btn.setFont(QFont(FONT_FAMILY, 10))
+        btn_y = 10
+        btn_h = 30
+        btn_w = 65
+
+        # 구독 연장
+        extend_btn = QPushButton("연장", widget)
+        extend_btn.setGeometry(5, btn_y, btn_w, btn_h)
+        extend_btn.setFont(QFont(FONT_FAMILY, 9))
         extend_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK['info']};
@@ -521,9 +652,10 @@ class AdminDashboard(QMainWindow):
         extend_btn.setCursor(Qt.PointingHandCursor)
         extend_btn.clicked.connect(lambda: self._extend_subscription(user_id, username))
 
-        toggle_btn = QPushButton("상태 변경", widget)
-        toggle_btn.setGeometry(110, 5, 90, 30)
-        toggle_btn.setFont(QFont(FONT_FAMILY, 10))
+        # 상태 변경
+        toggle_btn = QPushButton("상태", widget)
+        toggle_btn.setGeometry(75, btn_y, btn_w, btn_h)
+        toggle_btn.setFont(QFont(FONT_FAMILY, 9))
         toggle_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK['warning']};
@@ -538,9 +670,28 @@ class AdminDashboard(QMainWindow):
         toggle_btn.setCursor(Qt.PointingHandCursor)
         toggle_btn.clicked.connect(lambda: self._toggle_user(user_id, username))
 
+        # 이력 보기
+        history_btn = QPushButton("이력", widget)
+        history_btn.setGeometry(145, btn_y, btn_w, btn_h)
+        history_btn.setFont(QFont(FONT_FAMILY, 9))
+        history_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK['card']};
+                color: {DARK['text']};
+                border: 1px solid {DARK['border']};
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK['border']};
+            }}
+        """)
+        history_btn.setCursor(Qt.PointingHandCursor)
+        history_btn.clicked.connect(lambda: self._show_login_history(user_id, username))
+
+        # 삭제
         delete_btn = QPushButton("삭제", widget)
-        delete_btn.setGeometry(210, 5, 70, 30)
-        delete_btn.setFont(QFont(FONT_FAMILY, 10))
+        delete_btn.setGeometry(215, btn_y, btn_w, btn_h)
+        delete_btn.setFont(QFont(FONT_FAMILY, 9))
         delete_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK['danger']};
@@ -615,6 +766,11 @@ class AdminDashboard(QMainWindow):
             self.workers.append(worker)
             worker.start()
 
+    def _show_login_history(self, user_id, username):
+        """로그인 이력 보기"""
+        dialog = LoginHistoryDialog(username, user_id, self.api_base_url, self._get_headers(), self)
+        dialog.exec_()
+
     def _delete_user(self, user_id, username):
         """사용자 삭제"""
         reply = QMessageBox.warning(self, "사용자 삭제",
@@ -636,8 +792,8 @@ class AdminDashboard(QMainWindow):
             QMessageBox.warning(self, "오류", data.get("message", "처리 중 오류가 발생했습니다."))
 
     def _on_error(self, error):
-        # 자동 새로고침 중 에러는 무시 (연결 문제 등)
-        pass
+        self.connection_label.setText("연결 오류")
+        self.connection_label.setStyleSheet(f"color: {DARK['danger']};")
 
 
 class ApproveDialog(QDialog):
@@ -849,3 +1005,100 @@ class ExtendDialog(QDialog):
 
     def get_days(self):
         return self.days_spin.value()
+
+
+class LoginHistoryDialog(QDialog):
+    """로그인 이력 다이얼로그"""
+
+    def __init__(self, username: str, user_id: int, api_base_url: str, headers: dict, parent=None):
+        super().__init__(parent)
+        self.username = username
+        self.user_id = user_id
+        self.api_base_url = api_base_url
+        self.headers = headers
+        self.setWindowTitle(f"'{username}' 로그인 이력")
+        self.setFixedSize(700, 500)
+        self.setStyleSheet(f"background-color: {DARK['card']};")
+        self._setup_ui()
+        self._load_history()
+
+    def _setup_ui(self):
+        title_lbl = QLabel(f"'{self.username}' 로그인 이력", self)
+        title_lbl.setGeometry(30, 20, 640, 30)
+        title_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        title_lbl.setStyleSheet(f"color: {DARK['text']};")
+
+        # 이력 테이블
+        self.history_table = QTableWidget(self)
+        self.history_table.setGeometry(30, 60, 640, 380)
+        self.history_table.setColumnCount(4)
+        self.history_table.setHorizontalHeaderLabels(["로그인 시간", "IP 주소", "세션 ID", "상태"])
+        self.history_table.setColumnWidth(0, 180)
+        self.history_table.setColumnWidth(1, 150)
+        self.history_table.setColumnWidth(2, 200)
+        self.history_table.setColumnWidth(3, 80)
+        self.history_table.setFont(QFont(FONT_FAMILY, 10))
+        self.history_table.setStyleSheet(f"""
+            QTableWidget {{
+                background-color: {DARK['bg']};
+                color: {DARK['text']};
+                border: 1px solid {DARK['border']};
+                border-radius: 6px;
+                gridline-color: {DARK['border']};
+            }}
+            QTableWidget::item {{
+                padding: 8px;
+            }}
+            QHeaderView::section {{
+                background-color: {DARK['table_header']};
+                color: {DARK['text']};
+                font-weight: bold;
+                padding: 10px;
+                border: none;
+            }}
+        """)
+        self.history_table.verticalHeader().setVisible(False)
+
+        # 닫기 버튼
+        close_btn = QPushButton("닫기", self)
+        close_btn.setGeometry(560, 450, 100, 40)
+        close_btn.setFont(QFont(FONT_FAMILY, 11))
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK['bg']};
+                color: {DARK['text']};
+                border: 1px solid {DARK['border']};
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK['border']};
+            }}
+        """)
+        close_btn.clicked.connect(self.accept)
+
+    def _load_history(self):
+        """로그인 이력 로드 (현재는 세션 테이블에서 가져옴)"""
+        # 실제로는 API에서 로그인 이력을 가져와야 함
+        # 현재는 샘플 데이터 표시
+        try:
+            url = f"{self.api_base_url}/user/admin/users/{self.user_id}"
+            resp = requests.get(url, headers=self.headers, timeout=30)
+            if resp.status_code == 200:
+                user = resp.json()
+                # 단일 사용자 정보만 있으므로 마지막 로그인 정보만 표시
+                self.history_table.setRowCount(1)
+                last_login = user.get("last_login_at", "-")
+                if last_login and last_login != "-":
+                    try:
+                        dt = datetime.fromisoformat(last_login.replace("Z", "+00:00"))
+                        last_login = dt.strftime("%Y-%m-%d %H:%M:%S")
+                    except:
+                        pass
+
+                self.history_table.setItem(0, 0, QTableWidgetItem(last_login))
+                self.history_table.setItem(0, 1, QTableWidgetItem(user.get("last_login_ip", "-")))
+                self.history_table.setItem(0, 2, QTableWidgetItem("-"))
+                self.history_table.setItem(0, 3, QTableWidgetItem("성공"))
+        except Exception as e:
+            self.history_table.setRowCount(1)
+            self.history_table.setItem(0, 0, QTableWidgetItem(f"로드 실패: {str(e)[:50]}"))
