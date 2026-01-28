@@ -27,13 +27,17 @@ app = FastAPI(
 @app.on_event("startup")
 async def startup_event():
     """Initialize database tables on startup"""
-    logger.info("Initializing database tables...")
-    try:
-        init_db()
-        logger.info("Database tables initialized successfully")
-    except Exception as e:
-        logger.error(f"Failed to initialize database tables: {e}")
-        raise
+    logger.info("Starting application...")
+    # In production, tables should already exist via migrations
+    # Only attempt init_db in development
+    if settings.ENVIRONMENT != "production":
+        try:
+            init_db()
+            logger.info("Database tables initialized successfully")
+        except Exception as e:
+            logger.warning(f"Database init skipped (may already exist): {e}")
+    else:
+        logger.info("Production mode - skipping table creation (use migrations)")
 
 
 # Register rate limiter with app state

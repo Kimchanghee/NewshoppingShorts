@@ -19,11 +19,7 @@ if settings.CLOUD_SQL_CONNECTION_NAME:
         username=settings.DB_USER,
         password=settings.DB_PASSWORD,
         database=settings.DB_NAME,
-        query={
-            "unix_socket": unix_socket_path,
-            "charset": "utf8mb4",
-            "ssl_disabled": "true"  # SSL not needed for Unix socket
-        }
+        query={"unix_socket": unix_socket_path, "charset": "utf8mb4"}
     )
 else:
     # TCP connection for local development
