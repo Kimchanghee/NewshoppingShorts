@@ -30,7 +30,8 @@ _ERROR_MESSAGES = {
 
 # Server URL from environment variable (secure configuration)
 # 환경 변수에서 서버 URL 가져오기 (보안 설정)
-main_server = os.getenv('API_SERVER_URL', 'http://localhost:8000/')
+# Production: Cloud Run, Development: localhost
+main_server = os.getenv('API_SERVER_URL', 'https://ssmaker-auth-api-1049571775048.us-central1.run.app/')
 
 # Production environment detection
 # 운영 환경 감지
