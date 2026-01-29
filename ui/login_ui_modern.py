@@ -419,7 +419,7 @@ class RegistrationRequestDialog(QWidget):
         self.subtitleLabel.setGeometry(QtCore.QRect(30, 100, 340, 40))
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, 10))
         self.subtitleLabel.setStyleSheet("color: #6B7280; background: transparent;")
-        self.subtitleLabel.setText("가입 정보를 입력해주세요.\n관리자 승인 후 사용 가능합니다.")
+        self.subtitleLabel.setText("가입 정보를 입력해주세요.\n가입 후 바로 로그인 가능합니다. (체험판 3회)")
 
         # 가입자 명 라벨
         self.nameLabel = QLabel(self)
@@ -535,7 +535,7 @@ class RegistrationRequestDialog(QWidget):
         self.submitButton = QPushButton(self)
         self.submitButton.setGeometry(QtCore.QRect(30, 565, 340, 45))
         self.submitButton.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
-        self.submitButton.setText("가입 승인 요청")
+        self.submitButton.setText("회원가입")
         self.submitButton.setStyleSheet("""
             QPushButton {
                 color: #ffffff;

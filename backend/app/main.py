@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from app.routers import auth, registration, admin
+from app.routers import auth, registration, admin, subscription
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.config import get_settings
 from app.database import init_db
@@ -107,13 +107,14 @@ app.add_middleware(
     allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Admin-API-Key"],
+    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Admin-API-Key", "X-User-ID"],
 )
 
 # Include routers
 app.include_router(auth.router)
 app.include_router(registration.router)
 app.include_router(admin.router)
+app.include_router(subscription.router)
 
 
 @app.get("/")

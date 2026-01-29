@@ -2,7 +2,7 @@
 Registration Request Router
 회원가입 요청 라우터
 
-사용자 회원가입 요청 및 관리자 승인 API
+사용자 회원가입 - 자동 승인 방식 (체험판 3회 제공)
 
 Security:
 - Admin endpoints require X-Admin-API-Key header
@@ -23,7 +23,7 @@ from passlib.context import CryptContext
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.registration_request import RegistrationRequest, RequestStatus
-from app.models.user import User
+from app.models.user import User, UserType
 from app.schemas.registration import (
     RegistrationRequestCreate,
     RegistrationRequestResponse,
@@ -33,6 +33,10 @@ from app.schemas.registration import (
     RegistrationResponse,
     RequestStatusEnum,
 )
+
+# 체험판 설정
+FREE_TRIAL_WORK_COUNT = 3  # 체험판 작업 횟수
+DEFAULT_TRIAL_DAYS = 365   # 체험판 유효 기간 (1년)
 
 logger = logging.getLogger(__name__)
 
@@ -64,8 +68,8 @@ async def submit_registration_request(
     db: Session = Depends(get_db)
 ):
     """
-    회원가입 요청 제출
-    Submit a registration request
+    회원가입 - 자동 승인 (체험판 3회 제공)
+    Auto-approved registration with 3 free trial uses
 
     Rate limited to 5 requests per hour per IP to prevent abuse.
     IP당 시간당 5회로 제한하여 남용 방지.
@@ -80,59 +84,72 @@ async def submit_registration_request(
                 message="이미 사용 중인 아이디입니다."
             )
 
-        # Check if there's already a request with same username
+        # Check if there's already an approved request with same username
         existing_request = db.query(RegistrationRequest).filter(
             RegistrationRequest.username == data.username
         ).first()
         if existing_request:
-            # Get status as string for reliable comparison
             status_str = existing_request.status.value if hasattr(existing_request.status, 'value') else str(existing_request.status)
             logger.info(f"Found existing request: username={data.username}, status={status_str}")
 
-            if status_str == "pending":
+            if status_str == "approved":
                 return RegistrationResponse(
                     success=False,
-                    message="이미 승인 대기 중인 요청이 있습니다."
+                    message="이미 가입된 계정입니다. 로그인해 주세요."
                 )
-            elif status_str == "approved":
-                return RegistrationResponse(
-                    success=False,
-                    message="이미 승인된 계정입니다. 로그인해 주세요."
-                )
-            elif status_str == "rejected":
-                # 거부된 요청은 삭제하고 새로 생성 허용
-                logger.info(f"Deleting rejected request for re-registration: {data.username}")
-                db.delete(existing_request)
-                db.flush()
+            # 기존 요청 삭제 (rejected 또는 pending)
+            logger.info(f"Deleting old request for re-registration: {data.username}")
+            db.delete(existing_request)
+            db.flush()
 
         # Hash the password
         password_hash = pwd_context.hash(data.password)
 
-        # Create registration request
+        # 자동 승인: 직접 User 생성 (체험판)
+        subscription_expires_at = datetime.utcnow() + timedelta(days=DEFAULT_TRIAL_DAYS)
+
+        new_user = User(
+            username=data.username,
+            password_hash=password_hash,
+            subscription_expires_at=subscription_expires_at,
+            is_active=True,
+            work_count=FREE_TRIAL_WORK_COUNT,  # 체험판 3회
+            work_used=0,
+            user_type=UserType.TRIAL
+        )
+
+        db.add(new_user)
+
+        # 감사 로그용으로 registration_requests에도 기록 (APPROVED 상태)
         registration_request = RegistrationRequest(
             name=data.name,
             username=data.username,
             password_hash=password_hash,
             contact=data.contact,
-            status=RequestStatus.PENDING
+            status=RequestStatus.APPROVED,
+            reviewed_at=datetime.utcnow()
         )
 
         db.add(registration_request)
         db.commit()
-        db.refresh(registration_request)
+        db.refresh(new_user)
 
-        logger.info(f"Registration request created: id={registration_request.id}")
+        logger.info(f"User auto-registered: id={new_user.id}, username={new_user.username}, work_count={FREE_TRIAL_WORK_COUNT}")
 
         return RegistrationResponse(
             success=True,
-            message="회원가입 요청이 접수되었습니다. 관리자 승인 후 로그인이 가능합니다.",
-            data={"request_id": registration_request.id}
+            message=f"회원가입이 완료되었습니다! 체험판 {FREE_TRIAL_WORK_COUNT}회를 제공합니다. 바로 로그인하세요.",
+            data={
+                "user_id": new_user.id,
+                "username": new_user.username,
+                "work_count": FREE_TRIAL_WORK_COUNT,
+                "is_trial": True
+            }
         )
 
     except SQLAlchemyError as e:
         db.rollback()
-        logger.error(f"Database error during registration request: {e}", exc_info=True)
-        # 에러 메시지에 실제 에러 힌트 포함 (디버깅용)
+        logger.error(f"Database error during registration: {e}", exc_info=True)
         error_hint = str(e)[:200] if str(e) else "Unknown DB error"
         return RegistrationResponse(
             success=False,
@@ -140,7 +157,7 @@ async def submit_registration_request(
         )
     except Exception as e:
         db.rollback()
-        logger.error(f"Unexpected error during registration request: {e}", exc_info=True)
+        logger.error(f"Unexpected error during registration: {e}", exc_info=True)
         return RegistrationResponse(
             success=False,
             message=f"예기치 않은 오류가 발생했습니다. [{str(e)[:100]}]"
