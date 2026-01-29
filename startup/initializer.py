@@ -2,6 +2,7 @@
 """
 Application initialization with progress tracking.
 """
+
 import os
 import sys
 import time
@@ -179,12 +180,10 @@ class Initializer(QtCore.QObject):
             fonts_dir = self._get_fonts_dir()
 
             found_required = [
-                f for f in REQUIRED_FONTS
-                if os.path.exists(os.path.join(fonts_dir, f))
+                f for f in REQUIRED_FONTS if os.path.exists(os.path.join(fonts_dir, f))
             ]
             found_optional = [
-                f for f in OPTIONAL_FONTS
-                if os.path.exists(os.path.join(fonts_dir, f))
+                f for f in OPTIONAL_FONTS if os.path.exists(os.path.join(fonts_dir, f))
             ]
 
             total_found = len(found_required) + len(found_optional)
@@ -192,7 +191,7 @@ class Initializer(QtCore.QObject):
 
             if len(found_required) < len(REQUIRED_FONTS):
                 missing_names = ", ".join(
-                    [f.split('.')[0][:10] for f in missing_required[:2]]
+                    [f.split(".")[0][:10] for f in missing_required[:2]]
                 )
                 return True, f"경고 {missing_names}... 누락"
 
@@ -212,21 +211,22 @@ class Initializer(QtCore.QObject):
         try:
             creationflags = (
                 subprocess.CREATE_NO_WINDOW
-                if hasattr(subprocess, 'CREATE_NO_WINDOW')
+                if hasattr(subprocess, "CREATE_NO_WINDOW")
                 else 0
             )
             result = subprocess.run(
-                ['ffmpeg', '-version'],
+                ["ffmpeg", "-version"],
                 capture_output=True,
                 text=True,
                 timeout=5,
-                creationflags=creationflags
+                creationflags=creationflags,
             )
             if result.returncode == 0:
-                ffmpeg_path = 'ffmpeg'
+                ffmpeg_path = "ffmpeg"
         except (subprocess.SubprocessError, FileNotFoundError, OSError):
             try:
                 import imageio_ffmpeg
+
                 ffmpeg_path = imageio_ffmpeg.get_ffmpeg_exe()
                 if not ffmpeg_path or not os.path.exists(ffmpeg_path):
                     return False, "없음"
@@ -238,14 +238,14 @@ class Initializer(QtCore.QObject):
         try:
             creationflags = (
                 subprocess.CREATE_NO_WINDOW
-                if hasattr(subprocess, 'CREATE_NO_WINDOW')
+                if hasattr(subprocess, "CREATE_NO_WINDOW")
                 else 0
             )
             subprocess.run(
-                ['ffprobe', '-version'],
+                ["ffprobe", "-version"],
                 capture_output=True,
                 timeout=5,
-                creationflags=creationflags
+                creationflags=creationflags,
             )
             ffprobe_found = True
         except (subprocess.SubprocessError, FileNotFoundError, OSError):
@@ -253,23 +253,23 @@ class Initializer(QtCore.QObject):
 
         # 3. Check basic codec support
         try:
-            cmd = ffmpeg_path if isinstance(ffmpeg_path, str) else 'ffmpeg'
+            cmd = ffmpeg_path if isinstance(ffmpeg_path, str) else "ffmpeg"
             creationflags = (
                 subprocess.CREATE_NO_WINDOW
-                if hasattr(subprocess, 'CREATE_NO_WINDOW')
+                if hasattr(subprocess, "CREATE_NO_WINDOW")
                 else 0
             )
             result = subprocess.run(
-                [cmd, '-codecs'],
+                [cmd, "-codecs"],
                 capture_output=True,
                 text=True,
                 timeout=5,
-                creationflags=creationflags
+                creationflags=creationflags,
             )
             if result.returncode == 0:
                 codecs_output = result.stdout.lower()
-                has_h264 = 'h264' in codecs_output
-                has_aac = 'aac' in codecs_output
+                has_h264 = "h264" in codecs_output
+                has_aac = "aac" in codecs_output
 
                 if not (has_h264 and has_aac):
                     return True, "제한적"
@@ -295,26 +295,26 @@ class Initializer(QtCore.QObject):
         """Check all required and optional modules."""
         # Critical modules (import check)
         critical_import_modules = [
-            ('PIL', '이미지'),
-            ('moviepy', '영상'),
-            ('numpy', '연산'),
+            ("PIL", "이미지"),
+            ("moviepy", "영상"),
+            ("numpy", "연산"),
         ]
 
         # Critical modules (spec check only - avoid import side effects)
         critical_spec_modules = [
-            ('cv2', '비전'),
+            ("cv2", "비전"),
         ]
 
         # Optional modules
         optional_modules = [
-            ('faster_whisper', '음성'),
-            ('pytesseract', '문자'),
-            ('pydub', '오디오'),
+            ("faster_whisper", "음성"),
+            ("pytesseract", "문자"),
+            ("pydub", "오디오"),
         ]
 
         # Add RapidOCR check for Python < 3.13
         if sys.version_info < (3, 13):
-            optional_modules.insert(1, ('rapidocr_onnxruntime', '문자(RapidOCR)'))
+            optional_modules.insert(1, ("rapidocr_onnxruntime", "문자(RapidOCR)"))
 
         critical_missing: List[str] = []
         optional_missing: List[str] = []
@@ -323,8 +323,11 @@ class Initializer(QtCore.QObject):
         for mod_name, display_name in critical_import_modules:
             try:
                 __import__(mod_name)
-            except Exception:
-                critical_missing.append(display_name)
+            except Exception as e:
+                logger.error(
+                    f"Failed to import critical module {mod_name}: {e}", exc_info=True
+                )
+                critical_missing.append(f"{display_name} ({e})")
 
         # Check critical modules (spec only)
         for mod_name, display_name in critical_spec_modules:
@@ -342,7 +345,7 @@ class Initializer(QtCore.QObject):
                 optional_missing.append(display_name)
 
         if critical_missing:
-            missing_str = ', '.join(critical_missing)
+            missing_str = ", ".join(critical_missing)
             return False, f"필수 모듈 누락: {missing_str}"
 
         total = (
@@ -361,6 +364,7 @@ class Initializer(QtCore.QObject):
         """Initialize OCR model."""
         try:
             from utils.ocr_backend import create_ocr_reader
+
             reader = create_ocr_reader()
             if reader:
                 return reader

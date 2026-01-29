@@ -1,0 +1,39 @@
+307 INFO: PyInstaller: 6.18.0, contrib hooks: 2026.0
+307 INFO: Python: 3.14.2
+432 INFO: Platform: Windows-2022Server-10.0.20348-SP0
+432 INFO: Python environment: C:\Users\Administrator\AppData\Local\Programs\Python\Python314
+436 INFO: Removing temporary files and cleaning cache in C:\Users\Administrator\AppData\Local\pyinstaller
+444 WARNING: collect_data_files - skipping data collection for module 'rapidocr_onnxruntime' as it is not a package.
+830 WARNING: collect_data_files - skipping data collection for module 'faster_whisper' as it is not a package.
+831 WARNING: collect_data_files - skipping data collection for module 'ctranslate2' as it is not a package.
+C:\Users\Administrator\AppData\Local\Programs\Python\Python314\Lib\site-packages\PyInstaller\utils\hooks\__init__.py:665: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  __import__(name)
+11668 WARNING: collect_data_files - skipping data collection for module 'PIL.Image' as it is not a package.
+11801 WARNING: collect_dynamic_libs - skipping library collection for module 'PIL.Image' as it is not a package.
+14832 WARNING: collect_data_files - skipping data collection for module 'PIL.ImageDraw' as it is not a package.
+14961 WARNING: collect_dynamic_libs - skipping library collection for module 'PIL.ImageDraw' as it is not a package.
+17957 WARNING: collect_data_files - skipping data collection for module 'PIL.ImageFont' as it is not a package.
+18087 WARNING: collect_dynamic_libs - skipping library collection for module 'PIL.ImageFont' as it is not a package.
+1780 WARNING: Failed to collect submodules for 'pandas.core._numba.kernels' because importing 'pandas.core._numba.kernels' raised: ImportError: Numba could not be imported.
+--------------------------------------------------------------------------------
+If you are seeing this message and are undertaking Numba development work, you may need to rebuild Numba.
+Please see the development set up guide:
+
+https://numba.readthedocs.io/en/stable/developer/contributing.html.
+
+--------------------------------------------------------------------------------
+If you are not working on Numba development, the original error was: 'DLL load failed while importing _typeconv: 지정된 모듈을 찾을 수 없습니다.'.
+For help, please visit:
+
+https://numba.readthedocs.io/en/stable/user/faq.html#numba-could-not-be-imported
+34938 WARNING: collect_data_files - skipping data collection for module 'scipy' as it is not a package.
+34939 WARNING: collect_dynamic_libs - skipping library collection for module 'scipy' as it is not a package.
+37544 WARNING: collect_data_files - skipping data collection for module 'sklearn' as it is not a package.
+37544 WARNING: collect_dynamic_libs - skipping library collection for module 'sklearn' as it is not a package.
+40098 WARNING: collect_data_files - skipping data collection for module 'skimage' as it is not a package.
+40099 WARNING: collect_dynamic_libs - skipping library collection for module 'skimage' as it is not a package.
+675 WARNING: Failed to collect submodules for 'matplotlib.tests' because importing 'matplotlib.tests' raised: OSError: The baseline image directory does not exist. This is most likely because the test data is not installed. You may need to install matplotlib from source to get the test data.
+56869 WARNING: collect_data_files - skipping data collection for module 'rapidocr_onnxruntime' as it is not a package.
+56870 WARNING: collect_dynamic_libs - skipping library collection for module 'rapidocr_onnxruntime' as it is not a package.
+59552 WARNING: collect_data_files - skipping data collection for module 'onnxruntime' as it is not a package.
+59552 WARNING: collect_dynamic_libs - skipping library collection for module 'onnxruntime' as it is not a package.

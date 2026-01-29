@@ -192,54 +192,35 @@ try:
             datas += whisper_models
             print(f"[Build] Total Faster-Whisper model files: {len(whisper_models)}")
         else:
-            print("[Build WARNING] Faster-Whisper 모델이 캐시에 없습니다. 첫 실행 시 자동 다운로드됩니다.")
+            print(f"[Build WARNING] Faster-Whisper model not found in cache. Will download on first run.")
     else:
-        print("[Build WARNING] HuggingFace 캐시 디렉토리가 없습니다. 첫 실행 시 모델이 자동 다운로드됩니다.")
+        print("[Build WARNING] HuggingFace cache directory not found. Model will auto-download on first run.")
 except Exception as e:
-    print(f"[Build WARNING] Faster-Whisper 모델 수집 중 오류 (무시됨): {e}")
+    print(f"[Build WARNING] Failed to collect Faster-Whisper model (ignored): {e}")
 
 hiddenimports = []
 
 # 주요 패키지 전체 수집
+# 주의: PyInstaller가 이미 훅을 제공하는 대형 라이브러리(numpy, pandas 등)는 제외하여 빌드 속도 최적화
 packages_to_collect = [
     'pkg_resources',
-    'setuptools',
-    'PIL',
-    'PIL.Image',
-    'PIL.ImageDraw',
-    'PIL.ImageFont',
-    'cv2',
-    'numpy',
-    'pandas',
-    'scipy',
-    'sklearn',
-    'skimage',
-    'matplotlib',
     'moviepy',
     'imageio',
     'imageio_ffmpeg',
     'rapidocr_onnxruntime',  # OCR 엔진 (경량)
-    'onnxruntime',  # RapidOCR 의존성 (DLL 포함 필수)
     'faster_whisper',  # Faster-Whisper (CTranslate2 기반 고속 STT)
     'ctranslate2',  # CTranslate2 (Faster-Whisper 의존성)
     'tokenizers',  # HuggingFace tokenizers
     'huggingface_hub',  # 모델 다운로드
     'regex',
-    'requests',
-    'urllib3',
     'certifi',
     'charset_normalizer',
     'idna',
     'cryptography',
-    'PyQt5',
-    'tkinter',
     'pydub',
     'ffmpeg',
     'lxml',
     'openpyxl',
-    'numba',
-    'llvmlite',
-    'scipy',  # Faster-Whisper 의존성
     'google',
     'google.genai',
     'httpx',
@@ -254,6 +235,17 @@ packages_to_collect = [
     'wave',
     'audioop',
     'winsound',
+    # 프로젝트 내 모듈
+    'voice_profiles',
+    'config',
+    'caller',
+    'app',
+    'core',
+    'utils',
+    'managers',
+    'processors',
+    'ui',
+    'prompts',
 ]
 
 for pkg in packages_to_collect:
@@ -743,7 +735,29 @@ av_required = ['av', 'av.audio', 'av.video', 'av.container', 'av.codec', 'av.fil
 for mod in av_required:
     if mod not in hiddenimports:
         hiddenimports.append(mod)
-print(f"[Build] After av adjustment: {len(hiddenimports)} hiddenimports")
+
+# MoviePy 및 필수 의존성 명시적 추가 (ImportError 방지)
+extra_moviepy_imports = [
+    'moviepy',
+    'moviepy.editor',
+    'moviepy.video.fx.all',
+    'moviepy.audio.fx.all',
+    'moviepy.video.io.preview',
+    'moviepy.video.io.ffmpeg_reader',
+    'moviepy.video.io.ffmpeg_writer',
+    'proglog',
+    'decorator',
+    'tqdm',
+    'imageio',
+    'imageio_ffmpeg',
+    'requests',
+    'urllib3',
+]
+for mod in extra_moviepy_imports:
+    if mod not in hiddenimports:
+        hiddenimports.append(mod)
+
+print(f"[Build] After av/moviepy adjustment: {len(hiddenimports)} hiddenimports")
 
 a = Analysis(
     ['ssmaker.py'],
@@ -764,6 +778,7 @@ exe = EXE(
     pyz,
     a.scripts,
     a.binaries,
+    a.zipfiles,
     a.datas,
     [],
     name='ssmaker',
@@ -788,3 +803,16 @@ exe = EXE(
     entitlements_file=None,
     icon='resource/app_icon.ico' if os.path.exists('resource/app_icon.ico') else None,
 )
+
+# 단일 실행 파일 설정 (onfile)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name='ssmaker',
+)
+

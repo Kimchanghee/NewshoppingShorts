@@ -261,6 +261,20 @@ def login(**data) -> Dict[str, Any]:
     except requests.exceptions.ConnectionError as e:
         logger.error(f"Login connection error: {e}")
         return {"status": "error", "message": _ERROR_MESSAGES["connection"]}
+    except requests.exceptions.HTTPError as e:
+        if e.response.status_code == 401:
+            return {
+                "status": "error",
+                "message": "비밀번호가 일치하지 않거나 인증에 실패했습니다.",
+            }
+        elif e.response.status_code == 404:
+            return {"status": "error", "message": "존재하지 않는 아이디입니다."}
+        elif e.response.status_code == 403:
+            return {
+                "status": "error",
+                "message": "접근 권한이 없습니다. (승인 대기중일 수 있습니다)",
+            }
+        return {"status": "error", "message": f"서버 오류: {e.response.status_code}"}
     except requests.exceptions.RequestException as e:
         logger.error(f"Login network error: {str(e)[:100]}")
         return {"status": "error", "message": _ERROR_MESSAGES["network"]}

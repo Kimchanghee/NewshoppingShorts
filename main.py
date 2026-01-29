@@ -99,8 +99,8 @@ except Exception as exc:  # pragma: no cover - informative log only
     warnings.warn(f"[경고] OpenCV를 불러오지 못했습니다: {exc}", ImportWarning)
 
 try:
-    # moviepy 2.x compatible imports
-    from moviepy import VideoFileClip, vfx
+    # moviepy 1.x compatible imports
+    from moviepy.editor import VideoFileClip, vfx
 
     MOVIEPY_AVAILABLE = True
 except Exception as exc:  # pragma: no cover - informative log only
@@ -871,13 +871,13 @@ class VideoAnalyzerGUI:
         self._right_frame = tk.Frame(self._header_frame, bg=self.header_bg)
         self._right_frame.pack(side=tk.RIGHT, padx=20, pady=10)
 
-        # 테마 토글
-        self.theme_toggle = ThemeToggle(
-            self._right_frame,
-            theme_manager=self.theme_manager,
-            on_toggle=self._toggle_theme,
-        )
-        self.theme_toggle.pack(side=tk.RIGHT)
+        # 테마 토글 (제거됨 - 라이트 모드 고정)
+        # self.theme_toggle = ThemeToggle(
+        #     self._right_frame,
+        #     theme_manager=self.theme_manager,
+        #     on_toggle=self._toggle_theme,
+        # )
+        # self.theme_toggle.pack(side=tk.RIGHT)
 
         # 설정 버튼 (톱니바퀴)
         self.settings_button = SettingsButton(
