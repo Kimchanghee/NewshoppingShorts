@@ -363,19 +363,29 @@ class Login(QMainWindow, login_Ui.Ui_LoginWindow):
             )
 
             if result.get('success'):
+                # 회원가입 성공 - 체험판 3회 제공
+                is_trial = result.get('data', {}).get('is_trial', True)
+                work_count = result.get('data', {}).get('work_count', 3)
+
                 self.showCustomMessageBox(
-                    '가입 요청 완료',
-                    '회원가입 요청이 접수되었습니다.\n관리자 승인 후 로그인이 가능합니다.'
+                    '회원가입 완료',
+                    f'회원가입이 완료되었습니다!\n체험판 {work_count}회가 제공됩니다.\n바로 로그인하세요.'
                 )
                 self._closeRegistrationDialog()
+
+                # 로그인 폼에 아이디 자동 입력
+                if hasattr(self.ui, 'inputUserId'):
+                    self.ui.inputUserId.setText(username)
+                    if hasattr(self.ui, 'inputUserPw'):
+                        self.ui.inputUserPw.setFocus()
             else:
-                error_msg = result.get('message', '회원가입 요청에 실패했습니다.')
-                self.showCustomMessageBox('요청 실패', error_msg)
+                error_msg = result.get('message', '회원가입에 실패했습니다.')
+                self.showCustomMessageBox('가입 실패', error_msg)
 
         except Exception as e:
-            logger.error("[Registration] 회원가입 요청 실패: %s", e, exc_info=True)
+            logger.error("[Registration] 회원가입 실패: %s", e, exc_info=True)
             self.showCustomMessageBox(
-                '요청 실패',
+                '가입 실패',
                 '서버 연결에 실패했습니다.\n잠시 후 다시 시도해주세요.'
             )
 

@@ -32,7 +32,12 @@ from ui.panels.style_tab import StyleTab
 from ui.panels.queue_tab import QueueTab
 from ui.panels.url_content_panel import URLContentPanel
 from ui.components import StatusBar
-from ui.components.custom_dialog import show_info, show_warning, show_error, show_question
+from ui.components.custom_dialog import (
+    show_info,
+    show_warning,
+    show_error,
+    show_question,
+)
 from ui.components.sidebar_container import SidebarContainer
 from ui.components.settings_button import SettingsButton
 from ui.components.settings_modal import SettingsModal
@@ -46,7 +51,7 @@ from utils.logging_config import get_logger
 # Initialize logger
 logger = get_logger(__name__)
 
-URL_PATTERN = re.compile(r'https?://[^\s\"\'<>]+')
+URL_PATTERN = re.compile(r"https?://[^\s\"\'<>]+")
 
 
 def _configure_stdio_utf8() -> None:
@@ -57,8 +62,13 @@ def _configure_stdio_utf8() -> None:
             sys.stderr.reconfigure(encoding="utf-8", errors="replace")
         else:
             import io  # local import to avoid extra dependency when not needed
-            sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
-            sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding="utf-8", errors="replace")
+
+            sys.stdout = io.TextIOWrapper(
+                sys.stdout.buffer, encoding="utf-8", errors="replace"
+            )
+            sys.stderr = io.TextIOWrapper(
+                sys.stderr.buffer, encoding="utf-8", errors="replace"
+            )
     except Exception:
         # If reconfiguration fails we simply continue; worst case the default encoding remains.
         pass
@@ -69,6 +79,7 @@ _configure_stdio_utf8()
 try:
     from google import genai
     from google.genai import types
+
     GENAI_SDK_AVAILABLE = True
     GENAI_TYPES_AVAILABLE = True
 except Exception as exc:  # pragma: no cover - informative log only
@@ -80,6 +91,7 @@ except Exception as exc:  # pragma: no cover - informative log only
 
 try:
     import cv2  # type: ignore
+
     CV2_AVAILABLE = True
 except Exception as exc:  # pragma: no cover - informative log only
     cv2 = None
@@ -89,6 +101,7 @@ except Exception as exc:  # pragma: no cover - informative log only
 try:
     # moviepy 2.x compatible imports
     from moviepy import VideoFileClip, vfx
+
     MOVIEPY_AVAILABLE = True
 except Exception as exc:  # pragma: no cover - informative log only
     VideoFileClip = None
@@ -98,6 +111,7 @@ except Exception as exc:  # pragma: no cover - informative log only
 
 try:
     from pydub import AudioSegment  # type: ignore
+
     PYDUB_AVAILABLE = True
 except Exception as exc:  # pragma: no cover - informative log only
     AudioSegment = None
@@ -107,14 +121,15 @@ except Exception as exc:  # pragma: no cover - informative log only
 # OCR 사용 가능 여부 체크 - Python 버전에 따라 다른 방식
 try:
     import importlib.util
+
     if sys.version_info >= (3, 13):
         # Python 3.13+: pytesseract 사용
-        OCR_AVAILABLE = importlib.util.find_spec('pytesseract') is not None
+        OCR_AVAILABLE = importlib.util.find_spec("pytesseract") is not None
     else:
         # Python 3.13 미만: RapidOCR 우선
         OCR_AVAILABLE = (
-            importlib.util.find_spec('rapidocr_onnxruntime') is not None or
-            importlib.util.find_spec('pytesseract') is not None
+            importlib.util.find_spec("rapidocr_onnxruntime") is not None
+            or importlib.util.find_spec("pytesseract") is not None
         )
 except Exception:
     OCR_AVAILABLE = False
@@ -122,6 +137,7 @@ except Exception:
 # GPU 가속을 위한 NumPy/CuPy 초기화
 try:
     import numpy as np
+
     NUMPY_AVAILABLE = True
 except Exception as exc:
     np = None
@@ -132,6 +148,7 @@ except Exception as exc:
 # Python 3.13+에서는 CuPy 미지원 - NumPy만 사용
 GPU_ACCEL_AVAILABLE = False
 xp = np  # 기본값은 NumPy
+
 
 def _check_and_install_cupy():
     """
@@ -144,7 +161,7 @@ def _check_and_install_cupy():
     global GPU_ACCEL_AVAILABLE, xp
 
     # CUDA 경로를 PATH에 추가 (Windows)
-    if sys.platform == 'win32':
+    if sys.platform == "win32":
         cuda_paths = [
             r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin",
             r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.0\bin",
@@ -152,13 +169,16 @@ def _check_and_install_cupy():
         ]
         for cuda_path in cuda_paths:
             if os.path.exists(cuda_path):
-                if cuda_path not in os.environ.get('PATH', ''):
-                    os.environ['PATH'] = cuda_path + os.pathsep + os.environ.get('PATH', '')
+                if cuda_path not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = (
+                        cuda_path + os.pathsep + os.environ.get("PATH", "")
+                    )
                     logger.debug(f"[GPU 가속] CUDA 경로 추가: {cuda_path}")
                 break
 
     try:
         import cupy as cp
+
         # GPU 사용 가능 여부 엄격 테스트 (DLL 로드 포함)
         test_array = cp.array([1, 2, 3])
         _ = test_array.sum()
@@ -177,8 +197,14 @@ def _check_and_install_cupy():
         # CuPy는 설치되었지만 CUDA DLL 없음 또는 GPU 사용 불가
         error_msg = str(exc)
 
-        if "nvrtc" in error_msg.lower() or "cuda" in error_msg.lower() or ".dll" in error_msg.lower():
-            logger.warning("[GPU 가속] CUDA 런타임 오류 - CuPy가 설치되어 있지만 CUDA가 제대로 설치되지 않았습니다.")
+        if (
+            "nvrtc" in error_msg.lower()
+            or "cuda" in error_msg.lower()
+            or ".dll" in error_msg.lower()
+        ):
+            logger.warning(
+                "[GPU 가속] CUDA 런타임 오류 - CuPy가 설치되어 있지만 CUDA가 제대로 설치되지 않았습니다."
+            )
             logger.warning(f"[GPU 가속] 오류 상세: {error_msg[:200]}")
             logger.info("[GPU 가속] NumPy CPU 모드로 전환합니다. (GPU 가속 없이 작동)")
             logger.info("[GPU 가속] 팁: 불필요한 CuPy를 제거하려면: pip uninstall cupy")
@@ -188,6 +214,7 @@ def _check_and_install_cupy():
         xp = np
         GPU_ACCEL_AVAILABLE = False
         return False
+
 
 # NumPy 사용 가능한 경우에만 CuPy 체크 시도
 if NUMPY_AVAILABLE:
@@ -220,17 +247,18 @@ YOUTUBE_API_AVAILABLE = True
 INSTAGRAPI_AVAILABLE = True
 YOUTUBE_UPLOAD_SCOPES = ["https://www.googleapis.com/auth/youtube.upload"]
 
+
 def resource_path(relative_path: str) -> str:
     # PyInstaller로 빌드된 exe 인지 확인
-    if getattr(sys, 'frozen', False):
+    if getattr(sys, "frozen", False):
         # onefile 모드: _MEIPASS 임시 폴더 사용
-        if hasattr(sys, '_MEIPASS'):
+        if hasattr(sys, "_MEIPASS"):
             meipass_path = os.path.join(sys._MEIPASS, relative_path)
             if os.path.exists(meipass_path):
                 return meipass_path
         # onedir 모드: exe 폴더의 _internal 사용
         base_path = os.path.dirname(sys.executable)
-        internal_path = os.path.join(base_path, '_internal', relative_path)
+        internal_path = os.path.join(base_path, "_internal", relative_path)
         if os.path.exists(internal_path):
             return internal_path
         # fallback: 기존 경로
@@ -239,6 +267,7 @@ def resource_path(relative_path: str) -> str:
         # 개발 중(파이썬 파일로 실행)일 때
         base_path = os.path.dirname(os.path.abspath(__file__))
         return os.path.join(base_path, relative_path)
+
 
 class VideoAnalyzerGUI:
     def __init__(self, root, login_data=None, preloaded_ocr=None):
@@ -254,8 +283,7 @@ class VideoAnalyzerGUI:
         # Icon path verified silently
         self._root_icon = tk.PhotoImage(file=icon_path)
         self.root.iconphoto(True, self._root_icon)
-        
-        
+
         # 창 크기 설정 (고정 레이아웃 사용)
         # Window size settings (using fixed layout)
         self.root.geometry(f"{LAYOUT.WINDOW_WIDTH}x{LAYOUT.WINDOW_HEIGHT}")
@@ -279,9 +307,9 @@ class VideoAnalyzerGUI:
         self.success_color = "#34a853"
         self.warning_color = "#fbbc04"
         self.error_color = "#ea4335"
-        
+
         self.root.configure(bg=self.bg_color)
-        
+
         # URL 관련 변수
         self.url_queue = []
         self.url_status = {}
@@ -300,14 +328,14 @@ class VideoAnalyzerGUI:
 
         # 동적 처리 플래그
         self.dynamic_processing = False
-        
+
         # 변수 초기화 (API 로드 전에 실행)
         self.video_source = tk.StringVar(value="none")
         self.local_file_path = ""
         self.tiktok_douyin_url = ""
         self._temp_downloaded_file = None
         self.source_video = ""
-        
+
         # TTS 음성 고정 설정
         default_voice = DEFAULT_MULTI_VOICE_PRESETS[0]
         self.selected_tts_voice = tk.StringVar(value=default_voice)
@@ -332,7 +360,7 @@ class VideoAnalyzerGUI:
         self.max_voice_selection = 10
         self.voice_summary_var = tk.StringVar(value="선택된 음성: 없음")
         self._active_sample_player = None
-        
+
         # 배치 처리용 변수
         self.url_list = []
         self.batch_processing = False
@@ -343,10 +371,10 @@ class VideoAnalyzerGUI:
         self.batch_processing_lock = threading.Lock()  # 중복 배치 실행 방지
         self.url_status_lock = threading.Lock()  # url_status 접근 동기화
         self.batch_thread = None  # 현재 실행 중인 배치 스레드
-        
+
         # self.output_folder_path = os.path.join(os.getcwd(), "outputs")
         # os.makedirs(self.output_folder_path, exist_ok=True)
-        
+
         # ★ 저장된 출력 폴더 경로 불러오기 ★
         try:
             settings = get_settings_manager()
@@ -376,7 +404,7 @@ class VideoAnalyzerGUI:
         self.output_folder_label = None
         self.start_batch_button = None
         self.stop_batch_button = None
-        
+
         # 결과 저장용 변수
         self.analysis_result = {}
         self.last_chinese_script_lines: List[str] = []
@@ -390,116 +418,116 @@ class VideoAnalyzerGUI:
         self.final_video_temp_dir = None
         self.generated_videos: List[Dict[str, Any]] = []
         self.korean_subtitle_override = None
-        self.korean_subtitle_mode = 'default'
+        self.korean_subtitle_mode = "default"
         self.cached_video_width: Optional[int] = None
         self.cached_video_height: Optional[int] = None
-        
+
         # TTS 관련 변수
         self.speaker_voice_mapping = {}
         self.last_tts_segments = []
         self._per_line_tts = []
-        
 
-        
         self.tts_sync_info = {}
         self.current_task_var = tk.StringVar(value="대기 중")
         self._current_job_header = None
         # 진행상황 관리
         self.progress_states = {
-            'download': {'status': 'waiting', 'progress': 0, 'message': None},
-            'analysis': {'status': 'waiting', 'progress': 0, 'message': None},
-            'ocr_analysis': {'status': 'waiting', 'progress': 0, 'message': None},
-            'subtitle': {'status': 'waiting', 'progress': 0, 'message': None},
-            'translation': {'status': 'waiting', 'progress': 0, 'message': None},
-            'tts': {'status': 'waiting', 'progress': 0, 'message': None},
-            'video': {'status': 'waiting', 'progress': 0, 'message': None},
+            "download": {"status": "waiting", "progress": 0, "message": None},
+            "analysis": {"status": "waiting", "progress": 0, "message": None},
+            "ocr_analysis": {"status": "waiting", "progress": 0, "message": None},
+            "subtitle": {"status": "waiting", "progress": 0, "message": None},
+            "translation": {"status": "waiting", "progress": 0, "message": None},
+            "tts": {"status": "waiting", "progress": 0, "message": None},
+            "video": {"status": "waiting", "progress": 0, "message": None},
             # 세밀한 싱크 파이프라인 단계
-            'tts_audio': {'status': 'waiting', 'progress': 0, 'message': None},
-            'audio_merge': {'status': 'waiting', 'progress': 0, 'message': None},
-            'audio_analysis': {'status': 'waiting', 'progress': 0, 'message': None},
-            'subtitle_overlay': {'status': 'waiting', 'progress': 0, 'message': None},
-            'post_tasks': {'status': 'waiting', 'progress': 0, 'message': None},
-            'finalize': {'status': 'waiting', 'progress': 0, 'message': None},
+            "tts_audio": {"status": "waiting", "progress": 0, "message": None},
+            "audio_merge": {"status": "waiting", "progress": 0, "message": None},
+            "audio_analysis": {"status": "waiting", "progress": 0, "message": None},
+            "subtitle_overlay": {"status": "waiting", "progress": 0, "message": None},
+            "post_tasks": {"status": "waiting", "progress": 0, "message": None},
+            "finalize": {"status": "waiting", "progress": 0, "message": None},
         }
 
         self.stage_messages = {
-            'download': [
+            "download": [
                 "현재 원본 동영상을 찾고 있습니다.",
                 "링크 속 숨은 명장면을 뒤지는 중이에요.",
-                "다운로드 터널 속에서 영상을 끌어오는 중입니다."
+                "다운로드 터널 속에서 영상을 끌어오는 중입니다.",
             ],
-            'analysis': [
+            "analysis": [
                 "AI가 동영상을 분석하고 있습니다.",
                 "씬별 포인트를 캐치하고 있어요.",
-                "내용을 샅샅이 뜯어보고 있습니다."
+                "내용을 샅샅이 뜯어보고 있습니다.",
             ],
-            'ocr_analysis': [
+            "ocr_analysis": [
                 "중국어 자막을 찾고 있습니다.",
                 "프레임마다 글자를 탐색 중이에요.",
-                "OCR로 자막 위치를 분석하고 있습니다."
+                "OCR로 자막 위치를 분석하고 있습니다.",
             ],
-            'subtitle': [
+            "subtitle": [
                 "중국어 자막을 분석하고 있습니다.",
                 "프레임 속 글자를 한 줄씩 추적하는 중이에요.",
-                "자막 위치를 확대경으로 살피고 있습니다."
+                "자막 위치를 확대경으로 살피고 있습니다.",
             ],
-            'translation': [
+            "translation": [
                 "번역과 각색을 하고 있습니다.",
                 "한국어 감성으로 문장을 다듬는 중이에요.",
-                "의미를 살리며 자연스럽게 고쳐 쓰고 있습니다."
+                "의미를 살리며 자연스럽게 고쳐 쓰고 있습니다.",
             ],
-            'tts': [
+            "tts": [
                 "목소리를 입히는 중이에요.",
                 "톤과 감정을 맞춰 한 줄씩 녹음하고 있어요.",
-                "듣기 좋은 보이스를 믹싱 중입니다."
+                "듣기 좋은 보이스를 믹싱 중입니다.",
             ],
-            'video': [
+            "video": [
                 "영상을 최종 인코딩 하고 있습니다.",
                 "장면을 이어 붙이며 피날레를 완성 중이에요.",
-                "렌더링 엔진이 열심히 팬을 돌리고 있습니다."
+                "렌더링 엔진이 열심히 팬을 돌리고 있습니다.",
             ],
-            'tts_audio': [
+            "tts_audio": [
                 "TTS 음성을 조물조물 빚는 중입니다.",
                 "대사를 가장 자연스러운 목소리로 녹음하고 있어요.",
-                "보이스 배우가 마이크 앞에서 열연 중입니다."
+                "보이스 배우가 마이크 앞에서 열연 중입니다.",
             ],
-            'audio_merge': [
+            "audio_merge": [
                 "갓 구운 TTS를 영상에 살포시 얹는 중입니다.",
                 "오디오와 영상이 한 몸이 되도록 맞붙이고 있어요.",
-                "볼륨과 템포를 맞춰 한 컷에 담는 중입니다."
+                "볼륨과 템포를 맞춰 한 컷에 담는 중입니다.",
             ],
-            'audio_analysis': [
+            "audio_analysis": [
                 "오디오를 세밀하게 들으며 자막 타이밍을 측정 중입니다.",
                 "파형 위를 탐정처럼 훑으며 싱크를 계산하고 있어요.",
-                "귀로 들은 시간을 숫자로 바꾸는 중입니다."
+                "귀로 들은 시간을 숫자로 바꾸는 중입니다.",
             ],
-            'subtitle_overlay': [
+            "subtitle_overlay": [
                 "계산한 타이밍으로 자막을 딱 맞춰 붙이고 있습니다.",
                 "문장마다 화면에 착 붙도록 자막을 얹는 중이에요.",
-                "자막이 화면 위에서 춤출 준비를 하고 있습니다."
+                "자막이 화면 위에서 춤출 준비를 하고 있습니다.",
             ],
-            'post_tasks': [
+            "post_tasks": [
                 "마지막 다듬기를 하며 군더더기를 정리하고 있어요.",
                 "마무리 전 필수 점검 항목을 체크 중입니다.",
-                "잔잔바리 작업들을 싹 쓸어 담는 중입니다."
+                "잔잔바리 작업들을 싹 쓸어 담는 중입니다.",
             ],
-            'finalize': [
+            "finalize": [
                 "피날레 렌더링으로 결과물을 포장 중입니다.",
                 "이제 곧 완성본이 탄생합니다. 조금만 기다려 주세요!",
-                "완성본을 반짝이 리본으로 묶는 중입니다."
-            ]
+                "완성본을 반짝이 리본으로 묶는 중입니다.",
+            ],
         }
         self._stage_message_cache = {}
-        
+
         # 세션별 고유 TTS 디렉토리 생성 (안전한 경로 사용)
         self.session_id = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
         self.base_tts_dir = get_safe_tts_base_dir()
-        self.tts_output_dir = os.path.join(self.base_tts_dir, f"session_{self.session_id}")
+        self.tts_output_dir = os.path.join(
+            self.base_tts_dir, f"session_{self.session_id}"
+        )
         os.makedirs(self.tts_output_dir, exist_ok=True)
         self.voice_sample_dir = os.path.join(self.base_tts_dir, "voice_samples")
         os.makedirs(self.voice_sample_dir, exist_ok=True)
         # Session TTS directory created silently
-        
+
         # OCR 리더 초기화 (로딩창에서 미리 초기화된 경우 재사용)
         if self.preloaded_ocr is not None:
             self.ocr_reader = self.preloaded_ocr
@@ -507,7 +535,7 @@ class VideoAnalyzerGUI:
         else:
             self.ocr_reader = None
             # OCR reader not preloaded - subtitle detection may be limited
-        
+
         # 비디오 옵션 변수들
         self.mirror_video = tk.BooleanVar(value=False)
         self.add_subtitles = tk.BooleanVar(value=True)
@@ -557,10 +585,10 @@ class VideoAnalyzerGUI:
             # Working directory verified silently
             # API 키 로드
             self.load_saved_api_keys()
-            
+
             # API 매니저 초기화
             self.api_key_manager = ApiKeyManager.APIKeyManager()
-            
+
             # Gemini 클라이언트 초기화
             self.init_client()
             try:
@@ -575,7 +603,7 @@ class VideoAnalyzerGUI:
         except Exception:
             # Async initialization error handled silently
             pass
-                    
+
     def load_saved_api_keys(self):
         """저장된 API 키 자동 로드 - Delegated to APIHandler"""
         return self.api_handler.load_saved_api_keys()
@@ -607,7 +635,7 @@ class VideoAnalyzerGUI:
         if not raw_input or not raw_input.strip():
             return []
 
-        lines = raw_input.strip().split('\n')
+        lines = raw_input.strip().split("\n")
         all_urls = []
 
         for line_num, line in enumerate(lines, 1):
@@ -616,14 +644,20 @@ class VideoAnalyzerGUI:
                 continue
 
             # v.douyin.com 형태 - 마지막 슬래시 포함!
-            douyin_matches = re.findall(r'https://v\.douyin\.com/[A-Za-z0-9_\-]+/', line)
+            douyin_matches = re.findall(
+                r"https://v\.douyin\.com/[A-Za-z0-9_\-]+/", line
+            )
             all_urls.extend(douyin_matches)
 
             # vm.tiktok.com 형태
-            tiktok_matches = re.findall(r'https://vm\.tiktok\.com/[A-Za-z0-9_\-]+/', line)
+            tiktok_matches = re.findall(
+                r"https://vm\.tiktok\.com/[A-Za-z0-9_\-]+/", line
+            )
             all_urls.extend(tiktok_matches)
 
-            logger.debug(f"[URL 처리] 라인 {line_num}: {len(douyin_matches + tiktok_matches)}개 URL 발견")
+            logger.debug(
+                f"[URL 처리] 라인 {line_num}: {len(douyin_matches + tiktok_matches)}개 URL 발견"
+            )
 
         # 중복 제거 및 검증 (슬래시 포함 상태로)
         unique_urls = []
@@ -639,16 +673,16 @@ class VideoAnalyzerGUI:
                     logger.warning(f"[URL 처리] 잘못된 URL 형식 무시: {url}")
 
         return unique_urls[:30]  # 최대 30개
-    
+
     def cleanup_temp_files(self):
         logger.debug("cleanup_temp_files in")
-        if hasattr(self, '_temp_downloaded_file') and self._temp_downloaded_file:
+        if hasattr(self, "_temp_downloaded_file") and self._temp_downloaded_file:
             try:
                 temp_dir = os.path.dirname(self._temp_downloaded_file)
                 if temp_dir and os.path.exists(temp_dir):
                     # 파일이 사용 중일 수 있으므로 잠시 대기
                     time.sleep(2)
-                    
+
                     logger.debug(f"temp_dir : {temp_dir}")
                     # 여러 번 시도
                     for attempt in range(3):
@@ -661,7 +695,9 @@ class VideoAnalyzerGUI:
                                 time.sleep(2)  # 2초 더 대기 후 재시도
                             else:
                                 # 마지막 시도에서도 실패하면 무시
-                                logger.warning(f"[정리] 임시 파일 삭제 실패 (무시): {str(e)}")
+                                logger.warning(
+                                    f"[정리] 임시 파일 삭제 실패 (무시): {str(e)}"
+                                )
                                 pass
             except Exception as e:
                 # 정리 실패는 치명적이지 않으므로 무시
@@ -669,7 +705,7 @@ class VideoAnalyzerGUI:
                 pass
             finally:
                 self._temp_downloaded_file = None
-                
+
     def init_client(self, use_specific_key=None):
         """Gemini API 클라이언트 초기화"""
         try:
@@ -699,7 +735,9 @@ class VideoAnalyzerGUI:
                 configured_tts = config.GEMINI_TTS_MODEL.replace("models/", "")
                 if tts_models and configured_tts not in tts_models:
                     fallback = tts_models[0]
-                    logger.warning(f"[API 초기화] 설정된 TTS 모델({configured_tts})을 사용할 수 없어 {fallback}로 대체합니다.")
+                    logger.warning(
+                        f"[API 초기화] 설정된 TTS 모델({configured_tts})을 사용할 수 없어 {fallback}로 대체합니다."
+                    )
                     config.GEMINI_TTS_MODEL = fallback
                 elif not tts_models:
                     # No available TTS models found - TTS calls may fail
@@ -707,20 +745,22 @@ class VideoAnalyzerGUI:
             except Exception:
                 # TTS model check failed - silently handled
                 pass
-            
+
             logger.info(f"[API 초기화] 완료")
             logger.info(f"- 비디오 분석 모델: {config.GEMINI_VIDEO_MODEL}")
             logger.info(f"- 텍스트 처리 모델: {config.GEMINI_TEXT_MODEL}")
             logger.info(f"- TTS 생성 모델: {config.GEMINI_TTS_MODEL}")
-            
+
             return True
         except Exception as e:
             logger.error(f"[API 오류] 초기화 실패: {str(e)}")
             return False
-        
+
     def update_progress_state(self, step, status, progress=None, message=None):
         """진행상황 상태 업데이트"""
-        return self.progress_manager.update_progress_state(step, status, progress, message)
+        return self.progress_manager.update_progress_state(
+            step, status, progress, message
+        )
 
     def update_all_progress_displays(self):
         """모든 탭의 진행상황 표시 업데이트 - 단순화"""
@@ -738,11 +778,20 @@ class VideoAnalyzerGUI:
         """음성 ID를 한글 이름으로 변환"""
         return self.voice_manager.get_voice_label(voice_id)
 
-    def set_active_voice(self, voice_id: str, voice_index: Optional[int] = None, voice_total: Optional[int] = None) -> None:
+    def set_active_voice(
+        self,
+        voice_id: str,
+        voice_index: Optional[int] = None,
+        voice_total: Optional[int] = None,
+    ) -> None:
         """현재 처리 중인 음성 정보를 진행 카드에 반영"""
-        return self.progress_manager.set_active_voice(voice_id, voice_index, voice_total)
+        return self.progress_manager.set_active_voice(
+            voice_id, voice_index, voice_total
+        )
 
-    def set_active_job(self, source: str, index: Optional[int] = None, total: Optional[int] = None) -> None:
+    def set_active_job(
+        self, source: str, index: Optional[int] = None, total: Optional[int] = None
+    ) -> None:
         """현재 처리 중인 작업 정보를 진행 카드에 반영한다."""
         return self.progress_manager.set_active_job(source, index, total)
 
@@ -753,7 +802,7 @@ class VideoAnalyzerGUI:
     def refresh_stage_indicator(self, step, status, progress=None):
         """진행현황 카드 단계 라벨/게이지 업데이트"""
         return self.progress_manager.refresh_stage_indicator(step, status, progress)
-        
+
     def get_status_color(self, status):
         """상태에 따른 색상 반환"""
         return self.progress_manager.get_status_color(status)
@@ -761,7 +810,6 @@ class VideoAnalyzerGUI:
     def get_status_text(self, status):
         """상태에 따른 텍스트 반환"""
         return self.progress_manager.get_status_text(status)
-        
 
     def setup_ui(self):
         """전체 UI 구성 - 사이드바 기반 레이아웃"""
@@ -791,7 +839,9 @@ class VideoAnalyzerGUI:
 
         # ===== 헤더 영역 (고정 높이) =====
         # Header area (fixed height)
-        self._header_frame = tk.Frame(self.root, bg=self.header_bg, height=LAYOUT.HEADER_HEIGHT)
+        self._header_frame = tk.Frame(
+            self.root, bg=self.header_bg, height=LAYOUT.HEADER_HEIGHT
+        )
         self._header_frame.pack(fill=tk.X)
         self._header_frame.pack_propagate(False)
 
@@ -804,7 +854,7 @@ class VideoAnalyzerGUI:
             text="쇼핑 숏폼 메이커",
             font=("맑은 고딕", 16, "bold"),
             bg=self.header_bg,
-            fg=self.primary_color
+            fg=self.primary_color,
         )
         self._main_title_label.pack(side=tk.LEFT)
 
@@ -813,7 +863,7 @@ class VideoAnalyzerGUI:
             text="AI 기반 숏폼 자동 제작",
             font=("맑은 고딕", 10),
             bg=self.header_bg,
-            fg=self.secondary_text
+            fg=self.secondary_text,
         )
         self._sub_title_label.pack(side=tk.LEFT, padx=(12, 0))
 
@@ -825,7 +875,7 @@ class VideoAnalyzerGUI:
         self.theme_toggle = ThemeToggle(
             self._right_frame,
             theme_manager=self.theme_manager,
-            on_toggle=self._toggle_theme
+            on_toggle=self._toggle_theme,
         )
         self.theme_toggle.pack(side=tk.RIGHT)
 
@@ -833,40 +883,20 @@ class VideoAnalyzerGUI:
         self.settings_button = SettingsButton(
             self._right_frame,
             theme_manager=self.theme_manager,
-            on_click=self._open_settings_modal
+            on_click=self._open_settings_modal,
         )
         self.settings_button.pack(side=tk.RIGHT, padx=(0, 12))
 
-        # 구독 정보 프레임
-        self._subscription_frame = tk.Frame(self._right_frame, bg=self.header_bg)
-        self._subscription_frame.pack(side=tk.RIGHT, padx=(0, 20))
+        # 구독 상태 위젯
+        from ui.components.subscription_status import SubscriptionStatusWidget
+        from ui.components.subscription_popup import show_subscription_prompt
 
-        self._sub_info_labels = {}
-        sub_info_style = {"font": ("맑은 고딕", 9), "bg": self.header_bg, "fg": self.secondary_text}
-
-        # 남은 횟수
-        self._sub_info_labels['count'] = tk.Label(
-            self._subscription_frame, text="횟수: -", **sub_info_style
+        self.subscription_widget = SubscriptionStatusWidget(
+            self._right_frame,
+            on_request_subscription=self._on_request_subscription,
+            theme_manager=self.theme_manager,
         )
-        self._sub_info_labels['count'].pack(side=tk.RIGHT, padx=(8, 0))
-
-        # 구분선
-        tk.Label(self._subscription_frame, text="|", **sub_info_style).pack(side=tk.RIGHT, padx=4)
-
-        # 남은 구독
-        self._sub_info_labels['expires'] = tk.Label(
-            self._subscription_frame, text="구독: -", **sub_info_style
-        )
-        self._sub_info_labels['expires'].pack(side=tk.RIGHT, padx=(8, 0))
-
-        # 구분선
-        tk.Label(self._subscription_frame, text="|", **sub_info_style).pack(side=tk.RIGHT, padx=4)
-
-        # 최근 로그인
-        self._sub_info_labels['login'] = tk.Label(
-            self._subscription_frame, text="로그인: -", **sub_info_style
-        )
-        self._sub_info_labels['login'].pack(side=tk.RIGHT)
+        self.subscription_widget.pack(side=tk.RIGHT, padx=(0, 20))
 
         # 구독 정보 업데이트
         self._update_subscription_info()
@@ -881,31 +911,31 @@ class VideoAnalyzerGUI:
             self.root,
             theme_manager=self.theme_manager,
             sidebar_width=LAYOUT.SIDEBAR_WIDTH,
-            gui=self
+            gui=self,
         )
         self.sidebar_container.pack(fill=tk.BOTH, expand=True, padx=0, pady=0)
 
         # 메뉴 추가: URL 입력 (1단계), 스타일 (2단계), 작업 (3단계)
         self.url_panel = URLContentPanel(
-            self.sidebar_container.content_frame,
-            self,
-            theme_manager=self.theme_manager
+            self.sidebar_container.content_frame, self, theme_manager=self.theme_manager
         )
-        self.sidebar_container.add_menu_item("url", "URL 입력", self.url_panel, step_number=1, icon="")
+        self.sidebar_container.add_menu_item(
+            "url", "URL 입력", self.url_panel, step_number=1, icon=""
+        )
 
         self.style_tab = StyleTab(
-            self.sidebar_container.content_frame,
-            self,
-            theme_manager=self.theme_manager
+            self.sidebar_container.content_frame, self, theme_manager=self.theme_manager
         )
-        self.sidebar_container.add_menu_item("style", "스타일", self.style_tab, step_number=2, icon="")
+        self.sidebar_container.add_menu_item(
+            "style", "스타일", self.style_tab, step_number=2, icon=""
+        )
 
         self.queue_tab = QueueTab(
-            self.sidebar_container.content_frame,
-            self,
-            theme_manager=self.theme_manager
+            self.sidebar_container.content_frame, self, theme_manager=self.theme_manager
         )
-        self.sidebar_container.add_menu_item("queue", "작업", self.queue_tab, step_number=3, icon="")
+        self.sidebar_container.add_menu_item(
+            "queue", "작업", self.queue_tab, step_number=3, icon=""
+        )
 
         # 기본 메뉴 선택 (URL 입력이 첫 단계)
         self.sidebar_container.select_menu("url")
@@ -949,6 +979,7 @@ class VideoAnalyzerGUI:
 
     def _show_tutorial(self, settings=None):
         """튜토리얼 오버레이 표시"""
+
         def on_tutorial_complete():
             if settings:
                 settings.mark_tutorial_completed()
@@ -959,7 +990,7 @@ class VideoAnalyzerGUI:
         self._tutorial_overlay = TutorialOverlay(
             self.root,
             on_complete=on_tutorial_complete,
-            theme_manager=self.theme_manager
+            theme_manager=self.theme_manager,
         )
         self._tutorial_overlay.show()
 
@@ -1003,7 +1034,7 @@ class VideoAnalyzerGUI:
 
         # 'clam' 테마 사용 - Windows에서 배경색 등 커스터마이징 가능
         try:
-            style.theme_use('clam')
+            style.theme_use("clam")
         except tk.TclError:
             pass  # 테마 사용 불가 시 기본 테마 유지
 
@@ -1024,13 +1055,13 @@ class VideoAnalyzerGUI:
                         "children": [
                             (
                                 "Horizontal.Progressbar.pbar",
-                                {"side": "left", "sticky": "ns"}
+                                {"side": "left", "sticky": "ns"},
                             )
                         ],
-                        "sticky": "nswe"
-                    }
+                        "sticky": "nswe",
+                    },
                 )
-            ]
+            ],
         )
 
         # 스크롤바 스타일 설정
@@ -1040,15 +1071,15 @@ class VideoAnalyzerGUI:
             troughcolor=self.theme_manager.get_color("scrollbar_bg"),
             borderwidth=0,
             relief=tk.FLAT,
-            arrowsize=12
+            arrowsize=12,
         )
         style.map(
             "Queue.Vertical.TScrollbar",
             background=[
                 ("active", self.primary_color),
                 ("pressed", self.accent_color),
-                ("!active", self.theme_manager.get_color("scrollbar_thumb"))
-            ]
+                ("!active", self.theme_manager.get_color("scrollbar_thumb")),
+            ],
         )
 
         # Treeview 스타일
@@ -1060,7 +1091,7 @@ class VideoAnalyzerGUI:
             fieldbackground=self.card_bg,
             foreground=self.text_color,
             borderwidth=0,
-            relief=tk.FLAT
+            relief=tk.FLAT,
         )
         style.configure(
             "Queue.Treeview.Heading",
@@ -1068,17 +1099,17 @@ class VideoAnalyzerGUI:
             background=self.theme_manager.get_color("bg_secondary"),
             foreground=self.text_color,
             relief=tk.FLAT,
-            borderwidth=0
+            borderwidth=0,
         )
         style.map(
             "Queue.Treeview",
             background=[("selected", self.light_red)],
-            foreground=[("selected", self.text_color)]
+            foreground=[("selected", self.text_color)],
         )
         style.map(
             "Queue.Treeview.Heading",
             background=[("active", self.theme_manager.get_color("bg_hover"))],
-            relief=[("active", tk.FLAT)]
+            relief=[("active", tk.FLAT)],
         )
 
         # 테마 스크롤바 스타일
@@ -1088,17 +1119,17 @@ class VideoAnalyzerGUI:
             troughcolor=self.theme_manager.get_color("scrollbar_bg"),
             borderwidth=0,
             relief=tk.FLAT,
-            arrowsize=12
+            arrowsize=12,
         )
 
     def _setup_legacy_widget_references(self):
         """기존 패널에서 사용하던 위젯 참조 설정 (호환성)"""
         # URLContentPanel에서 url_entry 가져오기
-        if hasattr(self, 'url_panel') and hasattr(self.url_panel, 'url_entry'):
+        if hasattr(self, "url_panel") and hasattr(self.url_panel, "url_entry"):
             self.url_entry = self.url_panel.url_entry
 
         # QueueTab에서 queue_panel과 progress_panel 가져오기
-        if hasattr(self, 'queue_tab') and hasattr(self.queue_tab, 'queue_panel'):
+        if hasattr(self, "queue_tab") and hasattr(self.queue_tab, "queue_panel"):
             # queue_panel에 있는 위젯들은 QueuePanel 생성 시 self.gui.xxx로 설정됨
             pass
 
@@ -1112,67 +1143,277 @@ class VideoAnalyzerGUI:
         # 여기서는 추가 작업 불필요 (옵저버가 _on_theme_changed 호출)
         pass
 
-    def _update_subscription_info(self):
-        """구독 정보 업데이트"""
-        from datetime import datetime
-
-        if not hasattr(self, '_sub_info_labels') or not self._sub_info_labels:
+    def _on_request_subscription(self, message: str = ""):
+        """구독 신청 버튼 클릭 처리"""
+        if not hasattr(self, "login_data") or not self.login_data:
             return
 
-        try:
-            # login_data에서 구독 정보 추출
-            user_data = {}
-            if self.login_data:
-                user_data = self.login_data.get('data', {}).get('data', {})
+        user_data = self.login_data.get("data", {}).get("data", {})
+        user_id = user_data.get("id")
 
-            # 최근 로그인
-            last_login = user_data.get('last_login_at', '')
-            if last_login:
-                try:
-                    dt = datetime.fromisoformat(last_login.replace('Z', '+00:00'))
-                    login_str = dt.strftime('%m/%d %H:%M')
-                except:
-                    login_str = '-'
+        if not user_id:
+            return
+
+        # 권한 검증: 체험판 사용자만 구독 신청 가능
+        work_count = user_data.get("work_count", -1)
+        user_type = user_data.get("user_type", "")
+
+        # 체험판 사용자인지 확인 (백엔드와 동일한 로직)
+        is_trial = user_type == "trial" or (work_count > 0 and work_count != -1)
+
+        if not is_trial:
+            # 체험판 사용자가 아니면 메시지 표시
+            self._show_error_message(
+                "구독 신청 불가",
+                "구독 신청은 체험판 사용자만 가능합니다.\n\n"
+                "이미 구독 중이거나 무제한 사용자입니다.",
+            )
+            return
+
+        # 이미 구독 신청 대기 중인지 확인
+        if hasattr(self, "subscription_widget"):
+            widget_data = self.subscription_widget.get_current_status()
+            if widget_data.get("has_pending_request", False):
+                self._show_error_message(
+                    "구독 신청 대기 중",
+                    "이미 구독 신청이 접수되어 승인 대기 중입니다.\n\n"
+                    "관리자의 승인을 기다려주세요.",
+                )
+                return
+
+        # 메시지가 제공되지 않았으면 다이얼로그 표시
+        if not message:
+            # 구독 신청 다이얼로그 표시
+            from ui.components.subscription_popup import show_subscription_prompt
+
+            work_used = user_data.get("work_used", 0)
+
+            def on_submit(msg: str):
+                self._submit_subscription_request(user_id, msg)
+
+            # 구독 안내 팝업 표시
+            show_subscription_prompt(
+                self.root, work_count, work_used, on_submit, self.theme_manager
+            )
+        else:
+            # 메시지가 제공되었으면 직접 요청 제출
+            self._submit_subscription_request(user_id, message)
+
+    def _submit_subscription_request(self, user_id: str, message: str):
+        """구독 신청 API 호출"""
+        from caller import rest
+        import threading
+
+        def submit_request():
+            result = rest.safe_subscription_request(user_id, message)
+            if result.get("success"):
+                # 성공 시 상태 갱신
+                self.root.after(0, lambda: self._refresh_subscription_status())
+                # 체험판 팝업 플래그 리셋 (구독 신청 시)
+                if hasattr(self, "_trial_exhaustion_shown"):
+                    self._trial_exhaustion_shown = False
             else:
-                login_str = datetime.now().strftime('%m/%d %H:%M')
-            self._sub_info_labels['login'].config(text=f"로그인: {login_str}")
+                # 실패 시 메시지 표시
+                error_msg = result.get("message", "구독 신청에 실패했습니다.")
+                self.root.after(
+                    0, lambda: self._show_error_message("구독 신청 실패", error_msg)
+                )
 
-            # 구독 만료일
-            expires_at = user_data.get('subscription_expires_at', '')
-            if expires_at:
-                try:
-                    exp_dt = datetime.fromisoformat(expires_at.replace('Z', '+00:00'))
-                    now = datetime.now(exp_dt.tzinfo) if exp_dt.tzinfo else datetime.now()
-                    days_left = (exp_dt - now).days
-                    if days_left < 0:
-                        expires_str = "만료됨"
-                        color = "#e31639"
-                    elif days_left <= 7:
-                        expires_str = f"{days_left}일"
-                        color = "#ffc107"
-                    else:
-                        expires_str = f"{days_left}일"
-                        color = self.secondary_text
-                    self._sub_info_labels['expires'].config(text=f"구독: {expires_str}", fg=color)
-                except:
-                    self._sub_info_labels['expires'].config(text="구독: -")
-            else:
-                self._sub_info_labels['expires'].config(text="구독: -")
+        threading.Thread(target=submit_request, daemon=True).start()
 
-            # 남은 작업 횟수
-            work_count = user_data.get('work_count', -1)
-            work_used = user_data.get('work_used', 0)
-            if work_count == -1:
-                count_str = "무제한"
-                color = "#00c853"
-            else:
-                remaining = max(0, work_count - work_used)
-                count_str = f"{remaining}회"
-                color = "#ffc107" if remaining <= 10 else self.secondary_text
-            self._sub_info_labels['count'].config(text=f"횟수: {count_str}", fg=color)
+    def _show_error_message(self, title: str, message: str):
+        """에러 메시지 표시"""
+        import tkinter.messagebox as messagebox
 
-        except Exception as e:
-            logger.debug(f"구독 정보 업데이트 실패: {e}")
+        messagebox.showerror(title, message)
+
+    def _refresh_subscription_status(self):
+        """구독 상태 새로고침"""
+        if not hasattr(self, "login_data") or not self.login_data:
+            return
+
+        user_data = self.login_data.get("data", {}).get("data", {})
+        user_id = user_data.get("id")
+
+        if not user_id:
+            return
+
+        # 백그라운드에서 구독 상태 조회
+        from caller import rest
+        import threading
+
+        def fetch_status():
+            result = rest.get_subscription_status_with_consistency(user_id)
+            if result.get("success"):
+                # 작업 횟수가 증가했는지 확인 (체험판 팝업 플래그 리셋)
+                current_work_used = result.get("work_used", 0)
+                if hasattr(self, "_last_work_used"):
+                    if current_work_used > self._last_work_used:
+                        # 작업 횟수가 증가했으면 팝업 플래그 리셋
+                        if hasattr(self, "_trial_exhaustion_shown"):
+                            self._trial_exhaustion_shown = False
+                self._last_work_used = current_work_used
+
+                # 성공 시 UI 업데이트
+                self.root.after(0, lambda: self._update_subscription_widget(result))
+            # 실패 시 무시 (기존 데이터 유지)
+
+        threading.Thread(target=fetch_status, daemon=True).start()
+
+    def _update_subscription_widget(self, status_data: dict):
+        """구독 상태 위젯 업데이트"""
+        if not hasattr(self, "subscription_widget"):
+            return
+
+        self.subscription_widget.update_status(
+            is_trial=status_data.get("is_trial", True),
+            work_count=status_data.get("work_count", 3),
+            work_used=status_data.get("work_used", 0),
+            can_work=status_data.get("can_work", True),
+            has_pending_request=status_data.get("has_pending_request", False),
+        )
+
+        # 체험판 소진 시 구독 안내 팝업 표시
+        self._check_trial_exhaustion(status_data)
+
+    def _check_trial_exhaustion(self, status_data: dict):
+        """체험판 소진 여부 확인 및 팝업 표시"""
+        is_trial = status_data.get("is_trial", True)
+        work_count = status_data.get("work_count", 3)
+        work_used = status_data.get("work_used", 0)
+        can_work = status_data.get("can_work", True)
+        has_pending_request = status_data.get("has_pending_request", False)
+
+        # 체험판 사용자이고 작업 횟수를 모두 사용했으며, 구독 신청 대기 중이 아닐 때
+        if (
+            is_trial
+            and work_count > 0
+            and work_used >= work_count
+            and not can_work
+            and not has_pending_request
+        ):
+            # 이미 팝업이 표시되었는지 확인 (중복 표시 방지)
+            if not hasattr(self, "_trial_exhaustion_shown"):
+                self._trial_exhaustion_shown = False
+
+            if not self._trial_exhaustion_shown:
+                self._trial_exhaustion_shown = True
+
+                # 잠시 후 팝업 표시 (UI 업데이트 완료 후)
+                self.root.after(
+                    1000,
+                    lambda: self._show_trial_exhaustion_popup(work_count, work_used),
+                )
+
+    def _show_trial_exhaustion_popup(self, work_count: int, work_used: int):
+        """체험판 소진 시 구독 안내 팝업 표시"""
+        from ui.components.subscription_popup import show_subscription_prompt
+
+        def on_submit(message: str):
+            """구독 신청 콜백"""
+            self._on_request_subscription(message)
+
+        # 구독 안내 팝업 표시
+        show_subscription_prompt(
+            self.root, work_count, work_used, on_submit, self.theme_manager
+        )
+
+    def _update_subscription_info(self):
+        """구독 정보 업데이트 (기존 호환성 유지)"""
+        from datetime import datetime
+
+        # SubscriptionStatusWidget이 있으면 업데이트
+        if hasattr(self, "subscription_widget"):
+            try:
+                # login_data에서 구독 정보 추출
+                user_data = {}
+                if self.login_data:
+                    user_data = self.login_data.get("data", {}).get("data", {})
+
+                work_count = user_data.get("work_count", -1)
+                work_used = user_data.get("work_used", 0)
+                user_type = user_data.get("user_type", "")
+
+                # 백엔드와 동일한 is_trial 계산 로직
+                # user_type이 "trial"이거나 work_count > 0이고 work_count != -1이면 체험판
+                is_trial = user_type == "trial" or (work_count > 0 and work_count != -1)
+                remaining = -1 if work_count == -1 else max(0, work_count - work_used)
+                can_work = work_count == -1 or remaining > 0
+
+                # 기본값으로 위젯 업데이트 (실제 상태는 _refresh_subscription_status에서 가져옴)
+                self.subscription_widget.update_status(
+                    is_trial=is_trial,
+                    work_count=work_count,
+                    work_used=work_used,
+                    can_work=can_work,
+                    has_pending_request=False,  # API 호출 후 업데이트
+                )
+
+                # 백그라운드에서 실제 상태 조회
+                self._refresh_subscription_status()
+
+            except Exception as e:
+                print(f"구독 정보 업데이트 오류: {e}")
+
+        # 기존 _sub_info_labels 업데이트 (호환성)
+        if hasattr(self, "_sub_info_labels") and self._sub_info_labels:
+            try:
+                # login_data에서 구독 정보 추출
+                user_data = {}
+                if self.login_data:
+                    user_data = self.login_data.get("data", {}).get("data", {})
+
+                # 최근 로그인 (현재 컴퓨터 시간 기준)
+                now = datetime.now()
+                login_str = now.strftime("%Y/%m/%d %H:%M")
+                self._sub_info_labels["login"].config(text=f"최근 로그인: {login_str}")
+
+                # 구독 만료일
+                expires_at = user_data.get("subscription_expires_at", "")
+                if expires_at:
+                    try:
+                        exp_dt = datetime.fromisoformat(
+                            expires_at.replace("Z", "+00:00")
+                        )
+                        now = (
+                            datetime.now(exp_dt.tzinfo)
+                            if exp_dt.tzinfo
+                            else datetime.now()
+                        )
+                        days_left = (exp_dt - now).days
+                        if days_left < 0:
+                            expires_str = "만료됨"
+                            color = "#e31639"
+                        elif days_left <= 7:
+                            expires_str = f"{days_left}일"
+                            color = "#ffc107"
+                        else:
+                            expires_str = f"{days_left}일"
+                            color = self.secondary_text
+                        self._sub_info_labels["expires"].config(
+                            text=f"구독: {expires_str}", fg=color
+                        )
+                    except:
+                        self._sub_info_labels["expires"].config(text="구독: -")
+                else:
+                    self._sub_info_labels["expires"].config(text="구독: -")
+
+                # 남은 작업 횟수
+                work_count = user_data.get("work_count", -1)
+                work_used = user_data.get("work_used", 0)
+                if work_count == -1:
+                    count_str = "무제한"
+                    color = "#00c853"
+                else:
+                    remaining = max(0, work_count - work_used)
+                    count_str = f"{remaining}회"
+                    color = "#ffc107" if remaining <= 10 else self.secondary_text
+                self._sub_info_labels["count"].config(
+                    text=f"횟수: {count_str}", fg=color
+                )
+
+            except Exception as e:
+                logger.debug(f"구독 정보 업데이트 실패: {e}")
 
     def _on_theme_changed(self, new_theme: str):
         """테마 변경 시 호출"""
@@ -1184,27 +1425,27 @@ class VideoAnalyzerGUI:
         self._update_header_theme()
 
         # 사이드바 컨테이너에 테마 적용
-        if hasattr(self, 'sidebar_container'):
+        if hasattr(self, "sidebar_container"):
             self.sidebar_container.apply_theme()
 
         # 패널들에 테마 적용
-        if hasattr(self, 'url_panel'):
+        if hasattr(self, "url_panel"):
             self.url_panel.apply_theme()
-        if hasattr(self, 'style_tab'):
+        if hasattr(self, "style_tab"):
             self.style_tab.apply_theme()
-        if hasattr(self, 'queue_tab'):
+        if hasattr(self, "queue_tab"):
             self.queue_tab.apply_theme()
 
         # 설정 버튼에 테마 적용
-        if hasattr(self, 'settings_button'):
+        if hasattr(self, "settings_button"):
             self.settings_button.apply_theme()
 
         # 테마 토글에 테마 적용
-        if hasattr(self, 'theme_toggle'):
+        if hasattr(self, "theme_toggle"):
             self.theme_toggle.apply_theme()
 
         # 상태 바에 테마 적용
-        if hasattr(self, 'status_bar') and self.status_bar is not None:
+        if hasattr(self, "status_bar") and self.status_bar is not None:
             self.status_bar.apply_theme()
 
         # 테마 설정 저장
@@ -1218,24 +1459,28 @@ class VideoAnalyzerGUI:
         """헤더 영역 테마 업데이트"""
         try:
             # 헤더 프레임 배경색 업데이트
-            if hasattr(self, '_header_frame'):
+            if hasattr(self, "_header_frame"):
                 self._header_frame.configure(bg=self.header_bg)
 
-            if hasattr(self, '_title_frame'):
+            if hasattr(self, "_title_frame"):
                 self._title_frame.configure(bg=self.header_bg)
 
-            if hasattr(self, '_right_frame'):
+            if hasattr(self, "_right_frame"):
                 self._right_frame.configure(bg=self.header_bg)
 
             # 타이틀 레이블 색상 업데이트
-            if hasattr(self, '_main_title_label'):
-                self._main_title_label.configure(bg=self.header_bg, fg=self.primary_color)
+            if hasattr(self, "_main_title_label"):
+                self._main_title_label.configure(
+                    bg=self.header_bg, fg=self.primary_color
+                )
 
-            if hasattr(self, '_sub_title_label'):
-                self._sub_title_label.configure(bg=self.header_bg, fg=self.secondary_text)
+            if hasattr(self, "_sub_title_label"):
+                self._sub_title_label.configure(
+                    bg=self.header_bg, fg=self.secondary_text
+                )
 
             # 구독 정보 프레임 테마 업데이트
-            if hasattr(self, '_subscription_frame'):
+            if hasattr(self, "_subscription_frame"):
                 self._subscription_frame.configure(bg=self.header_bg)
                 for child in self._subscription_frame.winfo_children():
                     child.configure(bg=self.header_bg)
@@ -1243,7 +1488,7 @@ class VideoAnalyzerGUI:
                 self._update_subscription_info()
 
             # 헤더 하단 구분선 색상 업데이트
-            if hasattr(self, '_header_divider'):
+            if hasattr(self, "_header_divider"):
                 self._header_divider.configure(bg=self.border_color)
 
         except Exception as e:
@@ -1270,12 +1515,12 @@ class VideoAnalyzerGUI:
                 self.root,
                 "캡처 완료",
                 f"총 {results['total']}개의 스크린샷이 저장되었습니다.\n\n"
-                f"저장 위치:\n{results['directory']}"
+                f"저장 위치:\n{results['directory']}",
             )
 
             # 폴더 열기 (Windows)
-            if sys.platform == 'win32':
-                os.startfile(results['directory'])
+            if sys.platform == "win32":
+                os.startfile(results["directory"])
 
             self.update_status("스크린샷 캡처 완료")
 
@@ -1302,7 +1547,10 @@ class VideoAnalyzerGUI:
         new_height = event.height
 
         # 크기가 실제로 변경되었을 때만 처리 (최적화)
-        if abs(new_width - self.current_width) < 5 and abs(new_height - self.current_height) < 5:
+        if (
+            abs(new_width - self.current_width) < 5
+            and abs(new_height - self.current_height) < 5
+        ):
             return
 
         self.current_width = new_width
@@ -1323,17 +1571,17 @@ class VideoAnalyzerGUI:
         try:
             # 음성 선택 섹션 - 고정 비율
             # Voice section - fixed ratio
-            if hasattr(self, 'voice_section_scale'):
+            if hasattr(self, "voice_section_scale"):
                 self.voice_section_scale = 0.45
 
             # 폰트 크기 - 고정 (동적 스케일링 없음)
             # Font sizes - fixed (no dynamic scaling)
             self.scaled_fonts = {
-                'title': 18,
-                'subtitle': 11,
-                'normal': 10,
-                'small': 9,
-                'tiny': 8
+                "title": 18,
+                "subtitle": 11,
+                "normal": 10,
+                "small": 9,
+                "tiny": 8,
             }
 
             # 패딩 - 고정
@@ -1384,14 +1632,18 @@ class VideoAnalyzerGUI:
         """Ensure each voice has a playable preview sample produced by Gemini."""
         return self.voice_manager.ensure_voice_samples(force)
 
-    def _generate_tts_sample(self, profile: Dict[str, Any], dest_path: str, duration: float = 3.0) -> bool:
+    def _generate_tts_sample(
+        self, profile: Dict[str, Any], dest_path: str, duration: float = 3.0
+    ) -> bool:
         """Use Gemini TTS to create a trimmed preview sample if possible."""
         return self.voice_manager._generate_tts_sample(profile, dest_path, duration)
 
     def _is_api_key_error(self, exc: Exception) -> bool:
         return self.voice_manager._is_api_key_error(exc)
 
-    def _write_trimmed_sample(self, dest_path: str, audio_data: Any, duration: float) -> None:
+    def _write_trimmed_sample(
+        self, dest_path: str, audio_data: Any, duration: float
+    ) -> None:
         """Persist audio data, trimming or padding to the target duration."""
         return self.voice_manager._write_trimmed_sample(dest_path, audio_data, duration)
 
@@ -1406,7 +1658,6 @@ class VideoAnalyzerGUI:
     def create_progress_section(self, parent):
         """Create progress section (now handled by ProgressPanel)"""
         return ProgressPanel(parent, self)
-
 
     def remove_selected_url(self):
         """선택된 URL을 큐에서 제거"""
@@ -1441,10 +1692,12 @@ class VideoAnalyzerGUI:
         return self.queue_manager.paste_and_extract(event)
 
     def add_log(self, message: str):
-        timestamp = datetime.now().strftime('%H:%M:%S')
-        logger.info(f'[{timestamp}] {message}')
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        logger.info(f"[{timestamp}] {message}")
 
-    def _build_script_lines(self, script_entries: Optional[Iterable[Dict[str, Any]]]) -> List[str]:
+    def _build_script_lines(
+        self, script_entries: Optional[Iterable[Dict[str, Any]]]
+    ) -> List[str]:
         lines: List[str] = []
         if not script_entries:
             return lines
@@ -1452,12 +1705,12 @@ class VideoAnalyzerGUI:
         for entry in script_entries:
             if not isinstance(entry, dict):
                 continue
-            timestamp = str(entry.get('timestamp', '00:00')).strip() or '00:00'
-            speaker = str(entry.get('speaker', '') or '').strip() or '발화자'
-            text = str(entry.get('text', '') or '').strip()
+            timestamp = str(entry.get("timestamp", "00:00")).strip() or "00:00"
+            speaker = str(entry.get("speaker", "") or "").strip() or "발화자"
+            text = str(entry.get("text", "") or "").strip()
             if not text:
                 continue
-            tone = str(entry.get('tone_marker', '') or '').strip()
+            tone = str(entry.get("tone_marker", "") or "").strip()
             head = f"[{timestamp}] [{speaker}]"
             payload = f"{tone} {text}".strip() if tone else text
             line = f"{head} {payload}".strip()
@@ -1465,7 +1718,9 @@ class VideoAnalyzerGUI:
 
         return lines
 
-    def record_analysis_script(self, script_entries: Optional[Iterable[Dict[str, Any]]]) -> None:
+    def record_analysis_script(
+        self, script_entries: Optional[Iterable[Dict[str, Any]]]
+    ) -> None:
         lines = self._build_script_lines(script_entries)
         self.last_chinese_script_lines = lines
         if not lines:
@@ -1482,7 +1737,9 @@ class VideoAnalyzerGUI:
         for line in lines:
             self.add_log(f"[중국어 원문] {line}")
 
-    def verify_translation_source(self, script_entries: Optional[Iterable[Dict[str, Any]]]) -> bool:
+    def verify_translation_source(
+        self, script_entries: Optional[Iterable[Dict[str, Any]]]
+    ) -> bool:
         lines = self._build_script_lines(script_entries)
         if not lines:
             self.add_log("[번역 검증] 번역 대상 원문이 비어 있어 확인하지 못했습니다.")
@@ -1496,23 +1753,27 @@ class VideoAnalyzerGUI:
 
         if digest != self.last_chinese_script_digest:
             self.add_log("[번역 검증] 분석 원문과 다른 콘텐츠가 감지되었습니다.")
-            self.add_log(f"[번역 검증] 기존 digest {self.last_chinese_script_digest[:10]}, 현재 {digest[:10]}")
+            self.add_log(
+                f"[번역 검증] 기존 digest {self.last_chinese_script_digest[:10]}, 현재 {digest[:10]}"
+            )
             return False
 
         self.add_log(f"[번역 검증] 원문 일치 확인 (digest {digest[:10]})")
         return True
 
     def _compute_centered_subtitle_region(
-        self,
-        subtitle_positions: Optional[Iterable[Dict[str, Any]]]
+        self, subtitle_positions: Optional[Iterable[Dict[str, Any]]]
     ) -> Optional[Dict[str, Any]]:
-        return self.subtitle_processor._compute_centered_subtitle_region(subtitle_positions)
+        return self.subtitle_processor._compute_centered_subtitle_region(
+            subtitle_positions
+        )
 
     def prepare_centered_subtitle_layout(
-        self,
-        subtitle_positions: Optional[Iterable[Dict[str, Any]]]
+        self, subtitle_positions: Optional[Iterable[Dict[str, Any]]]
     ) -> List[Dict[str, Any]]:
-        return self.subtitle_processor.prepare_centered_subtitle_layout(subtitle_positions)
+        return self.subtitle_processor.prepare_centered_subtitle_layout(
+            subtitle_positions
+        )
 
     def create_status_bar(self):
         """Create status bar (now handled by StatusBar)"""
@@ -1521,28 +1782,30 @@ class VideoAnalyzerGUI:
     def create_dummy_widgets(self):
         """호환성을 위한 더미 위젯들"""
         self.script_progress = {
-            'progress_bar': ttk.Progressbar(self.root),
-            'status_label': tk.Label(self.root, text="")
+            "progress_bar": ttk.Progressbar(self.root),
+            "status_label": tk.Label(self.root, text=""),
         }
         self.translation_progress = {
-            'progress_bar': ttk.Progressbar(self.root),
-            'status_label': tk.Label(self.root, text="")
+            "progress_bar": ttk.Progressbar(self.root),
+            "status_label": tk.Label(self.root, text=""),
         }
         self.tts_progress = {
-            'progress_bar': ttk.Progressbar(self.root),
-            'status_label': tk.Label(self.root, text="")
+            "progress_bar": ttk.Progressbar(self.root),
+            "status_label": tk.Label(self.root, text=""),
         }
-        
+
         # 더미 프레임 생성
         dummy_frame = tk.Frame(self.root)
-        
+
         self.script_text = scrolledtext.ScrolledText(dummy_frame)
         self.translation_text = scrolledtext.ScrolledText(dummy_frame)
         self.tts_result_text = scrolledtext.ScrolledText(dummy_frame)
         self.tts_status_label = tk.Label(dummy_frame, text="")
-        self.create_final_video_button = tk.Button(dummy_frame, text="", state=tk.DISABLED)
+        self.create_final_video_button = tk.Button(
+            dummy_frame, text="", state=tk.DISABLED
+        )
         self.save_path_label = tk.Label(dummy_frame, text="")
-        
+
     def update_analyze_button(self):
         """
         분석 버튼 상태 업데이트.
@@ -1574,8 +1837,12 @@ class VideoAnalyzerGUI:
         """전체 진행률 표시 업데이트"""
         return self.progress_manager.update_overall_progress_display()
 
-    def _build_overall_witty_message(self, progress: float, completed: int, total: int) -> str:
-        return self.progress_manager._build_overall_witty_message(progress, completed, total)
+    def _build_overall_witty_message(
+        self, progress: float, completed: int, total: int
+    ) -> str:
+        return self.progress_manager._build_overall_witty_message(
+            progress, completed, total
+        )
 
     def update_overall_progress(self, step, status, progress=None):
         """전체 진행현황 표시 업데이트"""
@@ -1606,6 +1873,7 @@ class VideoAnalyzerGUI:
     def stop_batch_processing(self):
         """배치 처리 중지 - Delegated to BatchHandler"""
         return self.batch_handler.stop_batch_processing()
+
     def on_voice_mode_change(self, *_):
         return self.voice_manager.on_voice_mode_change(*_)
 
@@ -1634,9 +1902,11 @@ class VideoAnalyzerGUI:
         duration: float,
         size_mb: float,
         temp_dir: Optional[str] = None,
-        features: Optional[List[str]] = None
+        features: Optional[List[str]] = None,
     ) -> None:
-        return self.output_manager.register_generated_video(voice, path, duration, size_mb, temp_dir, features)
+        return self.output_manager.register_generated_video(
+            voice, path, duration, size_mb, temp_dir, features
+        )
 
     def _generate_folder_name_for_url(self, url: str, timestamp: Optional[Any]) -> str:
         """Generate folder name in format: YYYYMMDD_HHMMSS_itemname"""
@@ -1644,7 +1914,8 @@ class VideoAnalyzerGUI:
 
     def save_generated_videos_locally(self, show_popup: bool = True) -> None:
         return self.output_manager.save_generated_videos_locally(show_popup)
-# VideoAnalyzerGUI 안의 기존 메서드 교체
+
+    # VideoAnalyzerGUI 안의 기존 메서드 교체
     def derive_product_keyword(self, max_words: int = 3, max_length: int = 24) -> str:
         """
         파일명 등에 쓸 짧은 키워드 생성 (TTSProcessor에 의존하지 않음).
@@ -1665,12 +1936,33 @@ class VideoAnalyzerGUI:
 
             # 4) 토큰화(한글/영문/숫자), 너무 짧은 것 제거
             import re
+
             tokens = re.findall(r"[0-9A-Za-z가-힣]{2,}", text)
 
             # 간단한 불용어(한국어/영어)
             stop = {
-                "영상","제품","보기","확인","해주세요","해요","입니다","그","이","저","그리고",
-                "the","this","that","and","for","with","you","your","please","check","video",
+                "영상",
+                "제품",
+                "보기",
+                "확인",
+                "해주세요",
+                "해요",
+                "입니다",
+                "그",
+                "이",
+                "저",
+                "그리고",
+                "the",
+                "this",
+                "that",
+                "and",
+                "for",
+                "with",
+                "you",
+                "your",
+                "please",
+                "check",
+                "video",
             }
 
             # 첫 글자/숫자 기반의 러프한 제품 키워드 후보
@@ -1691,11 +1983,10 @@ class VideoAnalyzerGUI:
         except Exception:
             return "video"
 
-
     def show_api_status(self):
         """API 키 상태를 팝업으로 표시 - Delegated to APIHandler"""
         return self.api_handler.show_api_status()
-        
+
     def extract_clean_script_from_translation(self, max_len: int = 14) -> str:
         """Clean translation text so it can be used for Korean subtitles."""
         return self.tts_processor.extract_clean_script_from_translation(max_len)
@@ -1703,7 +1994,9 @@ class VideoAnalyzerGUI:
     def _split_script_for_tts(self, script: str, max_chars: int = 13) -> List[str]:
         return self.tts_processor._split_script_for_tts(script, max_chars)
 
-    def _rebalance_subtitle_segments(self, segments: Iterable[str], max_chars: int) -> List[str]:
+    def _rebalance_subtitle_segments(
+        self, segments: Iterable[str], max_chars: int
+    ) -> List[str]:
         return self.tts_processor._rebalance_subtitle_segments(segments, max_chars)
 
     def build_tts_metadata(
@@ -1714,9 +2007,13 @@ class VideoAnalyzerGUI:
         speaker: str,
         max_chars: int = 13,
     ) -> List[Dict[str, Any]]:
-        return self.tts_processor.build_tts_metadata(script, total_duration, tts_path, speaker, max_chars)
+        return self.tts_processor.build_tts_metadata(
+            script, total_duration, tts_path, speaker, max_chars
+        )
 
-    def _filter_chinese_regions(self, subtitle_positions: Optional[Iterable[Dict[str, Any]]]) -> List[Dict[str, Any]]:
+    def _filter_chinese_regions(
+        self, subtitle_positions: Optional[Iterable[Dict[str, Any]]]
+    ) -> List[Dict[str, Any]]:
         return self.subtitle_detector._filter_chinese_regions(subtitle_positions)
 
     def apply_chinese_subtitle_removal(self, video):
@@ -1771,7 +2068,9 @@ class VideoAnalyzerGUI:
         감지된 박스에 페더(Feather) 마스크를 적용한 자연스러운 블러.
         입력/출력 시그니처 기존 유지.
         """
-        return self.subtitle_processor.apply_opencv_blur_enhanced(video, subtitle_positions, w, h)
+        return self.subtitle_processor.apply_opencv_blur_enhanced(
+            video, subtitle_positions, w, h
+        )
 
     def get_video_duration_helper(self):
         """원본 영상 길이 측정 헬퍼 함수"""
@@ -1792,7 +2091,7 @@ class VideoAnalyzerGUI:
     def update_status(self, message):
         """상태 표시줄 업데이트"""
         self.root.after(0, lambda: self.status_bar.config(text=message))
-        
+
     def _start_login_watch(self):
         """로그인 상태 감시 시작 - Delegated to LoginHandler"""
         return self.login_handler.start_login_watch()
@@ -1808,7 +2107,7 @@ class VideoAnalyzerGUI:
     def errorProgramForceClose(self, status: str):
         """서버 강제 종료 - Delegated to LoginHandler"""
         return self.login_handler.error_program_force_close(status)
-            
+
     def processBeforeExitProgram(self):
         """
         Logout from server before app exit (safe for both Qt/Tk).
@@ -1822,16 +2121,14 @@ class VideoAnalyzerGUI:
                 return
 
             # Safe nested dictionary access
-            user_id = (self.login_data.get('data', {})
-                                      .get('data', {})
-                                      .get('id'))
+            user_id = self.login_data.get("data", {}).get("data", {}).get("id")
 
             if not user_id:
                 logger.warning("User ID not found in login data - skipping logout")
                 return
 
             # Attempt logout
-            data = {'userId': user_id, "key": "ssmaker"}
+            data = {"userId": user_id, "key": "ssmaker"}
             try:
                 rest.logOut(**data)
                 logger.info("Logout successful")
@@ -1846,6 +2143,7 @@ class VideoAnalyzerGUI:
         # 1) Qt 앱이 살아있다면 먼저 종료 시도
         try:
             from PyQt5.QtWidgets import QCoreApplication
+
             app = QCoreApplication.instance()
             if app is not None:
                 app.quit()
@@ -1884,10 +2182,13 @@ class VideoAnalyzerGUI:
                 return
 
             # 복구 확인 메시지 생성
-            message = self.session_manager.get_restore_confirmation_message(session_data)
+            message = self.session_manager.get_restore_confirmation_message(
+                session_data
+            )
 
             # 사용자에게 복구 여부 확인
             from ui.components.custom_dialog import show_question
+
             restore = show_question(self.root, "🔄 이전 작업 복구", message)
 
             if restore:
@@ -1895,28 +2196,37 @@ class VideoAnalyzerGUI:
                 success = self.session_manager.restore_session(session_data)
                 if success:
                     from ui.components.custom_dialog import show_info
+
                     show_info(
                         self.root,
                         "복구 완료",
                         "이전 작업을 성공적으로 복구했습니다.\n\n"
                         "대기 중인 URL은 '작업 시작' 버튼을 눌러\n"
-                        "이어서 처리할 수 있습니다."
+                        "이어서 처리할 수 있습니다.",
                     )
                 else:
                     # UI 미준비로 인한 실패인 경우 재시도
                     if retry_count < MAX_RETRIES:
-                        logger.warning(f"[세션] 복구 실패 - {RETRY_DELAY_MS}ms 후 재시도 ({retry_count + 1}/{MAX_RETRIES})")
+                        logger.warning(
+                            f"[세션] 복구 실패 - {RETRY_DELAY_MS}ms 후 재시도 ({retry_count + 1}/{MAX_RETRIES})"
+                        )
                         # 세션 파일은 보존하고 재시도
-                        self.root.after(RETRY_DELAY_MS, lambda: self._retry_restore_session(session_data, retry_count + 1))
+                        self.root.after(
+                            RETRY_DELAY_MS,
+                            lambda: self._retry_restore_session(
+                                session_data, retry_count + 1
+                            ),
+                        )
                     else:
                         # 최대 재시도 횟수 초과 - 실패로 처리하되 세션 파일은 보존
                         from ui.components.custom_dialog import show_error
+
                         show_error(
                             self.root,
                             "복구 실패",
                             "세션 복구 중 오류가 발생했습니다.\n\n"
                             "세션 파일은 보존되어 다음 실행 시 다시 복구를 시도합니다.\n"
-                            "세션을 삭제하려면 '새로 시작'을 선택하세요."
+                            "세션을 삭제하려면 '새로 시작'을 선택하세요.",
                         )
                         logger.error("[세션] 최대 재시도 횟수 초과 - 세션 파일 보존")
             else:
@@ -1942,27 +2252,36 @@ class VideoAnalyzerGUI:
             success = self.session_manager.restore_session(session_data)
             if success:
                 from ui.components.custom_dialog import show_info
+
                 show_info(
                     self.root,
                     "복구 완료",
                     "이전 작업을 성공적으로 복구했습니다.\n\n"
                     "대기 중인 URL은 '작업 시작' 버튼을 눌러\n"
-                    "이어서 처리할 수 있습니다."
+                    "이어서 처리할 수 있습니다.",
                 )
             else:
                 # 재시도
                 if retry_count < MAX_RETRIES:
-                    logger.warning(f"[세션] 복구 재시도 실패 - {RETRY_DELAY_MS}ms 후 재시도 ({retry_count + 1}/{MAX_RETRIES})")
-                    self.root.after(RETRY_DELAY_MS, lambda: self._retry_restore_session(session_data, retry_count + 1))
+                    logger.warning(
+                        f"[세션] 복구 재시도 실패 - {RETRY_DELAY_MS}ms 후 재시도 ({retry_count + 1}/{MAX_RETRIES})"
+                    )
+                    self.root.after(
+                        RETRY_DELAY_MS,
+                        lambda: self._retry_restore_session(
+                            session_data, retry_count + 1
+                        ),
+                    )
                 else:
                     # 최대 재시도 횟수 초과
                     from ui.components.custom_dialog import show_error
+
                     show_error(
                         self.root,
                         "복구 실패",
                         "세션 복구 중 오류가 발생했습니다.\n\n"
                         "세션 파일은 보존되어 다음 실행 시 다시 복구를 시도합니다.\n"
-                        "세션을 삭제하려면 '새로 시작'을 선택하세요."
+                        "세션을 삭제하려면 '새로 시작'을 선택하세요.",
                     )
                     logger.error("[세션] 최대 재시도 횟수 초과 - 세션 파일 보존")
         except Exception as e:
@@ -2047,11 +2366,13 @@ class VideoAnalyzerGUI:
         # 안전 종료: 먼저 정상 종료 시도, 필요시 강제 종료
         self._safe_exit()
 
+
 def main():
     root = tk.Tk()
     app = VideoAnalyzerGUI(root)
 
     root.mainloop()
+
 
 if __name__ == "__main__":
     main()

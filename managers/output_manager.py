@@ -25,6 +25,7 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+
 class OutputManager:
     """
     Manager class for handling output file operations.
@@ -45,18 +46,23 @@ class OutputManager:
     def select_output_folder(self):
         """Select local output folder."""
         old_folder = self.gui.output_folder_path
-        selected = filedialog.askdirectory(parent=self.gui.root, title="Select Output Folder")
+        selected = filedialog.askdirectory(
+            parent=self.gui.root, title="Select Output Folder"
+        )
         if not selected:
             return
         selected = os.path.abspath(selected)
         os.makedirs(selected, exist_ok=True)
 
         # 폴더가 실제로 변경되었는지 확인
-        folder_changed = (old_folder != selected)
+        folder_changed = old_folder != selected
 
         self.gui.output_folder_path = selected
         self.gui.output_folder_var.set(selected)
-        if hasattr(self.gui, 'output_folder_display') and self.gui.output_folder_display:
+        if (
+            hasattr(self.gui, "output_folder_display")
+            and self.gui.output_folder_display
+        ):
             self.gui.output_folder_display.config(text=selected)
 
         # ★ 저장 폴더 경로 영구 저장 ★
@@ -80,13 +86,18 @@ class OutputManager:
         Returns:
             str: Absolute path to the output directory
         """
-        path = getattr(self.gui, 'output_folder_path', os.path.join(os.getcwd(), "outputs"))
+        path = getattr(
+            self.gui, "output_folder_path", os.path.join(os.getcwd(), "outputs")
+        )
         os.makedirs(path, exist_ok=True)
         return path
 
     def refresh_output_folder_display(self):
         """Refresh the output folder display in the UI."""
-        if hasattr(self.gui, "output_folder_display") and self.gui.output_folder_display:
+        if (
+            hasattr(self.gui, "output_folder_display")
+            and self.gui.output_folder_display
+        ):
             self.gui.output_folder_display.config(text=self.gui.output_folder_var.get())
 
     def _ensure_read_permissions(self, path: str) -> None:
@@ -104,9 +115,9 @@ class OutputManager:
                 path,
                 "/inheritance:e",
                 "/grant",
-                "*S-1-1-0:(R)",        # Everyone
+                "*S-1-1-0:(R)",  # Everyone
                 "/grant",
-                "*S-1-5-32-545:(R)",   # Users group
+                "*S-1-5-32-545:(R)",  # Users group
             ]
             if os.path.isdir(path):
                 cmd.append("/T")
@@ -128,7 +139,7 @@ class OutputManager:
         duration: float,
         size_mb: float,
         temp_dir: Optional[str] = None,
-        features: Optional[List[str]] = None
+        features: Optional[List[str]] = None,
     ) -> None:
         """
         Register a generated video and immediately save to output folder.
@@ -141,15 +152,20 @@ class OutputManager:
             temp_dir: Optional temporary directory used during generation
             features: Optional list of features applied to the video
         """
-        if not hasattr(self.gui, "generated_videos") or self.gui.generated_videos is None:
+        if (
+            not hasattr(self.gui, "generated_videos")
+            or self.gui.generated_videos is None
+        ):
             self.gui.generated_videos = []
 
         # Capture URL and timestamp for per-URL folder organization
-        url = getattr(self.gui, '_current_processing_url', None)
-        timestamp = getattr(self.gui, '_processing_start_time', None)
+        url = getattr(self.gui, "_current_processing_url", None)
+        timestamp = getattr(self.gui, "_processing_start_time", None)
 
         # ★★★ 즉시 저장: 영상이 생성되는 대로 바로 출력 폴더로 이동 ★★★
-        saved_path = self._save_video_immediately(path, url, timestamp, temp_dir, voice, duration, size_mb)
+        saved_path = self._save_video_immediately(
+            path, url, timestamp, temp_dir, voice, duration, size_mb
+        )
 
         record = {
             "voice": voice,
@@ -165,10 +181,17 @@ class OutputManager:
         self.gui.generated_videos.append(record)
 
         if saved_path:
-            self.gui.add_log(f"[OUTPUT] ✓ {voice} 즉시 저장됨 - {duration:.1f}s - {size_mb:.1f}MB")
+            self.gui.add_log(
+                f"[OUTPUT] ✓ {voice} 즉시 저장됨 - {duration:.1f}s - {size_mb:.1f}MB"
+            )
             self.gui.add_log(f"[OUTPUT]   → {saved_path}")
         else:
-            self.gui.add_log(f"[OUTPUT] Voice {voice} - {duration:.1f}s - {size_mb:.1f}MB -> {path}")
+            self.gui.add_log(
+                f"[OUTPUT] Voice {voice} - {duration:.1f}s - {size_mb:.1f}MB -> {path}"
+            )
+
+        # 구독 상태 새로고침은 processor.py에서 useWork 호출 후 처리됨
+        # 여기서는 중복 호출 방지를 위해 호출하지 않음
 
     def _save_video_immediately(
         self,
@@ -178,7 +201,7 @@ class OutputManager:
         temp_dir: Optional[str],
         voice: Optional[str] = None,
         duration: Optional[float] = None,
-        size_mb: Optional[float] = None
+        size_mb: Optional[float] = None,
     ) -> Optional[str]:
         """
         영상을 즉시 출력 폴더로 저장 + 영상별 로그 파일 생성.
@@ -205,7 +228,10 @@ class OutputManager:
             # URL별 폴더 생성
             if url:
                 # url_timestamps에서 일관된 타임스탬프 사용
-                if hasattr(self.gui, 'url_timestamps') and url in self.gui.url_timestamps:
+                if (
+                    hasattr(self.gui, "url_timestamps")
+                    and url in self.gui.url_timestamps
+                ):
                     timestamp = self.gui.url_timestamps[url]
 
                 folder_name = self._generate_folder_name_for_url(url, timestamp)
@@ -253,7 +279,7 @@ class OutputManager:
         voice: Optional[str],
         duration: Optional[float],
         size_mb: Optional[float],
-        url: Optional[str]
+        url: Optional[str],
     ) -> None:
         """
         개별 영상에 대한 로그 파일 생성.
@@ -268,23 +294,25 @@ class OutputManager:
         """
         try:
             # 로그 파일명: 영상파일명에서 .mp4를 _log.txt로 변경
-            log_filename = video_filename.replace('.mp4', '_log.txt')
+            log_filename = video_filename.replace(".mp4", "_log.txt")
             log_path = os.path.join(output_dir, log_filename)
 
             # 로그 버퍼에서 현재 로그 가져오기
             log_content = ""
-            if hasattr(self.gui, '_url_log_buffer') and self.gui._url_log_buffer:
-                log_content = ''.join(self.gui._url_log_buffer)
+            if hasattr(self.gui, "_url_log_buffer") and self.gui._url_log_buffer:
+                log_content = "".join(self.gui._url_log_buffer)
 
             # 로그 파일 작성
-            with open(log_path, 'w', encoding='utf-8') as f:
-                f.write(f"{'='*70}\n")
+            with open(log_path, "w", encoding="utf-8") as f:
+                f.write(f"{'=' * 70}\n")
                 f.write(f"영상 생성 로그\n")
-                f.write(f"{'='*70}\n\n")
+                f.write(f"{'=' * 70}\n\n")
 
                 # 기본 정보
                 f.write(f"[기본 정보]\n")
-                f.write(f"  생성 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+                f.write(
+                    f"  생성 시각: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n"
+                )
                 f.write(f"  영상 파일: {video_filename}\n")
                 if voice:
                     f.write(f"  사용 음성: {voice}\n")
@@ -298,9 +326,9 @@ class OutputManager:
 
                 # 상세 로그
                 if log_content:
-                    f.write(f"{'='*70}\n")
+                    f.write(f"{'=' * 70}\n")
                     f.write(f"[상세 처리 로그]\n")
-                    f.write(f"{'='*70}\n\n")
+                    f.write(f"{'=' * 70}\n\n")
                     f.write(log_content)
 
             logger.info("[로그 저장] %s", log_filename)
@@ -324,7 +352,7 @@ class OutputManager:
             base_output_dir = self.get_output_directory()
 
             # URL에 해당하는 폴더 찾기
-            if hasattr(self.gui, 'url_timestamps') and url in self.gui.url_timestamps:
+            if hasattr(self.gui, "url_timestamps") and url in self.gui.url_timestamps:
                 timestamp = self.gui.url_timestamps[url]
                 folder_name = self._generate_folder_name_for_url(url, timestamp)
                 output_dir = os.path.join(base_output_dir, folder_name)
@@ -338,7 +366,7 @@ class OutputManager:
                 return "통과"
 
             # 로그 파일 찾기 (*_log.txt)
-            log_files = [f for f in os.listdir(output_dir) if f.endswith('_log.txt')]
+            log_files = [f for f in os.listdir(output_dir) if f.endswith("_log.txt")]
             if not log_files:
                 logger.debug("[로그 검증] 로그 파일 없음")
                 return "통과"
@@ -348,7 +376,7 @@ class OutputManager:
             for log_file in log_files:
                 log_path = os.path.join(output_dir, log_file)
                 try:
-                    with open(log_path, 'r', encoding='utf-8') as f:
+                    with open(log_path, "r", encoding="utf-8") as f:
                         log_content = f.read()
                 except Exception as read_err:
                     logger.warning("[로그 검증] 읽기 실패: %s", read_err)
@@ -363,7 +391,7 @@ class OutputManager:
                 # 이슈 요약 (최대 2개)
                 summary = ", ".join(issues_found[:2])
                 if len(issues_found) > 2:
-                    summary += f" 외 {len(issues_found)-2}건"
+                    summary += f" 외 {len(issues_found) - 2}건"
                 logger.warning("[로그 검증] 이슈 발견: %s", summary)
                 return f"로그 확인 ({summary})"
             else:
@@ -388,23 +416,29 @@ class OutputManager:
         issues = []
 
         # 1. start > end 역행 문제
-        if re.search(r'start\s*>\s*end|역행|start.*보다.*end.*작', log_content, re.IGNORECASE):
+        if re.search(
+            r"start\s*>\s*end|역행|start.*보다.*end.*작", log_content, re.IGNORECASE
+        ):
             issues.append("타이밍 역행")
 
         # 2. 오버랩/겹침 문제
-        if re.search(r'overlap|겹침|오버랩', log_content, re.IGNORECASE):
+        if re.search(r"overlap|겹침|오버랩", log_content, re.IGNORECASE):
             issues.append("구간 겹침")
 
         # 3. duration 0 또는 음수
-        if re.search(r'duration\s*[=:]\s*-?\d*\.?\d*\s*(<=|<)\s*0|duration.*0초|길이.*0', log_content, re.IGNORECASE):
+        if re.search(
+            r"duration\s*[=:]\s*-?\d*\.?\d*\s*(<=|<)\s*0|duration.*0초|길이.*0",
+            log_content,
+            re.IGNORECASE,
+        ):
             issues.append("길이 0")
 
         # 4. 명시적 에러 키워드
         error_patterns = [
-            (r'\[ERROR\]', "ERROR"),
-            (r'치명적\s*오류', "치명적 오류"),
-            (r'싱크.*실패|sync.*fail', "싱크 실패"),
-            (r'자막.*표시.*안.*됨|자막.*누락', "자막 누락"),
+            (r"\[ERROR\]", "ERROR"),
+            (r"치명적\s*오류", "치명적 오류"),
+            (r"싱크.*실패|sync.*fail", "싱크 실패"),
+            (r"자막.*표시.*안.*됨|자막.*누락", "자막 누락"),
         ]
         for pattern, label in error_patterns:
             if re.search(pattern, log_content, re.IGNORECASE):
@@ -412,12 +446,12 @@ class OutputManager:
                     issues.append(label)
 
         # 5. Whisper 분석 실패 + 폴백 사용
-        if re.search(r'Whisper.*실패.*폴백|char_proportional_fallback', log_content):
+        if re.search(r"Whisper.*실패.*폴백|char_proportional_fallback", log_content):
             # 폴백은 경고 수준이므로 추가하지 않음 (정상 동작)
             pass
 
         # 6. TTS 생성 실패
-        if re.search(r'TTS.*생성.*실패|TTS.*오류', log_content, re.IGNORECASE):
+        if re.search(r"TTS.*생성.*실패|TTS.*오류", log_content, re.IGNORECASE):
             issues.append("TTS 오류")
 
         return issues
@@ -445,11 +479,11 @@ class OutputManager:
             # Extract from URL if keyword extraction fails
             try:
                 # Try to extract meaningful part from URL
-                url_parts = url.rstrip('/').split('/')
+                url_parts = url.rstrip("/").split("/")
                 if len(url_parts) > 0:
                     last_part = url_parts[-1]
                     # Clean the URL part for folder name
-                    item_name = re.sub(r'[^\w\s가-힣-]', '', last_part)[:20]
+                    item_name = re.sub(r"[^\w\s가-힣-]", "", last_part)[:20]
                 if not item_name:
                     item_name = "video"
             except Exception as e:
@@ -459,7 +493,7 @@ class OutputManager:
         # Combine into folder name
         folder_name = f"{date_time}_{item_name}"
         # Remove any invalid characters for folder names
-        folder_name = re.sub(r'[<>:"/\\|?*]', '', folder_name)
+        folder_name = re.sub(r'[<>:"/\\|?*]', "", folder_name)
         return folder_name
 
     def _cleanup_log_buffer(self) -> None:
@@ -470,9 +504,10 @@ class OutputManager:
         try:
             # 로그 캡처 종료
             from core.video.batch.processor import _stop_log_capture
+
             _stop_log_capture(self.gui)
             # 버퍼 초기화
-            if hasattr(self.gui, '_url_log_buffer'):
+            if hasattr(self.gui, "_url_log_buffer"):
                 self.gui._url_log_buffer = []
         except Exception as e:
             ui_controller.write_error_log(e)
@@ -502,7 +537,7 @@ class OutputManager:
         logger.info("[파일 저장] 저장 위치 확인")
         logger.info("=" * 70)
         logger.info("저장 경로: %s", base_output_dir)
-        logger.info("바탕화면 여부: %s", '바탕화면' if is_desktop else '다른 위치')
+        logger.info("바탕화면 여부: %s", "바탕화면" if is_desktop else "다른 위치")
         logger.info("저장할 영상 개수: %d개", len(records))
         logger.info("=" * 70)
 
@@ -521,10 +556,18 @@ class OutputManager:
             # Get timestamp from url_timestamps dictionary (for session consistency)
             # This ensures same folder is used even after session restore
             try:
-                if hasattr(self.gui, 'url_timestamps') and url in self.gui.url_timestamps:
+                if (
+                    hasattr(self.gui, "url_timestamps")
+                    and url in self.gui.url_timestamps
+                ):
                     timestamp = self.gui.url_timestamps[url]
                     from datetime import datetime
-                    ts_str = timestamp.strftime('%Y%m%d_%H%M%S') if isinstance(timestamp, datetime) else str(timestamp)
+
+                    ts_str = (
+                        timestamp.strftime("%Y%m%d_%H%M%S")
+                        if isinstance(timestamp, datetime)
+                        else str(timestamp)
+                    )
                     logger.debug("[폴더 일관성] URL별 타임스탬프 사용: %s", ts_str)
                 else:
                     # Fallback: try to get from first record

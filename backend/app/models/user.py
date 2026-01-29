@@ -1,6 +1,14 @@
-from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP
+from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, Enum as SQLEnum
 from sqlalchemy.sql import func
+import enum
 from app.database import Base
+
+
+class UserType(enum.Enum):
+    """User type enumeration"""
+    TRIAL = "trial"
+    SUBSCRIBER = "subscriber"
+    ADMIN = "admin"
 
 
 class User(Base):
@@ -23,3 +31,9 @@ class User(Base):
     # 작업 횟수 관리 (-1 = 무제한)
     work_count = Column(Integer, default=-1, nullable=False)
     work_used = Column(Integer, default=0, nullable=False)
+    # 사용자 유형 (trial=체험판, subscriber=구독자, admin=관리자)
+    user_type = Column(
+        SQLEnum(UserType, values_callable=lambda x: [e.value for e in x]),
+        default=UserType.TRIAL,
+        nullable=False
+    )

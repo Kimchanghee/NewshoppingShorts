@@ -61,5 +61,5 @@ def init_db():
     데이터베이스 테이블 초기화
     """
     # Import all models to register them with Base
-    from app.models import user, session, login_attempt, registration_request
+    from app.models import user, session, login_attempt, registration_request, subscription_request
     Base.metadata.create_all(bind=engine)
