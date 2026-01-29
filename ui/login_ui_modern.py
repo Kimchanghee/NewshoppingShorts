@@ -8,12 +8,40 @@ Modern Login UI for Shopping Shorts Maker
 """
 
 from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSignal
+from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtWidgets import (
     QMainWindow, QWidget, QFrame, QLabel, QLineEdit,
     QPushButton, QCheckBox, QMessageBox
 )
 from PyQt5.QtGui import QFont, QIcon, QPixmap
+
+
+class UsernameCheckWorker(QThread):
+    """아이디 중복 확인 백그라운드 워커"""
+    finished = pyqtSignal(bool, str)  # (available, message)
+
+    def __init__(self, username: str):
+        super().__init__()
+        self.username = username
+
+    def run(self):
+        import os
+        import requests
+
+        try:
+            api_url = os.getenv('API_SERVER_URL', 'https://ssmaker-auth-api-1049571775048.us-central1.run.app/')
+            resp = requests.get(
+                f"{api_url}user/check-username/{self.username}",
+                timeout=5
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                self.finished.emit(data.get("available", False), data.get("message", ""))
+            else:
+                self.finished.emit(False, "확인 실패 - 다시 시도해주세요")
+        except Exception:
+            self.finished.emit(False, "확인 실패 - 네트워크 오류")
 
 # 공통 폰트 설정
 FONT_FAMILY = "맑은 고딕"
@@ -554,9 +582,8 @@ class RegistrationRequestDialog(QWidget):
         self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
 
     def _check_username(self):
-        """아이디 중복 확인"""
+        """아이디 중복 확인 (비동기)"""
         import re
-        import requests
 
         username = self.usernameEdit.text().strip()
 
@@ -574,34 +601,28 @@ class RegistrationRequestDialog(QWidget):
         self.usernameStatusLabel.setText("확인 중...")
         self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
 
-        # API 호출
-        try:
-            import os
-            api_url = os.getenv('API_SERVER_URL', 'https://ssmaker-auth-api-1049571775048.us-central1.run.app/')
-            resp = requests.get(
-                f"{api_url}user/check-username/{username}",
-                timeout=5
-            )
+        # 비동기 API 호출
+        self._username_worker = UsernameCheckWorker(username)
+        self._username_worker.finished.connect(self._on_username_check_done)
+        self._username_worker.start()
 
-            if resp.status_code == 200:
-                data = resp.json()
-                if data.get("available", False):
-                    self._username_available = True
-                    self.usernameStatusLabel.setText("✓ 사용 가능한 아이디입니다")
-                    self.usernameStatusLabel.setStyleSheet("color: #10B981; background: transparent;")
-                else:
-                    self._username_available = False
-                    self.usernameStatusLabel.setText("✗ 이미 사용 중인 아이디입니다")
-                    self.usernameStatusLabel.setStyleSheet("color: #EF4444; background: transparent;")
-            else:
-                self.usernameStatusLabel.setText("확인 실패 - 다시 시도해주세요")
-                self.usernameStatusLabel.setStyleSheet("color: #F59E0B; background: transparent;")
-        except Exception:
-            self.usernameStatusLabel.setText("확인 실패 - 네트워크 오류")
+    def _on_username_check_done(self, available: bool, message: str):
+        """아이디 중복 확인 완료 콜백"""
+        self.checkUsernameBtn.setEnabled(True)
+        self.checkUsernameBtn.setText("중복확인")
+
+        if available:
+            self._username_available = True
+            self.usernameStatusLabel.setText("✓ 사용 가능한 아이디입니다")
+            self.usernameStatusLabel.setStyleSheet("color: #10B981; background: transparent;")
+        elif "네트워크" in message or "실패" in message:
+            self._username_available = False
+            self.usernameStatusLabel.setText(message)
             self.usernameStatusLabel.setStyleSheet("color: #F59E0B; background: transparent;")
-        finally:
-            self.checkUsernameBtn.setEnabled(True)
-            self.checkUsernameBtn.setText("중복확인")
+        else:
+            self._username_available = False
+            self.usernameStatusLabel.setText("✗ 이미 사용 중인 아이디입니다")
+            self.usernameStatusLabel.setStyleSheet("color: #EF4444; background: transparent;")
 
     def _on_submit(self):
         import re
