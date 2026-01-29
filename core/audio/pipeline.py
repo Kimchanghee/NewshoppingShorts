@@ -35,6 +35,7 @@ logger = get_logger(__name__)
 # ============================================================
 try:
     from google.genai import types
+
     GENAI_TYPES_AVAILABLE = True
 except ImportError:
     types = None
@@ -42,6 +43,7 @@ except ImportError:
 
 try:
     from pydub import AudioSegment
+
     PYDUB_AVAILABLE = True
 except ImportError:
     AudioSegment = None
@@ -62,11 +64,12 @@ class AudioConfig:
         sample_rate: 오디오 샘플레이트
         channels: 오디오 채널 수
     """
+
     speed_ratio: float = 1.2
     max_attempts: int = 5
     chars_per_second: float = 7.0
     min_video_duration: float = 4.0
-    max_chars_per_segment: int = 13
+    max_chars_per_segment: int = 5
     sample_rate: int = 44100
     channels: int = 2
 
@@ -86,6 +89,7 @@ class TTSResult:
         metadata: 자막 동기화를 위한 메타데이터 리스트
         timestamps_source: 타임스탬프 추출 방식 (whisper/char_proportional 등)
     """
+
     audio_path: str
     original_duration: float
     speeded_duration: float
@@ -245,6 +249,7 @@ class AudioPipeline:
         """앱에서 CTA 문구 가져오기"""
         try:
             from ui.panels.cta_panel import get_selected_cta_lines
+
             return get_selected_cta_lines(self.app)
         except ImportError:
             logger.warning("[AudioPipeline] CTA 패널 임포트 실패")
@@ -280,8 +285,12 @@ class AudioPipeline:
 
         # 길이 체크 및 축소
         if len(script) > max_chars:
-            logger.info(f"[AudioPipeline] 스크립트 축소: {len(script)}자 -> {max_chars}자")
-            main_script = self._trim_script_by_chars(main_script, max_chars - len(cta_text) - 1)
+            logger.info(
+                f"[AudioPipeline] 스크립트 축소: {len(script)}자 -> {max_chars}자"
+            )
+            main_script = self._trim_script_by_chars(
+                main_script, max_chars - len(cta_text) - 1
+            )
             script = main_script + (" " + cta_text if cta_text else "")
             logger.info(f"  조정 후: {len(script)}자")
 
@@ -289,8 +298,17 @@ class AudioPipeline:
 
     def _is_product_video(self) -> bool:
         """상품 영상인지 확인"""
-        translation = getattr(self.app, 'translation_result', '') or ''
-        product_keywords = ['상품', '제품', '구매', '링크', 'product', 'purchase', 'buy', 'shop']
+        translation = getattr(self.app, "translation_result", "") or ""
+        product_keywords = [
+            "상품",
+            "제품",
+            "구매",
+            "링크",
+            "product",
+            "purchase",
+            "buy",
+            "shop",
+        ]
         return any(kw in translation.lower() for kw in product_keywords)
 
     def _trim_script_by_chars(
@@ -320,7 +338,7 @@ class AudioPipeline:
             return preserve_text or ""
 
         # 문장 단위로 분리
-        sentence_pattern = re.compile(r'[.!?。！？]\s*')
+        sentence_pattern = re.compile(r"[.!?。！？]\s*")
         sentences = sentence_pattern.split(main_script)
         sentence_ends = sentence_pattern.findall(main_script)
 
@@ -379,19 +397,27 @@ class AudioPipeline:
                 if attempt > 0:
                     if last_duration > 0:
                         overshoot_ratio = last_duration / max_duration_after_speed
-                        reduction_rate = max(0.3, min(0.9, (1.0 / overshoot_ratio) * 0.85))
+                        reduction_rate = max(
+                            0.3, min(0.9, (1.0 / overshoot_ratio) * 0.85)
+                        )
                     else:
                         reduction_rate = 0.7 if attempt == 1 else 0.5
 
-                    logger.info(f"[AudioPipeline] 재시도 {attempt+1}: {reduction_rate*100:.0f}% 축소")
-                    reduced_main = self._trim_script_for_retry(main_script, reduction_rate)
+                    logger.info(
+                        f"[AudioPipeline] 재시도 {attempt + 1}: {reduction_rate * 100:.0f}% 축소"
+                    )
+                    reduced_main = self._trim_script_for_retry(
+                        main_script, reduction_rate
+                    )
                     current_script = reduced_main + (" " + cta_text if cta_text else "")
                     current_segments = self._split_text_naturally(current_script)
                 else:
                     current_script = script
                     current_segments = subtitle_segments
 
-                logger.info(f"[AudioPipeline] 시도 {attempt+1}/{self.config.max_attempts}: {len(current_script)}자")
+                logger.info(
+                    f"[AudioPipeline] 시도 {attempt + 1}/{self.config.max_attempts}: {len(current_script)}자"
+                )
 
                 # TTS 생성
                 result = self._generate_tts_internal(
@@ -405,7 +431,9 @@ class AudioPipeline:
 
                 # 길이 체크
                 if result.speeded_duration <= max_duration_after_speed:
-                    logger.info(f"[AudioPipeline] 성공: {result.speeded_duration:.1f}초 <= {max_duration_after_speed:.1f}초")
+                    logger.info(
+                        f"[AudioPipeline] 성공: {result.speeded_duration:.1f}초 <= {max_duration_after_speed:.1f}초"
+                    )
                     return result
 
                 excess = result.speeded_duration - max_duration_after_speed
@@ -413,7 +441,7 @@ class AudioPipeline:
 
             except Exception as exc:
                 ui_controller.write_error_log(exc)
-                logger.error(f"[AudioPipeline] 시도 {attempt+1} 실패: {exc}")
+                logger.error(f"[AudioPipeline] 시도 {attempt + 1} 실패: {exc}")
 
                 # API 할당량 초과 시 키 전환
                 error_str = str(exc)
@@ -425,7 +453,9 @@ class AudioPipeline:
 
         # 모든 시도 실패 시 마지막 결과 반환 (길이 초과 허용)
         if last_result:
-            logger.warning(f"[AudioPipeline] 목표 길이 미달성, 마지막 결과 사용: {last_duration:.1f}초")
+            logger.warning(
+                f"[AudioPipeline] 목표 길이 미달성, 마지막 결과 사용: {last_duration:.1f}초"
+            )
             return last_result
 
         raise RuntimeError("TTS 생성 실패")
@@ -460,8 +490,8 @@ class AudioPipeline:
                             voice_name=voice
                         )
                     )
-                )
-            )
+                ),
+            ),
         )
 
         # 응답 검증
@@ -483,18 +513,21 @@ class AudioPipeline:
         original_path = os.path.join(self.app.tts_output_dir, original_filename)
 
         # WAV 파일 저장
-        if audio_data[:4] == b'RIFF':
-            with open(original_path, 'wb') as f:
+        if audio_data[:4] == b"RIFF":
+            with open(original_path, "wb") as f:
                 f.write(audio_data)
         else:
-            with wave.open(original_path, 'wb') as wf:
+            with wave.open(original_path, "wb") as wf:
                 wf.setnchannels(1)
                 wf.setsampwidth(2)
                 wf.setframerate(24000)
                 wf.writeframes(audio_data)
 
         # pydub로 로드 및 정규화
-        from core.video.batch.audio_utils import _prepare_segment, _ensure_pydub_converter
+        from core.video.batch.audio_utils import (
+            _prepare_segment,
+            _ensure_pydub_converter,
+        )
 
         raw_audio = AudioSegment.from_file(original_path, format="wav")
         prepared_audio = _prepare_segment(raw_audio)
@@ -503,18 +536,29 @@ class AudioPipeline:
         ffmpeg_path = _ensure_pydub_converter()
         try:
             if ffmpeg_path:
-                prepared_audio.export(original_path, format="wav",
-                                     parameters=["-ar", str(self.config.sample_rate),
-                                               "-ac", str(self.config.channels)])
+                prepared_audio.export(
+                    original_path,
+                    format="wav",
+                    parameters=[
+                        "-ar",
+                        str(self.config.sample_rate),
+                        "-ac",
+                        str(self.config.channels),
+                    ],
+                )
             else:
                 from core.video.batch.audio_utils import _write_wave_fallback
-                _write_wave_fallback(prepared_audio, original_path,
-                                    sample_rate=self.config.sample_rate)
+
+                _write_wave_fallback(
+                    prepared_audio, original_path, sample_rate=self.config.sample_rate
+                )
         except Exception as export_err:
             logger.warning(f"[TTS] export 폴백: {export_err}")
             from core.video.batch.audio_utils import _write_wave_fallback
-            _write_wave_fallback(prepared_audio, original_path,
-                                sample_rate=self.config.sample_rate)
+
+            _write_wave_fallback(
+                prepared_audio, original_path, sample_rate=self.config.sample_rate
+            )
 
         original_duration = len(prepared_audio) / 1000.0
         logger.info(f"[TTS 생성] 원본 길이: {original_duration:.2f}초")
@@ -525,8 +569,10 @@ class AudioPipeline:
         )
 
         # Whisper 분석으로 자막 타이밍 추출
-        metadata, timestamps_source, voice_start, voice_end = self._analyze_with_whisper(
-            speeded_path, script, subtitle_segments, speeded_duration
+        metadata, timestamps_source, voice_start, voice_end = (
+            self._analyze_with_whisper(
+                speeded_path, script, subtitle_segments, speeded_duration
+            )
         )
 
         return TTSResult(
@@ -554,7 +600,10 @@ class AudioPipeline:
         Returns:
             (배속된 파일 경로, 배속 후 길이)
         """
-        from core.video.batch.audio_utils import _ensure_pydub_converter, _write_wave_fallback
+        from core.video.batch.audio_utils import (
+            _ensure_pydub_converter,
+            _write_wave_fallback,
+        )
 
         speeded_filename = f"tts_speeded_{voice}_{timestamp}_{random_suffix}.wav"
         speeded_path = os.path.join(self.app.tts_output_dir, speeded_filename)
@@ -565,11 +614,17 @@ class AudioPipeline:
         # ffmpeg atempo 사용 (더 좋은 품질)
         if ffmpeg_path:
             cmd = [
-                ffmpeg_path, "-y", "-i", original_path,
-                "-filter:a", f"atempo={speed_ratio}",
-                "-ar", str(self.config.sample_rate),
-                "-ac", str(self.config.channels),
-                speeded_path
+                ffmpeg_path,
+                "-y",
+                "-i",
+                original_path,
+                "-filter:a",
+                f"atempo={speed_ratio}",
+                "-ar",
+                str(self.config.sample_rate),
+                "-ac",
+                str(self.config.channels),
+                speeded_path,
             ]
             result = subprocess.run(cmd, capture_output=True, timeout=60)
 
@@ -620,35 +675,42 @@ class AudioPipeline:
                 self.app, audio_path, script, subtitle_segments
             )
 
-            if whisper_result and 'segments' in whisper_result:
-                whisper_segments = whisper_result['segments']
-                voice_start = whisper_result.get('voice_start', 0)
-                voice_end = whisper_result.get('voice_end', total_duration)
+            if whisper_result and "segments" in whisper_result:
+                whisper_segments = whisper_result["segments"]
+                voice_start = whisper_result.get("voice_start", 0)
+                voice_end = whisper_result.get("voice_end", total_duration)
 
                 metadata = []
                 for seg in whisper_segments:
-                    idx = seg.get('index', 1) - 1
-                    metadata.append({
-                        'idx': idx,
-                        'start': seg['start'],
-                        'end': seg['end'],
-                        'text': seg['text'],
-                        'path': audio_path,
-                        'speaker': None,  # 나중에 설정
-                        'is_narr': False,
-                    })
+                    idx = seg.get("index", 1) - 1
+                    metadata.append(
+                        {
+                            "idx": idx,
+                            "start": seg["start"],
+                            "end": seg["end"],
+                            "text": seg["text"],
+                            "path": audio_path,
+                            "speaker": None,  # 나중에 설정
+                            "is_narr": False,
+                        }
+                    )
 
                 logger.info(f"[Whisper] {len(metadata)}개 세그먼트 분석 완료")
-                return metadata, 'whisper_analysis', voice_start, voice_end
+                return metadata, "whisper_analysis", voice_start, voice_end
 
         except Exception as e:
             logger.warning(f"[Whisper] 분석 실패: {e}")
 
         # Whisper 실패 시 글자 수 비례 폴백
         logger.info("[Whisper] 글자 수 비례 폴백 사용")
-        return self._create_fallback_metadata(
-            subtitle_segments, total_duration, audio_path
-        ), 'char_proportional_fallback', 0.0, total_duration
+        return (
+            self._create_fallback_metadata(
+                subtitle_segments, total_duration, audio_path
+            ),
+            "char_proportional_fallback",
+            0.0,
+            total_duration,
+        )
 
     def _create_fallback_metadata(
         self,
@@ -665,7 +727,7 @@ class AudioPipeline:
         # 글자 수 계산 (공백, 구두점 제외)
         char_counts = []
         for text in subtitle_segments:
-            clean = re.sub(r'[\s,.!?~\-]', '', text.strip())
+            clean = re.sub(r"[\s,.!?~\-]", "", text.strip())
             char_counts.append(max(1, len(clean)))
 
         total_chars = sum(char_counts)
@@ -677,15 +739,17 @@ class AudioPipeline:
             char_ratio = char_counts[idx] / total_chars
             segment_duration = total_duration * char_ratio
 
-            metadata.append({
-                'idx': idx,
-                'start': round(current_time, 3),
-                'end': round(current_time + segment_duration, 3),
-                'text': text.strip(),
-                'path': audio_path,
-                'speaker': None,
-                'is_narr': False,
-            })
+            metadata.append(
+                {
+                    "idx": idx,
+                    "start": round(current_time, 3),
+                    "end": round(current_time + segment_duration, 3),
+                    "text": text.strip(),
+                    "path": audio_path,
+                    "speaker": None,
+                    "is_narr": False,
+                }
+            )
             current_time += segment_duration
 
         logger.info(f"[Fallback] {len(metadata)}개 세그먼트 (글자 수 비례)")
@@ -699,7 +763,10 @@ class AudioPipeline:
         """
         try:
             from core.video.batch.utils import _split_text_naturally
-            return _split_text_naturally(self.app, text, self.config.max_chars_per_segment)
+
+            return _split_text_naturally(
+                self.app, text, self.config.max_chars_per_segment
+            )
         except ImportError:
             # 폴백: 단순 분할
             return self._simple_split(text)
@@ -725,11 +792,11 @@ class AudioPipeline:
     def _handle_rate_limit(self):
         """API 할당량 초과 시 키 전환"""
         try:
-            api_mgr = getattr(self.app, 'api_key_manager', None)
+            api_mgr = getattr(self.app, "api_key_manager", None)
             if api_mgr:
                 api_mgr.block_current_key(duration_minutes=5)
                 logger.info("[AudioPipeline] API 키 전환 중...")
-                if hasattr(self.app, 'init_client') and self.app.init_client():
+                if hasattr(self.app, "init_client") and self.app.init_client():
                     logger.info("[AudioPipeline] API 키 전환 완료")
                 else:
                     time.sleep(60)

@@ -65,6 +65,9 @@ class VideoSettings:
     # Subtitle positioning
     SUBTITLE_Y_THRESHOLD: float = 0.5  # 50% of frame height (subtitle region)
 
+    # Subtitle text limits
+    MAX_CHARS_PER_SUBTITLE_LINE: int = 5  # 한 줄당 최대 글자 수 (띄어쓰기 포함)
+
     # Sampling intervals (seconds)
     SAMPLE_INTERVAL_DEFAULT: float = 0.3  # Default OCR sample interval
     SAMPLE_INTERVAL_CRITICAL: float = 0.1  # Critical period (0-3s) interval
@@ -197,7 +200,12 @@ class WatermarkSettings:
     """Watermark configuration settings"""
 
     # Position options
-    POSITIONS: Tuple[str, ...] = ("top_left", "top_right", "bottom_left", "bottom_right")
+    POSITIONS: Tuple[str, ...] = (
+        "top_left",
+        "top_right",
+        "bottom_left",
+        "bottom_right",
+    )
     DEFAULT_POSITION: str = "bottom_right"
 
     # Visual settings
@@ -232,7 +240,10 @@ class GPUSettings:
 
 # === Convenience accessors ===
 
-def get_sample_interval(is_critical_period: bool, is_ultra_critical: bool = False) -> float:
+
+def get_sample_interval(
+    is_critical_period: bool, is_ultra_critical: bool = False
+) -> float:
     """
     Get appropriate sample interval based on video period.
 

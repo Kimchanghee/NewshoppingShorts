@@ -17,6 +17,7 @@ logger = get_logger(__name__)
 try:
     from google import genai
     from google.genai import types
+
     GENAI_SDK_AVAILABLE = True
     GENAI_TYPES_AVAILABLE = True
 except Exception as e:
@@ -27,8 +28,9 @@ except Exception as e:
     GENAI_TYPES_AVAILABLE = False
 
 try:
-    # moviepy 2.x compatible imports
-    from moviepy import VideoFileClip
+    # moviepy 1.x compatible imports
+    from moviepy.editor import VideoFileClip
+
     MOVIEPY_AVAILABLE = True
 except Exception as e:
     logger.warning("moviepy not available: %s", e)
@@ -53,7 +55,6 @@ class TTSProcessor:
             gui: Main GUI instance containing translation results and TTS settings
         """
         self.gui = gui
-
 
     def generate_tts_for_voice(self, voice: str):
         """
@@ -81,7 +82,9 @@ class TTSProcessor:
                 voice_label = profile.get("label", voice)
 
         if not (GENAI_SDK_AVAILABLE and GENAI_TYPES_AVAILABLE):
-            raise RuntimeError("Gemini SDK가 없거나 사용할 수 없어 TTS를 생성할 수 없습니다.")
+            raise RuntimeError(
+                "Gemini SDK가 없거나 사용할 수 없어 TTS를 생성할 수 없습니다."
+            )
 
         script = self.extract_clean_script_from_translation(max_len=2000)
         if not script:
@@ -96,10 +99,15 @@ class TTSProcessor:
         # 20초 미만 영상: TTS는 영상 길이에 맞춤
         if video_duration > 20.0:
             max_allowed = 20.0  # 1.2배속 후에도 20초 이하
-            logger.info("[TTS 제한] 영상 %.1f초 > 20초이므로 TTS 최대 20초까지 생성 (배속 후에도 충분)", video_duration)
+            logger.info(
+                "[TTS 제한] 영상 %.1f초 > 20초이므로 TTS 최대 20초까지 생성 (배속 후에도 충분)",
+                video_duration,
+            )
         else:
             max_allowed = video_duration - 0.5  # 짧은 영상: 영상 길이 기준
-            logger.info("[TTS 제한] 영상 %.1f초 <= 20초이므로 TTS는 영상에 맞춤", video_duration)
+            logger.info(
+                "[TTS 제한] 영상 %.1f초 <= 20초이므로 TTS는 영상에 맞춤", video_duration
+            )
 
         attempts = 5  # 3에서 5회로 증가 (재시도 더 많이 허용)
         last_metadata = None
@@ -107,10 +115,21 @@ class TTSProcessor:
         last_duration_after_speed = 0.0
         last_path = None
         # 제품 영상 감지 (영문 + 한국어 키워드)
-        translation_text = (self.gui.translation_result or '').lower()
+        translation_text = (self.gui.translation_result or "").lower()
         is_product = any(
             keyword in translation_text
-            for keyword in ["product", "purchase", "buy", "shop", "link", "제품", "상품", "구매", "링크", "확인해"]
+            for keyword in [
+                "product",
+                "purchase",
+                "buy",
+                "shop",
+                "link",
+                "제품",
+                "상품",
+                "구매",
+                "링크",
+                "확인해",
+            ]
         )
 
         script_len_for_estimate = len(base_script.replace("\n", " "))
@@ -118,7 +137,11 @@ class TTSProcessor:
         estimated_after_speed = estimated_tts_duration / 1.2
 
         logger.info("[TTS 사전 확인] 허용 TTS(1.2배속): %.1f초 이하", max_allowed)
-        logger.info("[TTS 사전 확인] %d자는 약 %.1f초 예상", script_len_for_estimate, estimated_after_speed)
+        logger.info(
+            "[TTS 사전 확인] %d자는 약 %.1f초 예상",
+            script_len_for_estimate,
+            estimated_after_speed,
+        )
 
         if max_allowed < 3.0:
             raise RuntimeError(
@@ -131,7 +154,11 @@ class TTSProcessor:
             base_script = self._trim_script_for_attempt(base_script, pre_reduction)
             base_segments = self._split_script_for_tts(base_script, max_chars=9)
             script_len_for_estimate = len(base_script.replace("\n", " "))
-            logger.info("[TTS 사전 축소] 예상 길이가 초과하여 스크립트를 %d%% 축소 (%d자)", int(pre_reduction*100), len(base_script))
+            logger.info(
+                "[TTS 사전 축소] 예상 길이가 초과하여 스크립트를 %d%% 축소 (%d자)",
+                int(pre_reduction * 100),
+                len(base_script),
+            )
 
         for attempt in range(attempts):
             if attempt == 0:
@@ -142,18 +169,30 @@ class TTSProcessor:
                     overshoot_ratio = last_duration_after_speed / max_allowed
                     reduction_rate = (1.0 / overshoot_ratio) * 0.95
                     reduction_rate = max(0.30, min(0.95, reduction_rate))
-                    logger.info("[TTS 재시도 %d] 이전 생성 %.1f초가 목표 %.1f초 초과", attempt+1, last_duration_after_speed, max_allowed)
-                    logger.info("  스크립트 %.1f%% 축소 (%d자)", reduction_rate*100, int(len(base_script)*reduction_rate))
+                    logger.info(
+                        "[TTS 재시도 %d] 이전 생성 %.1f초가 목표 %.1f초 초과",
+                        attempt + 1,
+                        last_duration_after_speed,
+                        max_allowed,
+                    )
+                    logger.info(
+                        "  스크립트 %.1f%% 축소 (%d자)",
+                        reduction_rate * 100,
+                        int(len(base_script) * reduction_rate),
+                    )
                 else:
-                    reduction_rate = 0.85 ** attempt
+                    reduction_rate = 0.85**attempt
 
                 trimmed = self._trim_script_for_attempt(base_script, reduction_rate)
                 segments_for_attempt = self._split_script_for_tts(trimmed, max_chars=9)
-                full_script = "\n".join(segments_for_attempt) if segments_for_attempt else trimmed
+                full_script = (
+                    "\n".join(segments_for_attempt) if segments_for_attempt else trimmed
+                )
 
             # CTA 추가 (모든 시도에서 적용 - 통합 후 2분할)
             # 선택된 CTA 라인 가져오기
             from ui.panels.cta_panel import get_selected_cta_lines
+
             cta_segments = get_selected_cta_lines(self.gui)
             cta_first_line = cta_segments[0] if cta_segments else "제품이 마음에"
 
@@ -181,19 +220,29 @@ class TTSProcessor:
 
                     part1 = cta_combined[:split_idx].strip()
                     part2 = cta_combined[split_idx:].strip()
-                    cta_final_segments = [part1, part2] if part1 and part2 else [cta_combined]
+                    cta_final_segments = (
+                        [part1, part2] if part1 and part2 else [cta_combined]
+                    )
 
                 segments_for_attempt = segments_for_attempt + cta_final_segments
-                logger.info("[TTS CTA] 제품 영상 감지, CTA 통합 후 %d분할: %s", len(cta_final_segments), cta_final_segments)
+                logger.info(
+                    "[TTS CTA] 제품 영상 감지, CTA 통합 후 %d분할: %s",
+                    len(cta_final_segments),
+                    cta_final_segments,
+                )
 
             if not segments_for_attempt:
                 normalized_full = full_script.strip()
                 segments_for_attempt = [normalized_full] if normalized_full else []
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
-            output_filename = f"full_script_tts_{voice_name}_{timestamp}_try{attempt + 1}.wav"
+            output_filename = (
+                f"full_script_tts_{voice_name}_{timestamp}_try{attempt + 1}.wav"
+            )
             output_path = os.path.join(self.gui.tts_output_dir, output_filename)
-            self.gui.add_log(f"[TTS] Voice {voice_label} | attempt {attempt + 1} | {len(full_script)} chars")
+            self.gui.add_log(
+                f"[TTS] Voice {voice_label} | attempt {attempt + 1} | {len(full_script)} chars"
+            )
 
             # ★★★ TTS용 텍스트: 숫자→자연스러운 한국어, 영어→한글 ★★★
             # 자막에는 "7개"로 표시되지만, TTS는 "일곱 개"로 읽음
@@ -206,10 +255,12 @@ class TTSProcessor:
                     response_modalities=["AUDIO"],
                     speech_config=types.SpeechConfig(
                         voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name)
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=voice_name
+                            )
                         )
-                    )
-                )
+                    ),
+                ),
             )
 
             # Response 구조 검증 및 audio_data 추출
@@ -218,8 +269,11 @@ class TTSProcessor:
             except (IndexError, AttributeError) as e:
                 logger.error("[TTS 오류] Gemini 응답 구조 오류: %s", e)
                 logger.error("[TTS 오류] Response type: %s", type(response))
-                if hasattr(response, 'candidates'):
-                    logger.error("[TTS 오류] Candidates count: %d", len(response.candidates) if response.candidates else 0)
+                if hasattr(response, "candidates"):
+                    logger.error(
+                        "[TTS 오류] Candidates count: %d",
+                        len(response.candidates) if response.candidates else 0,
+                    )
                 raise RuntimeError(
                     f"Gemini TTS API 응답 구조가 예상과 다릅니다. "
                     f"오류: {str(e)}. API 키와 모델 설정을 확인해주세요."
@@ -227,6 +281,7 @@ class TTSProcessor:
 
             from core.video.DynamicBatch import save_wave_file
             from core.video import VideoTool
+
             save_wave_file(self.gui, output_path, audio_data)
 
             tts_duration = VideoTool._wav_duration_sec(output_path)
@@ -244,32 +299,51 @@ class TTSProcessor:
                 audio_start_offset=audio_start_offset,
             )
             if not metadata:
-                metadata = [{
-                    "idx": 0,
-                    "start": 0.0,
-                    "end": tts_duration,
-                    "path": output_path,
-                    "speaker": voice_label,
-                    "text": full_script[:200],
-                    "is_narr": False
-                }]
+                metadata = [
+                    {
+                        "idx": 0,
+                        "start": 0.0,
+                        "end": tts_duration,
+                        "path": output_path,
+                        "speaker": voice_label,
+                        "text": full_script[:200],
+                        "is_narr": False,
+                    }
+                ]
 
             last_metadata = metadata
             last_duration = tts_duration
             last_duration_after_speed = after_speed
             last_path = output_path
-            self.gui.add_log(f"[TTS] Result length {tts_duration:.2f}s (1.2x => {after_speed:.2f}s)")
+            self.gui.add_log(
+                f"[TTS] Result length {tts_duration:.2f}s (1.2x => {after_speed:.2f}s)"
+            )
 
             if after_speed <= max_allowed:
-                logger.info("[TTS 성공] %.1f초 <= %.1f초 (시도 %d/%d)", after_speed, max_allowed, attempt+1, attempts)
+                logger.info(
+                    "[TTS 성공] %.1f초 <= %.1f초 (시도 %d/%d)",
+                    after_speed,
+                    max_allowed,
+                    attempt + 1,
+                    attempts,
+                )
                 return metadata, tts_duration, output_path
 
             shortage = after_speed - max_allowed
-            logger.warning("[TTS 길이 초과] %.1f초 > %.1f초 (초과: %.1f초)", after_speed, max_allowed, shortage)
-            self.gui.add_log(f"[TTS] Exceeds target length by {shortage:.1f}s, reducing script and retrying")
+            logger.warning(
+                "[TTS 길이 초과] %.1f초 > %.1f초 (초과: %.1f초)",
+                after_speed,
+                max_allowed,
+                shortage,
+            )
+            self.gui.add_log(
+                f"[TTS] Exceeds target length by {shortage:.1f}s, reducing script and retrying"
+            )
 
         logger.warning("[TTS 실패] %d회 시도했으나 목표 길이에 맞추지 못함", attempts)
-        logger.warning("  최종 길이: %.1f초 (목표: %.1f초)", last_duration_after_speed, max_allowed)
+        logger.warning(
+            "  최종 길이: %.1f초 (목표: %.1f초)", last_duration_after_speed, max_allowed
+        )
         logger.warning("  초과: %.1f초", last_duration_after_speed - max_allowed)
 
         if last_duration_after_speed > max_allowed * 1.3:
@@ -279,7 +353,9 @@ class TTSProcessor:
             )
 
         logger.warning("  하지만 강제로 진행합니다 (주의: 마지막 TTS가 잘릴 수 있음)")
-        self.gui.add_log(f"[TTS Warning] Failed to meet target length after {attempts} attempts, using shortest version")
+        self.gui.add_log(
+            f"[TTS Warning] Failed to meet target length after {attempts} attempts, using shortest version"
+        )
         return last_metadata, last_duration, last_path
 
     def build_tts_metadata(
@@ -313,13 +389,22 @@ class TTSProcessor:
             return []
 
         # Try to use Gemini Audio Understanding API for accurate timing
-        logger.info("[Audio Analysis] Gemini 오디오 이해 API로 정확한 타이밍 추출 중...")
-        audio_metadata = self._analyze_audio_with_gemini(tts_path, script, max_chars, subtitle_segments=segments)
+        logger.info(
+            "[Audio Analysis] Gemini 오디오 이해 API로 정확한 타이밍 추출 중..."
+        )
+        audio_metadata = self._analyze_audio_with_gemini(
+            tts_path, script, max_chars, subtitle_segments=segments
+        )
 
         if audio_metadata:
             if segments:
-                audio_metadata = self._align_metadata_to_segments(audio_metadata, segments)
-            logger.info("[Audio Analysis] Gemini 분석 완료 - %d개 세그먼트 (정확한 싱크)", len(audio_metadata))
+                audio_metadata = self._align_metadata_to_segments(
+                    audio_metadata, segments
+                )
+            logger.info(
+                "[Audio Analysis] Gemini 분석 완료 - %d개 세그먼트 (정확한 싱크)",
+                len(audio_metadata),
+            )
             # Add common fields
             for idx, item in enumerate(audio_metadata):
                 item["idx"] = idx
@@ -330,32 +415,62 @@ class TTSProcessor:
             # 오디오 앞 무음 오프셋 적용 (자막-오디오 싱크 보정)
             first_start = audio_metadata[0]["start"]
             last_end = audio_metadata[-1]["end"]
-            logger.debug("[Audio Timing] Gemini 타임스탬프: %.2fs ~ %.2fs (총 %.2fs)", first_start, last_end, last_end - first_start)
+            logger.debug(
+                "[Audio Timing] Gemini 타임스탬프: %.2fs ~ %.2fs (총 %.2fs)",
+                first_start,
+                last_end,
+                last_end - first_start,
+            )
             logger.debug("[Audio Timing] 실제 오디오 길이: %.2fs", total_duration)
-            logger.debug("[Audio Timing] 오디오 앞 무음 오프셋: %.3fs", audio_start_offset)
+            logger.debug(
+                "[Audio Timing] 오디오 앞 무음 오프셋: %.3fs", audio_start_offset
+            )
 
             # Gemini 타임스탬프가 오디오 앞 무음을 고려하지 않았다면 오프셋 적용
             # Gemini가 0초부터 시작한다면 실제 음성은 audio_start_offset 후에 시작함
             # 따라서 자막 타임스탬프를 오프셋만큼 뒤로 밀어야 함
             if audio_start_offset > 0.05 and first_start < audio_start_offset:
                 offset_to_apply = audio_start_offset - first_start
-                logger.debug("[Audio Sync] 자막 타임스탬프 보정: +%.3fs (Gemini 시작: %.3fs, 실제 음성: %.3fs)", offset_to_apply, first_start, audio_start_offset)
+                logger.debug(
+                    "[Audio Sync] 자막 타임스탬프 보정: +%.3fs (Gemini 시작: %.3fs, 실제 음성: %.3fs)",
+                    offset_to_apply,
+                    first_start,
+                    audio_start_offset,
+                )
                 for item in audio_metadata:
                     item["start"] = item["start"] + offset_to_apply
                     item["end"] = item["end"] + offset_to_apply
                 # 보정 후 확인
                 first_start = audio_metadata[0]["start"]
                 last_end = audio_metadata[-1]["end"]
-                logger.debug("[Audio Sync] 보정 후 타임스탬프: %.2fs ~ %.2fs", first_start, last_end)
+                logger.debug(
+                    "[Audio Sync] 보정 후 타임스탬프: %.2fs ~ %.2fs",
+                    first_start,
+                    last_end,
+                )
 
             # 디버깅: 첫 3개와 마지막 3개 세그먼트 타임스탬프
             logger.debug("[Gemini Segments] 첫 3개:")
             for i, item in enumerate(audio_metadata[:3]):
-                logger.debug("  %d. %.2f-%.2fs: '%s'", i+1, item['start'], item['end'], item['text'][:30])
+                logger.debug(
+                    "  %d. %.2f-%.2fs: '%s'",
+                    i + 1,
+                    item["start"],
+                    item["end"],
+                    item["text"][:30],
+                )
             if len(audio_metadata) > 3:
                 logger.debug("[Gemini Segments] 마지막 3개:")
-                for i, item in enumerate(audio_metadata[-3:], start=len(audio_metadata)-2):
-                    logger.debug("  %d. %.2f-%.2fs: '%s'", i, item['start'], item['end'], item['text'][:30])
+                for i, item in enumerate(
+                    audio_metadata[-3:], start=len(audio_metadata) - 2
+                ):
+                    logger.debug(
+                        "  %d. %.2f-%.2fs: '%s'",
+                        i,
+                        item["start"],
+                        item["end"],
+                        item["text"][:30],
+                    )
             # Merge short segments for better subtitle readability
             audio_metadata = self._merge_short_segments(audio_metadata, min_chars=6)
             return audio_metadata
@@ -380,28 +495,41 @@ class TTSProcessor:
             for idx, seg_text in enumerate(segments):
                 start_time = effective_start + idx * time_per_segment
                 end_time = effective_start + (idx + 1) * time_per_segment
-                fallback_metadata.append({
-                    "idx": idx,
-                    "start": start_time,
-                    "end": end_time,
-                    "text": str(seg_text).strip(),
-                    "path": tts_path,
-                    "speaker": speaker,
-                    "is_narr": False
-                })
-            logger.info("[Fallback] %d개 세그먼트 균등 분배 (각 %.2f초, 시작: %.2fs)", len(fallback_metadata), time_per_segment, effective_start)
+                fallback_metadata.append(
+                    {
+                        "idx": idx,
+                        "start": start_time,
+                        "end": end_time,
+                        "text": str(seg_text).strip(),
+                        "path": tts_path,
+                        "speaker": speaker,
+                        "is_narr": False,
+                    }
+                )
+            logger.info(
+                "[Fallback] %d개 세그먼트 균등 분배 (각 %.2f초, 시작: %.2fs)",
+                len(fallback_metadata),
+                time_per_segment,
+                effective_start,
+            )
         else:
             # segments가 없으면 전체 스크립트를 하나로 (오프셋 적용)
-            fallback_metadata.append({
-                "idx": 0,
-                "start": effective_start,
-                "end": total_duration,
-                "text": script[:200],  # 최대 200자
-                "path": tts_path,
-                "speaker": speaker,
-                "is_narr": False
-            })
-            logger.info("[Fallback] 단일 세그먼트 생성 (%.2fs-%.2fs)", effective_start, total_duration)
+            fallback_metadata.append(
+                {
+                    "idx": 0,
+                    "start": effective_start,
+                    "end": total_duration,
+                    "text": script[:200],  # 최대 200자
+                    "path": tts_path,
+                    "speaker": speaker,
+                    "is_narr": False,
+                }
+            )
+            logger.info(
+                "[Fallback] 단일 세그먼트 생성 (%.2fs-%.2fs)",
+                effective_start,
+                total_duration,
+            )
 
         return fallback_metadata
 
@@ -433,7 +561,10 @@ class TTSProcessor:
                 return []
 
             # 1. Upload audio file to Gemini Files API
-            logger.info("[Audio Analysis] 오디오 파일 업로드 중... (%s)", os.path.basename(audio_path))
+            logger.info(
+                "[Audio Analysis] 오디오 파일 업로드 중... (%s)",
+                os.path.basename(audio_path),
+            )
             uploaded_file = self.gui.genai_client.files.upload(file=audio_path)
             logger.info("[Audio Analysis] 업로드 완료: %s", uploaded_file.name)
 
@@ -441,21 +572,21 @@ class TTSProcessor:
             # Gemini can provide timestamps in format MM:SS or with word-level timing
             if subtitle_segments:
                 segment_list = "\n".join(
-                    f"{idx+1}. {str(seg).strip()}"
+                    f"{idx + 1}. {str(seg).strip()}"
                     for idx, seg in enumerate(subtitle_segments)
                     if str(seg).strip()
                 )
                 prompt = (
                     "Align this Korean audio to the provided subtitle segments exactly. "
                     "Keep the same order and text; do not merge, split, or add segments. "
-                    "Return start and end time in seconds for each item using the format \'0.0-1.2: [text]\'.\n"
+                    "Return start and end time in seconds for each item using the format '0.0-1.2: [text]'.\n"
                     f"Segments:\n{segment_list}\n"
                     "Only provide the aligned list with precise timings."
                 )
             else:
                 prompt = (
                     "Please provide a detailed transcript of this Korean audio with precise timestamps. "
-                    "For each sentence or phrase, indicate the start and end time in seconds (e.g., \'0.0-2.5: 안녕하세요\'). "
+                    "For each sentence or phrase, indicate the start and end time in seconds (e.g., '0.0-2.5: 안녕하세요'). "
                     "Split the transcript into natural speaking segments of about 8-10 characters each. "
                     "Use this format:\n"
                     "0.0-2.5: [text]\n"
@@ -472,20 +603,34 @@ class TTSProcessor:
 
             for attempt in range(1, MAX_AUDIO_RETRIES + 1):
                 try:
-                    logger.info("[Audio Analysis] API 호출 시도 %d/%d", attempt, MAX_AUDIO_RETRIES)
+                    logger.info(
+                        "[Audio Analysis] API 호출 시도 %d/%d",
+                        attempt,
+                        MAX_AUDIO_RETRIES,
+                    )
                     response = self.gui.genai_client.models.generate_content(
                         model=self.gui.config.GEMINI_TEXT_MODEL,
-                        contents=[prompt, uploaded_file]
+                        contents=[prompt, uploaded_file],
                     )
                     if response and response.text:
                         break  # 성공
                 except Exception as api_err:
                     last_error = str(api_err)
-                    is_server_error = "503" in last_error or "UNAVAILABLE" in last_error or "overloaded" in last_error.lower()
-                    logger.warning("[Audio Analysis] API 오류 (시도 %d/%d): %s", attempt, MAX_AUDIO_RETRIES, last_error[:100])
+                    is_server_error = (
+                        "503" in last_error
+                        or "UNAVAILABLE" in last_error
+                        or "overloaded" in last_error.lower()
+                    )
+                    logger.warning(
+                        "[Audio Analysis] API 오류 (시도 %d/%d): %s",
+                        attempt,
+                        MAX_AUDIO_RETRIES,
+                        last_error[:100],
+                    )
 
                     if attempt < MAX_AUDIO_RETRIES:
                         import time
+
                         wait_time = 5 if is_server_error else 3
                         logger.info("[Audio Analysis] %d초 후 재시도...", wait_time)
                         time.sleep(wait_time)
@@ -511,13 +656,13 @@ class TTSProcessor:
 
         except Exception as e:
             ui_controller.write_error_log(e)
-            logger.error("[Audio Analysis] Gemini 분석 중 오류 발생: %s", str(e), exc_info=True)
+            logger.error(
+                "[Audio Analysis] Gemini 분석 중 오류 발생: %s", str(e), exc_info=True
+            )
             return []
 
     def _parse_timestamped_transcript(
-        self,
-        transcript: str,
-        max_chars: int
+        self, transcript: str, max_chars: int
     ) -> List[Dict[str, Any]]:
         """
         Parse Gemini's timestamped transcript into metadata entries.
@@ -537,15 +682,21 @@ class TTSProcessor:
         metadata = []
 
         # Pattern 1: "0.0-2.5: text" or "0.0 - 2.5: text"
-        pattern1 = re.compile(r'(\d+\.?\d*)\s*-\s*(\d+\.?\d*)\s*:\s*(.+?)(?=\n|$)', re.MULTILINE)
+        pattern1 = re.compile(
+            r"(\d+\.?\d*)\s*-\s*(\d+\.?\d*)\s*:\s*(.+?)(?=\n|$)", re.MULTILINE
+        )
         matches1 = pattern1.findall(transcript)
 
         # Pattern 2: "00:00-00:02: text" (MM:SS format)
-        pattern2 = re.compile(r'(\d+):(\d+)\s*-\s*(\d+):(\d+)\s*:\s*(.+?)(?=\n|$)', re.MULTILINE)
+        pattern2 = re.compile(
+            r"(\d+):(\d+)\s*-\s*(\d+):(\d+)\s*:\s*(.+?)(?=\n|$)", re.MULTILINE
+        )
         matches2 = pattern2.findall(transcript)
 
         # Pattern 3: "[0.0s] text" or "(0.0s) text"
-        pattern3 = re.compile(r'[\[\(](\d+\.?\d*)s?[\]\)]\s*(.+?)(?=\n|$)', re.MULTILINE)
+        pattern3 = re.compile(
+            r"[\[\(](\d+\.?\d*)s?[\]\)]\s*(.+?)(?=\n|$)", re.MULTILINE
+        )
         matches3 = pattern3.findall(transcript)
 
         if matches1:
@@ -556,11 +707,13 @@ class TTSProcessor:
                     end = float(end_str)
                     text = text.strip()
                     if text and end > start:
-                        metadata.append({
-                            "start": start,
-                            "end": end,
-                            "text": text[:max_chars * 3]  # Allow some overflow
-                        })
+                        metadata.append(
+                            {
+                                "start": start,
+                                "end": end,
+                                "text": text[: max_chars * 3],  # Allow some overflow
+                            }
+                        )
                 except ValueError:
                     continue
 
@@ -572,11 +725,13 @@ class TTSProcessor:
                     end = int(min2) * 60 + int(sec2)
                     text = text.strip()
                     if text and end > start:
-                        metadata.append({
-                            "start": float(start),
-                            "end": float(end),
-                            "text": text[:max_chars * 3]
-                        })
+                        metadata.append(
+                            {
+                                "start": float(start),
+                                "end": float(end),
+                                "text": text[: max_chars * 3],
+                            }
+                        )
                 except ValueError:
                     continue
 
@@ -590,21 +745,17 @@ class TTSProcessor:
                     estimated_duration = len(text) * 0.15
                     end = start + estimated_duration
                     if text:
-                        metadata.append({
-                            "start": start,
-                            "end": end,
-                            "text": text[:max_chars * 3]
-                        })
+                        metadata.append(
+                            {"start": start, "end": end, "text": text[: max_chars * 3]}
+                        )
                 except ValueError:
                     continue
 
         # If no patterns matched, try to extract lines and estimate timing
         if not metadata:
-            lines = [line.strip() for line in transcript.split('\n') if line.strip()]
+            lines = [line.strip() for line in transcript.split("\n") if line.strip()]
             # Check if any line looks like it has timestamps
-            has_timestamps = any(
-                re.search(r'\d+[:.]\d+', line) for line in lines
-            )
+            has_timestamps = any(re.search(r"\d+[:.]\d+", line) for line in lines)
             if not has_timestamps:
                 # No timestamps found, can't use this
                 return []
@@ -636,23 +787,25 @@ class TTSProcessor:
                         # Flush current segment
                         word_count = len(current_text.split())
                         seg_duration = word_count * time_per_word
-                        final_metadata.append({
-                            "start": current_start,
-                            "end": current_start + seg_duration,
-                            "text": current_text
-                        })
+                        final_metadata.append(
+                            {
+                                "start": current_start,
+                                "end": current_start + seg_duration,
+                                "text": current_text,
+                            }
+                        )
                         current_start += seg_duration
                         current_text = word
                     else:
-                        current_text = f"{current_text} {word}".strip() if current_text else word
+                        current_text = (
+                            f"{current_text} {word}".strip() if current_text else word
+                        )
 
                 # Add remaining text
                 if current_text:
-                    final_metadata.append({
-                        "start": current_start,
-                        "end": end,
-                        "text": current_text
-                    })
+                    final_metadata.append(
+                        {"start": current_start, "end": end, "text": current_text}
+                    )
 
         return final_metadata
 
@@ -685,22 +838,24 @@ class TTSProcessor:
         rebuilt = []
         cursor = start_time
         for idx, text in enumerate(cleaned_segments):
-            ratio = len(text) / total_chars if total_chars else 1 / len(cleaned_segments)
+            ratio = (
+                len(text) / total_chars if total_chars else 1 / len(cleaned_segments)
+            )
             duration = max(0.25, total_duration * ratio)
-            rebuilt.append({
-                "idx": idx,
-                "start": cursor,
-                "end": cursor + duration,
-                "text": text,
-            })
+            rebuilt.append(
+                {
+                    "idx": idx,
+                    "start": cursor,
+                    "end": cursor + duration,
+                    "text": text,
+                }
+            )
             cursor += duration
 
         return rebuilt
 
     def _merge_short_segments(
-        self,
-        metadata: List[Dict[str, Any]],
-        min_chars: int = 6
+        self, metadata: List[Dict[str, Any]], min_chars: int = 6
     ) -> List[Dict[str, Any]]:
         """
         Merge segments with ≤min_chars characters into adjacent segments.
@@ -749,7 +904,11 @@ class TTSProcessor:
         for idx, item in enumerate(merged):
             item["idx"] = idx
 
-        logger.info("[Segment Merge] %d개 -> %d개 세그먼트 (짧은 구간 병합 완료)", len(metadata), len(merged))
+        logger.info(
+            "[Segment Merge] %d개 -> %d개 세그먼트 (짧은 구간 병합 완료)",
+            len(metadata),
+            len(merged),
+        )
         return merged
 
     def _split_script_for_tts(self, script: str, max_chars: int = 9) -> List[str]:
@@ -824,7 +983,7 @@ class TTSProcessor:
         merged: List[str] = []
         for seg in refined:
             # 이전 세그먼트가 문장 종결 부호로 끝나면 병합하지 않음
-            prev_ends_with_punct = merged and merged[-1][-1] in '.!?。？！…'
+            prev_ends_with_punct = merged and merged[-1][-1] in ".!?。？！…"
 
             if merged and len(seg) < min_chars and not prev_ends_with_punct:
                 # 병합 후에도 hard_max를 넘지 않을 때만 병합
@@ -837,14 +996,16 @@ class TTSProcessor:
 
         # 마지막 세그먼트가 너무 짧으면 이전과 병합 (단, 이전이 문장 종결이 아닐 때만)
         if len(merged) > 1 and len(merged[-1]) < min_chars:
-            if merged[-2][-1] not in '.!?。？！…':
+            if merged[-2][-1] not in ".!?。？！…":
                 if len(merged[-2]) + len(merged[-1]) + 1 <= hard_max:
                     merged[-2] = f"{merged[-2]} {merged[-1]}".strip()
                     merged.pop()
 
         return self._rebalance_subtitle_segments(merged, max_chars)
 
-    def _rebalance_subtitle_segments(self, segments: Iterable[str], max_chars: int) -> List[str]:
+    def _rebalance_subtitle_segments(
+        self, segments: Iterable[str], max_chars: int
+    ) -> List[str]:
         """
         Rebalance subtitle segments for better readability.
 
@@ -895,7 +1056,9 @@ class TTSProcessor:
                     if next_segment:
                         if len(tokens) > 2:
                             last_token = tokens[-1]
-                            if len(last_token) <= 2 and not last_token.endswith(("는", "요")):
+                            if len(last_token) <= 2 and not last_token.endswith(
+                                ("는", "요")
+                            ):
                                 candidate = f"{last_token} {next_segment}".strip()
                                 if len(candidate) <= max_chars:
                                     cleaned[i] = " ".join(tokens[:-1]).strip()
@@ -919,17 +1082,17 @@ class TTSProcessor:
         Returns:
             Trimmed script text
         """
-        sentences = re.split(r'(?:[.!?]\s+)', script)
+        sentences = re.split(r"(?:[.!?]\s+)", script)
         target_chars = int(len(script) * reduction_rate)
         if target_chars <= 0:
             return script
-        trimmed = ''
+        trimmed = ""
         for sentence in sentences:
             sentence = sentence.strip()
             if not sentence:
                 continue
             if len(trimmed) + len(sentence) <= target_chars:
-                trimmed += sentence + ' '
+                trimmed += sentence + " "
             else:
                 break
         trimmed = trimmed.strip()
@@ -961,44 +1124,58 @@ class TTSProcessor:
                         continue
 
                     # Drop obvious metadata and status lines.
-                    if re.match(r'^[#*= -]{3,}$', line):
+                    if re.match(r"^[#*= -]{3,}$", line):
                         continue
 
                     # Remove timestamps, speaker tags, numbering and parenthetical notes.
-                    line = re.sub(r'\[[^\]]*\]', '', line)
-                    line = re.sub(r'\([^)]*\)', '', line)
-                    line = re.sub(r'^\d+[\.)]\s*', '', line)
-                    line = re.sub(r'^(?:-|\*|\u2022)\s*', '', line)
-                    line = re.sub(r'\s+', ' ', line).strip()
+                    line = re.sub(r"\[[^\]]*\]", "", line)
+                    line = re.sub(r"\([^)]*\)", "", line)
+                    line = re.sub(r"^\d+[\.)]\s*", "", line)
+                    line = re.sub(r"^(?:-|\*|\u2022)\s*", "", line)
+                    line = re.sub(r"\s+", " ", line).strip()
 
                     if len(line) < 2:
                         continue
                     cleaned_lines.append(line)
 
                 if not cleaned_lines:
-                    logger.warning("[ScriptExtract] No usable lines found, falling back to raw text")
-                    cleaned_lines = [line.strip() for line in raw.splitlines() if line.strip()]
+                    logger.warning(
+                        "[ScriptExtract] No usable lines found, falling back to raw text"
+                    )
+                    cleaned_lines = [
+                        line.strip() for line in raw.splitlines() if line.strip()
+                    ]
 
-                full_script = re.sub(r'\s+', ' ', " ".join(cleaned_lines)).strip()
+                full_script = re.sub(r"\s+", " ", " ".join(cleaned_lines)).strip()
 
             # 번역 결과가 없거나 비어있으면 영상 분석 결과 사용
             if not full_script:
-                logger.warning("[ScriptExtract] Translation result is empty, trying video analysis result")
+                logger.warning(
+                    "[ScriptExtract] Translation result is empty, trying video analysis result"
+                )
 
                 # 1. video_analysis_result 확인 (상품 설명)
                 video_analysis = getattr(self.gui, "video_analysis_result", None)
                 if video_analysis:
                     if isinstance(video_analysis, str):
                         full_script = video_analysis.strip()
-                        logger.info("[ScriptExtract] Using video_analysis_result as script")
+                        logger.info(
+                            "[ScriptExtract] Using video_analysis_result as script"
+                        )
                     elif isinstance(video_analysis, dict):
                         # 딕셔너리에서 텍스트 추출
-                        full_script = video_analysis.get("description", "") or video_analysis.get("script", "")
+                        full_script = video_analysis.get(
+                            "description", ""
+                        ) or video_analysis.get("script", "")
                         if full_script:
-                            logger.info("[ScriptExtract] Using video_analysis_result (dict) as script")
+                            logger.info(
+                                "[ScriptExtract] Using video_analysis_result (dict) as script"
+                            )
 
                 # 2. analysis_result 확인 (기존 fallback)
-                if not full_script and isinstance(getattr(self.gui, "analysis_result", None), dict):
+                if not full_script and isinstance(
+                    getattr(self.gui, "analysis_result", None), dict
+                ):
                     alt = self.gui.analysis_result.get("script")
                     if isinstance(alt, list):
                         fallback = " ".join(
@@ -1006,12 +1183,14 @@ class TTSProcessor:
                             for entry in alt
                             if isinstance(entry, dict) and entry.get("text")
                         )
-                        full_script = re.sub(r'\s+', ' ', fallback).strip()
+                        full_script = re.sub(r"\s+", " ", fallback).strip()
                         if full_script:
-                            logger.info("[ScriptExtract] Using analysis_result script as fallback")
+                            logger.info(
+                                "[ScriptExtract] Using analysis_result script as fallback"
+                            )
 
             if max_len and len(full_script) > max_len * 200:
-                full_script = full_script[: max_len * 200].rsplit(' ', 1)[0].strip()
+                full_script = full_script[: max_len * 200].rsplit(" ", 1)[0].strip()
 
             # ★ 자막용 스크립트는 숫자 그대로 유지 (7개, 3명 등)
             # ★ TTS 호출 시에만 한국어로 변환 (일곱 개, 세 명 등)
@@ -1019,8 +1198,12 @@ class TTSProcessor:
 
         except Exception as e:
             ui_controller.write_error_log(e)
-            logger.error("[ScriptExtract] Error while cleaning script: %s", e, exc_info=True)
-            fallback = re.sub(r'[^\w\s.,!?\uAC00-\uD7A3]', '', self.gui.translation_result or '').strip()
+            logger.error(
+                "[ScriptExtract] Error while cleaning script: %s", e, exc_info=True
+            )
+            fallback = re.sub(
+                r"[^\w\s.,!?\uAC00-\uD7A3]", "", self.gui.translation_result or ""
+            ).strip()
             return fallback
 
     def get_video_duration_helper(self):

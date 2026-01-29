@@ -5,8 +5,11 @@ Shopping Shorts Maker - Entry Point
 Fast startup with instant splash screen.
 Heavy initialization happens in background while splash is visible.
 """
+
 import sys
 import os
+from PyQt5 import QtCore, QtWidgets, QtGui
+from PyQt5.QtWidgets import QApplication
 
 # =============================================================================
 # Step 1: Minimal setup for instant splash (MUST be first and fast)
@@ -19,13 +22,91 @@ ensure_stdio()
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
-# =============================================================================
-# Main Entry Point - Show splash IMMEDIATELY
-# =============================================================================
-if __name__ == "__main__":
-    from PyQt5 import QtCore, QtWidgets, QtGui
-    from PyQt5.QtWidgets import QApplication
 
+class StartupWorker(QtCore.QThread):
+    """Background worker for heavy initialization tasks."""
+
+    progress = QtCore.pyqtSignal(int)
+    status = QtCore.pyqtSignal(str)
+    finished = QtCore.pyqtSignal()
+    error = QtCore.pyqtSignal(str)
+
+    def run(self):
+        try:
+            self.status.emit("패키지 확인 중...")
+            self.progress.emit(10)
+
+            # 1. Package Check
+            from startup.package_installer import check_and_install_packages
+
+            check_and_install_packages()
+            self.progress.emit(20)
+
+            # 2. Environment Setup
+            self.status.emit("환경 설정 중...")
+            from startup.environment import (
+                setup_dpi_awareness,
+                setup_ffmpeg_path,
+                load_onnxruntime,
+            )
+
+            setup_dpi_awareness()
+            self.progress.emit(30)
+
+            self.status.emit("FFmpeg 설정 중...")
+            setup_ffmpeg_path()
+            self.progress.emit(40)
+
+            self.status.emit("ONNX Runtime 로딩...")
+            load_onnxruntime()
+            self.progress.emit(50)
+
+            # 3. Logging Setup
+            self.status.emit("로깅 초기화...")
+            from pathlib import Path
+            from utils.logging_config import AppLogger
+
+            AppLogger.setup(
+                log_dir=Path("logs"),
+                level="INFO",
+                console_level="INFO",
+                file_level="DEBUG",
+            )
+            self.progress.emit(60)
+
+            # 4. Resource Loading (Fonts, TTS samples)
+            self.status.emit("리소스 확인 중...")
+            try:
+                # Ensure TTS directory exists
+                from utils.tts_config import get_safe_tts_base_dir
+
+                base_dir = get_safe_tts_base_dir()
+                os.makedirs(os.path.join(base_dir, "voice_samples"), exist_ok=True)
+
+                # Check critical fonts
+                from startup.constants import REQUIRED_FONTS
+                # (Simple check only, detailed check in Initializer)
+            except Exception:
+                pass
+            self.progress.emit(70)
+
+            # 5. Controller Preparation
+            self.status.emit("앱 컨트롤러 준비...")
+            # Import controller (triggers more imports)
+            from startup.app_controller import AppController
+
+            # Just import here to warm up cache
+            self.progress.emit(90)
+
+            self.status.emit("준비 완료!")
+            self.progress.emit(100)
+            self.finished.emit()
+
+        except Exception as e:
+            self.error.emit(str(e))
+
+
+if __name__ == "__main__":
     # PyQt5 HighDPI attributes (before QApplication creation)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_EnableHighDpiScaling, True)
     QtWidgets.QApplication.setAttribute(QtCore.Qt.AA_UseHighDpiPixmaps, True)
@@ -43,122 +124,70 @@ if __name__ == "__main__":
 
     # Show splash IMMEDIATELY (before any heavy imports)
     from ui.windows.startup_splash import StartupSplash
+
     splash = StartupSplash()
     splash.show()
-    app.processEvents()
 
-    # =============================================================================
-    # Step 2: Heavy initialization in background while splash is visible
-    # =============================================================================
-    splash.set_status("패키지 확인 중...")
-    splash.set_progress(5)
-    app.processEvents()
+    # Worker for background initialization
+    worker = StartupWorker()
 
-    from startup.package_installer import check_and_install_packages
-    check_and_install_packages()
+    # Global references to prevent garbage collection
+    controller = None
+    login_window = None
 
-    splash.set_status("환경 설정 중...")
-    splash.set_progress(15)
-    app.processEvents()
+    def on_progress(val):
+        splash.set_progress(val)
 
-    from startup.environment import (
-        setup_dpi_awareness,
-        setup_ffmpeg_path,
-        load_onnxruntime,
-    )
-    setup_dpi_awareness()
+    def on_status(msg):
+        splash.set_status(msg)
 
-    splash.set_status("FFmpeg 설정 중...")
-    splash.set_progress(25)
-    app.processEvents()
-    setup_ffmpeg_path()
+    def on_error(msg):
+        # Show error and exit
+        splash.set_status(f"오류: {msg}")
+        # In a real app, maybe show a message box here
+        # For now, just close after a delay
+        QtCore.QTimer.singleShot(3000, app.quit)
 
-    splash.set_status("ONNX Runtime 로딩...")
-    splash.set_progress(40)
-    app.processEvents()
-    load_onnxruntime()
-
-    splash.set_status("로깅 초기화...")
-    splash.set_progress(50)
-    app.processEvents()
-
-    from pathlib import Path
-    from utils.logging_config import AppLogger, get_logger
-
-    AppLogger.setup(
-        log_dir=Path("logs"),
-        level="INFO",
-        console_level="INFO",
-        file_level="DEBUG"
-    )
-    logger = get_logger(__name__)
-
-    splash.set_status("로그인 창 준비...")
-    splash.set_progress(70)
-    app.processEvents()
-
-    # Import controller (triggers more imports)
-    from startup.app_controller import AppController
-
-    splash.set_status("준비 완료!")
-    splash.set_progress(100)
-    app.processEvents()
-
-    # Close splash and show login
-    import tempfile
-    import traceback
-    from datetime import datetime
-
-    try:
-        # Pre-create controller and login window for smooth transition
-        controller = AppController(app)
-
-        # Import Login for pre-creation
-        from ui.windows.login_window import Login
-        controller.login_window = Login()
-        controller.login_window.controller = controller
-        app.processEvents()
-
-        # Now close splash and show login (smooth transition)
-        splash.hide()
-        controller.login_window.show()
-        app.processEvents()
-        splash.close()
-
-        # Run Qt event loop
-        exit_code = app.exec_()
-
-        # After successful login, launch main app
-        if controller.login_data:
-            import tkinter as tk
-            from main import VideoAnalyzerGUI
-
-            root = tk.Tk()
-            gui = VideoAnalyzerGUI(
-                root,
-                login_data=controller.login_data,
-                preloaded_ocr=controller.ocr_reader
-            )
-            root.mainloop()
-
-        sys.exit(exit_code)
-
-    except Exception as e:
-        logger.critical("프로그램 실행 중 치명적 오류 발생: %s", e, exc_info=True)
-
-        # Write error log to temp directory
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        error_log_path = os.path.join(
-            tempfile.gettempdir(),
-            f"ssmaker_error_{timestamp}.txt"
-        )
+    def on_finished():
+        global controller, login_window
         try:
-            with open(error_log_path, "w", encoding="utf-8") as f:
-                f.write(f"Timestamp: {datetime.now().isoformat()}\n")
-                f.write(f"Error: {e}\n\n")
-                f.write(traceback.format_exc())
-            logger.info("Error log saved to: %s", error_log_path)
-        except Exception as log_err:
-            logger.error("Failed to write error log: %s", log_err)
+            # Final imports and launch
+            from startup.app_controller import AppController
+            from ui.windows.login_window import Login
 
-        raise
+            controller = AppController(app)
+            login_window = Login()
+            login_window.controller = controller
+            controller.login_window = login_window  # Link back
+
+            # Transition: Hide Splash -> Show Login -> Close Splash
+            splash.hide()
+            login_window.show()
+            splash.close()
+
+        except Exception as e:
+            on_error(str(e))
+
+    worker.progress.connect(on_progress)
+    worker.status.connect(on_status)
+    worker.error.connect(on_error)
+    worker.finished.connect(on_finished)
+
+    # Start initialization in background
+    worker.start()
+
+    # Run Qt event loop
+    exit_code = app.exec_()
+
+    # After successful login (PyQt loop ended), launch main app (Tkinter)
+    if controller and controller.login_data:
+        import tkinter as tk
+        from main import VideoAnalyzerGUI
+
+        root = tk.Tk()
+        gui = VideoAnalyzerGUI(
+            root, login_data=controller.login_data, preloaded_ocr=controller.ocr_reader
+        )
+        root.mainloop()
+
+    sys.exit(exit_code)

@@ -3,12 +3,20 @@
 Instant startup splash screen - shows immediately while app loads.
 PyQt5 기반 즉시 표시 스플래시 화면
 """
+
 from PyQt5.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QProgressBar, QApplication, QGraphicsDropShadowEffect
+    QWidget,
+    QVBoxLayout,
+    QHBoxLayout,
+    QLabel,
+    QProgressBar,
+    QApplication,
+    QGraphicsDropShadowEffect,
 )
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt5.QtGui import QFont, QColor, QPainter, QBrush, QPen, QLinearGradient
+
+from ui.theme_manager import get_theme_manager
 
 
 class StartupSplash(QWidget):
@@ -16,20 +24,23 @@ class StartupSplash(QWidget):
 
     loadingComplete = pyqtSignal()
 
-    # Stitch 디자인 테마 (레드)
-    COLORS = {
-        'bg': '#FFFFFF',
-        'header_bg': '#fce8eb',
-        'primary': '#e31639',
-        'accent': '#e31639',
-        'text': '#1b0e10',
-        'secondary': '#64748b',
-        'border': '#f0f0f0',
-        'progress_bg': '#f5f5f5',
-    }
-
     def __init__(self):
         super().__init__()
+        # 테마 매니저에서 색상 가져오기
+        self.tm = get_theme_manager()
+        self.tm.set_theme("light")  # 스플래시는 화사한 라이트 테마 고정
+
+        self.COLORS = {
+            "bg": self.tm.get_color("bg_main"),
+            "header_bg": self.tm.get_color("primary_light"),
+            "primary": self.tm.get_color("primary"),
+            "accent": self.tm.get_color("accent"),
+            "text": self.tm.get_color("text_primary"),
+            "secondary": self.tm.get_color("text_secondary"),
+            "border": self.tm.get_color("border_light"),
+            "progress_bg": self.tm.get_color("bg_secondary"),
+        }
+
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setFixedSize(420, 280)
@@ -49,9 +60,9 @@ class StartupSplash(QWidget):
         self.container.setGeometry(10, 10, 400, 260)
         self.container.setStyleSheet(f"""
             QWidget {{
-                background-color: {self.COLORS['bg']};
+                background-color: {self.COLORS["bg"]};
                 border-radius: 16px;
-                border: 1px solid {self.COLORS['border']};
+                border: 1px solid {self.COLORS["border"]};
             }}
         """)
 
@@ -77,14 +88,18 @@ class StartupSplash(QWidget):
         # Title
         title = QLabel("쇼핑 숏폼 메이커")
         title.setFont(QFont("맑은 고딕", 20, QFont.Bold))
-        title.setStyleSheet(f"color: {self.COLORS['primary']}; background: transparent; border: none;")
+        title.setStyleSheet(
+            f"color: {self.COLORS['primary']}; background: transparent; border: none;"
+        )
         title.setAlignment(Qt.AlignCenter)
         layout.addWidget(title)
 
         # Subtitle
         subtitle = QLabel("Shopping Shorts Maker")
         subtitle.setFont(QFont("Segoe UI", 10))
-        subtitle.setStyleSheet(f"color: {self.COLORS['secondary']}; background: transparent; border: none;")
+        subtitle.setStyleSheet(
+            f"color: {self.COLORS['secondary']}; background: transparent; border: none;"
+        )
         subtitle.setAlignment(Qt.AlignCenter)
         layout.addWidget(subtitle)
 
@@ -98,12 +113,12 @@ class StartupSplash(QWidget):
         self.progress_bar.setValue(0)
         self.progress_bar.setStyleSheet(f"""
             QProgressBar {{
-                background-color: {self.COLORS['progress_bg']};
+                background-color: {self.COLORS["progress_bg"]};
                 border: none;
                 border-radius: 3px;
             }}
             QProgressBar::chunk {{
-                background-color: {self.COLORS['primary']};
+                background-color: {self.COLORS["primary"]};
                 border-radius: 3px;
             }}
         """)
@@ -114,7 +129,9 @@ class StartupSplash(QWidget):
         # Status text
         self.status_label = QLabel(self._status_text)
         self.status_label.setFont(QFont("맑은 고딕", 9))
-        self.status_label.setStyleSheet(f"color: {self.COLORS['secondary']}; background: transparent; border: none;")
+        self.status_label.setStyleSheet(
+            f"color: {self.COLORS['secondary']}; background: transparent; border: none;"
+        )
         self.status_label.setAlignment(Qt.AlignCenter)
         layout.addWidget(self.status_label)
 
@@ -123,7 +140,9 @@ class StartupSplash(QWidget):
         # Version
         version = QLabel("v1.0.0")
         version.setFont(QFont("Segoe UI", 8))
-        version.setStyleSheet(f"color: {self.COLORS['secondary']}; background: transparent; border: none;")
+        version.setStyleSheet(
+            f"color: {self.COLORS['secondary']}; background: transparent; border: none;"
+        )
         version.setAlignment(Qt.AlignCenter)
         layout.addWidget(version)
 
@@ -144,8 +163,8 @@ class StartupSplash(QWidget):
         """Update the loading dots."""
         self._dot_count = (self._dot_count + 1) % 4
         dots = "." * self._dot_count
-        base_text = self._status_text.rstrip('.')
-        if base_text.endswith('...'):
+        base_text = self._status_text.rstrip(".")
+        if base_text.endswith("..."):
             base_text = base_text[:-3]
         self.status_label.setText(f"{base_text}{dots}")
 

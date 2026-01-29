@@ -6,6 +6,7 @@ Tutorial Overlay using PyQt5
 Tkinter 메인 윈도우 위에 PyQt5 오버레이를 표시합니다.
 Shows PyQt5 overlay on top of Tkinter main window.
 """
+
 import logging
 import sys
 from typing import Optional, Callable, List, Dict, Any, Tuple
@@ -41,9 +42,15 @@ class TutorialOverlay(QWidget):
         },
         {
             "title": "3. 작업 실행",
-            "description": "시작 버튼을 눌러\n영상을 생성하세요",
+            "description": "설정이 완료되면 작업을 시작하세요.\n진행 상황은 실시간으로 표시됩니다.",
             "icon": "🚀",
             "target": "sidebar_menu_3",
+        },
+        {
+            "title": "4. 설정",
+            "description": "API 키, 테마, 출력 폴더 등\n앱의 환경설정을 변경할 수 있습니다.",
+            "icon": "⚙️",
+            "target": "header_settings_button",
         },
     ]
 
@@ -52,7 +59,7 @@ class TutorialOverlay(QWidget):
         tk_root,
         on_complete: Optional[Callable] = None,
         on_skip: Optional[Callable] = None,
-        theme_manager: Optional[Any] = None
+        theme_manager: Optional[Any] = None,
     ):
         # QApplication 확인/생성
         self._app = QApplication.instance()
@@ -84,11 +91,7 @@ class TutorialOverlay(QWidget):
 
     def _setup_window(self) -> None:
         """윈도우 설정"""
-        self.setWindowFlags(
-            Qt.FramelessWindowHint |
-            Qt.WindowStaysOnTopHint |
-            Qt.Tool
-        )
+        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
 
@@ -155,6 +158,17 @@ class TutorialOverlay(QWidget):
             sidebar_width = 240
             item_height = 56
 
+            if target == "header_settings_button":
+                # 설정 버튼 위치 (헤더 우측)
+                # 실제 위치를 정확히 알기 어려우므로 추정치 사용
+                # 우측에서 60px 정도 떨어짐
+                win_w = self.width()
+                x = win_w - 60 - 40
+                y = 20
+                w = 40
+                h = 40
+                return QRect(x, y, w, h)
+
             x = 8
             y = header_height + 17 + idx * 60
             w = sidebar_width - 16
@@ -185,9 +199,7 @@ class TutorialOverlay(QWidget):
 
         self._draw_skip_link(painter, w, h)
 
-    def _draw_spotlight(
-        self, painter: QPainter, w: int, h: int, rect: QRect
-    ) -> None:
+    def _draw_spotlight(self, painter: QPainter, w: int, h: int, rect: QRect) -> None:
         """스포트라이트 효과"""
         pad = 8
         x1, y1 = rect.x() - pad, rect.y() - pad
@@ -212,8 +224,7 @@ class TutorialOverlay(QWidget):
         painter.drawRect(x1, y1, x2 - x1, y2 - y1)
 
     def _draw_card(
-        self, painter: QPainter, w: int, h: int,
-        rect: QRect, step: Dict[str, Any]
+        self, painter: QPainter, w: int, h: int, rect: QRect, step: Dict[str, Any]
     ) -> None:
         """설명 카드"""
         card_w, card_h = 260, 180
@@ -243,9 +254,7 @@ class TutorialOverlay(QWidget):
         self._draw_card_content(painter, card_x, card_y, card_w, card_h, step)
 
     def _draw_card_content(
-        self, painter: QPainter,
-        x: int, y: int, w: int, h: int,
-        step: Dict[str, Any]
+        self, painter: QPainter, x: int, y: int, w: int, h: int, step: Dict[str, Any]
     ) -> None:
         """카드 내용 그리기"""
         # 카드 배경
@@ -260,28 +269,20 @@ class TutorialOverlay(QWidget):
         painter.drawText(
             QRect(x, y + 12, w, 20),
             Qt.AlignCenter,
-            f"{self.current_step + 1} / {len(self.STEPS)}"
+            f"{self.current_step + 1} / {len(self.STEPS)}",
         )
 
         # 아이콘
         font_icon = QFont("Segoe UI Emoji", 24)
         painter.setFont(font_icon)
-        painter.drawText(
-            QRect(x, y + 35, w, 40),
-            Qt.AlignCenter,
-            step["icon"]
-        )
+        painter.drawText(QRect(x, y + 35, w, 40), Qt.AlignCenter, step["icon"])
 
         # 제목
         font_title = QFont("맑은 고딕", 13)
         font_title.setBold(True)
         painter.setFont(font_title)
         painter.setPen(QPen(self.text_dark))
-        painter.drawText(
-            QRect(x, y + 75, w, 25),
-            Qt.AlignCenter,
-            step["title"]
-        )
+        painter.drawText(QRect(x, y + 75, w, 25), Qt.AlignCenter, step["title"])
 
         # 설명
         font_desc = QFont("맑은 고딕", 10)
@@ -290,7 +291,7 @@ class TutorialOverlay(QWidget):
         painter.drawText(
             QRect(x + 10, y + 100, w - 20, 50),
             Qt.AlignCenter | Qt.TextWordWrap,
-            step["description"]
+            step["description"],
         )
 
         # 버튼 영역 저장 (클릭 처리용)
@@ -347,12 +348,12 @@ class TutorialOverlay(QWidget):
             return
 
         # 다음 버튼
-        if hasattr(self, '_next_btn_rect') and self._next_btn_rect.contains(pos):
+        if hasattr(self, "_next_btn_rect") and self._next_btn_rect.contains(pos):
             self._next_step()
             return
 
         # 건너뛰기
-        if hasattr(self, '_skip_rect') and self._skip_rect.contains(pos):
+        if hasattr(self, "_skip_rect") and self._skip_rect.contains(pos):
             self._skip()
             return
 

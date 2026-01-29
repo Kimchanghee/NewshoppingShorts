@@ -32,7 +32,7 @@ pydub>=0.25.1
 more-itertools>=9.0.0
 
 # 비디오 및 이미지 처리
-moviepy>=1.0.3
+moviepy>=1.0.3,<2.0.0
 imageio-ffmpeg>=0.4.9  # moviepy FFmpeg 바이너리
 
 # AI API 클라이언트

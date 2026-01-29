@@ -13,8 +13,9 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 try:
-    # moviepy 2.x compatible imports
-    from moviepy import VideoFileClip
+    # moviepy 1.x compatible imports
+    from moviepy.editor import VideoFileClip
+
     MOVIEPY_AVAILABLE = True
 except Exception as e:
     logger.debug(f"moviepy import failed: {e}")
@@ -62,9 +63,7 @@ class VideoComposer:
         self.gui.tts_files = []
 
         thread = threading.Thread(
-            target=self._create_videos_for_presets,
-            args=(source_video,),
-            daemon=True
+            target=self._create_videos_for_presets, args=(source_video,), daemon=True
         )
         thread.start()
 
@@ -79,7 +78,9 @@ class VideoComposer:
             source_video: Path to source video file
         """
         # 사용자가 실제로 선택한 음성만 사용 (voice_vars에서 체크된 것)
-        selected_voices = [vid for vid, state in self.gui.voice_vars.items() if state.get()]
+        selected_voices = [
+            vid for vid, state in self.gui.voice_vars.items() if state.get()
+        ]
         voice_manager = getattr(self.gui, "voice_manager", None)
         if selected_voices:
             voices = []
@@ -90,40 +91,61 @@ class VideoComposer:
                         voices.append(profile["voice_name"])
                         continue
                 voices.append(vid)
-            display_names = [voice_manager.get_voice_label(v) if voice_manager else v for v in voices]
-            logger.info(f"[음성 선택] 사용자가 선택한 음성 사용: {', '.join(display_names)}")
+            display_names = [
+                voice_manager.get_voice_label(v) if voice_manager else v for v in voices
+            ]
+            logger.info(
+                f"[음성 선택] 사용자가 선택한 음성 사용: {', '.join(display_names)}"
+            )
         else:
-            voices = getattr(self.gui, 'multi_voice_presets', self.gui.available_tts_voices)
-            display_names = [voice_manager.get_voice_label(v) if voice_manager else v for v in voices]
-            logger.info(f"[음성 선택] 기본 음성 사용: {', '.join(display_names) if isinstance(display_names, list) else display_names}")
+            voices = getattr(
+                self.gui, "multi_voice_presets", self.gui.available_tts_voices
+            )
+            display_names = [
+                voice_manager.get_voice_label(v) if voice_manager else v for v in voices
+            ]
+            logger.info(
+                f"[음성 선택] 기본 음성 사용: {', '.join(display_names) if isinstance(display_names, list) else display_names}"
+            )
 
         total = len(voices)
         if total == 0:
             # Show warning for empty voice selection
             from ui.components.custom_dialog import show_warning
-            self.gui.root.after(0, lambda: show_warning(
-                self.gui.root,
-                "음성 선택 필요",
-                "TTS 음성이 선택되지 않았습니다.\n\n"
-                "최소 1개 이상의 음성을 선택해주세요."
-            ))
-            self.gui.update_progress_state('tts', 'error', 0, "음성이 선택되지 않아 처리를 중단했습니다.")
+
+            self.gui.root.after(
+                0,
+                lambda: show_warning(
+                    self.gui.root,
+                    "음성 선택 필요",
+                    "TTS 음성이 선택되지 않았습니다.\n\n"
+                    "최소 1개 이상의 음성을 선택해주세요.",
+                ),
+            )
+            self.gui.update_progress_state(
+                "tts", "error", 0, "음성이 선택되지 않아 처리를 중단했습니다."
+            )
             return
 
         self.gui.generated_videos = []
-        self.gui.update_progress_state('tts', 'processing', 0)
+        self.gui.update_progress_state("tts", "processing", 0)
 
         for idx, voice in enumerate(voices, 1):
-            voice_label = voice_manager.get_voice_label(voice) if voice_manager else voice
-            self.gui.add_log(f'[VOICE] {idx}/{total} - {voice_label}')
+            voice_label = (
+                voice_manager.get_voice_label(voice) if voice_manager else voice
+            )
+            self.gui.add_log(f"[VOICE] {idx}/{total} - {voice_label}")
             try:
                 # Import TTS processor
                 from processors.tts_processor import TTSProcessor
+
                 tts_processor = TTSProcessor(self.gui)
 
-                metadata, duration, output_path = tts_processor.generate_tts_for_voice(voice)
+                metadata, duration, output_path = tts_processor.generate_tts_for_voice(
+                    voice
+                )
                 if not metadata or not output_path:
-                    raise RuntimeError('TTS generation failed.')
+                    raise RuntimeError("TTS generation failed.")
 
                 self.gui._per_line_tts = metadata
                 self.gui.tts_files = [output_path]
@@ -131,19 +153,20 @@ class VideoComposer:
                 self.gui.last_voice_used = voice
                 self.gui.update_voice_info_label(latest_voice=voice)
                 progress = int(idx / total * 100)
-                self.gui.update_progress_state('tts', 'processing', progress)
+                self.gui.update_progress_state("tts", "processing", progress)
 
                 self.gui.source_video = source_video
 
                 # Import CreateFinalVideo module
                 from core.video import CreateFinalVideo
+
                 CreateFinalVideo.create_final_video_thread(self.gui)
 
             except Exception as exc:
                 logger.error(f"[Video] Error during video creation for voice: {exc}")
-                self.gui.update_progress_state('video', 'error', message=str(exc))
+                self.gui.update_progress_state("video", "error", message=str(exc))
 
-        self.gui.update_progress_state('tts', 'completed', 100)
+        self.gui.update_progress_state("tts", "completed", 100)
         try:
             self.gui.save_generated_videos_locally()
         except Exception as exc:
