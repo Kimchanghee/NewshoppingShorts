@@ -5,9 +5,15 @@ This module handles batch processing control logic, extracted from main.py.
 """
 
 import threading
+import time
 from typing import TYPE_CHECKING
 
-from ui.components.custom_dialog import show_warning, show_info, show_error, show_question
+from ui.components.custom_dialog import (
+    show_warning,
+    show_info,
+    show_error,
+    show_question,
+)
 import core.video.DynamicBatch as DynamicBatch
 from utils.logging_config import get_logger
 from caller import rest
@@ -22,7 +28,7 @@ if TYPE_CHECKING:
 class BatchHandler:
     """Handles batch processing start/stop logic"""
 
-    def __init__(self, app: 'VideoAnalyzerGUI'):
+    def __init__(self, app: "VideoAnalyzerGUI"):
         self.app = app
 
     def start_batch_processing(self):
@@ -39,16 +45,24 @@ class BatchHandler:
 
         # 대기 중인 URL만 처리 (thread-safe access)
         with self.app.url_status_lock:
-            waiting_urls = [url for url in self.app.url_queue if self.app.url_status.get(url) == 'waiting']
+            waiting_urls = [
+                url
+                for url in self.app.url_queue
+                if self.app.url_status.get(url) == "waiting"
+            ]
 
         if not waiting_urls:
             show_info(self.app.root, "알림", "처리할 대기 중인 URL이 없습니다.")
             return
 
         # TTS 음성 선택 검증 - 실제 선택된 음성 체크
-        selected_voices = [vid for vid, state in self.app.voice_vars.items() if state.get()]
+        selected_voices = [
+            vid for vid, state in self.app.voice_vars.items() if state.get()
+        ]
         if not selected_voices or len(selected_voices) == 0:
-            show_warning(self.app.root, "경고", "TTS 음성을 최소 1개 이상 선택해주세요.")
+            show_warning(
+                self.app.root, "경고", "TTS 음성을 최소 1개 이상 선택해주세요."
+            )
             return
 
         # 선택된 음성 확인 로그 (명확한 표시)
@@ -63,8 +77,12 @@ class BatchHandler:
                     continue
             voice_labels.append(vid)
 
-        self.app.add_log(f"[음성 확인] 선택된 음성 {len(selected_voices)}개: {', '.join(voice_labels)}")
-        self.app.add_log(f"[음성 확인] 각 URL당 {len(selected_voices)}개의 영상이 생성됩니다.")
+        self.app.add_log(
+            f"[음성 확인] 선택된 음성 {len(selected_voices)}개: {', '.join(voice_labels)}"
+        )
+        self.app.add_log(
+            f"[음성 확인] 각 URL당 {len(selected_voices)}개의 영상이 생성됩니다."
+        )
 
         # API 키 검증 - 먼저 체크 (빈 dict, None, 또는 모든 값이 빈 문자열인 경우 체크)
         has_valid_api_key = (
@@ -82,7 +100,7 @@ class BatchHandler:
                 "작업을 시작하려면 최소 1개 이상의 API 키가 필요합니다.\n\n"
                 "API 키를 지금 추가하시겠습니까?\n\n"
                 "※ API 키는 https://aistudio.google.com/apikey\n"
-                "   에서 무료로 발급받을 수 있습니다."
+                "   에서 무료로 발급받을 수 있습니다.",
             )
             if result:
                 # 사용자가 "예"를 선택하면 API 키 관리 창 열기
@@ -91,20 +109,20 @@ class BatchHandler:
 
         # 작업 횟수 확인 (Work count check)
         try:
-            user_id = self.app.login_data.get('data', {}).get('data', {}).get('id', '')
+            user_id = self.app.login_data.get("data", {}).get("data", {}).get("id", "")
             if user_id:
                 work_check = rest.checkWorkAvailable(user_id)
-                if work_check.get('success'):
-                    if not work_check.get('can_work', True):
+                if work_check.get("success"):
+                    if not work_check.get("can_work", True):
                         self.app.add_log("[작업] 잔여 작업 횟수가 없습니다.")
                         show_warning(
                             self.app.root,
                             "작업 횟수 초과",
                             "잔여 작업 횟수가 없습니다.\n\n"
-                            "관리자에게 문의하여 작업 횟수를 추가해 주세요."
+                            "관리자에게 문의하여 작업 횟수를 추가해 주세요.",
                         )
                         return
-                    remaining = work_check.get('remaining', -1)
+                    remaining = work_check.get("remaining", -1)
                     if remaining != -1:
                         self.app.add_log(f"[작업] 잔여 작업 횟수: {remaining}회")
                     else:
@@ -126,7 +144,7 @@ class BatchHandler:
                     "• API 키가 유효하지 않음\n"
                     "• 네트워크 연결 문제\n"
                     "• Gemini SDK 설치 오류\n\n"
-                    "API 키 설정을 확인해주세요."
+                    "API 키 설정을 확인해주세요.",
                 )
                 return
 
@@ -135,15 +153,12 @@ class BatchHandler:
         # 동적 처리 플래그 설정
         self.app.dynamic_processing = True
         self.app.batch_processing = True
-        self.app.start_batch_button.config(state='disabled')
-        self.app.stop_batch_button.config(state='normal')
+        self.app.start_batch_button.config(state="disabled")
+        self.app.stop_batch_button.config(state="normal")
         self.app.reset_progress_states()
 
         # 동적 처리 스레드 시작 (순차 실행 보장)
-        thread = threading.Thread(
-            target=self._batch_processing_wrapper,
-            daemon=True
-        )
+        thread = threading.Thread(target=self._batch_processing_wrapper, daemon=True)
         self.app.batch_thread = thread
         thread.start()
 
@@ -161,13 +176,19 @@ class BatchHandler:
             self.app.add_log("[배치] 다른 배치 작업이 실행 중이어서 대기합니다...")
             # Timeout-based acquisition to prevent deadlock
             for retry in range(MAX_RETRIES):
-                acquired = self.app.batch_processing_lock.acquire(timeout=LOCK_TIMEOUT_SECONDS)
+                acquired = self.app.batch_processing_lock.acquire(
+                    timeout=LOCK_TIMEOUT_SECONDS
+                )
                 if acquired:
                     break
-                self.app.add_log(f"[배치] Lock 획득 재시도 ({retry + 1}/{MAX_RETRIES})...")
+                self.app.add_log(
+                    f"[배치] Lock 획득 재시도 ({retry + 1}/{MAX_RETRIES})..."
+                )
 
             if not acquired:
-                self.app.add_log("[배치] Lock 획득 실패 - 배치 처리를 시작할 수 없습니다.")
+                self.app.add_log(
+                    "[배치] Lock 획득 실패 - 배치 처리를 시작할 수 없습니다."
+                )
                 self.app.root.after(0, self._reset_batch_ui_on_complete)
                 return
 
@@ -182,14 +203,29 @@ class BatchHandler:
 
     def _reset_batch_ui_on_complete(self):
         """배치 처리 완료 시 UI 상태 복구"""
-        # 항상 UI 상태를 복구 (에러 발생 시에도)
         try:
             self.app.batch_processing = False
             self.app.dynamic_processing = False
-            self.app.start_batch_button.config(state='normal')
-            self.app.stop_batch_button.config(state='disabled')
+            self.app.start_batch_button.config(state="normal")
+            self.app.stop_batch_button.config(state="disabled")
+
+            self._play_completion_alarm()
         except Exception as e:
             logger.error(f"Failed to reset batch UI state: {e}")
+
+    def _play_completion_alarm(self):
+        try:
+            import winsound
+
+            for i in range(3):
+                winsound.Beep(1000 + (i * 200), 300)
+                if i < 2:
+                    time.sleep(0.1)
+            logger.info("[알람] 배치 처리 완료 알람 재생")
+        except ImportError:
+            logger.warning("[알람] winsound 모듈이 없어 알람을 재생할 수 없습니다.")
+        except Exception as e:
+            logger.error(f"[알람] 알람 재생 실패: {e}")
 
     def stop_batch_processing(self):
         """배치 처리 중지 (현재 URL 완료 후 중지)"""
@@ -202,7 +238,7 @@ class BatchHandler:
         self.app.add_log("[배치] 배치 처리 중지 요청 - 현재 작업 완료 후 중지됩니다.")
 
         # UI 즉시 업데이트 (실제 스레드는 백그라운드에서 정리됨)
-        self.app.stop_batch_button.config(state='disabled')
+        self.app.stop_batch_button.config(state="disabled")
 
         # 백그라운드에서 스레드 종료 대기
         def wait_for_thread_finish():
@@ -212,13 +248,15 @@ class BatchHandler:
 
             # 세션 저장 (중지된 상태 기록)
             try:
-                if hasattr(self.app, 'session_manager'):
+                if hasattr(self.app, "session_manager"):
                     self.app.session_manager.save_session()
                     self.app.add_log("[세션] 중지 시점 세션 저장 완료")
             except Exception as e:
                 self.app.add_log(f"[세션] 저장 실패: {e}")
 
             # UI 상태 복구
-            self.app.root.after(0, lambda: self.app.start_batch_button.config(state='normal'))
+            self.app.root.after(
+                0, lambda: self.app.start_batch_button.config(state="normal")
+            )
 
         threading.Thread(target=wait_for_thread_finish, daemon=True).start()
