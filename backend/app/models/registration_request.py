@@ -12,9 +12,9 @@ import enum
 
 class RequestStatus(str, enum.Enum):
     """가입 요청 상태"""
-    PENDING = "pending"      # 승인 대기
-    APPROVED = "approved"    # 승인됨
-    REJECTED = "rejected"    # 거부됨
+    PENDING = "PENDING"      # 승인 대기
+    APPROVED = "APPROVED"    # 승인됨
+    REJECTED = "REJECTED"    # 거부됨
 
 
 class RegistrationRequest(Base):

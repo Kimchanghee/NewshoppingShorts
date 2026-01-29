@@ -80,16 +80,30 @@ async def submit_registration_request(
                 message="이미 사용 중인 아이디입니다."
             )
 
-        # Check if there's already a pending request with same username
+        # Check if there's already a request with same username
         existing_request = db.query(RegistrationRequest).filter(
-            RegistrationRequest.username == data.username,
-            RegistrationRequest.status == RequestStatus.PENDING
+            RegistrationRequest.username == data.username
         ).first()
         if existing_request:
-            return RegistrationResponse(
-                success=False,
-                message="이미 승인 대기 중인 요청이 있습니다."
-            )
+            # Get status as string for reliable comparison
+            status_str = existing_request.status.value if hasattr(existing_request.status, 'value') else str(existing_request.status)
+            logger.info(f"Found existing request: username={data.username}, status={status_str}")
+
+            if status_str == "pending":
+                return RegistrationResponse(
+                    success=False,
+                    message="이미 승인 대기 중인 요청이 있습니다."
+                )
+            elif status_str == "approved":
+                return RegistrationResponse(
+                    success=False,
+                    message="이미 승인된 계정입니다. 로그인해 주세요."
+                )
+            elif status_str == "rejected":
+                # 거부된 요청은 삭제하고 새로 생성 허용
+                logger.info(f"Deleting rejected request for re-registration: {data.username}")
+                db.delete(existing_request)
+                db.flush()
 
         # Hash the password
         password_hash = pwd_context.hash(data.password)

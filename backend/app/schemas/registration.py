@@ -13,9 +13,9 @@ import re
 
 class RequestStatusEnum(str, Enum):
     """가입 요청 상태"""
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
 
 
 class RegistrationRequestCreate(BaseModel):

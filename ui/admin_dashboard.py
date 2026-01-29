@@ -410,7 +410,7 @@ class AdminDashboard(QMainWindow):
         status_filter = self.filter_combo.currentText()
         url = f"{self.api_base_url}/user/register/requests"
         if status_filter != "전체":
-            status_map = {"대기 중": "pending", "승인됨": "approved", "거부됨": "rejected"}
+            status_map = {"대기 중": "PENDING", "승인됨": "APPROVED", "거부됨": "REJECTED"}
             url += f"?status={status_map.get(status_filter, '')}"
 
         worker = ApiWorker("GET", url, self._get_headers())
@@ -430,11 +430,11 @@ class AdminDashboard(QMainWindow):
             self.requests_table.setRowHeight(row, 50)
 
             status = req.get("status", "")
-            if status == "pending":
+            if status == "PENDING":
                 pending += 1
-            elif status == "approved":
+            elif status == "APPROVED":
                 approved += 1
-            elif status == "rejected":
+            elif status == "REJECTED":
                 rejected += 1
 
             self._set_cell(self.requests_table, row, 0, str(req.get("id", "")))
@@ -453,12 +453,12 @@ class AdminDashboard(QMainWindow):
             self._set_cell(self.requests_table, row, 4, created or "-")
 
             # 상태
-            status_text = {"pending": "대기 중", "approved": "승인됨", "rejected": "거부됨"}.get(status, status)
-            status_color = {"pending": DARK['warning'], "approved": DARK['success'], "rejected": DARK['danger']}.get(status, DARK['text'])
+            status_text = {"PENDING": "대기 중", "APPROVED": "승인됨", "REJECTED": "거부됨"}.get(status, status)
+            status_color = {"PENDING": DARK['warning'], "APPROVED": DARK['success'], "REJECTED": DARK['danger']}.get(status, DARK['text'])
             self._set_cell(self.requests_table, row, 5, status_text, status_color)
 
             # 작업 버튼
-            if status == "pending":
+            if status == "PENDING":
                 widget = self._create_request_actions(req.get("id"), row)
                 self.requests_table.setCellWidget(row, 6, widget)
             else:
