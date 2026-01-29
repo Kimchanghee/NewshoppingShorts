@@ -353,10 +353,11 @@ class RegistrationRequestDialog(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._username_available = False  # 아이디 중복 확인 상태
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setFixedSize(400, 580)
+        self.setFixedSize(400, 650)  # 높이 증가 (580 -> 650)
         self.setStyleSheet("background-color: #ffffff;")
 
         # 뒤로가기 버튼
@@ -413,38 +414,76 @@ class RegistrationRequestDialog(QWidget):
         self.usernameLabel.setStyleSheet("color: #374151; background: transparent;")
         self.usernameLabel.setText("아이디")
 
-        # 아이디 입력
+        # 아이디 입력 (중복확인 버튼 공간 확보)
         self.usernameEdit = QLineEdit(self)
-        self.usernameEdit.setGeometry(QtCore.QRect(30, 250, 340, 42))
+        self.usernameEdit.setGeometry(QtCore.QRect(30, 250, 240, 42))
         self.usernameEdit.setFont(QFont(FONT_FAMILY, 11))
         self.usernameEdit.setPlaceholderText("영문, 숫자, 밑줄(_)만 사용")
         self._apply_input_style(self.usernameEdit)
+        self.usernameEdit.textChanged.connect(self._on_username_changed)
+
+        # 중복확인 버튼
+        self.checkUsernameBtn = QPushButton(self)
+        self.checkUsernameBtn.setGeometry(QtCore.QRect(280, 250, 90, 42))
+        self.checkUsernameBtn.setFont(QFont(FONT_FAMILY, 10))
+        self.checkUsernameBtn.setText("중복확인")
+        self.checkUsernameBtn.setStyleSheet("""
+            QPushButton {
+                background-color: #6B7280;
+                color: white;
+                border: none;
+                border-radius: 8px;
+            }
+            QPushButton:hover {
+                background-color: #4B5563;
+            }
+            QPushButton:disabled {
+                background-color: #D1D5DB;
+                color: #9CA3AF;
+            }
+        """)
+        self.checkUsernameBtn.setCursor(Qt.PointingHandCursor)
+        self.checkUsernameBtn.clicked.connect(self._check_username)
+
+        # 아이디 상태 라벨
+        self.usernameStatusLabel = QLabel(self)
+        self.usernameStatusLabel.setGeometry(QtCore.QRect(30, 294, 340, 18))
+        self.usernameStatusLabel.setFont(QFont(FONT_FAMILY, 9))
+        self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
+        self.usernameStatusLabel.setText("")
 
         # 비밀번호 라벨
         self.passwordLabel = QLabel(self)
-        self.passwordLabel.setGeometry(QtCore.QRect(30, 300, 100, 25))
+        self.passwordLabel.setGeometry(QtCore.QRect(30, 320, 100, 25))
         self.passwordLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
         self.passwordLabel.setStyleSheet("color: #374151; background: transparent;")
         self.passwordLabel.setText("비밀번호")
 
         # 비밀번호 입력
         self.passwordEdit = QLineEdit(self)
-        self.passwordEdit.setGeometry(QtCore.QRect(30, 325, 340, 42))
+        self.passwordEdit.setGeometry(QtCore.QRect(30, 345, 340, 42))
         self.passwordEdit.setFont(QFont(FONT_FAMILY, 11))
         self.passwordEdit.setPlaceholderText("6자 이상 입력")
         self.passwordEdit.setEchoMode(QLineEdit.Password)
         self._apply_input_style(self.passwordEdit)
 
+        # 비밀번호 안내 라벨
+        self.passwordHintLabel = QLabel(self)
+        self.passwordHintLabel.setGeometry(QtCore.QRect(30, 389, 340, 18))
+        self.passwordHintLabel.setFont(QFont(FONT_FAMILY, 9))
+        self.passwordHintLabel.setStyleSheet("color: #9CA3AF; background: transparent;")
+        self.passwordHintLabel.setText("※ 영문, 숫자 포함 6자 이상 권장")
+
         # 비밀번호 확인 라벨
         self.passwordConfirmLabel = QLabel(self)
-        self.passwordConfirmLabel.setGeometry(QtCore.QRect(30, 375, 120, 25))
+        self.passwordConfirmLabel.setGeometry(QtCore.QRect(30, 410, 120, 25))
         self.passwordConfirmLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
         self.passwordConfirmLabel.setStyleSheet("color: #374151; background: transparent;")
         self.passwordConfirmLabel.setText("비밀번호 확인")
 
         # 비밀번호 확인 입력
         self.passwordConfirmEdit = QLineEdit(self)
-        self.passwordConfirmEdit.setGeometry(QtCore.QRect(30, 400, 340, 42))
+        self.passwordConfirmEdit.setGeometry(QtCore.QRect(30, 435, 340, 42))
         self.passwordConfirmEdit.setFont(QFont(FONT_FAMILY, 11))
         self.passwordConfirmEdit.setPlaceholderText("비밀번호를 다시 입력")
         self.passwordConfirmEdit.setEchoMode(QLineEdit.Password)
@@ -452,21 +491,21 @@ class RegistrationRequestDialog(QWidget):
 
         # 연락처 라벨
         self.contactLabel = QLabel(self)
-        self.contactLabel.setGeometry(QtCore.QRect(30, 450, 100, 25))
+        self.contactLabel.setGeometry(QtCore.QRect(30, 485, 100, 25))
         self.contactLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
         self.contactLabel.setStyleSheet("color: #374151; background: transparent;")
         self.contactLabel.setText("연락처")
 
         # 연락처 입력
         self.contactEdit = QLineEdit(self)
-        self.contactEdit.setGeometry(QtCore.QRect(30, 475, 340, 42))
+        self.contactEdit.setGeometry(QtCore.QRect(30, 510, 340, 42))
         self.contactEdit.setFont(QFont(FONT_FAMILY, 11))
         self.contactEdit.setPlaceholderText("010-1234-5678")
         self._apply_input_style(self.contactEdit)
 
         # 제출 버튼
         self.submitButton = QPushButton(self)
-        self.submitButton.setGeometry(QtCore.QRect(30, 530, 340, 45))
+        self.submitButton.setGeometry(QtCore.QRect(30, 565, 340, 45))
         self.submitButton.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
         self.submitButton.setText("가입 승인 요청")
         self.submitButton.setStyleSheet("""
@@ -508,6 +547,62 @@ class RegistrationRequestDialog(QWidget):
     def _on_back(self):
         self.backRequested.emit()
 
+    def _on_username_changed(self, text):
+        """아이디 입력 변경 시 중복확인 초기화"""
+        self._username_available = False
+        self.usernameStatusLabel.setText("")
+        self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
+
+    def _check_username(self):
+        """아이디 중복 확인"""
+        import re
+        import requests
+
+        username = self.usernameEdit.text().strip()
+
+        if not username or len(username) < 4:
+            self._show_error("아이디는 4자 이상이어야 합니다.")
+            return
+
+        if not re.match(r'^[a-zA-Z0-9_]+$', username):
+            self._show_error("아이디는 영문, 숫자, 밑줄(_)만 사용할 수 있습니다.")
+            return
+
+        # 버튼 비활성화
+        self.checkUsernameBtn.setEnabled(False)
+        self.checkUsernameBtn.setText("확인중...")
+        self.usernameStatusLabel.setText("확인 중...")
+        self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
+
+        # API 호출
+        try:
+            import os
+            api_url = os.getenv('API_SERVER_URL', 'https://ssmaker-auth-api-1049571775048.us-central1.run.app/')
+            resp = requests.get(
+                f"{api_url}user/check-username/{username}",
+                timeout=5
+            )
+
+            if resp.status_code == 200:
+                data = resp.json()
+                if data.get("available", False):
+                    self._username_available = True
+                    self.usernameStatusLabel.setText("✓ 사용 가능한 아이디입니다")
+                    self.usernameStatusLabel.setStyleSheet("color: #10B981; background: transparent;")
+                else:
+                    self._username_available = False
+                    self.usernameStatusLabel.setText("✗ 이미 사용 중인 아이디입니다")
+                    self.usernameStatusLabel.setStyleSheet("color: #EF4444; background: transparent;")
+            else:
+                self.usernameStatusLabel.setText("확인 실패 - 다시 시도해주세요")
+                self.usernameStatusLabel.setStyleSheet("color: #F59E0B; background: transparent;")
+        except Exception:
+            self.usernameStatusLabel.setText("확인 실패 - 네트워크 오류")
+            self.usernameStatusLabel.setStyleSheet("color: #F59E0B; background: transparent;")
+        finally:
+            self.checkUsernameBtn.setEnabled(True)
+            self.checkUsernameBtn.setText("중복확인")
+
     def _on_submit(self):
         import re
 
@@ -528,6 +623,10 @@ class RegistrationRequestDialog(QWidget):
 
         if not re.match(r'^[a-zA-Z0-9_]+$', username):
             self._show_error("아이디는 영문, 숫자, 밑줄(_)만 사용할 수 있습니다.")
+            return
+
+        if not self._username_available:
+            self._show_error("아이디 중복확인을 해주세요.")
             return
 
         if not password or len(password) < 6:

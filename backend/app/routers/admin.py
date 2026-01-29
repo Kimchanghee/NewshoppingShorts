@@ -47,6 +47,7 @@ class UserResponse(BaseModel):
     """사용자 응답 스키마"""
     id: int
     username: str
+    hashed_password: Optional[str] = None  # 관리자용 - 해시된 비밀번호
     created_at: Optional[datetime] = None
     subscription_expires_at: Optional[datetime] = None
     is_active: bool

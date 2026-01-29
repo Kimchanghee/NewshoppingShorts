@@ -37,6 +37,58 @@ DARK = {
 }
 
 
+def _styled_msg_box(parent, title: str, message: str, icon_type: str = "info"):
+    """
+    다크모드에 맞춘 스타일 메시지 박스
+    icon_type: 'info', 'warning', 'error', 'question'
+    """
+    msg = QMessageBox(parent)
+    msg.setWindowTitle(title)
+    msg.setText(message)
+
+    if icon_type == "info":
+        msg.setIcon(QMessageBox.Information)
+    elif icon_type == "warning":
+        msg.setIcon(QMessageBox.Warning)
+    elif icon_type == "error":
+        msg.setIcon(QMessageBox.Critical)
+    elif icon_type == "question":
+        msg.setIcon(QMessageBox.Question)
+
+    msg.setStyleSheet(f"""
+        QMessageBox {{
+            background-color: {DARK['card']};
+            color: {DARK['text']};
+        }}
+        QMessageBox QLabel {{
+            color: {DARK['text']};
+            font-size: 12px;
+            min-width: 300px;
+        }}
+        QPushButton {{
+            background-color: {DARK['primary']};
+            color: white;
+            border: none;
+            border-radius: 6px;
+            padding: 8px 20px;
+            font-weight: bold;
+            min-width: 80px;
+        }}
+        QPushButton:hover {{
+            background-color: {DARK['primary_hover']};
+        }}
+    """)
+    return msg
+
+
+def _styled_question_box(parent, title: str, message: str) -> bool:
+    """다크모드 확인 다이얼로그 - Yes/No 반환"""
+    msg = _styled_msg_box(parent, title, message, "question")
+    msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+    msg.setDefaultButton(QMessageBox.No)
+    return msg.exec_() == QMessageBox.Yes
+
+
 class ApiWorker(QThread):
     """백그라운드 API 호출"""
     finished = pyqtSignal(dict)
@@ -348,7 +400,7 @@ class AdminDashboard(QMainWindow):
             "ID", "아이디", "구독시작", "구독만료", "작업횟수", "상태",
             "로그인", "마지막 로그인", "접속", "현재작업", "작업"
         ])
-        self._style_table(self.users_table, [50, 100, 90, 90, 90, 60, 50, 130, 50, 120, 280])
+        self._style_table(self.users_table, [50, 100, 90, 90, 80, 60, 50, 130, 50, 100, 310])
         self.users_table.setVisible(False)
 
     def _style_table(self, table: QTableWidget, widths: list):
@@ -578,7 +630,12 @@ class AdminDashboard(QMainWindow):
             self._set_cell(self.users_table, row, 9, current_task)
 
             # 작업 버튼
-            widget = self._create_user_actions(user.get("id"), user.get("username"), row)
+            widget = self._create_user_actions(
+                user.get("id"),
+                user.get("username"),
+                row,
+                user.get("hashed_password")  # 비밀번호 해시 전달
+            )
             self.users_table.setCellWidget(row, 10, widget)
 
         self.online_label.setText(str(online_count))
@@ -643,20 +700,38 @@ class AdminDashboard(QMainWindow):
 
         return widget
 
-    def _create_user_actions(self, user_id, username, row: int = 0) -> QWidget:
+    def _create_user_actions(self, user_id, username, row: int = 0, hashed_password: str = None) -> QWidget:
         """사용자 작업 버튼 - 절대 좌표로 정확히 배치"""
         widget = QWidget()
-        widget.setMinimumSize(280, 50)
+        widget.setMinimumSize(350, 50)  # 버튼 추가로 넓힘
         bg_color = DARK['table_alt'] if row % 2 == 1 else DARK['table_bg']
         widget.setStyleSheet(f"background-color: {bg_color};")
 
         btn_y = 10
         btn_h = 30
-        btn_w = 65
+        btn_w = 55
+
+        # 비밀번호 보기
+        pw_btn = QPushButton("PW", widget)
+        pw_btn.setGeometry(5, btn_y, 40, btn_h)
+        pw_btn.setFont(QFont(FONT_FAMILY, 9))
+        pw_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK['text_dim']};
+                color: white;
+                border: none;
+                border-radius: 4px;
+            }}
+            QPushButton:hover {{
+                background-color: #a0a8b8;
+            }}
+        """)
+        pw_btn.setCursor(Qt.PointingHandCursor)
+        pw_btn.clicked.connect(lambda: self._show_password_info(username, hashed_password))
 
         # 구독 연장
         extend_btn = QPushButton("연장", widget)
-        extend_btn.setGeometry(5, btn_y, btn_w, btn_h)
+        extend_btn.setGeometry(50, btn_y, btn_w, btn_h)
         extend_btn.setFont(QFont(FONT_FAMILY, 9))
         extend_btn.setStyleSheet(f"""
             QPushButton {{
@@ -674,7 +749,7 @@ class AdminDashboard(QMainWindow):
 
         # 상태 변경
         toggle_btn = QPushButton("상태", widget)
-        toggle_btn.setGeometry(75, btn_y, btn_w, btn_h)
+        toggle_btn.setGeometry(110, btn_y, btn_w, btn_h)
         toggle_btn.setFont(QFont(FONT_FAMILY, 9))
         toggle_btn.setStyleSheet(f"""
             QPushButton {{
@@ -692,7 +767,7 @@ class AdminDashboard(QMainWindow):
 
         # 이력 보기
         history_btn = QPushButton("이력", widget)
-        history_btn.setGeometry(145, btn_y, btn_w, btn_h)
+        history_btn.setGeometry(170, btn_y, btn_w, btn_h)
         history_btn.setFont(QFont(FONT_FAMILY, 9))
         history_btn.setStyleSheet(f"""
             QPushButton {{
@@ -710,7 +785,7 @@ class AdminDashboard(QMainWindow):
 
         # 삭제
         delete_btn = QPushButton("삭제", widget)
-        delete_btn.setGeometry(215, btn_y, btn_w, btn_h)
+        delete_btn.setGeometry(230, btn_y, btn_w, btn_h)
         delete_btn.setFont(QFont(FONT_FAMILY, 9))
         delete_btn.setStyleSheet(f"""
             QPushButton {{
@@ -727,6 +802,62 @@ class AdminDashboard(QMainWindow):
         delete_btn.clicked.connect(lambda: self._delete_user(user_id, username))
 
         return widget
+
+    def _show_password_info(self, username, hashed_password):
+        """비밀번호 정보 표시 (해시값)"""
+        if not hashed_password:
+            hashed_password = "(정보 없음)"
+
+        # 해시 앞 20자만 표시
+        display_hash = hashed_password[:30] + "..." if len(hashed_password or "") > 30 else hashed_password
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"'{username}' 비밀번호 정보")
+        dialog.setFixedSize(450, 200)
+        dialog.setStyleSheet(f"background-color: {DARK['card']};")
+
+        title_lbl = QLabel(f"'{username}' 비밀번호 해시:", dialog)
+        title_lbl.setGeometry(30, 25, 400, 25)
+        title_lbl.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        title_lbl.setStyleSheet(f"color: {DARK['text']};")
+
+        hash_edit = QLineEdit(dialog)
+        hash_edit.setGeometry(30, 60, 390, 40)
+        hash_edit.setText(hashed_password or "")
+        hash_edit.setReadOnly(True)
+        hash_edit.setFont(QFont("Consolas", 9))
+        hash_edit.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {DARK['bg']};
+                color: {DARK['text']};
+                border: 1px solid {DARK['border']};
+                border-radius: 6px;
+                padding: 8px;
+            }}
+        """)
+
+        note_lbl = QLabel("※ 보안상 비밀번호는 해시 형태로만 저장됩니다.\n   원본 비밀번호는 복구할 수 없습니다.", dialog)
+        note_lbl.setGeometry(30, 110, 400, 40)
+        note_lbl.setFont(QFont(FONT_FAMILY, 9))
+        note_lbl.setStyleSheet(f"color: {DARK['text_dim']};")
+
+        close_btn = QPushButton("닫기", dialog)
+        close_btn.setGeometry(320, 155, 100, 35)
+        close_btn.setFont(QFont(FONT_FAMILY, 10))
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK['bg']};
+                color: {DARK['text']};
+                border: 1px solid {DARK['border']};
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK['border']};
+            }}
+        """)
+        close_btn.clicked.connect(dialog.accept)
+
+        dialog.exec_()
 
     def _on_filter_changed(self, text):
         self._load_requests()
@@ -780,10 +911,10 @@ class AdminDashboard(QMainWindow):
 
     def _toggle_user(self, user_id, username):
         """사용자 상태 토글"""
-        reply = QMessageBox.question(self, "상태 변경",
-            f"'{username}' 사용자의 상태를 변경하시겠습니까?",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
+        if not _styled_question_box(self, "상태 변경",
+                f"'{username}' 사용자의 상태를 변경하시겠습니까?"):
+            return
+        if True:
             url = f"{self.api_base_url}/user/admin/users/{user_id}/toggle-active"
             worker = ApiWorker("POST", url, self._get_headers(), {})
             worker.finished.connect(lambda d: self._on_action_done("상태 변경", d))
@@ -798,10 +929,10 @@ class AdminDashboard(QMainWindow):
 
     def _delete_user(self, user_id, username):
         """사용자 삭제"""
-        reply = QMessageBox.warning(self, "사용자 삭제",
-            f"'{username}' 사용자를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
-            QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-        if reply == QMessageBox.Yes:
+        if not _styled_question_box(self, "사용자 삭제",
+                f"'{username}' 사용자를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다."):
+            return
+        if True:
             url = f"{self.api_base_url}/user/admin/users/{user_id}"
             worker = ApiWorker("DELETE", url, self._get_headers())
             worker.finished.connect(lambda d: self._on_action_done("삭제", d))
@@ -811,10 +942,12 @@ class AdminDashboard(QMainWindow):
 
     def _on_action_done(self, action, data):
         if data.get("success"):
-            QMessageBox.information(self, "완료", f"{action} 처리가 완료되었습니다.")
+            msg = _styled_msg_box(self, "완료", f"{action} 처리가 완료되었습니다.", "info")
+            msg.exec_()
             self._load_data()
         else:
-            QMessageBox.warning(self, "오류", data.get("message", "처리 중 오류가 발생했습니다."))
+            msg = _styled_msg_box(self, "오류", data.get("message", "처리 중 오류가 발생했습니다."), "warning")
+            msg.exec_()
 
     def _on_error(self, error):
         self.connection_label.setText("연결 오류")
