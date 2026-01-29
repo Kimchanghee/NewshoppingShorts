@@ -167,6 +167,42 @@ async def check_session(
     )
 
 
+@router.get("/check-username/{username}")
+@limiter.limit("30/minute")
+async def check_username(
+    request: Request, username: str, db: Session = Depends(get_db)
+):
+    """
+    Check if username is available for registration.
+    아이디 사용 가능 여부 확인
+    """
+    import re
+    from app.models.user import User
+    from app.models.registration_request import RegistrationRequest
+
+    # 유효성 검사
+    if not username or len(username) < 4 or len(username) > 50:
+        return {"available": False, "message": "아이디는 4~50자여야 합니다."}
+
+    if not re.match(r'^[a-zA-Z0-9_]+$', username):
+        return {"available": False, "message": "아이디는 영문, 숫자, 밑줄(_)만 사용 가능합니다."}
+
+    # 기존 사용자 확인
+    existing_user = db.query(User).filter(User.username == username).first()
+    if existing_user:
+        return {"available": False, "message": "이미 사용 중인 아이디입니다."}
+
+    # 대기 중인 가입 요청 확인
+    pending_request = db.query(RegistrationRequest).filter(
+        RegistrationRequest.username == username,
+        RegistrationRequest.status == "PENDING"
+    ).first()
+    if pending_request:
+        return {"available": False, "message": "승인 대기 중인 아이디입니다."}
+
+    return {"available": True, "message": "사용 가능한 아이디입니다."}
+
+
 @router.post("/work/check", response_model=CheckWorkResponse)
 @limiter.limit("60/minute")
 async def check_work(
