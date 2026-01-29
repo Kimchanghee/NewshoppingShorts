@@ -914,8 +914,8 @@ class AdminDashboard(QMainWindow):
         if not _styled_question_box(self, "상태 변경",
                 f"'{username}' 사용자의 상태를 변경하시겠습니까?"):
             return
-        if True:
-            url = f"{self.api_base_url}/user/admin/users/{user_id}/toggle-active"
+
+        url = f"{self.api_base_url}/user/admin/users/{user_id}/toggle-active"
             worker = ApiWorker("POST", url, self._get_headers(), {})
             worker.finished.connect(lambda d: self._on_action_done("상태 변경", d))
             worker.error.connect(self._on_error)
@@ -932,8 +932,8 @@ class AdminDashboard(QMainWindow):
         if not _styled_question_box(self, "사용자 삭제",
                 f"'{username}' 사용자를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다."):
             return
-        if True:
-            url = f"{self.api_base_url}/user/admin/users/{user_id}"
+
+        url = f"{self.api_base_url}/user/admin/users/{user_id}"
             worker = ApiWorker("DELETE", url, self._get_headers())
             worker.finished.connect(lambda d: self._on_action_done("삭제", d))
             worker.error.connect(self._on_error)

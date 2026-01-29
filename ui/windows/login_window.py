@@ -330,7 +330,7 @@ class Login(QMainWindow, login_Ui.Ui_LoginWindow):
 
         self.registrationDialog = RegistrationRequestDialog(self)
         self.registrationDialog.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self.registrationDialog.setFixedSize(400, 580)
+        # 다이얼로그가 자체적으로 크기 설정함 (login_ui_modern.py에서 650px)
 
         self.registrationDialog.backRequested.connect(self._closeRegistrationDialog)
         self.registrationDialog.registrationRequested.connect(
