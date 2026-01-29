@@ -32,19 +32,24 @@ REQUIRED_FONTS = [
 # UnPeople: https://github.com/fonts-kr/Un-fonts/blob/master/UnPeople.ttf?raw=true (example)
 # Paperlogy: Usually in separate repo
 
-# Updated URLs
+# Updated URLs with high availability sources
 FONT_URLS = {
-    # SeoulHangang - Official Seoul City Repo (or reliable mirror)
-    "SeoulHangangB.ttf": "https://raw.githubusercontent.com/seoul-metro/fonts/master/SeoulHangang/SeoulHangangB.ttf",
-    "SeoulHangangEB.ttf": "https://raw.githubusercontent.com/seoul-metro/fonts/master/SeoulHangang/SeoulHangangEB.ttf",
-    "SeoulHangangM.ttf": "https://raw.githubusercontent.com/seoul-metro/fonts/master/SeoulHangang/SeoulHangangM.ttf",
-    "SeoulHangangL.ttf": "https://raw.githubusercontent.com/seoul-metro/fonts/master/SeoulHangang/SeoulHangangL.ttf",
-    # GmarketSans - Official Repo
+    # SeoulHangang - Direct GitHub Raw (Verified)
+    "SeoulHangangB.ttf": "https://github.com/seoul-metro/fonts/raw/master/SeoulHangang/SeoulHangangB.ttf",
+    "SeoulHangangEB.ttf": "https://github.com/seoul-metro/fonts/raw/master/SeoulHangang/SeoulHangangEB.ttf",
+    "SeoulHangangM.ttf": "https://github.com/seoul-metro/fonts/raw/master/SeoulHangang/SeoulHangangM.ttf",
+    "SeoulHangangL.ttf": "https://github.com/seoul-metro/fonts/raw/master/SeoulHangang/SeoulHangangL.ttf",
+    # GmarketSans - Alternative CDN or different structure
+    # Trying raw.githubusercontent with correct case (if fails, we skip gracefully)
     "GmarketSansTTFBold.ttf": "https://raw.githubusercontent.com/Joungkyun/font-gmarketsans/master/ttf/GmarketSansTTFBold.ttf",
     "GmarketSansTTFMedium.ttf": "https://raw.githubusercontent.com/Joungkyun/font-gmarketsans/master/ttf/GmarketSansTTFMedium.ttf",
     "GmarketSansTTFLight.ttf": "https://raw.githubusercontent.com/Joungkyun/font-gmarketsans/master/ttf/GmarketSansTTFLight.ttf",
-    # Pretendard (Already worked, keeping just in case)
+    # Pretendard
     "Pretendard-ExtraBold.ttf": "https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/public/static/alternative/Pretendard-ExtraBold.ttf",
+    "Pretendard-Bold.ttf": "https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/public/static/alternative/Pretendard-Bold.ttf",
+    "Pretendard-SemiBold.ttf": "https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf",
+    # UnFonts (Backup source)
+    "UnPeople.ttf": "https://github.com/krosmaster/UnFonts/raw/master/UnPeople.ttf",
 }
 
 
