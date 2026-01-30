@@ -33,7 +33,9 @@ class Settings(BaseSettings):
     def validate_jwt_secret(cls, v):
         """JWT secret must be at least 32 characters for security"""
         if len(v) < 32:
-            raise ValueError("JWT_SECRET_KEY must be at least 32 characters. Generate with: openssl rand -hex 32")
+            raise ValueError(
+                "JWT_SECRET_KEY must be at least 32 characters. Generate with: openssl rand -hex 32"
+            )
         return v
 
     # Security
@@ -41,6 +43,9 @@ class Settings(BaseSettings):
     MAX_LOGIN_ATTEMPTS: int = 5
     MAX_IP_ATTEMPTS: int = 20  # Higher threshold for IP-based limiting
     LOGIN_ATTEMPT_WINDOW_MINUTES: int = 15
+
+    # API Key for client authentication
+    SSMAKER_API_KEY: str = ""
 
     # Admin API Key for protected endpoints
     # Generate with: openssl rand -hex 32
@@ -51,9 +56,13 @@ class Settings(BaseSettings):
     def validate_admin_api_key(cls, v, info):
         """Admin API key validation - required in production"""
         # Get environment from values if available
-        env = info.data.get("ENVIRONMENT", "development") if info.data else "development"
+        env = (
+            info.data.get("ENVIRONMENT", "development") if info.data else "development"
+        )
         if env == "production" and (not v or len(v) < 32):
-            raise ValueError("ADMIN_API_KEY must be at least 32 characters in production")
+            raise ValueError(
+                "ADMIN_API_KEY must be at least 32 characters in production"
+            )
         return v
 
     # Environment
@@ -70,7 +79,9 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             # Allow wildcard (desktop app needs this)
             if v == "*":
-                logger.warning("CORS wildcard '*' enabled. Consider restricting for web apps.")
+                logger.warning(
+                    "CORS wildcard '*' enabled. Consider restricting for web apps."
+                )
                 return ["*"]
             # Single URL
             if v.startswith("http"):

@@ -1155,7 +1155,7 @@ def _create_final_video_for_batch(
 
         # 2) Audio longer than target -> trim slightly
         elif real_audio_dur > desired_cut + eps:
-            new_audio = new_audio.subclipped(0, max(0, desired_cut - eps))
+            new_audio = new_audio.subclip(0, max(0, desired_cut - eps))
             real_audio_dur = new_audio.duration  # update
             # 오디오 트림 시에도 기존 오프셋 유지 (자막 싱크 보존)
             current_offset = app.tts_sync_info.get("audio_start_offset", 0.0)
@@ -1261,7 +1261,7 @@ def _create_final_video_for_batch(
                             "  [Video] 연장 실패, 현재 길이 유지: %.3fs", video.duration
                         )
         elif video.duration > target_video_duration + eps:
-            video = video.subclipped(0, target_video_duration)
+            video = video.subclip(0, target_video_duration)
             logger.debug(
                 "  [Video] Trimmed: %.3fs -> %.3fs", original_duration, video.duration
             )
@@ -1269,10 +1269,10 @@ def _create_final_video_for_batch(
         video_duration = video.duration
 
         # Apply audio to video
-        final_video = video.with_audio(new_audio)
+        final_video = video.set_audio(new_audio)
 
         if final_video.duration > target_video_duration + eps:
-            final_video = final_video.subclipped(0, target_video_duration)
+            final_video = final_video.subclip(0, target_video_duration)
 
         # Subtitles
         subtitle_applied = False
@@ -1419,14 +1419,14 @@ def _create_final_video_for_batch(
             logger.debug(
                 "  Trimming: %.3fs -> %.3fs", final_video.duration, final_cut_point
             )
-            final_video = final_video.subclipped(0, final_cut_point)
+            final_video = final_video.subclip(0, final_cut_point)
         elif final_video.duration + eps < final_cut_point:
             logger.debug(
                 "  Video short; adjusting duration: %.3fs -> %.3fs",
                 final_video.duration,
                 final_cut_point,
             )
-            final_video = final_video.with_duration(final_cut_point)
+            final_video = final_video.set_duration(final_cut_point)
 
         logger.info("  Final video length: %.3fs", final_video.duration)
 

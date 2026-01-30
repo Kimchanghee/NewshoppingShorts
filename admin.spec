@@ -9,8 +9,8 @@ from PyInstaller.utils.hooks import collect_all, collect_submodules
 
 block_cipher = None
 
-# ui 패키지 전체 수집
-ui_datas, ui_binaries, ui_hiddenimports = collect_all('ui')
+# ui 패키지 수집 (수동 데이터 추가 사용)
+ui_datas, ui_binaries, ui_hiddenimports = [], [], []
 
 # requests 패키지 수집
 requests_datas, requests_binaries, requests_hiddenimports = collect_all('requests')

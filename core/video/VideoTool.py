@@ -305,7 +305,7 @@ def _create_single_line_subtitle(
 
         # 3. 단일 이미지 클립 생성 (배경 + 텍스트 합친 상태)
         subtitle_np = np.array(bg_image)
-        subtitle_clip = ImageClip(subtitle_np, duration=duration).with_start(start_time)
+        subtitle_clip = ImageClip(subtitle_np, duration=duration).set_start(start_time)
 
         return subtitle_clip
 
@@ -467,7 +467,7 @@ def _create_watermark_clip(
 
         # numpy 배열로 변환 후 ImageClip 생성
         watermark_np = np.array(watermark_img)
-        watermark_clip = ImageClip(watermark_np, duration=duration).with_start(0)
+        watermark_clip = ImageClip(watermark_np, duration=duration).set_start(0)
 
         logger.debug(
             f"[Watermark] Created: '{channel_name}' at {position} ({x}, {y}), duration={duration:.1f}s"

@@ -2,7 +2,7 @@
 Registration Request Router
 회원가입 요청 라우터
 
-사용자 회원가입 - 자동 승인 방식 (체험판 3회 제공)
+사용자 회원가입 - 자동 승인 방식 (체험판 5회 제공)
 
 Security:
 - Admin endpoints require X-Admin-API-Key header
@@ -10,6 +10,7 @@ Security:
 - Transaction rollback handling
 - User enumeration prevention
 """
+
 import logging
 from typing import Optional
 from datetime import datetime, timedelta
@@ -24,6 +25,8 @@ from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.registration_request import RegistrationRequest, RequestStatus
 from app.models.user import User, UserType
+from app.models.session import SessionModel
+from app.utils.jwt_handler import create_access_token
 from app.schemas.registration import (
     RegistrationRequestCreate,
     RegistrationRequestResponse,
@@ -35,8 +38,8 @@ from app.schemas.registration import (
 )
 
 # 체험판 설정
-FREE_TRIAL_WORK_COUNT = 3  # 체험판 작업 횟수
-DEFAULT_TRIAL_DAYS = 365   # 체험판 유효 기간 (1년)
+FREE_TRIAL_WORK_COUNT = 5  # 체험판 작업 횟수 (5회 무료체험)
+DEFAULT_TRIAL_DAYS = 365  # 체험판 유효 기간 (1년)
 
 logger = logging.getLogger(__name__)
 
@@ -61,43 +64,39 @@ router = APIRouter(prefix="/user", tags=["registration"])
 
 
 @router.post("/register/request", response_model=RegistrationResponse)
-@limiter.limit("5/hour")
 async def submit_registration_request(
-    request: Request,
-    data: RegistrationRequestCreate,
-    db: Session = Depends(get_db)
+    request: Request, data: RegistrationRequestCreate, db: Session = Depends(get_db)
 ):
     """
-    회원가입 - 자동 승인 (체험판 3회 제공)
-    Auto-approved registration with 3 free trial uses
+    회원가입 - 자동 승인 (체험판 5회 제공)
+    Auto-approved registration with 5 free trial uses
 
     Rate limited to 5 requests per hour per IP to prevent abuse.
     IP당 시간당 5회로 제한하여 남용 방지.
     """
-    logger.info(f"Registration request received: username={data.username}, name={data.name}")
+    logger.info(
+        f"Registration request received: username={data.username}, name={data.name}"
+    )
     try:
         # Check if username already exists in users table
         existing_user = db.query(User).filter(User.username == data.username).first()
         if existing_user:
             return RegistrationResponse(
                 success=False,
-                message="이미 사용 중인 아이디입니다."
+                message="이미 사용 중인 아이디입니다. 다른 아이디를 사용해주세요.",
             )
 
         # Check if there's already an approved request with same username
-        existing_request = db.query(RegistrationRequest).filter(
-            RegistrationRequest.username == data.username
-        ).first()
+        existing_request = (
+            db.query(RegistrationRequest)
+            .filter(RegistrationRequest.username == data.username)
+            .first()
+        )
         if existing_request:
-            status_str = existing_request.status.value if hasattr(existing_request.status, 'value') else str(existing_request.status)
-            logger.info(f"Found existing request: username={data.username}, status={status_str}")
-
-            if status_str == "approved":
+            if existing_request.status == RequestStatus.APPROVED:
                 return RegistrationResponse(
-                    success=False,
-                    message="이미 가입된 계정입니다. 로그인해 주세요."
+                    success=False, message="이미 가입된 계정입니다. 로그인해 주세요."
                 )
-            # 기존 요청 삭제 (rejected 또는 pending)
             logger.info(f"Deleting old request for re-registration: {data.username}")
             db.delete(existing_request)
             db.flush()
@@ -113,12 +112,26 @@ async def submit_registration_request(
             password_hash=password_hash,
             subscription_expires_at=subscription_expires_at,
             is_active=True,
-            work_count=FREE_TRIAL_WORK_COUNT,  # 체험판 3회
+            work_count=FREE_TRIAL_WORK_COUNT,  # 체험판 5회
             work_used=0,
-            user_type=UserType.TRIAL
+            user_type=UserType.TRIAL,
         )
 
         db.add(new_user)
+        db.flush()  # ID 생성을 위해 flush
+
+        # JWT 토큰 생성 (자동 로그인용)
+        client_ip = get_client_ip(request)
+        token, jti, expires_at = create_access_token(new_user.id, client_ip)
+
+        # 세션 저장 (로그인과 동일한 방식)
+        session = SessionModel(
+            user_id=new_user.id,
+            token_jti=jti,
+            ip_address=client_ip,
+            expires_at=expires_at,
+        )
+        db.add(session)
 
         # 감사 로그용으로 registration_requests에도 기록 (APPROVED 상태)
         registration_request = RegistrationRequest(
@@ -127,14 +140,16 @@ async def submit_registration_request(
             password_hash=password_hash,
             contact=data.contact,
             status=RequestStatus.APPROVED,
-            reviewed_at=datetime.utcnow()
+            reviewed_at=datetime.utcnow(),
         )
 
         db.add(registration_request)
         db.commit()
         db.refresh(new_user)
 
-        logger.info(f"User auto-registered: id={new_user.id}, username={new_user.username}, work_count={FREE_TRIAL_WORK_COUNT}")
+        logger.info(
+            f"User auto-registered: id={new_user.id}, username={new_user.username}, work_count={FREE_TRIAL_WORK_COUNT}"
+        )
 
         return RegistrationResponse(
             success=True,
@@ -143,8 +158,9 @@ async def submit_registration_request(
                 "user_id": new_user.id,
                 "username": new_user.username,
                 "work_count": FREE_TRIAL_WORK_COUNT,
-                "is_trial": True
-            }
+                "is_trial": True,
+                "token": token,  # JWT 토큰 추가
+            },
         )
 
     except SQLAlchemyError as e:
@@ -152,15 +168,13 @@ async def submit_registration_request(
         logger.error(f"Database error during registration: {e}", exc_info=True)
         error_hint = str(e)[:200] if str(e) else "Unknown DB error"
         return RegistrationResponse(
-            success=False,
-            message=f"서버 오류가 발생했습니다. [{error_hint}]"
+            success=False, message=f"서버 오류가 발생했습니다. [{error_hint}]"
         )
     except Exception as e:
         db.rollback()
         logger.error(f"Unexpected error during registration: {e}", exc_info=True)
         return RegistrationResponse(
-            success=False,
-            message=f"예기치 않은 오류가 발생했습니다. [{str(e)[:100]}]"
+            success=False, message=f"예기치 않은 오류가 발생했습니다. [{str(e)[:100]}]"
         )
 
 
@@ -172,7 +186,7 @@ async def list_registration_requests(
     page: int = Query(1, ge=1, description="페이지 번호"),
     page_size: int = Query(20, ge=1, le=100, description="페이지 크기"),
     db: Session = Depends(get_db),
-    _admin: bool = Depends(verify_admin_api_key)
+    _admin: bool = Depends(verify_admin_api_key),
 ):
     """
     회원가입 요청 목록 조회 (관리자용)
@@ -191,13 +205,18 @@ async def list_registration_requests(
 
     # Pagination
     offset = (page - 1) * page_size
-    requests = query.order_by(RegistrationRequest.created_at.desc()).offset(offset).limit(page_size).all()
+    requests = (
+        query.order_by(RegistrationRequest.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
 
     return RegistrationRequestList(
         requests=[RegistrationRequestResponse.model_validate(r) for r in requests],
         total=total,
         page=page,
-        page_size=page_size
+        page_size=page_size,
     )
 
 
@@ -207,7 +226,7 @@ async def approve_registration(
     request: Request,
     data: ApproveRequest,
     db: Session = Depends(get_db),
-    _admin: bool = Depends(verify_admin_api_key)
+    _admin: bool = Depends(verify_admin_api_key),
 ):
     """
     회원가입 요청 승인 (관리자용)
@@ -215,41 +234,49 @@ async def approve_registration(
 
     Requires X-Admin-API-Key header.
     """
-    logger.info(f"Approve request received: request_id={data.request_id}, days={data.subscription_days}, work_count={data.work_count}")
+    logger.info(
+        f"Approve request received: request_id={data.request_id}, days={data.subscription_days}, work_count={data.work_count}"
+    )
     try:
         # Find the registration request
-        reg_request = db.query(RegistrationRequest).filter(
-            RegistrationRequest.id == data.request_id
-        ).first()
+        reg_request = (
+            db.query(RegistrationRequest)
+            .filter(RegistrationRequest.id == data.request_id)
+            .first()
+        )
         logger.info(f"Registration request found: {reg_request is not None}")
 
         if not reg_request:
             return RegistrationResponse(
-                success=False,
-                message="요청을 찾을 수 없습니다."
+                success=False, message="요청을 찾을 수 없습니다."
             )
 
         if reg_request.status != RequestStatus.PENDING:
             return RegistrationResponse(
                 success=False,
-                message=f"이미 처리된 요청입니다. (상태: {reg_request.status.value})"
+                message=f"이미 처리된 요청입니다. (상태: {reg_request.status.value})",
             )
 
         # Check if username is still available
-        existing_user = db.query(User).filter(User.username == reg_request.username).first()
+        existing_user = (
+            db.query(User).filter(User.username == reg_request.username).first()
+        )
         if existing_user:
             reg_request.status = RequestStatus.REJECTED
             reg_request.reviewed_at = datetime.utcnow()
             reg_request.rejection_reason = "아이디가 이미 사용 중입니다."
             db.commit()
             return RegistrationResponse(
-                success=False,
-                message="아이디가 이미 사용 중입니다."
+                success=False, message="아이디가 이미 사용 중입니다."
             )
 
         # Create the user
-        subscription_expires_at = datetime.utcnow() + timedelta(days=data.subscription_days)
-        logger.info(f"Creating user: username={reg_request.username}, expires={subscription_expires_at}, work_count={data.work_count}")
+        subscription_expires_at = datetime.utcnow() + timedelta(
+            days=data.subscription_days
+        )
+        logger.info(
+            f"Creating user: username={reg_request.username}, expires={subscription_expires_at}, work_count={data.work_count}"
+        )
 
         new_user = User(
             username=reg_request.username,
@@ -257,7 +284,7 @@ async def approve_registration(
             subscription_expires_at=subscription_expires_at,
             is_active=True,
             work_count=data.work_count,  # -1 = 무제한
-            work_used=0
+            work_used=0,
         )
 
         db.add(new_user)
@@ -269,7 +296,9 @@ async def approve_registration(
 
         db.commit()
 
-        logger.info(f"Registration approved: user_id={new_user.id}, username={new_user.username}")
+        logger.info(
+            f"Registration approved: user_id={new_user.id}, username={new_user.username}"
+        )
 
         work_count_str = "무제한" if data.work_count == -1 else f"{data.work_count}회"
         return RegistrationResponse(
@@ -279,23 +308,21 @@ async def approve_registration(
                 "user_id": new_user.id,
                 "username": new_user.username,
                 "subscription_expires_at": subscription_expires_at.isoformat(),
-                "work_count": data.work_count
-            }
+                "work_count": data.work_count,
+            },
         )
 
     except SQLAlchemyError as e:
         db.rollback()
         logger.error(f"Database error during approval: {e}", exc_info=True)
         return RegistrationResponse(
-            success=False,
-            message=f"승인 처리 중 오류가 발생했습니다: {str(e)[:100]}"
+            success=False, message=f"승인 처리 중 오류가 발생했습니다: {str(e)[:100]}"
         )
     except Exception as e:
         db.rollback()
         logger.error(f"Unexpected error during approval: {e}", exc_info=True)
         return RegistrationResponse(
-            success=False,
-            message=f"승인 처리 중 예기치 않은 오류: {str(e)[:100]}"
+            success=False, message=f"승인 처리 중 예기치 않은 오류: {str(e)[:100]}"
         )
 
 
@@ -305,7 +332,7 @@ async def reject_registration(
     request: Request,
     data: RejectRequest,
     db: Session = Depends(get_db),
-    _admin: bool = Depends(verify_admin_api_key)
+    _admin: bool = Depends(verify_admin_api_key),
 ):
     """
     회원가입 요청 거부 (관리자용)
@@ -315,20 +342,21 @@ async def reject_registration(
     """
     try:
         # Find the registration request
-        reg_request = db.query(RegistrationRequest).filter(
-            RegistrationRequest.id == data.request_id
-        ).first()
+        reg_request = (
+            db.query(RegistrationRequest)
+            .filter(RegistrationRequest.id == data.request_id)
+            .first()
+        )
 
         if not reg_request:
             return RegistrationResponse(
-                success=False,
-                message="요청을 찾을 수 없습니다."
+                success=False, message="요청을 찾을 수 없습니다."
             )
 
         if reg_request.status != RequestStatus.PENDING:
             return RegistrationResponse(
                 success=False,
-                message=f"이미 처리된 요청입니다. (상태: {reg_request.status.value})"
+                message=f"이미 처리된 요청입니다. (상태: {reg_request.status.value})",
             )
 
         # Update registration request status
@@ -343,15 +371,14 @@ async def reject_registration(
         return RegistrationResponse(
             success=True,
             message="회원가입 요청이 거부되었습니다.",
-            data={"request_id": reg_request.id}
+            data={"request_id": reg_request.id},
         )
 
     except SQLAlchemyError as e:
         db.rollback()
         logger.error(f"Database error during rejection: {e}")
         return RegistrationResponse(
-            success=False,
-            message="거부 처리 중 오류가 발생했습니다."
+            success=False, message="거부 처리 중 오류가 발생했습니다."
         )
 
 
@@ -360,8 +387,10 @@ async def reject_registration(
 async def check_registration_status(
     request: Request,
     username: str,
-    contact: str = Query(..., min_length=4, description="연락처 뒤 4자리 (본인 확인용)"),
-    db: Session = Depends(get_db)
+    contact: str = Query(
+        ..., min_length=4, description="연락처 뒤 4자리 (본인 확인용)"
+    ),
+    db: Session = Depends(get_db),
 ):
     """
     회원가입 요청 상태 확인
@@ -373,22 +402,23 @@ async def check_registration_status(
     # Validate username format
     if not username or len(username) < 4:
         return RegistrationResponse(
-            success=False,
-            message="해당 정보와 일치하는 가입 요청이 없습니다."
+            success=False, message="해당 정보와 일치하는 가입 요청이 없습니다."
         )
 
     # Sanitize username
     username_clean = username.lower().strip()
 
-    reg_request = db.query(RegistrationRequest).filter(
-        RegistrationRequest.username == username_clean
-    ).order_by(RegistrationRequest.created_at.desc()).first()
+    reg_request = (
+        db.query(RegistrationRequest)
+        .filter(RegistrationRequest.username == username_clean)
+        .order_by(RegistrationRequest.created_at.desc())
+        .first()
+    )
 
     # Always return the same message format to prevent enumeration
     if not reg_request:
         return RegistrationResponse(
-            success=False,
-            message="해당 정보와 일치하는 가입 요청이 없습니다."
+            success=False, message="해당 정보와 일치하는 가입 요청이 없습니다."
         )
 
     # Verify contact (last 4 digits)
@@ -398,14 +428,13 @@ async def check_registration_status(
     if not stored_contact.endswith(input_contact[-4:]):
         # Return same message to prevent enumeration
         return RegistrationResponse(
-            success=False,
-            message="해당 정보와 일치하는 가입 요청이 없습니다."
+            success=False, message="해당 정보와 일치하는 가입 요청이 없습니다."
         )
 
     status_messages = {
         RequestStatus.PENDING: "승인 대기 중입니다.",
         RequestStatus.APPROVED: "승인이 완료되었습니다. 로그인해 주세요.",
-        RequestStatus.REJECTED: f"요청이 거부되었습니다. 사유: {reg_request.rejection_reason or '미기재'}"
+        RequestStatus.REJECTED: f"요청이 거부되었습니다. 사유: {reg_request.rejection_reason or '미기재'}",
     }
 
     return RegistrationResponse(
@@ -413,7 +442,11 @@ async def check_registration_status(
         message=status_messages.get(reg_request.status, "알 수 없는 상태"),
         data={
             "status": reg_request.status.value,
-            "created_at": reg_request.created_at.isoformat() if reg_request.created_at else None,
-            "reviewed_at": reg_request.reviewed_at.isoformat() if reg_request.reviewed_at else None
-        }
+            "created_at": reg_request.created_at.isoformat()
+            if reg_request.created_at
+            else None,
+            "reviewed_at": reg_request.reviewed_at.isoformat()
+            if reg_request.reviewed_at
+            else None,
+        },
     )

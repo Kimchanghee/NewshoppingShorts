@@ -113,16 +113,52 @@ class BatchHandler:
             if user_id:
                 work_check = rest.checkWorkAvailable(user_id)
                 if work_check.get("success"):
-                    if not work_check.get("can_work", True):
-                        self.app.add_log("[작업] 잔여 작업 횟수가 없습니다.")
-                        show_warning(
-                            self.app.root,
-                            "작업 횟수 초과",
-                            "잔여 작업 횟수가 없습니다.\n\n"
-                            "관리자에게 문의하여 작업 횟수를 추가해 주세요.",
-                        )
-                        return
+                    work_count = work_check.get("work_count", -1)
+                    work_used = work_check.get("work_used", 0)
                     remaining = work_check.get("remaining", -1)
+
+                    # 체험판 사용자 확인 (work_count == 5 이거나 user_type == "trial")
+                    is_trial_user = (
+                        work_count == 5
+                        or self.app.login_data.get("data", {})
+                        .get("data", {})
+                        .get("user_type", "")
+                        == "trial"
+                    )
+
+                    if not work_check.get("can_work", True):
+                        if is_trial_user:
+                            # 체험판 사용자: 구체적인 안내 제공
+                            self.app.add_log(
+                                "[작업] 체험판 5회 소진. 웹사이트 안내 표시."
+                            )
+                            show_warning(
+                                self.app.root,
+                                "체험판 소진",
+                                "체험판 5회를 모두 소진했습니다.\n\n"
+                                "더 많은 작업을 하시려면 유료 플랜으로 전환하세요.\n\n"
+                                "【유료 플랜 특징】\n"
+                                "• 무제한 작업 가능\n"
+                                "• 더 나은 TTS 음성 옵션\n"
+                                "• 우선 기술 지원\n\n"
+                                "웹사이트에서 플랜 확인 및 결제 가능합니다.\n\n"
+                                "• 웹사이트 접속:\n  "
+                                "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
+                            )
+                        else:
+                            # 유료 사용자: 일반 초과 알림
+                            self.app.add_log("[작업] 잔여 작업 횟수가 없습니다.")
+                            show_warning(
+                                self.app.root,
+                                "작업 횟수 초과",
+                                "잔여 작업 횟수가 없습니다.\n\n"
+                                "관리자에게 문의하여 작업 횟수를 추가해 주세요.\n\n"
+                                "문의 메시지:\n"
+                                "• 작업 횟수 추가 요청\n"
+                                "• 유료 플랜 문의\n"
+                                "• 기타 문의사항",
+                            )
+                        return
                     if remaining != -1:
                         self.app.add_log(f"[작업] 잔여 작업 횟수: {remaining}회")
                     else:

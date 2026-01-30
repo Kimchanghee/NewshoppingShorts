@@ -27,6 +27,7 @@ class LoginHandler:
     def start_login_watch(self):
         """로그인 상태 감시 시작 및 신규 사용자 자동 체험판 신청"""
         if not self.app.login_data:
+            logger.warning("[LoginHandler] No login data available, skipping watch start")
             return
 
         # 신규 사용자 자동 체험판 신청 로직
@@ -35,74 +36,94 @@ class LoginHandler:
             user_data = self.app.login_data.get("data", {}).get("data", {})
             user_id = user_data.get("id")
             work_count = user_data.get("work_count", -1)
+            
+            logger.info(f"[LoginHandler] Starting watch for user: {user_id}, initial work_count: {work_count}")
 
             # 신규 가입자(또는 work_count가 초기 상태인 사용자)라면 3회 신청
             if user_id and (work_count <= 0 or work_count is None):
+                logger.info(f"[LoginHandler] Triggering auto-trial request for new user: {user_id}")
                 threading.Thread(
                     target=self._auto_request_trial, args=(user_id,), daemon=True
                 ).start()
+            else:
+                logger.info("[LoginHandler] User has valid work count, skipping auto-trial request")
         except Exception as e:
-            logger.warning(f"Auto trial request check failed: {e}")
+            logger.warning(f"[LoginHandler] Auto trial request check failed: {e}")
 
         self.app._login_watch_stop = False
         t = threading.Thread(target=self._login_watch_loop, daemon=True)
         t.start()
 
     def _auto_request_trial(self, user_id):
-        """신규 사용자를 위한 자동 체험판 신청 (3회)"""
+        """신규 사용자를 위한 자동 체험판 신청 (5회)"""
         try:
-            logger.info(f"Auto-requesting trial for user: {user_id}")
+            logger.info(f"[AutoTrial] Requesting trial for user: {user_id}")
             # 이미 신청 대기 중인지 확인 (SubscriptionWidget 로직 참조)
             status_res = rest.get_subscription_status_with_consistency(user_id)
             if status_res.get("has_pending_request"):
-                logger.info("User already has pending request, skipping auto-request")
+                logger.info(f"[AutoTrial] User {user_id} already has pending request, skipping")
                 return
 
-            # 신청 API 호출
+            # 신청 API 호출 (5회로 변경)
+            logger.info(f"[AutoTrial] Sending subscription request API call...")
             res = rest.safe_subscription_request(
-                user_id, "신규 가입 자동 체험판 신청 (3회)"
+                user_id, "신규 가입 자동 체험판 신청 (5회)"
             )
+            
             if res.get("success"):
-                logger.info(f"Auto-trial request success: {res.get('message')}")
+                logger.info(f"[AutoTrial] Request success: {res.get('message')}")
                 # UI 업데이트를 위해 메인 스레드에서 새로고침 트리거
                 self.app.root.after(2000, self.app._refresh_subscription_status)
             else:
-                logger.warning(f"Auto-trial request failed: {res.get('message')}")
+                logger.warning(f"[AutoTrial] Request failed: {res.get('message')}")
         except Exception as e:
-            logger.error(f"Error during auto-trial request: {e}")
+            logger.error(f"[AutoTrial] Error during request: {e}", exc_info=True)
 
     def _login_watch_loop(self):
         """5초마다 로그인 상태 확인"""
         try:
             userId = self.app.login_data["data"]["data"]["id"]
             userIp = self.app.login_data["data"]["ip"]
+            logger.info(f"[watch_loop] Loop started for user: {userId} at IP: {userIp}")
         except Exception as e:
-            logger.warning("Failed to extract login data for watch loop: %s", e)
+            logger.warning("[watch_loop] Failed to extract login data: %s", e)
             return
 
+        loop_count = 0
         while not getattr(self.app, "_login_watch_stop", False):
+            loop_count += 1
             try:
+                if loop_count % 12 == 0: # 1분마다 로그 남기기 (5초 * 12)
+                    logger.debug(f"[watch_loop] Heartbeat check... (seq={loop_count})")
+                    
                 data = {"userId": userId, "key": "ssmaker", "ip": userIp}
                 res = rest.loginCheck(**data)
                 st = res.get("status") if isinstance(res, dict) else None
+                
                 if st == "skip":
                     # 검증 실패 - 조용히 재시도
+                    if loop_count % 12 == 0:
+                        logger.debug("[watch_loop] Check skipped (validation failed)")
                     time.sleep(5)
                     continue
+                    
                 if st == "EU003":
+                    logger.warning("[watch_loop] Duplicate login detected (EU003)")
                     # Tkinter 스레드 안전 호출
                     self.app.root.after(
                         0, lambda: self.exit_program_other_place("EU003")
                     )
                     break
                 elif st == "EU004":
+                    logger.error("[watch_loop] Force close command received (EU004)")
                     self.app.root.after(
                         0, lambda: self.error_program_force_close("EU004")
                     )
                     break
             except Exception as e:
                 # 네트워크 오류 등은 무시하고 재시도 (Network errors are ignored and retried)
-                logger.debug("Login check failed (will retry): %s", e)
+                if loop_count % 12 == 0:
+                    logger.debug(f"[watch_loop] Check exception: {e}")
             time.sleep(5)
 
     def exit_program_other_place(self, status: str):

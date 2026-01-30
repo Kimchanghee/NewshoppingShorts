@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Official Font Downloader for Shopping Shorts Maker
-Downloads all required fonts from reliable mirrors.
-"""
 import os
 import sys
 import logging
@@ -19,21 +15,18 @@ if sys.platform == 'win32':
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
     sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts")
 os.makedirs(FONTS_DIR, exist_ok=True)
 
 HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/121.0.0.0 Safari/537.36'
 }
 
 FONT_SOURCES = [
     {
         "id": "seoul_hangang",
         "name": "SeoulHangangB.ttf",
-        "urls": [
-            "https://www.seoul.go.kr/v2012/seoul/symbol/file/SeoulHangangB.ttf",
-            "https://github.com/Seo-Riwu/Seoul-Fonts/raw/main/TTF/SeoulHangangB.ttf"
-        ]
+        "urls": ["https://github.com/webfontworld/seoul/raw/main/SeoulHangangB.ttf"]
     },
     {
         "id": "pretendard",
@@ -62,6 +55,11 @@ FONT_SOURCES = [
         "extract_files": ["SpoqaHanSansNeo-Bold.ttf"]
     },
     {
+        "id": "cafe24_surround",
+        "name": "Cafe24Ssurround.ttf",
+        "urls": ["https://github.com/webfontworld/cafe24/raw/main/Cafe24Ssurround.ttf"]
+    },
+    {
         "id": "nanum_square",
         "name": "NanumSquareEB.ttf",
         "is_zip": True,
@@ -71,7 +69,17 @@ FONT_SOURCES = [
     {
         "id": "paperlogy",
         "name": "Paperlogy-9Black.ttf",
-        "urls": ["https://github.com/fonts-archive/Paperlogy/raw/main/Paperlogy-9Black.ttf"]
+        "urls": ["https://github.com/webfontworld/paperlogy/raw/main/Paperlogy-9Black.ttf"]
+    },
+    {
+        "id": "kopub_batang",
+        "name": "KoPubBatangBold.ttf",
+        "urls": ["https://github.com/webfontworld/kopub/raw/main/KoPubBatangBold.ttf"]
+    },
+    {
+        "id": "unpeople_gothic",
+        "name": "UnPeople.ttf",
+        "urls": ["https://github.com/webfontworld/un/raw/main/UnPeople.ttf"]
     }
 ]
 
@@ -79,8 +87,9 @@ def download_font(source):
     target_name = source["name"]
     target_path = os.path.join(FONTS_DIR, target_name)
     
-    if os.path.exists(target_path) and os.path.getsize(target_path) > 100000:
-        logger.info(f"  [OK] {target_name} exists and seems valid.")
+    # Paperlogy is already there, don't redownload
+    if os.path.exists(target_path) and os.path.getsize(target_path) > 1000:
+        logger.info(f"  [OK] {target_name} exists.")
         return True
 
     for url in source["urls"]:
@@ -104,15 +113,20 @@ def download_font(source):
                         f.write(resp.content)
                     logger.info(f"    [OK] Saved {target_name}")
                     return True
-        except Exception:
-            pass
+            else:
+                logger.warning(f"    [FAIL] Status {resp.status_code}")
+        except Exception as e:
+            logger.warning(f"    [ERROR] {e}")
     return False
 
 def main():
-    logger.info("Syncing 10 Fonts...")
+    logger.info("=" * 60)
+    logger.info("Installing All 10 Fonts for SSMaker")
+    logger.info("=" * 60)
     for source in FONT_SOURCES:
         download_font(source)
-    logger.info("Done.")
+    logger.info("=" * 60)
+    logger.info("All fonts synced to fonts/ directory.")
 
 if __name__ == "__main__":
     main()

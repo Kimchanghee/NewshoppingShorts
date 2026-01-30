@@ -44,7 +44,7 @@ router = APIRouter(prefix="/user/admin", tags=["admin"])
 # ===== Schemas =====
 
 class UserResponse(BaseModel):
-    """사용자 응답 스키마"""
+    """사용자 응답 스키마 Status: Beta"""
     id: int
     username: str
     hashed_password: Optional[str] = None  # 관리자용 - 해시된 비밀번호
@@ -52,9 +52,11 @@ class UserResponse(BaseModel):
     subscription_expires_at: Optional[datetime] = None
     is_active: bool
     last_login_at: Optional[datetime] = None
+    last_login_ip: Optional[str] = None
     login_count: int = 0
     work_count: int = -1  # -1 = 무제한
     work_used: int = 0
+    user_type: str = "trial"
 
     class Config:
         from_attributes = True

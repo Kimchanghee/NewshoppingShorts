@@ -129,6 +129,8 @@ class ApiWorker(QThread):
 
             if resp.status_code == 200:
                 self.finished.emit(resp.json())
+            elif resp.status_code == 204:
+                self.finished.emit({"success": True})
             else:
                 self.error.emit(f"Error {resp.status_code}: {resp.text}")
         except Exception as e:
@@ -143,7 +145,7 @@ class AdminDashboard(QMainWindow):
         self.api_base_url = api_base_url.rstrip("/")
         self.admin_api_key = admin_api_key
         self.workers = []
-        self.current_tab = 0  # 0: 회원가입 요청, 1: 사용자 관리, 2: 구독 요청
+        self.current_tab = 0  # 0: 사용자 관리, 1: 구독 요청
         self.last_update_time = None
         self._setup_ui()
         self._load_data()
@@ -233,32 +235,32 @@ class AdminDashboard(QMainWindow):
         gap = 20
         start_x = 40
 
-        # 대기 중 요청
+        # 구독요청 대기 중
         self._create_card(
-            start_x, card_y, card_w, card_h, "대기 중 요청", DARK["warning"]
+            start_x, card_y, card_w, card_h, "구독요청 대기", DARK["warning"]
         )
         self.pending_label = self._get_value_label(start_x, card_y, card_w, card_h)
 
-        # 승인된 요청
+        # 구독요청 승인됨
         self._create_card(
             start_x + (card_w + gap),
             card_y,
             card_w,
             card_h,
-            "승인된 요청",
+            "구독요청 승인",
             DARK["success"],
         )
         self.approved_label = self._get_value_label(
             start_x + (card_w + gap), card_y, card_w, card_h
         )
 
-        # 거부된 요청
+        # 구독요청 거부됨
         self._create_card(
             start_x + (card_w + gap) * 2,
             card_y,
             card_w,
             card_h,
-            "거부된 요청",
+            "구독요청 거부",
             DARK["danger"],
         )
         self.rejected_label = self._get_value_label(
@@ -328,29 +330,23 @@ class AdminDashboard(QMainWindow):
         return lbl
 
     def _create_tab_buttons(self):
-        """탭 버튼 생성"""
-        self.tab_requests = QPushButton("회원가입 요청", self.central)
-        self.tab_requests.setGeometry(40, 180, 130, 42)
-        self.tab_requests.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
-        self.tab_requests.setCursor(Qt.PointingHandCursor)
-        self.tab_requests.clicked.connect(lambda: self._switch_tab(0))
-
+        """탭 버튼 생성 (회원가입 요청 탭 제거 - 자동 승인됨)"""
         self.tab_users = QPushButton("사용자 관리", self.central)
-        self.tab_users.setGeometry(180, 180, 130, 42)
-        self.tab_users.setFont(QFont(FONT_FAMILY, 12))
+        self.tab_users.setGeometry(40, 180, 130, 42)
+        self.tab_users.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
         self.tab_users.setCursor(Qt.PointingHandCursor)
-        self.tab_users.clicked.connect(lambda: self._switch_tab(1))
+        self.tab_users.clicked.connect(lambda: self._switch_tab(0))
 
         self.tab_subscriptions = QPushButton("구독 요청", self.central)
-        self.tab_subscriptions.setGeometry(320, 180, 130, 42)
+        self.tab_subscriptions.setGeometry(180, 180, 130, 42)
         self.tab_subscriptions.setFont(QFont(FONT_FAMILY, 12))
         self.tab_subscriptions.setCursor(Qt.PointingHandCursor)
-        self.tab_subscriptions.clicked.connect(lambda: self._switch_tab(2))
+        self.tab_subscriptions.clicked.connect(lambda: self._switch_tab(1))
 
         self._update_tab_styles()
 
     def _update_tab_styles(self):
-        """탭 스타일 업데이트"""
+        """탭 스타일 업데이트 (2개 탭: 사용자 관리, 구독 요청)"""
         active = f"""
             QPushButton {{
                 background-color: {DARK["card"]};
@@ -372,80 +368,39 @@ class AdminDashboard(QMainWindow):
                 color: {DARK["text"]};
             }}
         """
-        self.tab_requests.setStyleSheet(active if self.current_tab == 0 else inactive)
-        self.tab_users.setStyleSheet(active if self.current_tab == 1 else inactive)
+        self.tab_users.setStyleSheet(active if self.current_tab == 0 else inactive)
         self.tab_subscriptions.setStyleSheet(
-            active if self.current_tab == 2 else inactive
+            active if self.current_tab == 1 else inactive
         )
-        self.tab_requests.setFont(
+        self.tab_users.setFont(
             QFont(
                 FONT_FAMILY, 12, QFont.Bold if self.current_tab == 0 else QFont.Normal
             )
         )
-        self.tab_users.setFont(
+        self.tab_subscriptions.setFont(
             QFont(
                 FONT_FAMILY, 12, QFont.Bold if self.current_tab == 1 else QFont.Normal
             )
         )
-        self.tab_subscriptions.setFont(
-            QFont(
-                FONT_FAMILY, 12, QFont.Bold if self.current_tab == 2 else QFont.Normal
-            )
-        )
 
     def _switch_tab(self, tab_index):
-        """탭 전환"""
+        """탭 전환 (0: 사용자 관리, 1: 구독 요청)"""
         self.current_tab = tab_index
         self._update_tab_styles()
-        self.requests_table.setVisible(tab_index == 0)
-        self.users_table.setVisible(tab_index == 1)
-        self.subscriptions_table.setVisible(tab_index == 2)
-        self.filter_combo.setVisible(tab_index == 0)
-        self.filter_label.setVisible(tab_index == 0)
-        self.search_edit.setVisible(tab_index == 1)
-        self.search_label.setVisible(tab_index == 1)
-        self.sub_filter_combo.setVisible(tab_index == 2)
-        self.sub_filter_label.setVisible(tab_index == 2)
+        self.users_table.setVisible(tab_index == 0)
+        self.subscriptions_table.setVisible(tab_index == 1)
+        self.search_edit.setVisible(tab_index == 0)
+        self.search_label.setVisible(tab_index == 0)
+        self.sub_filter_combo.setVisible(tab_index == 1)
+        self.sub_filter_label.setVisible(tab_index == 1)
 
     def _create_filter_area(self):
-        """필터/검색 영역 생성"""
-        # 회원가입 요청 필터
-        self.filter_label = QLabel("상태 필터:", self.central)
-        self.filter_label.setGeometry(40, 245, 80, 30)
-        self.filter_label.setFont(QFont(FONT_FAMILY, 11))
-        self.filter_label.setStyleSheet(f"color: {DARK['text']};")
-
-        self.filter_combo = QComboBox(self.central)
-        self.filter_combo.setGeometry(125, 242, 140, 36)
-        self.filter_combo.setFont(QFont(FONT_FAMILY, 11))
-        self.filter_combo.addItems(
-            ["대기 중", "승인됨", "거부됨", "전체"]
-        )  # 대기 중이 기본값
-        self.filter_combo.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {DARK["card"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                padding: 5px 15px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {DARK["card"]};
-                color: {DARK["text"]};
-                selection-background-color: {DARK["primary"]};
-            }}
-        """)
-        self.filter_combo.currentTextChanged.connect(self._on_filter_changed)
-
-        # 사용자 검색
+        """필터/검색 영역 생성 (회원가입 요청 필터 제거)"""
+        # 사용자 검색 (기본 표시)
         self.search_label = QLabel("아이디 검색:", self.central)
         self.search_label.setGeometry(40, 245, 90, 30)
         self.search_label.setFont(QFont(FONT_FAMILY, 11))
         self.search_label.setStyleSheet(f"color: {DARK['text']};")
-        self.search_label.setVisible(False)
 
         self.search_edit = QLineEdit(self.central)
         self.search_edit.setGeometry(135, 242, 200, 36)
@@ -464,7 +419,6 @@ class AdminDashboard(QMainWindow):
             }}
         """)
         self.search_edit.textChanged.connect(self._on_search_changed)
-        self.search_edit.setVisible(False)
 
         # 구독 요청 필터
         self.sub_filter_label = QLabel("상태 필터:", self.central)
@@ -498,45 +452,37 @@ class AdminDashboard(QMainWindow):
         self.sub_filter_combo.setVisible(False)
 
     def _create_tables(self):
-        """테이블 생성"""
+        """테이블 생성 (회원가입 요청 테이블 제거)"""
         table_x = 40
         table_y = 290
         table_w = 1520
         table_h = 580
 
-        # 회원가입 요청 테이블
-        self.requests_table = QTableWidget(self.central)
-        self.requests_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.requests_table.setColumnCount(7)
-        self.requests_table.setHorizontalHeaderLabels(
-            ["ID", "가입자 명", "아이디", "연락처", "요청일시", "상태", "작업"]
-        )
-        self._style_table(self.requests_table, [60, 150, 180, 180, 180, 100, 200])
-        self.requests_table.setRowHeight(0, 50)
-
-        # 사용자 관리 테이블 (확장된 컬럼)
+        # 사용자 관리 테이블 (확장된 컨럼) - 기본 표시
         self.users_table = QTableWidget(self.central)
         self.users_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.users_table.setColumnCount(11)
+        self.users_table.setColumnCount(13)
         self.users_table.setHorizontalHeaderLabels(
             [
                 "ID",
                 "아이디",
+                "유형",
                 "구독시작",
                 "구독만료",
                 "작업횟수",
                 "상태",
                 "로그인",
                 "마지막 로그인",
+                "IP",
                 "접속",
                 "현재작업",
                 "작업",
             ]
         )
         self._style_table(
-            self.users_table, [50, 100, 90, 90, 80, 60, 50, 130, 50, 100, 310]
+            self.users_table, [50, 100, 70, 90, 90, 80, 60, 50, 130, 100, 50, 100, 310]
         )
-        self.users_table.setVisible(False)
+        # 사용자 테이블이 기본 표시됨
 
         # 구독 요청 테이블
         self.subscriptions_table = QTableWidget(self.central)
@@ -597,88 +543,10 @@ class AdminDashboard(QMainWindow):
             table.setColumnWidth(i, w)
 
     def _load_data(self):
-        """데이터 로드"""
-        self._load_requests()
+        """데이터 로드 (회원가입 요청 제거 - 자동 승인됨)"""
         self._load_users()
         self._load_subscriptions()
         self._update_last_refresh_time()
-
-    def _load_requests(self):
-        """회원가입 요청 로드"""
-        status_filter = self.filter_combo.currentText()
-        url = f"{self.api_base_url}/user/register/requests"
-        if status_filter != "전체":
-            status_map = {
-                "대기 중": "PENDING",
-                "승인됨": "APPROVED",
-                "거부됨": "REJECTED",
-            }
-            url += f"?status={status_map.get(status_filter, '')}"
-
-        worker = ApiWorker("GET", url, self._get_headers())
-        worker.finished.connect(self._on_requests_loaded)
-        worker.error.connect(self._on_error)
-        self.workers.append(worker)
-        worker.start()
-
-    def _on_requests_loaded(self, data: dict):
-        """요청 목록 로드 완료"""
-        items = data.get("requests", [])
-        self.requests_table.setRowCount(len(items))
-
-        pending = approved = rejected = 0
-
-        for row, req in enumerate(items):
-            self.requests_table.setRowHeight(row, 50)
-
-            status = req.get("status", "")
-            if status == "PENDING":
-                pending += 1
-            elif status == "APPROVED":
-                approved += 1
-            elif status == "REJECTED":
-                rejected += 1
-
-            self._set_cell(self.requests_table, row, 0, str(req.get("id", "")))
-            self._set_cell(self.requests_table, row, 1, req.get("name", ""))
-            self._set_cell(self.requests_table, row, 2, req.get("username", ""))
-            self._set_cell(self.requests_table, row, 3, req.get("contact", ""))
-
-            # 요청 일시
-            created = req.get("created_at", "")
-            if created:
-                try:
-                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                    created = dt.strftime("%Y-%m-%d %H:%M")
-                except:
-                    pass
-            self._set_cell(self.requests_table, row, 4, created or "-")
-
-            # 상태
-            status_text = {
-                "PENDING": "대기 중",
-                "APPROVED": "승인됨",
-                "REJECTED": "거부됨",
-            }.get(status, status)
-            status_color = {
-                "PENDING": DARK["warning"],
-                "APPROVED": DARK["success"],
-                "REJECTED": DARK["danger"],
-            }.get(status, DARK["text"])
-            self._set_cell(self.requests_table, row, 5, status_text, status_color)
-
-            # 작업 버튼
-            if status == "PENDING":
-                widget = self._create_request_actions(req.get("id"), row)
-                self.requests_table.setCellWidget(row, 6, widget)
-            else:
-                self._set_cell(self.requests_table, row, 6, "-")
-
-        self.pending_label.setText(str(pending))
-        self.approved_label.setText(str(approved))
-        self.rejected_label.setText(str(rejected))
-        self.connection_label.setText("연결됨")
-        self.connection_label.setStyleSheet(f"color: {DARK['success']};")
 
     def _load_users(self):
         """사용자 목록 로드"""
@@ -717,7 +585,22 @@ class AdminDashboard(QMainWindow):
                     created = dt.strftime("%Y-%m-%d")
                 except:
                     pass
-            self._set_cell(self.users_table, row, 2, created or "-")
+
+            # 유형 (Trial / Subscriber / Admin)
+            utype = user.get("user_type", "trial")
+            utype_text = {
+                "trial": "체험판",
+                "subscriber": "구독자",
+                "admin": "관리자",
+            }.get(utype, utype)
+            utype_color = {
+                "trial": DARK["text_dim"],
+                "subscriber": DARK["primary"],
+                "admin": DARK["warning"],
+            }.get(utype, DARK["text"])
+
+            self._set_cell(self.users_table, row, 2, utype_text, utype_color)
+            self._set_cell(self.users_table, row, 3, created or "-")
 
             # 구독 만료일
             expires = user.get("subscription_expires_at", "")
@@ -729,21 +612,21 @@ class AdminDashboard(QMainWindow):
                     # 만료 임박 (7일 이내) 또는 만료됨
                     if expires_dt.replace(tzinfo=None) < now:
                         self._set_cell(
-                            self.users_table, row, 3, expires_str, DARK["danger"]
+                            self.users_table, row, 4, expires_str, DARK["danger"]
                         )
                     elif (expires_dt.replace(tzinfo=None) - now).days <= 7:
                         self._set_cell(
-                            self.users_table, row, 3, expires_str, DARK["warning"]
+                            self.users_table, row, 4, expires_str, DARK["warning"]
                         )
                     else:
                         self._set_cell(
-                            self.users_table, row, 3, expires_str, DARK["success"]
+                            self.users_table, row, 4, expires_str, DARK["success"]
                         )
                         active_sub_count += 1
                 except:
-                    self._set_cell(self.users_table, row, 3, "-")
+                    self._set_cell(self.users_table, row, 4, "-")
             else:
-                self._set_cell(self.users_table, row, 3, "-")
+                self._set_cell(self.users_table, row, 4, "-")
 
             # 작업 횟수
             work_count = user.get("work_count", -1)
@@ -755,30 +638,41 @@ class AdminDashboard(QMainWindow):
                 remaining = max(0, work_count - work_used)
                 work_str = f"{remaining}/{work_count}"
                 work_color = DARK["warning"] if remaining <= 10 else DARK["text"]
-            self._set_cell(self.users_table, row, 4, work_str, work_color)
+            self._set_cell(self.users_table, row, 5, work_str, work_color)
 
             # 계정 상태 (활성/비활성)
             is_active = user.get("is_active", False)
             self._set_cell(
                 self.users_table,
                 row,
-                5,
+                6,
                 "활성" if is_active else "정지",
                 DARK["success"] if is_active else DARK["danger"],
             )
 
             # 로그인 횟수
-            self._set_cell(self.users_table, row, 6, str(user.get("login_count", 0)))
+            self._set_cell(self.users_table, row, 7, str(user.get("login_count", 0)))
 
             # 마지막 로그인
             last_login = user.get("last_login_at", "")
             if last_login:
                 try:
                     dt = datetime.fromisoformat(last_login.replace("Z", "+00:00"))
-                    last_login = dt.strftime("%Y-%m-%d %H:%M")
+                    last_login = dt.strftime("%H:%M")  # 시간을 좀더 짧게
+                    # 오늘인지 확인
+                    if dt.date() == now.date():
+                        last_login_str = f"오늘 {last_login}"
+                    else:
+                        last_login_str = dt.strftime("%m-%d %H:%M")
                 except:
-                    pass
-            self._set_cell(self.users_table, row, 7, last_login or "-")
+                    last_login_str = last_login
+            else:
+                last_login_str = "-"
+
+            self._set_cell(self.users_table, row, 8, last_login_str)
+
+            # IP
+            self._set_cell(self.users_table, row, 9, user.get("last_login_ip", "-"))
 
             # 접속 상태 (마지막 로그인이 5분 이내면 온라인으로 간주)
             is_online = False
@@ -794,11 +688,11 @@ class AdminDashboard(QMainWindow):
                     pass
             online_text = "ON" if is_online else "OFF"
             online_color = DARK["online"] if is_online else DARK["offline"]
-            self._set_cell(self.users_table, row, 8, online_text, online_color)
+            self._set_cell(self.users_table, row, 10, online_text, online_color)
 
             # 현재 작업 (세션 정보에서 가져올 수 있음 - 현재는 미구현)
             current_task = user.get("current_task", "-")
-            self._set_cell(self.users_table, row, 9, current_task)
+            self._set_cell(self.users_table, row, 11, current_task)
 
             # 작업 버튼
             widget = self._create_user_actions(
@@ -807,7 +701,7 @@ class AdminDashboard(QMainWindow):
                 row,
                 user.get("hashed_password"),  # 비밀번호 해시 전달
             )
-            self.users_table.setCellWidget(row, 10, widget)
+            self.users_table.setCellWidget(row, 12, widget)
 
         self.online_label.setText(str(online_count))
         self.active_sub_label.setText(str(active_sub_count))
@@ -823,53 +717,6 @@ class AdminDashboard(QMainWindow):
         bg_color = DARK["table_alt"] if row % 2 == 1 else DARK["table_bg"]
         item.setBackground(QBrush(QColor(bg_color)))
         table.setItem(row, col, item)
-
-    def _create_request_actions(self, request_id, row: int = 0) -> QWidget:
-        """요청 작업 버튼 - 절대 좌표로 정확히 배치"""
-        widget = QWidget()
-        widget.setMinimumSize(200, 50)
-        bg_color = DARK["table_alt"] if row % 2 == 1 else DARK["table_bg"]
-        widget.setStyleSheet(f"background-color: {bg_color};")
-
-        btn_y = 10
-        btn_h = 30
-        btn_gap = 5
-
-        approve_btn = QPushButton("승인", widget)
-        approve_btn.setGeometry(5, btn_y, 80, btn_h)
-        approve_btn.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
-        approve_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK["success"]};
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: #00e676;
-            }}
-        """)
-        approve_btn.setCursor(Qt.PointingHandCursor)
-        approve_btn.clicked.connect(lambda: self._approve_request(request_id))
-
-        reject_btn = QPushButton("거부", widget)
-        reject_btn.setGeometry(90, btn_y, 80, btn_h)
-        reject_btn.setFont(QFont(FONT_FAMILY, 9, QFont.Bold))
-        reject_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK["danger"]};
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: #ff8a80;
-            }}
-        """)
-        reject_btn.setCursor(Qt.PointingHandCursor)
-        reject_btn.clicked.connect(lambda: self._reject_request(request_id))
-
-        return widget
 
     def _create_user_actions(
         self, user_id, username, row: int = 0, hashed_password: str = None
@@ -1067,9 +914,6 @@ class AdminDashboard(QMainWindow):
 
         dialog.exec_()
 
-    def _on_filter_changed(self, text):
-        self._load_requests()
-
     def _on_search_changed(self, text):
         self._load_users()
 
@@ -1216,37 +1060,6 @@ class AdminDashboard(QMainWindow):
             self.workers.append(worker)
             worker.start()
 
-    def _approve_request(self, request_id):
-        """승인 다이얼로그"""
-        dialog = ApproveDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            days = dialog.get_days()
-            work_count = dialog.get_work_count()
-            url = f"{self.api_base_url}/user/register/approve"
-            data = {
-                "request_id": request_id,
-                "subscription_days": days,
-                "work_count": work_count,  # -1 = 무제한
-            }
-            worker = ApiWorker("POST", url, self._get_headers(), data)
-            worker.finished.connect(lambda d: self._on_action_done("승인", d))
-            worker.error.connect(self._on_error)
-            self.workers.append(worker)
-            worker.start()
-
-    def _reject_request(self, request_id):
-        """거부 다이얼로그"""
-        dialog = RejectDialog(self)
-        if dialog.exec_() == QDialog.Accepted:
-            reason = dialog.get_reason()
-            url = f"{self.api_base_url}/user/register/reject"
-            data = {"request_id": request_id, "reason": reason}
-            worker = ApiWorker("POST", url, self._get_headers(), data)
-            worker.finished.connect(lambda d: self._on_action_done("거부", d))
-            worker.error.connect(self._on_error)
-            self.workers.append(worker)
-            worker.start()
-
     def _extend_subscription(self, user_id, username):
         """구독 연장"""
         dialog = ExtendDialog(username, self)
@@ -1293,9 +1106,16 @@ class AdminDashboard(QMainWindow):
         url = f"{self.api_base_url}/user/admin/users/{user_id}"
         worker = ApiWorker("DELETE", url, self._get_headers())
         worker.finished.connect(lambda d: self._on_action_done("삭제", d))
-        worker.error.connect(self._on_error)
+        worker.error.connect(lambda e: self._on_action_error("삭제", e))
         self.workers.append(worker)
         worker.start()
+
+    def _on_action_error(self, action, error):
+        """작업 실패 시 에러 메시지 표시"""
+        self._on_error(error)
+        msg = _styled_msg_box(self, "오류", f"{action} 실패: {error}", "error")
+        msg.exec_()
+        self._load_data()
 
     def _on_action_done(self, action, data):
         if data.get("success"):
@@ -1323,7 +1143,7 @@ class ApproveDialog(QDialog):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("회원가입 승인")
+        self.setWindowTitle("구독 승인")
         self.setFixedSize(420, 300)
         self.setStyleSheet(f"background-color: {DARK['card']};")
         self._setup_ui()

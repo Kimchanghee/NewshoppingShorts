@@ -436,7 +436,7 @@ class SecretsManager:
                     # 세션당 한 번만 경고 표시
                     if not cls._warning_shown:
                         cls._warning_shown = True
-                        logger.info(
+                        logger.debug(
                             "[보안] 개발 모드: 파일 기반 암호화 키 사용 중. "
                             "프로덕션에서는 SECRETS_ENCRYPTION_KEY 환경 변수를 설정하세요."
                         )
@@ -466,7 +466,7 @@ class SecretsManager:
             # 세션당 한 번만 경고 표시
             if not cls._warning_shown:
                 cls._warning_shown = True
-                logger.info(
+                logger.debug(
                     "[보안] 개발 모드: 새 암호화 키 생성됨. 저장 위치: %s. "
                     "프로덕션에서는 SECRETS_ENCRYPTION_KEY 환경 변수를 설정하세요.",
                     key_file

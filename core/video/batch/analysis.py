@@ -49,50 +49,12 @@ def _analyze_video_for_batch(app):
 
         prompt = get_video_analysis_prompt(cta_lines)
 
-        # 파일 업로드 (Gemini가 자동으로 최적 해상도 선택)
-        app.add_log(f"[분석] 영상 파일 업로드 중... ({os.path.basename(app._temp_downloaded_file)})")
-        logger.info(f"[배치 분석] 영상 파일 업로드 중... ({os.path.basename(app._temp_downloaded_file)})")
-        video_file = app.genai_client.files.upload(file=app._temp_downloaded_file)
-        app.add_log("[분석] 업로드 완료, Gemini 서버에서 처리 대기 중...")
-        logger.info("[배치 분석] 업로드 완료, 파일 처리 대기 중...")
+        # 5분 타임아웃으로 분석 실행 (최대 5회 재시도)
+        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+        ANALYSIS_TIMEOUT = 300  # 5분
+        MAX_RETRIES = 5
 
-        wait_count = 0
-        max_wait_time = 600  # 최대 10분 대기 (타임아웃)
-        while video_file.state == types.FileState.PROCESSING:
-            time.sleep(2)
-            wait_count += 2
-            if wait_count >= max_wait_time:
-                raise TimeoutError(f"파일 처리 시간 초과 ({max_wait_time}초). 네트워크 상태를 확인하세요.")
-            if wait_count % 10 == 0:  # 10초마다 로그 출력
-                app.add_log(f"[분석] 서버 처리 중... ({wait_count}초 경과)")
-                logger.info(f"[배치 분석] 파일 처리 중... ({wait_count}초 경과)")
-            video_file = app.genai_client.files.get(name=video_file.name)
-
-        app.add_log(f"[분석] 서버 처리 완료 ({wait_count}초 소요)")
-        logger.info(f"[배치 분석] 파일 처리 완료 ({wait_count}초 소요)")
-
-        if video_file.state == types.FileState.FAILED:
-            error_message = getattr(getattr(video_file, "error", None), "message", "")
-            raise RuntimeError(f"파일 처리 실패: {error_message}")
-
-        if not video_file.uri or not video_file.mime_type:
-            raise RuntimeError("업로드된 비디오 정보에 URI 또는 MIME 타입이 없습니다.")
-
-        # 비디오 파트 생성
-        video_part = types.Part.from_uri(
-            file_uri=video_file.uri,
-            mime_type=video_file.mime_type
-        )
-
-        # API 호출 전 로그
-        app.add_log("[분석] Gemini AI로 영상 분석 요청 중...")
-        app.add_log(f"[분석] 영상 길이: {app.get_video_duration_helper():.1f}초")
-        app.add_log("[분석] AI 분석에는 30초~2분 정도 소요됩니다...")
-        logger.info("[배치 분석] Gemini API로 영상 분석 요청 중...")
-        logger.info(f"[배치 분석] 영상 길이: {app.get_video_duration_helper():.1f}초")
-        logger.info("[배치 분석] 분석에는 30초~2분 정도 소요될 수 있습니다. 잠시만 기다려주세요...")
-
-        # 진행 상황 표시 스레드
+        # 진행 상황 표시 스레드 관련 변수
         analysis_done = threading.Event()
         elapsed_time = [0]  # mutable object for thread
 
@@ -107,52 +69,6 @@ def _analyze_video_for_batch(app):
 
         progress_thread = threading.Thread(target=progress_indicator, daemon=True)
         progress_thread.start()
-
-        # 현재 사용 중인 API 키 로깅 (api_key_manager를 우선 사용)
-        api_mgr = getattr(app, "api_key_manager", None) or getattr(app, "api_manager", None)
-        current_api_key = getattr(api_mgr, "current_key", "unknown") if api_mgr else "unknown"
-        logger.debug(f"[영상 분석 API] 사용 중인 API 키: {current_api_key}")
-
-        # 5분 타임아웃으로 분석 실행 (최대 5회 재시도)
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-        ANALYSIS_TIMEOUT = 300  # 5분
-        MAX_RETRIES = 5
-
-        def call_gemini_api():
-            # Gemini 3 모델: thinking_level 사용 (LOW = 빠름, HIGH = 느림)
-            # Gemini 2.5 모델: thinking_budget 사용 (0 = 끔, 24576 = 최대)
-            is_gemini_3 = "gemini-3" in config.GEMINI_VIDEO_MODEL.lower()
-
-            if is_gemini_3:
-                thinking_level = (
-                    types.ThinkingLevel.LOW
-                    if config.GEMINI_THINKING_LEVEL == "low"
-                    else types.ThinkingLevel.HIGH
-                )
-                generation_config = types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(
-                        thinking_level=thinking_level
-                    ),
-                    temperature=config.GEMINI_TEMPERATURE,
-                )
-            else:
-                # Gemini 2.5 이하 모델
-                thinking_budget = 0 if config.GEMINI_THINKING_LEVEL == "low" else 24576
-                generation_config = types.GenerateContentConfig(
-                    thinking_config=types.ThinkingConfig(
-                        thinking_budget=thinking_budget
-                    ),
-                    temperature=config.GEMINI_TEMPERATURE,
-                )
-
-            return app.genai_client.models.generate_content(
-                model=config.GEMINI_VIDEO_MODEL,
-                contents=[
-                    video_part,
-                    prompt,
-                ],
-                config=generation_config,
-            )
 
         def is_gemini_server_error(error_str: str) -> bool:
             """Gemini 서버 오류인지 확인 (API 키 오류 제외)"""
@@ -170,17 +86,6 @@ def _analyze_video_for_batch(app):
             if any(kw in error_lower for kw in api_key_keywords):
                 return False
             return any(kw.lower() in error_lower for kw in server_error_keywords)
-
-        def show_server_error_popup():
-            """Gemini 서버 오류 팝업 표시"""
-            try:
-                # UI 스레드에서 팝업 표시
-                if hasattr(app, 'root') and app.root:
-                    app.root.after(0, lambda: _show_gemini_server_error_dialog(app))
-                else:
-                    logger.warning("[배치 분석] Gemini 서버 오류 - 잠시 후 다시 시도해주세요")
-            except Exception as popup_err:
-                logger.warning(f"[배치 분석] 팝업 표시 실패: {popup_err}")
 
         def _show_gemini_server_error_dialog(app):
             """Gemini 서버 오류 다이얼로그"""
@@ -202,9 +107,26 @@ def _analyze_video_for_batch(app):
                     "잠시 후 다시 시도해주세요."
                 )
 
+        def show_server_error_popup():
+            """Gemini 서버 오류 팝업 표시"""
+            try:
+                # UI 스레드에서 팝업 표시
+                if hasattr(app, 'root') and app.root:
+                    app.root.after(0, lambda: _show_gemini_server_error_dialog(app))
+                else:
+                    logger.warning("[배치 분석] Gemini 서버 오류 - 잠시 후 다시 시도해주세요")
+            except Exception as popup_err:
+                logger.warning(f"[배치 분석] 팝업 표시 실패: {popup_err}")
+
+        # 현재 사용 중인 API 키 로깅 (api_key_manager를 우선 사용)
+        api_mgr = getattr(app, "api_key_manager", None) or getattr(app, "api_manager", None)
+        current_api_key = getattr(api_mgr, "current_key", "unknown") if api_mgr else "unknown"
+        logger.debug(f"[영상 분석 API] 사용 중인 API 키: {current_api_key}")
+
         response = None
         last_error = None
         is_server_error = False
+        video_file = None
 
         for attempt in range(1, MAX_RETRIES + 1):
             try:
@@ -212,8 +134,66 @@ def _analyze_video_for_batch(app):
                     app.add_log(f"[분석] API 재시도 {attempt}/{MAX_RETRIES}...")
                 logger.info(f"[배치 분석] API 호출 시도 {attempt}/{MAX_RETRIES} (타임아웃: {ANALYSIS_TIMEOUT}초)")
 
+                # API 키가 바뀌었거나 첫 시도라면 파일 업로드 수행
+                if video_file is None:
+                    # 파일 업로드 (Gemini가 자동으로 최적 해상도 선택)
+                    app.add_log(f"[분석] 영상 파일 업로드 중... ({os.path.basename(app._temp_downloaded_file)})")
+                    logger.info(f"[배치 분석] 영상 파일 업로드 중... ({os.path.basename(app._temp_downloaded_file)})")
+                    video_file = app.genai_client.files.upload(file=app._temp_downloaded_file)
+                    app.add_log("[분석] 업로드 완료, Gemini 서버에서 처리 대기 중...")
+                    logger.info("[배치 분석] 업로드 완료, 파일 처리 대기 중...")
+
+                    wait_count = 0
+                    max_wait_time = 600  # 최대 10분 대기
+                    while video_file.state == types.FileState.PROCESSING:
+                        time.sleep(2)
+                        wait_count += 2
+                        if wait_count >= max_wait_time:
+                            raise TimeoutError(f"파일 처리 시간 초과 ({max_wait_time}초)")
+                        if wait_count % 10 == 0:
+                            app.add_log(f"[분석] 서버 처리 중... ({wait_count}초 경과)")
+                        video_file = app.genai_client.files.get(name=video_file.name)
+
+                    if video_file.state == types.FileState.FAILED:
+                        error_message = getattr(getattr(video_file, "error", None), "message", "")
+                        raise RuntimeError(f"파일 처리 실패: {error_message}")
+                    
+                    app.add_log(f"[분석] 서버 처리 완료 ({wait_count}초 소요)")
+                    logger.info(f"[배치 분석] 파일 처리 완료 ({wait_count}초 소요)")
+
+                # 비디오 파트 생성 (항상 현재 video_file 기준)
+                video_part = types.Part.from_uri(
+                    file_uri=video_file.uri,
+                    mime_type=video_file.mime_type
+                )
+
+                def call_gemini_api_internal():
+                    is_gemini_3 = "gemini-3" in config.GEMINI_VIDEO_MODEL.lower()
+                    if is_gemini_3:
+                        thinking_level = (
+                            types.ThinkingLevel.LOW
+                            if config.GEMINI_THINKING_LEVEL == "low"
+                            else types.ThinkingLevel.HIGH
+                        )
+                        generation_config = types.GenerateContentConfig(
+                            thinking_config=types.ThinkingConfig(thinking_level=thinking_level),
+                            temperature=config.GEMINI_TEMPERATURE,
+                        )
+                    else:
+                        thinking_budget = 0 if config.GEMINI_THINKING_LEVEL == "low" else 24576
+                        generation_config = types.GenerateContentConfig(
+                            thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
+                            temperature=config.GEMINI_TEMPERATURE,
+                        )
+
+                    return app.genai_client.models.generate_content(
+                        model=config.GEMINI_VIDEO_MODEL,
+                        contents=[video_part, prompt],
+                        config=generation_config,
+                    )
+
                 with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(call_gemini_api)
+                    future = executor.submit(call_gemini_api_internal)
                     try:
                         response = future.result(timeout=ANALYSIS_TIMEOUT)
                         app.add_log("[분석] AI 분석 응답 수신 완료!")
@@ -222,19 +202,38 @@ def _analyze_video_for_batch(app):
                     except FuturesTimeoutError:
                         logger.warning(f"[배치 분석] 타임아웃! {ANALYSIS_TIMEOUT}초 초과 (시도 {attempt}/{MAX_RETRIES})")
                         last_error = f"분석 타임아웃 ({ANALYSIS_TIMEOUT}초 초과)"
-                        is_server_error = True  # 타임아웃도 서버 문제로 간주
+                        is_server_error = True
                         if attempt < MAX_RETRIES:
-                            # 타임아웃도 지수 백오프 적용
                             import random
                             wait_time = min(60, 10 * (2 ** (attempt - 1))) + random.uniform(0, 5)
-                            logger.info(f"[배치 분석] {int(wait_time)}초 후 재시도합니다...")
                             time.sleep(wait_time)
-                            elapsed_time[0] = 0
                         continue
 
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"[배치 분석] API 호출 실패 (시도 {attempt}): {e}")
+
+                # 429 Quota Exceeded 또는 403 Permission Denied 처리 (키 교체)
+                is_quota_error = "429" in str(e) and ("RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower())
+                is_permission_error = "403" in str(e) or "PERMISSION_DENIED" in str(e) or "permission denied" in str(e).lower()
+
+                if is_quota_error or is_permission_error:
+                    if is_quota_error:
+                        logger.warning("[배치 분석] API 키 할당량 초과(429) 감지. 키 교체를 시도합니다.")
+                    else:
+                        logger.warning("[배치 분석] API 키 권한 오류(403) 감지. 키 교체 및 파일 재업로드를 시도합니다.")
+                    
+                    if api_mgr:
+                        api_mgr.block_current_key(duration_minutes=60 if is_permission_error else 5)
+                        if app.init_client():
+                            new_key = getattr(api_mgr, 'current_key', 'unknown')
+                            logger.info(f"[배치 분석] API 키 교체 완료 -> {new_key}. 즉시 재시도합니다.")
+                            video_file = None  # 새 키로 재업로드 필요하므로 초기화
+                            continue
+                        else:
+                            logger.error("[배치 분석] 교체할 API 키가 더 이상 없습니다.")
+                    else:
+                        logger.warning("[배치 분석] API Key Manager가 없어 키 교체를 수행할 수 없습니다.")
 
                 # Gemini 서버 오류인지 확인
                 if is_gemini_server_error(last_error):
@@ -242,18 +241,9 @@ def _analyze_video_for_batch(app):
                     logger.warning("[배치 분석] Gemini 서버 오류 감지!")
 
                 if attempt < MAX_RETRIES:
-                    # 지수 백오프: 서버 오류일 때 점점 더 오래 대기 (5, 15, 30, 60, 90초)
-                    if is_server_error:
-                        base_wait = 5
-                        wait_time = min(90, base_wait * (2 ** (attempt - 1)))  # 지수 증가, 최대 90초
-                        # 약간의 랜덤 지터 추가 (0~5초)
-                        import random
-                        jitter = random.uniform(0, 5)
-                        wait_time = int(wait_time + jitter)
-                    else:
-                        wait_time = 3
-                    logger.info(f"[배치 분석] {wait_time}초 후 재시도합니다... (시도 {attempt + 1}/{MAX_RETRIES})")
-                    time.sleep(wait_time)
+                    wait_time = min(90, 5 * (2 ** (attempt - 1))) if is_server_error else 3
+                    import random
+                    time.sleep(wait_time + random.uniform(0, 5))
                 continue
 
         # 진행 표시 스레드 종료
@@ -423,15 +413,47 @@ def _translate_script_for_batch(app):
             cta_lines=cta_lines
         )
 
-        # 현재 사용 중인 API 키 로깅
-        api_mgr = getattr(app, 'api_key_manager', None) or getattr(app, 'api_manager', None)
-        current_api_key = getattr(api_mgr, 'current_key', 'unknown') if api_mgr else 'unknown'
-        logger.debug(f"[번역 API] 사용 중인 API 키: {current_api_key}")
+        MAX_RETRIES = 3
+        response = None
+        
+        for attempt in range(1, MAX_RETRIES + 1):
+            try:
+                if attempt > 1:
+                    app.add_log(f"[번역] API 재시도 {attempt}/{MAX_RETRIES}...")
+                
+                # 현재 사용 중인 API 키 로깅
+                api_mgr = getattr(app, 'api_key_manager', None) or getattr(app, 'api_manager', None)
+                current_api_key = getattr(api_mgr, 'current_key', 'unknown') if api_mgr else 'unknown'
+                logger.debug(f"[번역 API] 사용 중인 API 키 (시도 {attempt}): {current_api_key}")
 
-        response = app.genai_client.models.generate_content(
-            model=config.GEMINI_TEXT_MODEL,
-            contents=[prompt],
-        )
+                response = app.genai_client.models.generate_content(
+                    model=config.GEMINI_TEXT_MODEL,
+                    contents=[prompt],
+                )
+                break # 성공 시 루프 탈출
+                
+            except Exception as e:
+                logger.error(f"[배치 번역] API 호출 실패 (시도 {attempt}): {e}")
+                
+                # 429 Quota Exceeded 처리 (키 교체)
+                if "429" in str(e) and ("RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower()):
+                    logger.warning("[배치 번역] API 키 할당량 초과(429) 감지. 키 교체를 시도합니다.")
+                    if api_mgr:
+                        api_mgr.block_current_key(duration_minutes=60)
+                        # 클라이언트 재초기화 (새 키 로드)
+                        if app.init_client():
+                            new_key = getattr(api_mgr, 'current_key', 'unknown')
+                            logger.info(f"[배치 번역] API 키 교체 완료 -> {new_key}. 즉시 재시도합니다.")
+                            continue
+                        else:
+                            logger.error("[배치 번역] 교체할 API 키가 더 이상 없습니다.")
+                    else:
+                        logger.warning("[배치 번역] API Key Manager가 없어 키 교체를 수행할 수 없습니다.")
+                
+                if attempt < MAX_RETRIES:
+                    time.sleep(2 * attempt)
+                else:
+                    raise e
 
         # 비용 계산 및 로깅
         if response and hasattr(response, 'usage_metadata') and response.usage_metadata:

@@ -2,6 +2,7 @@
 """
 Environment setup for DPI, ffmpeg, and onnxruntime.
 """
+
 import sys
 import os
 import ctypes
@@ -19,7 +20,7 @@ def setup_dpi_awareness() -> None:
     - PROCESS_PER_MONITOR_DPI_AWARE (2): Each monitor's DPI is recognized
     - Works together with Qt's AA_EnableHighDpiScaling
     """
-    if sys.platform != 'win32':
+    if sys.platform != "win32":
         return
 
     try:
@@ -43,12 +44,49 @@ def setup_ffmpeg_path() -> None:
     warnings.filterwarnings("ignore", message="Couldn't find ffmpeg or avconv")
 
     try:
+        # Check bundled ffmpeg first (PyInstaller onefile/onedir support)
+        bundled_ffmpeg = None
+
+        if getattr(sys, "frozen", False):
+            # PyInstaller path
+            base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+
+            # Possible locations in bundle
+            candidates = [
+                os.path.join(base_path, "imageio_ffmpeg", "ffmpeg.exe"),
+                os.path.join(base_path, "ffmpeg.exe"),
+                os.path.join(os.path.dirname(sys.executable), "ffmpeg.exe"),  # External
+            ]
+
+            for path in candidates:
+                if os.path.exists(path):
+                    bundled_ffmpeg = path
+                    break
+
+        if bundled_ffmpeg:
+            # Set environment variables for imageio-ffmpeg and general usage
+            os.environ["IMAGEIO_FFMPEG_EXE"] = bundled_ffmpeg
+
+            # Add to PATH so subprocess.run(['ffmpeg']) works
+            ffmpeg_dir = os.path.dirname(bundled_ffmpeg)
+            current_path = os.environ.get("PATH", "")
+            if ffmpeg_dir not in current_path:
+                os.environ["PATH"] = ffmpeg_dir + os.pathsep + current_path
+
+            logger.info(f"Bundled FFmpeg setup: {bundled_ffmpeg}")
+            return
+
+        # Fallback to standard detection
         import imageio_ffmpeg
+
         ffmpeg_exe = imageio_ffmpeg.get_ffmpeg_exe()
         if ffmpeg_exe and os.path.exists(ffmpeg_exe):
+            os.environ["IMAGEIO_FFMPEG_EXE"] = ffmpeg_exe  # Explicitly set
             os.environ["PATH"] = (
                 os.path.dirname(ffmpeg_exe) + os.pathsep + os.environ.get("PATH", "")
             )
+            logger.info(f"System FFmpeg setup: {ffmpeg_exe}")
+
     except Exception as e:
         logger.debug("ffmpeg path setup failed (non-critical): %s", e)
 
@@ -74,9 +112,7 @@ def setup_onnxruntime_environment() -> None:
 
         # exe directory (important for onedir builds)
         exe_dir = (
-            os.path.dirname(sys.executable)
-            if getattr(sys, "frozen", False)
-            else base
+            os.path.dirname(sys.executable) if getattr(sys, "frozen", False) else base
         )
 
         # Expected _internal structure
@@ -89,6 +125,7 @@ def setup_onnxruntime_environment() -> None:
         # Add actual onnxruntime installation/bundle path
         try:
             import importlib.util
+
             spec = importlib.util.find_spec("onnxruntime")
             if spec and spec.origin:
                 mod_dir = os.path.dirname(spec.origin)
@@ -145,6 +182,7 @@ def load_onnxruntime() -> bool:
 
     try:
         import onnxruntime  # noqa: F401
+
         logger.debug("onnxruntime loaded successfully")
         return True
     except Exception as e:
