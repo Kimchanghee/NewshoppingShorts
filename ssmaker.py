@@ -22,6 +22,25 @@ ensure_stdio()
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 os.environ["QT_ENABLE_HIGHDPI_SCALING"] = "1"
 
+# API 서버 주소 설정
+# 배포된 exe(frozen)는 클라우드 서버를 강제로 사용
+if getattr(sys, "frozen", False):
+    # [배포용] 클라우드 운영 서버 (환경변수 무시하고 강제 설정)
+    os.environ["API_SERVER_URL"] = (
+        "https://ssmaker-auth-api-1049571775048.us-central1.run.app/"
+    )
+else:
+    # [개발용] 환경 변수가 없으면 기본값 설정
+    if "API_SERVER_URL" not in os.environ:
+        os.environ["API_SERVER_URL"] = (
+            "https://ssmaker-auth-api-1049571775048.us-central1.run.app/"
+        )
+
+# 로깅 설정 (urllib3 경고 숨기기)
+import logging
+
+logging.getLogger("urllib3").setLevel(logging.ERROR)
+
 
 class StartupWorker(QtCore.QThread):
     """Background worker for heavy initialization tasks."""
@@ -184,10 +203,16 @@ if __name__ == "__main__":
         import tkinter as tk
         from main import VideoAnalyzerGUI
 
+        logger = logging.getLogger("ssmaker")
+        logger.info(
+            "[Startup] PyQt login phase complete. Launching Tkinter main app..."
+        )
+
         root = tk.Tk()
         gui = VideoAnalyzerGUI(
             root, login_data=controller.login_data, preloaded_ocr=controller.ocr_reader
         )
+        logger.info("[Startup] Tkinter root created. Entering mainloop.")
         root.mainloop()
 
     sys.exit(exit_code)

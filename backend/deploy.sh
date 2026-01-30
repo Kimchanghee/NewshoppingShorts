@@ -32,6 +32,7 @@ gcloud run deploy $SERVICE_NAME \
   --set-env-vars "CLOUD_SQL_CONNECTION_NAME=${CLOUD_SQL_CONNECTION}" \
   --set-env-vars "ENVIRONMENT=production" \
   --set-env-vars "ALLOWED_ORIGINS=*" \
+  --set-env-vars "SSMAKER_API_KEY=ssmaker" \
   --set-secrets "DB_PASSWORD=ssmaker-db-password:latest" \
   --set-secrets "JWT_SECRET_KEY=ssmaker-jwt-secret:latest" \
   --set-secrets "ADMIN_API_KEY=ssmaker-admin-api-key:latest" \

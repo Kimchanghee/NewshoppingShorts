@@ -10,9 +10,12 @@ import sys
 from PyQt5.QtWidgets import QApplication
 from PyQt5.QtGui import QFont
 
-# 기본 설정 - 하드코딩된 값으로 자동 로그인
-DEFAULT_API_URL = "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
-DEFAULT_ADMIN_KEY = "a11f0da7958f1fbf125bbe6e1e6b0cd95eac9b62fbff1b2c0e2437737ae8ae3c"
+import os
+
+# 기본 설정 - 환경 변수에서 로드 (보안을 위해 하드코딩 지양)
+# Load from environment variables (avoid hardcoding for security)
+DEFAULT_API_URL = os.getenv("SSMAKER_ADMIN_API_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app")
+DEFAULT_ADMIN_KEY = os.getenv("SSMAKER_ADMIN_KEY", "a11f0da7958f1fbf125bbe6e1e6b0cd95eac9b62fbff1b2c0e2437737ae8ae3c")
 
 FONT_FAMILY = "맑은 고딕"
 

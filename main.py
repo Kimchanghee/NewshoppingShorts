@@ -7,6 +7,7 @@ import re
 import shutil
 import hashlib
 import threading
+import queue  # For thread-safe UI updates
 import time
 import warnings
 from datetime import datetime
@@ -278,6 +279,10 @@ class VideoAnalyzerGUI:
         self.config = config
 
         self.root.title(f"쇼핑 숏폼 메이커")
+
+        # Thread-safe UI update queue
+        self.msg_queue = queue.Queue()
+        self.root.after(100, self.check_queue)
 
         icon_path = resource_path(os.path.join("resource", "mainTrayIcon.png"))
         # Icon path verified silently
@@ -577,7 +582,19 @@ class VideoAnalyzerGUI:
         threading.Thread(target=self._async_load_and_init, daemon=True).start()
 
         # 로그인 상태 감시 시작
+        logger.info("[MainApp] Initialization complete. Starting login watch...")
         self._start_login_watch()
+        logger.info("[MainApp] Main window ready and event loop running.")
+
+    def check_queue(self):
+        """Thread-safe UI update queue worker"""
+        try:
+            while True:
+                task = self.msg_queue.get_nowait()
+                task()
+        except queue.Empty:
+            pass
+        self.root.after(100, self.check_queue)
 
     def _async_load_and_init(self):
         """비동기 API 키 로드 및 초기화"""
@@ -1254,8 +1271,8 @@ class VideoAnalyzerGUI:
                             self._trial_exhaustion_shown = False
                 self._last_work_used = current_work_used
 
-                # 성공 시 UI 업데이트
-                self.root.after(0, lambda: self._update_subscription_widget(result))
+                # 성공 시 UI 업데이트 (Thread-safe)
+                self.msg_queue.put(lambda: self._update_subscription_widget(result))
             # 실패 시 무시 (기존 데이터 유지)
 
         threading.Thread(target=fetch_status, daemon=True).start()
@@ -2121,14 +2138,16 @@ class VideoAnalyzerGUI:
                 return
 
             # Safe nested dictionary access
-            user_id = self.login_data.get("data", {}).get("data", {}).get("id")
+            user_data = self.login_data.get("data", {}).get("data", {})
+            user_id = user_data.get("id")
+            token = self.login_data.get("data", {}).get("token") or user_data.get("token")
 
             if not user_id:
                 logger.warning("User ID not found in login data - skipping logout")
                 return
 
             # Attempt logout
-            data = {"userId": user_id, "key": "ssmaker"}
+            data = {"userId": user_id, "key": token or "ssmaker"}
             try:
                 rest.logOut(**data)
                 logger.info("Logout successful")

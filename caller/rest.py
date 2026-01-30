@@ -35,8 +35,8 @@ _ERROR_MESSAGES = {
 # 환경 변수에서 서버 URL 가져오기 (보안 설정)
 # Production: Cloud Run, Development: localhost
 main_server = os.getenv(
-    "API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app/"
-)
+    "API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
+).rstrip("/")
 
 # Production environment detection
 # 운영 환경 감지
@@ -231,28 +231,48 @@ def login(**data) -> Dict[str, Any]:
     }
 
     try:
+        logger.info(f"[Login] Requesting login to: {main_server}/user/login/god")
+        logger.info(f"[Login] Params: id={_sanitize_user_id_for_logging(user_id)}, ip={ip_address}, force={data.get('force', False)}")
+        
+        start_time = time.time()
         response = _secure_session.post(
-            main_server + "user/login/god",
+            f"{main_server}/user/login/god",
             json=body,
-            timeout=(
-                3,
-                10,
-            ),  # (connect_timeout, read_timeout) - 빠른 연결, 적절한 읽기 시간
+            timeout=(3, 10),
         )
+        elapsed = time.time() - start_time
+        
+        logger.info(f"[Login] Response received in {elapsed:.2f}s, Status: {response.status_code}")
+        
+        # 응답 바디 로깅 (에러 발생 전 수행)
+        try:
+            loginObject = json.loads(response.text)
+            # 로그에 응답 구조만 남기고 민감 정보 제외
+            safe_log_obj = loginObject.copy()
+            if "data" in safe_log_obj and isinstance(safe_log_obj["data"], dict):
+                data_part = safe_log_obj["data"].copy()
+                if "token" in data_part:
+                    data_part["token"] = "MASKED_TOKEN"
+                safe_log_obj["data"] = data_part
+            logger.info(f"[Login] Response body: {json.dumps(safe_log_obj, ensure_ascii=False)}")
+        except Exception:
+            logger.warning("[Login] Failed to parse response body for logging")
+            # JSON 파싱 실패 시 텍스트라도 로깅
+            logger.info(f"[Login] Raw response: {response.text[:500]}")
+
         response.raise_for_status()
-        loginObject = json.loads(response.text)
 
         # Store JWT token securely on successful login
-        # 로그인 성공 시 JWT 토큰 안전하게 저장
         if loginObject.get("status") == True and "data" in loginObject:
             token = loginObject.get("data", {}).get("token")
             if token:
-                # Check token expiration before storing
-                # 저장 전 토큰 만료 확인
                 if _check_token_expiration(token):
                     _set_auth_token(token)
+                    logger.info("[Login] New auth token stored successfully")
                 else:
-                    logger.warning("Received expired JWT token from server")
+                    logger.warning("[Login] Received expired JWT token from server")
+            else:
+                logger.warning("[Login] No token found in successful login response")
 
         return loginObject
     except requests.exceptions.Timeout:
@@ -312,7 +332,7 @@ def logOut(**data) -> str:
 
     try:
         response = _secure_session.post(
-            main_server + "user/logout/god", json=body, timeout=60
+            f"{main_server}/user/logout/god", json=body, timeout=60
         )
         response.raise_for_status()
         loginObject = json.loads(response.text)
@@ -374,7 +394,7 @@ def loginCheck(**data) -> Dict[str, Any]:
 
     try:
         response = _secure_session.post(
-            main_server + "user/login/god/check", json=body, timeout=60
+            f"{main_server}/user/login/god/check", json=body, timeout=60
         )
         response.raise_for_status()
         loginObject = json.loads(response.text)
@@ -405,7 +425,9 @@ def getVersion() -> str:
         Version string
     """
     try:
-        response = _secure_session.get(main_server + "free/lately/?item=22", timeout=5)
+        response = _secure_session.get(
+            f"{main_server}/free/lately/?item=22", timeout=15
+        )
         response.raise_for_status()
         bodyObject = json.loads(response.text)
         version = bodyObject.get("version", "1.0.0")
@@ -416,16 +438,16 @@ def getVersion() -> str:
         requests.exceptions.ConnectionError,
         requests.exceptions.Timeout,
     ):
-        logger.warning("Version check server timeout - using default version")
+        logger.debug("Version check server timeout - using default version")
         return "1.0.0"
     except requests.exceptions.RequestException as e:
-        logger.warning(f"Version check failed: {e} - using default version")
+        logger.debug(f"Version check failed: {e} - using default version")
         return "1.0.0"
     except json.JSONDecodeError as e:
-        logger.error(f"Version response parsing failed: {e} - using default version")
+        logger.debug(f"Version response parsing failed: {e} - using default version")
         return "1.0.0"
     except Exception as e:
-        logger.exception(f"Unexpected version check error: {e} - using default version")
+        logger.debug(f"Unexpected version check error: {e} - using default version")
         return "1.0.0"
 
 
@@ -471,22 +493,38 @@ def submitRegistrationRequest(
 
     try:
         logger.info(
-            f"Sending registration request to: {main_server}user/register/request"
+            f"Sending registration request to: {main_server}/user/register/request"
         )
         response = _secure_session.post(
-            main_server + "user/register/request", json=body, timeout=30
+            f"{main_server}/user/register/request", json=body, timeout=30
         )
 
-        # 모든 응답 로깅 (디버깅용)
         logger.info(f"Registration response status: {response.status_code}")
         logger.info(f"Registration response body: {response.text[:500]}")
 
         if response.status_code == 409:
-            # Username already exists or pending
+            # Username already exists
             return {
                 "success": False,
-                "message": "이미 사용 중이거나 승인 대기 중인 아이디입니다.",
+                "message": "이미 사용 중인 아이디입니다.",
             }
+
+        if response.status_code == 429:
+            try:
+                error_data = response.json()
+                error_info = error_data.get("error", {})
+                retry_after = error_info.get(
+                    "retry_after", "1시간 후 다시 시도해주세요."
+                )
+                return {
+                    "success": False,
+                    "message": f"회원가입 요청이 너무 많습니다.\n{retry_after} 후 다시 시도해주세요.",
+                }
+            except json.JSONDecodeError:
+                return {
+                    "success": False,
+                    "message": "회원가입 요청이 너무 많습니다.\n잠시 후 다시 시도해주세요.",
+                }
 
         response.raise_for_status()
         result = response.json()
@@ -495,10 +533,23 @@ def submitRegistrationRequest(
             logger.info(
                 f"Registration request submitted for: {_sanitize_user_id_for_logging(username)}"
             )
-            return {"success": True, "message": "회원가입 요청이 접수되었습니다."}
+            # Return full result to allow auto-login
+            return result
         else:
-            # 서버에서 온 에러 메시지 그대로 전달
+            # 서버에서 온 에러 메시지 처리 (SQL 에러 숨기기)
             server_message = result.get("message", "요청 처리에 실패했습니다.")
+
+            if (
+                "Duplicate entry" in server_message
+                or "IntegrityError" in server_message
+                or "1062" in str(server_message)
+            ):
+                server_message = (
+                    "이미 존재하는 아이디입니다. 다른 아이디를 사용해주세요."
+                )
+            elif "SQL" in server_message or "pymysql" in server_message:
+                server_message = "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+
             logger.error(f"Registration failed: {server_message}")
             return {"success": False, "message": server_message}
 
@@ -545,7 +596,7 @@ def checkWorkAvailable(user_id: str) -> Dict[str, Any]:
 
     try:
         response = _secure_session.post(
-            main_server + "user/work/check", json=body, timeout=10
+            f"{main_server}/user/work/check", json=body, timeout=10
         )
         response.raise_for_status()
         result = response.json()
@@ -604,7 +655,7 @@ def useWork(user_id: str) -> Dict[str, Any]:
 
     try:
         response = _secure_session.post(
-            main_server + "user/work/use", json=body, timeout=10
+            f"{main_server}/user/work/use", json=body, timeout=10
         )
         response.raise_for_status()
         result = response.json()
@@ -695,7 +746,7 @@ def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
 
     try:
         response = _secure_session.get(
-            main_server + "user/subscription/my-status", headers=headers, timeout=10
+            f"{main_server}/user/subscription/my-status", headers=headers, timeout=10
         )
         response.raise_for_status()
         result = response.json()
@@ -759,7 +810,7 @@ def submitSubscriptionRequest(user_id: str, message: str = "") -> Dict[str, Any]
             f"Submitting subscription request for user: {_sanitize_user_id_for_logging(str(user_id))}"
         )
         response = _secure_session.post(
-            main_server + "user/subscription/request",
+            f"{main_server}/user/subscription/request",
             headers=headers,
             json=body,
             timeout=30,
@@ -883,38 +934,43 @@ class SubscriptionStateManager:
 
     def update_state(self, new_state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        상태 업데이트 및 불일치 감지
-
+        상태 업데이트
+        
+        서버의 최신 상태를 신뢰하고 업데이트합니다.
+        
         Args:
             new_state: 새로운 상태 데이터
-
+            
         Returns:
-            검증된 상태 데이터
+            업데이트된 상태 데이터
         """
         with self._state_lock:
             if self._last_known_state is None:
                 self._last_known_state = new_state
                 return new_state
+            
+            # 상태 변경 감지 (로깅용)
+            self._log_state_changes(self._last_known_state, new_state)
+            
+            self._last_known_state = new_state
+            return new_state
 
-            is_inconsistent = self._detect_inconsistency(new_state)
+    def _log_state_changes(self, old_state: Dict[str, Any], new_state: Dict[str, Any]):
+        """상태 변경 사항 로깅"""
+        if not new_state.get("success", False):
+            return
 
-            if is_inconsistent:
-                self._inconsistent_count += 1
-                logger.warning(
-                    f"구독 상태 불일치 감지 ({self._inconsistent_count}/"
-                    f"{self._max_inconsistent_before_reset}): {new_state}"
-                )
-
-                if self._inconsistent_count >= self._max_inconsistent_before_reset:
-                    logger.error("너무 많은 상태 불일치 발생, 상태 재설정")
-                    self._reset_state()
-                    return new_state
-
-                return self._last_known_state
-            else:
-                self._inconsistent_count = 0
-                self._last_known_state = new_state
-                return new_state
+        key_fields = ["is_trial", "can_work", "has_pending_request", "remaining", "work_count"]
+        changes = []
+        
+        for field in key_fields:
+            old_val = old_state.get(field)
+            new_val = new_state.get(field)
+            if old_val != new_val:
+                changes.append(f"{field}: {old_val} -> {new_val}")
+        
+        if changes:
+            logger.info(f"구독 상태 변경됨: {', '.join(changes)}")
 
     def _detect_inconsistency(self, new_state: Dict[str, Any]) -> bool:
         """상태 불일치 감지 로직"""

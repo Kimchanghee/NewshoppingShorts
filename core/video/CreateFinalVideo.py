@@ -175,7 +175,7 @@ def create_final_video_thread(app):
                 target_video_duration,
             )
 
-            video = video.subclipped(0, target_video_duration)
+            video = video.subclip(0, target_video_duration)
 
             logger.debug(
                 "[AudioSync] Video trimmed to %.2fs to match TTS + 3.0s",
@@ -211,7 +211,7 @@ def create_final_video_thread(app):
 
         # ???ㅻ뵒???곸슜
 
-        final_video = video.with_audio(new_audio)
+        final_video = video.set_audio(new_audio)
 
         app.update_progress_state("video", "processing", 60)
 
@@ -345,7 +345,7 @@ def create_final_video_thread(app):
                     cut_point,
                 )
 
-                final_video = final_video.subclipped(0, cut_point)
+                final_video = final_video.subclip(0, cut_point)
 
                 logger.debug(
                     "[Trim] Completed subtitle-based cut: %.1fs", final_video.duration
@@ -369,7 +369,7 @@ def create_final_video_thread(app):
                     cut_point,
                 )
 
-                final_video = final_video.subclipped(0, cut_point)
+                final_video = final_video.subclip(0, cut_point)
 
                 logger.debug(
                     "[Trim] Completed audio-based cut: %.1fs", final_video.duration

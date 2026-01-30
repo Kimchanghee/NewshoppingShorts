@@ -13,6 +13,8 @@ opencv-python>=4.8.0
 pytesseract>=0.3.13
 numpy>=1.24.0
 pillow>=10.0.0
+scikit-image>=0.22.0  # 추가 이미지 처리 기능
+scipy>=1.11.0  # 과학 계산 및 신호 처리
 
 # RapidOCR (Python 3.12 이하만 지원)
 rapidocr-onnxruntime>=1.3.0; python_version < "3.13"
@@ -29,15 +31,44 @@ tokenizers>=0.15.0; python_version < "3.13"
 
 # 오디오 처리
 pydub>=0.25.1
+audioop-lts>=0.2.0; python_version >= "3.13"  # Python 3.13+ 필수 (audioop 제거됨)
 more-itertools>=9.0.0
 
 # 비디오 및 이미지 처리
 moviepy>=1.0.3,<2.0.0
 imageio-ffmpeg>=0.4.9  # moviepy FFmpeg 바이너리
 
+# TTS (Text-to-Speech)
+edge-tts>=6.1.0  # Microsoft Edge TTS
+
+# 비디오 다운로드 (Douyin, TikTok, YouTube 등)
+yt-dlp>=2023.11.0
+
+# 진행률 표시
+tqdm>=4.66.0
+
+# 파일 타입 감지
+python-magic>=0.4.27; sys_platform != 'win32'
+python-magic-bin>=0.4.14; sys_platform == 'win32'
+
 # AI API 클라이언트
 google-genai>=1.0.0  # Gemini API (새 SDK)
 anthropic>=0.18.0  # Claude API
+
+# JWT 및 인증 (백엔드용)
+PyJWT>=2.8.0
+python-jose[cryptography]>=3.3.0
+
+# 백엔드 (FastAPI)
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+sqlalchemy>=2.0.0
+pymysql>=1.1.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+passlib[bcrypt]>=1.7.4
+bcrypt>=4.0.0
+slowapi>=0.1.9
 
 # Windows 시스템 정보 (Windows 전용)
 pywin32>=305; sys_platform == 'win32'
@@ -51,6 +82,10 @@ colorama>=0.4.6
 
 # 보안 및 암호화
 cryptography>=41.0.0  # Fernet(AES) 암호화
+
+# 테스트
+pytest>=7.4.0
+pytest-cov>=4.1.0
 
 # 설치 방법:
 # pip install -r requirements.txt

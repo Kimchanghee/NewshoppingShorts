@@ -52,11 +52,12 @@ class AuthService:
     def __init__(self, db: Session):
         self.db = db
 
-    async def login(
-        self, username: str, password: str, ip_address: str, force: bool
-    ):
+    async def login(self, username: str, password: str, ip_address: str, force: bool):
         """Login logic with dual rate limiting (username + IP)"""
-        logger.info(f"Login attempt: username={_mask_username(username)}, ip={ip_address}, force={force}")
+        username = username.lower()
+        logger.info(
+            f"Login attempt: username={_mask_username(username)}, ip={ip_address}, force={force}"
+        )
 
         # Rate limiting check - both username and IP based
         rate_limit_result = await self._check_rate_limit(username, ip_address)
@@ -83,24 +84,27 @@ class AuthService:
         # 보안: 사용자 열거 공격 방지를 위해 통합된 에러 응답 사용
         # All authentication failures return the same error code (EU001)
 
-        if not user or not password_valid:
+        if not user:
+            # User enumeration is allowed per user request for better UX
+            self._record_login_attempt(username, ip_address, success=False)
+            return {"status": "EU004", "message": "EU004"}  # User not found
+
+        if not password_valid:
             # Record failed attempt
             self._record_login_attempt(username, ip_address, success=False)
-            return {"status": "EU001", "message": "EU001"}  # Invalid credentials
+            return {"status": "EU001", "message": "EU001"}  # Invalid password
 
-        # Check subscription and active status - return same generic error
-        # to prevent revealing that the user exists
-        # 구독 및 활성 상태 확인 - 사용자 존재 여부를 노출하지 않기 위해 동일한 오류 반환
+        # Check subscription and active status
         if (
             user.subscription_expires_at
             and user.subscription_expires_at < datetime.utcnow()
         ):
             self._record_login_attempt(username, ip_address, success=False)
-            return {"status": "EU001", "message": "EU001"}  # Unified error
+            return {"status": "EU002", "message": "EU002"}  # Subscription expired
 
         if not user.is_active:
             self._record_login_attempt(username, ip_address, success=False)
-            return {"status": "EU001", "message": "EU001"}  # Unified error
+            return {"status": "EU001", "message": "EU001"}  # Unified error for inactive
 
         # Check existing session
         existing_session = (
@@ -144,7 +148,9 @@ class AuthService:
         self.db.commit()
 
         # Security: Hash IP in logs for privacy
-        logger.info(f"Login successful: user_id={user.id}, ip_hash={_hash_ip(ip_address)}")
+        logger.info(
+            f"Login successful: user_id={user.id}, ip_hash={_hash_ip(ip_address)}"
+        )
 
         # Backward compatible response with subscription info
         return {
@@ -152,10 +158,14 @@ class AuthService:
             "data": {
                 "data": {
                     "id": str(user.id),
-                    "subscription_expires_at": user.subscription_expires_at.isoformat() if user.subscription_expires_at else None,
-                    "work_count": getattr(user, 'work_count', -1),
-                    "work_used": getattr(user, 'work_used', 0),
-                    "last_login_at": user.last_login_at.isoformat() if user.last_login_at else None,
+                    "subscription_expires_at": user.subscription_expires_at.isoformat()
+                    if user.subscription_expires_at
+                    else None,
+                    "work_count": getattr(user, "work_count", -1),
+                    "work_used": getattr(user, "work_used", 0),
+                    "last_login_at": user.last_login_at.isoformat()
+                    if user.last_login_at
+                    else None,
                 },
                 "ip": ip_address,
                 "token": token,
@@ -171,14 +181,14 @@ class AuthService:
 
             # Verify token belongs to the user making the request
             if str(token_user_id) != str(user_id):
-                logger.warning(f"Logout attempt with mismatched user_id: token={token_user_id}, request={user_id}")
+                logger.warning(
+                    f"Logout attempt with mismatched user_id: token={token_user_id}, request={user_id}"
+                )
                 return "error"
 
             session = (
                 self.db.query(SessionModel)
-                .filter(
-                    SessionModel.token_jti == jti, SessionModel.is_active == True
-                )
+                .filter(SessionModel.token_jti == jti, SessionModel.is_active == True)
                 .first()
             )
 
@@ -205,13 +215,17 @@ class AuthService:
 
             # Verify token belongs to the user making the request
             if str(token_user_id) != str(user_id):
-                logger.warning(f"Session check with mismatched user_id: token={token_user_id}, request={user_id}")
+                logger.warning(
+                    f"Session check with mismatched user_id: token={token_user_id}, request={user_id}"
+                )
                 return {"status": "EU003"}
 
             # IP mismatch check
             if token_ip != ip_address:
                 # Security: Hash IPs in logs for privacy
-                logger.warning(f"Session IP mismatch: token_ip_hash={_hash_ip(token_ip)}, request_ip_hash={_hash_ip(ip_address)}")
+                logger.warning(
+                    f"Session IP mismatch: token_ip_hash={_hash_ip(token_ip)}, request_ip_hash={_hash_ip(ip_address)}"
+                )
                 return {"status": "EU003"}  # Session from different IP
 
             # Database session check
@@ -280,9 +294,7 @@ class AuthService:
 
         return {"allowed": True, "reason": None}
 
-    def _record_login_attempt(
-        self, username: str, ip_address: str, success: bool
-    ):
+    def _record_login_attempt(self, username: str, ip_address: str, success: bool):
         """Record login attempt for rate limiting - commits immediately for consistency"""
         attempt = LoginAttempt(
             username=username, ip_address=ip_address, success=success
@@ -308,7 +320,7 @@ class AuthService:
                     "can_work": False,
                     "work_count": 0,
                     "work_used": 0,
-                    "remaining": 0
+                    "remaining": 0,
                 }
 
             user = self.db.query(User).filter(User.id == int(user_id)).first()
@@ -318,11 +330,11 @@ class AuthService:
                     "can_work": False,
                     "work_count": 0,
                     "work_used": 0,
-                    "remaining": 0
+                    "remaining": 0,
                 }
 
-            work_count = getattr(user, 'work_count', -1)
-            work_used = getattr(user, 'work_used', 0)
+            work_count = getattr(user, "work_count", -1)
+            work_used = getattr(user, "work_used", 0)
 
             # -1 means unlimited
             if work_count == -1:
@@ -337,7 +349,7 @@ class AuthService:
                 "can_work": can_work,
                 "work_count": work_count,
                 "work_used": work_used,
-                "remaining": remaining
+                "remaining": remaining,
             }
 
         except ValueError as e:
@@ -347,7 +359,7 @@ class AuthService:
                 "can_work": False,
                 "work_count": 0,
                 "work_used": 0,
-                "remaining": 0
+                "remaining": 0,
             }
         except Exception as e:
             logger.exception("Work check failed unexpectedly")
@@ -356,7 +368,7 @@ class AuthService:
                 "can_work": False,
                 "work_count": 0,
                 "work_used": 0,
-                "remaining": 0
+                "remaining": 0,
             }
 
     async def use_work(self, user_id: str, token: str) -> dict:
@@ -376,7 +388,7 @@ class AuthService:
                     "success": False,
                     "message": "Token mismatch",
                     "remaining": None,
-                    "used": None
+                    "used": None,
                 }
 
             user = self.db.query(User).filter(User.id == int(user_id)).first()
@@ -385,11 +397,11 @@ class AuthService:
                     "success": False,
                     "message": "User not found",
                     "remaining": None,
-                    "used": None
+                    "used": None,
                 }
 
-            work_count = getattr(user, 'work_count', -1)
-            work_used = getattr(user, 'work_used', 0)
+            work_count = getattr(user, "work_count", -1)
+            work_used = getattr(user, "work_used", 0)
 
             # Check if work is available (unless unlimited)
             if work_count != -1:
@@ -399,22 +411,26 @@ class AuthService:
                         "success": False,
                         "message": "No remaining work count",
                         "remaining": 0,
-                        "used": work_used
+                        "used": work_used,
                     }
 
             # Increment work_used
             user.work_used = work_used + 1
             self.db.commit()
 
-            new_remaining = -1 if work_count == -1 else max(0, work_count - user.work_used)
+            new_remaining = (
+                -1 if work_count == -1 else max(0, work_count - user.work_used)
+            )
 
-            logger.info(f"Work used: user_id={user_id}, used={user.work_used}, remaining={new_remaining}")
+            logger.info(
+                f"Work used: user_id={user_id}, used={user.work_used}, remaining={new_remaining}"
+            )
 
             return {
                 "success": True,
                 "message": "Work count updated",
                 "remaining": new_remaining,
-                "used": user.work_used
+                "used": user.work_used,
             }
 
         except ValueError as e:
@@ -423,7 +439,7 @@ class AuthService:
                 "success": False,
                 "message": "Invalid token",
                 "remaining": None,
-                "used": None
+                "used": None,
             }
         except Exception as e:
             logger.exception("Use work failed unexpectedly")
@@ -432,5 +448,5 @@ class AuthService:
                 "success": False,
                 "message": "Internal error",
                 "remaining": None,
-                "used": None
+                "used": None,
             }

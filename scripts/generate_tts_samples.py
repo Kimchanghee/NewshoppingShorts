@@ -5,7 +5,8 @@ from google import genai
 from google.genai import types
 
 # API Key from prompt
-API_KEY = "AIzaSyDjskdUeHDKJeBaBDuLMM5acRp-J-lnEBM"
+# API Key from prompt
+API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 # Target directory
 BASE_DIR = os.getcwd()

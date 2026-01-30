@@ -60,7 +60,7 @@ class APIHandler:
 
             if loaded_keys:
                 config.GEMINI_API_KEYS = loaded_keys.copy()
-                logger.info(f"[API Handler] {len(loaded_keys)}개 API 키 로드됨 (via APIKeyManager)")
+                logger.debug(f"[API Handler] {len(loaded_keys)}개 API 키 로드됨 (via APIKeyManager)")
                 return
 
             # 레거시 JSON 파일에서 마이그레이션 (한 번만 수행)

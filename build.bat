@@ -52,27 +52,37 @@ if errorlevel 1 (
 for /f "tokens=2" %%i in ('%VENV_PIP% show google-genai ^| findstr "Version"') do echo      google-genai version: %%i
 echo.
 
-REM Step 4: Verify faster-whisper is installed
-echo [4/6] Verifying faster-whisper...
-%VENV_PIP% show faster-whisper >nul 2>&1
-if errorlevel 1 (
-    echo      faster-whisper not found, installing...
-    %VENV_PIP% install faster-whisper>=1.0.0
+REM Step 4: Verify faster-whisper is installed (Skip on Python 3.13+)
+set SKIP_WHISPER=0
+%VENV_PYTHON% -c "import sys; sys.exit(0 if sys.version_info >= (3, 13) else 1)"
+if not errorlevel 1 (
+    echo [4/6] Python 3.13+ detected, skipping faster-whisper...
+    set SKIP_WHISPER=1
+) else (
+    echo [4/6] Verifying faster-whisper...
+    %VENV_PIP% show faster-whisper >nul 2>&1
     if errorlevel 1 (
-        echo      ERROR: Failed to install faster-whisper
-        pause
-        exit /b 1
+        echo      faster-whisper not found, installing...
+        %VENV_PIP% install faster-whisper>=1.0.0
+        if errorlevel 1 (
+            echo      ERROR: Failed to install faster-whisper
+            pause
+            exit /b 1
+        )
     )
+    for /f "tokens=2" %%i in ('%VENV_PIP% show faster-whisper ^| findstr "Version"') do echo      faster-whisper version: %%i
 )
-for /f "tokens=2" %%i in ('%VENV_PIP% show faster-whisper ^| findstr "Version"') do echo      faster-whisper version: %%i
 echo.
 
-REM Step 5: Download Whisper models
-echo [5/6] Downloading Faster-Whisper models...
+REM Step 5: Download Whisper models and Fonts
+echo [5/6] Downloading Faster-Whisper models and Fonts...
 %VENV_PYTHON% download_whisper_models.py
 if errorlevel 1 (
-    echo      WARNING: Model download failed (will download on first run)
-    REM Continue build even if download fails - models can be downloaded at runtime
+    echo      WARNING: Whisper model download failed (will download on first run)
+)
+%VENV_PYTHON% download_all_fonts.py
+if errorlevel 1 (
+    echo      WARNING: Font download failed
 )
 echo.
 

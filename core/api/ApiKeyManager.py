@@ -88,7 +88,7 @@ class APIKeyManager:
                     loaded_keys[internal_key_name] = key_value
 
             if loaded_keys:
-                logger.info(f"[API Manager] SecretsManager에서 {len(loaded_keys)}개 키 로드됨")
+                logger.debug(f"[API Manager] SecretsManager에서 {len(loaded_keys)}개 키 로드됨")
             else:
                 logger.debug("[API Manager] SecretsManager에 저장된 키 없음")
 

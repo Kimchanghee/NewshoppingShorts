@@ -85,8 +85,13 @@ class OCRBackend:
         # All engines failed
         logger.error("All OCR engines failed to initialize")
         self._print_tesseract_install_guide()
+        
+        msg = "OCR engine unavailable - no OCR backend could be initialized"
+        if sys.version_info >= (3, 13):
+            msg += "\n(Note: RapidOCR is not supported on Python 3.13+. You MUST install Tesseract.)"
+            
         raise OCRInitializationError(
-            message="OCR engine unavailable - no OCR backend could be initialized",
+            message=msg,
             recovery_hint="Install Tesseract OCR:\nWindows: winget install UB-Mannheim.TesseractOCR\nmacOS: brew install tesseract tesseract-lang\nLinux: sudo apt install tesseract-ocr tesseract-ocr-kor tesseract-ocr-chi-sim"
         )
 

@@ -10,14 +10,21 @@ Modern Login UI for Shopping Shorts Maker
 from PyQt5 import QtCore, QtGui, QtWidgets
 from PyQt5.QtCore import Qt, pyqtSignal, QThread
 from PyQt5.QtWidgets import (
-    QMainWindow, QWidget, QFrame, QLabel, QLineEdit,
-    QPushButton, QCheckBox, QMessageBox
+    QMainWindow,
+    QWidget,
+    QFrame,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QCheckBox,
+    QMessageBox,
 )
 from PyQt5.QtGui import QFont, QIcon, QPixmap
 
 
 class UsernameCheckWorker(QThread):
     """아이디 중복 확인 백그라운드 워커"""
+
     finished = pyqtSignal(bool, str)  # (available, message)
 
     def __init__(self, username: str):
@@ -27,21 +34,42 @@ class UsernameCheckWorker(QThread):
     def run(self):
         import os
         import requests
+        import logging
+
+        logger = logging.getLogger(__name__)
 
         try:
-            api_url = os.getenv('API_SERVER_URL', 'https://ssmaker-auth-api-1049571775048.us-central1.run.app/')
-            resp = requests.get(
-                f"{api_url}user/check-username/{self.username}",
-                timeout=5
+            api_url = os.getenv(
+                "API_SERVER_URL",
+                "https://ssmaker-auth-api-1049571775048.us-central1.run.app/",
             )
+            # URL 끝에 '/' 가 없으면 추가 (중요)
+            if not api_url.endswith("/"):
+                api_url += "/"
+
+            target_url = f"{api_url}user/check-username/{self.username}"
+            logger.info(f"[UsernameCheck] 중복확인 요청 중: {target_url}")
+
+            resp = requests.get(target_url, timeout=5)
 
             if resp.status_code == 200:
                 data = resp.json()
-                self.finished.emit(data.get("available", False), data.get("message", ""))
+                available = data.get("available", False)
+                message = data.get("message", "")
+                logger.info(f"[UsernameCheck] 중복확인 성공: available={available}, msg={message}")
+                self.finished.emit(available, message)
             else:
-                self.finished.emit(False, "확인 실패 - 다시 시도해주세요")
-        except Exception:
-            self.finished.emit(False, "확인 실패 - 네트워크 오류")
+                logger.warning(
+                    f"[UsernameCheck] 중복확인 실패 (HTTP {resp.status_code}): {resp.text}"
+                )
+                self.finished.emit(False, f"서버 오류 ({resp.status_code})")
+        except requests.exceptions.ConnectionError:
+            logger.debug(f"[UsernameCheck] 서버 연결 실패: {target_url}")
+            self.finished.emit(False, "서버 연결 실패 - start_backend.bat를 실행했는지 확인하세요")
+        except Exception as e:
+            logger.error(f"[UsernameCheck] 예기치 않은 오류: {e}", exc_info=True)
+            self.finished.emit(False, f"오류 발생 ({str(e)})")
+
 
 # 공통 폰트 설정
 FONT_FAMILY = "맑은 고딕"
@@ -124,7 +152,9 @@ class ModernLoginUi:
         self.subtitleLabel.setGeometry(QtCore.QRect(0, 305, 300, 50))
         self.subtitleLabel.setAlignment(Qt.AlignCenter)
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, 10))
-        self.subtitleLabel.setStyleSheet("color: rgba(255,255,255,0.85); background: transparent;")
+        self.subtitleLabel.setStyleSheet(
+            "color: rgba(255,255,255,0.85); background: transparent;"
+        )
         self.subtitleLabel.setText("중국 쇼핑 영상을\n한국어 숏폼으로 자동 변환")
         self.subtitleLabel.setObjectName("subtitleLabel")
 
@@ -133,7 +163,9 @@ class ModernLoginUi:
         self.featureIcons.setGeometry(QtCore.QRect(0, 380, 300, 30))
         self.featureIcons.setAlignment(Qt.AlignCenter)
         self.featureIcons.setFont(QFont(FONT_FAMILY, 9))
-        self.featureIcons.setStyleSheet("color: rgba(255,255,255,0.7); background: transparent;")
+        self.featureIcons.setStyleSheet(
+            "color: rgba(255,255,255,0.7); background: transparent;"
+        )
         self.featureIcons.setText("AI 번역  |  자동 편집  |  숏폼 제작")
         self.featureIcons.setObjectName("featureIcons")
 
@@ -142,7 +174,9 @@ class ModernLoginUi:
         self.versionLabel.setGeometry(QtCore.QRect(0, 460, 300, 30))
         self.versionLabel.setAlignment(Qt.AlignCenter)
         self.versionLabel.setFont(QFont(FONT_FAMILY, 9))
-        self.versionLabel.setStyleSheet("color: rgba(255,255,255,0.5); background: transparent;")
+        self.versionLabel.setStyleSheet(
+            "color: rgba(255,255,255,0.5); background: transparent;"
+        )
         self.versionLabel.setText("v2.0.0")
         self.versionLabel.setObjectName("versionLabel")
 
@@ -171,7 +205,9 @@ class ModernLoginUi:
         """)
         self.minimumButton.setText("")
         icon_min = QIcon()
-        icon_min.addPixmap(QPixmap("resource/Minimize_icon.png"), QIcon.Normal, QIcon.On)
+        icon_min.addPixmap(
+            QPixmap("resource/Minimize_icon.png"), QIcon.Normal, QIcon.On
+        )
         self.minimumButton.setIcon(icon_min)
         self.minimumButton.setIconSize(QtCore.QSize(12, 12))
         self.minimumButton.setObjectName("minimumButton")
@@ -211,7 +247,9 @@ class ModernLoginUi:
         self.loginSubtitleLabel = QLabel(self.rightFrame)
         self.loginSubtitleLabel.setGeometry(QtCore.QRect(50, 110, 300, 25))
         self.loginSubtitleLabel.setFont(QFont(FONT_FAMILY, 10))
-        self.loginSubtitleLabel.setStyleSheet("color: #6B7280; background: transparent;")
+        self.loginSubtitleLabel.setStyleSheet(
+            "color: #6B7280; background: transparent;"
+        )
         self.loginSubtitleLabel.setText("계정 정보를 입력해주세요")
         self.loginSubtitleLabel.setObjectName("loginSubtitleLabel")
 
@@ -342,7 +380,7 @@ class ModernLoginUi:
                 background-color: #FEE2E2;
             }
         """)
-        self.registerRequestButton.setText("회원가입 요청")
+        self.registerRequestButton.setText("회원가입")
         self.registerRequestButton.setObjectName("registerRequestButton")
         self.registerRequestButton.setCursor(Qt.PointingHandCursor)
 
@@ -362,12 +400,14 @@ class ModernLoginUi:
     def retranslateUi(self, LoginWindow):
         """번역 설정 / Translation setup"""
         _translate = QtCore.QCoreApplication.translate
-        LoginWindow.setWindowTitle(_translate("LoginWindow", "쇼핑 숏폼 메이커 - 로그인"))
+        LoginWindow.setWindowTitle(
+            _translate("LoginWindow", "쇼핑 숏폼 메이커 - 로그인")
+        )
         self.label_id.setText(_translate("LoginWindow", "아이디"))
         self.label_pw.setText(_translate("LoginWindow", "비밀번호"))
         self.idpw_checkbox.setText(_translate("LoginWindow", "ID/PW 저장"))
         self.loginButton.setText(_translate("LoginWindow", "로그인"))
-        self.registerRequestButton.setText(_translate("LoginWindow", "회원가입 요청"))
+        self.registerRequestButton.setText(_translate("LoginWindow", "회원가입"))
 
 
 class RegistrationRequestDialog(QWidget):
@@ -412,14 +452,16 @@ class RegistrationRequestDialog(QWidget):
         self.titleLabel.setGeometry(QtCore.QRect(30, 65, 340, 35))
         self.titleLabel.setFont(QFont(FONT_FAMILY, 20, QFont.Bold))
         self.titleLabel.setStyleSheet("color: #1F2937; background: transparent;")
-        self.titleLabel.setText("회원가입 요청")
+        self.titleLabel.setText("회원가입")
 
         # 서브타이틀
         self.subtitleLabel = QLabel(self)
         self.subtitleLabel.setGeometry(QtCore.QRect(30, 100, 340, 40))
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, 10))
         self.subtitleLabel.setStyleSheet("color: #6B7280; background: transparent;")
-        self.subtitleLabel.setText("가입 정보를 입력해주세요.\n가입 후 바로 로그인 가능합니다. (체험판 3회)")
+        self.subtitleLabel.setText(
+            "가입 정보를 입력해주세요.\n가입 후 바로 로그인 가능합니다. (체험판 5회)"
+        )
 
         # 가입자 명 라벨
         self.nameLabel = QLabel(self)
@@ -477,7 +519,9 @@ class RegistrationRequestDialog(QWidget):
         self.usernameStatusLabel = QLabel(self)
         self.usernameStatusLabel.setGeometry(QtCore.QRect(30, 294, 340, 18))
         self.usernameStatusLabel.setFont(QFont(FONT_FAMILY, 9))
-        self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(
+            "color: #6B7280; background: transparent;"
+        )
         self.usernameStatusLabel.setText("")
 
         # 비밀번호 라벨
@@ -506,7 +550,9 @@ class RegistrationRequestDialog(QWidget):
         self.passwordConfirmLabel = QLabel(self)
         self.passwordConfirmLabel.setGeometry(QtCore.QRect(30, 410, 120, 25))
         self.passwordConfirmLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
-        self.passwordConfirmLabel.setStyleSheet("color: #374151; background: transparent;")
+        self.passwordConfirmLabel.setStyleSheet(
+            "color: #374151; background: transparent;"
+        )
         self.passwordConfirmLabel.setText("비밀번호 확인")
 
         # 비밀번호 확인 입력
@@ -579,7 +625,9 @@ class RegistrationRequestDialog(QWidget):
         """아이디 입력 변경 시 중복확인 초기화"""
         self._username_available = False
         self.usernameStatusLabel.setText("")
-        self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(
+            "color: #6B7280; background: transparent;"
+        )
 
     def _check_username(self):
         """아이디 중복 확인 (비동기)"""
@@ -591,7 +639,7 @@ class RegistrationRequestDialog(QWidget):
             self._show_error("아이디는 4자 이상이어야 합니다.")
             return
 
-        if not re.match(r'^[a-zA-Z0-9_]+$', username):
+        if not re.match(r"^[a-zA-Z0-9_]+$", username):
             self._show_error("아이디는 영문, 숫자, 밑줄(_)만 사용할 수 있습니다.")
             return
 
@@ -599,7 +647,9 @@ class RegistrationRequestDialog(QWidget):
         self.checkUsernameBtn.setEnabled(False)
         self.checkUsernameBtn.setText("확인중...")
         self.usernameStatusLabel.setText("확인 중...")
-        self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(
+            "color: #6B7280; background: transparent;"
+        )
 
         # 비동기 API 호출
         self._username_worker = UsernameCheckWorker(username)
@@ -614,15 +664,21 @@ class RegistrationRequestDialog(QWidget):
         if available:
             self._username_available = True
             self.usernameStatusLabel.setText("✓ 사용 가능한 아이디입니다")
-            self.usernameStatusLabel.setStyleSheet("color: #10B981; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(
+                "color: #10B981; background: transparent;"
+            )
         elif "네트워크" in message or "실패" in message:
             self._username_available = False
             self.usernameStatusLabel.setText(message)
-            self.usernameStatusLabel.setStyleSheet("color: #F59E0B; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(
+                "color: #F59E0B; background: transparent;"
+            )
         else:
             self._username_available = False
             self.usernameStatusLabel.setText("✗ 이미 사용 중인 아이디입니다")
-            self.usernameStatusLabel.setStyleSheet("color: #EF4444; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(
+                "color: #EF4444; background: transparent;"
+            )
 
     def _on_submit(self):
         import re
@@ -642,7 +698,7 @@ class RegistrationRequestDialog(QWidget):
             self._show_error("아이디는 4자 이상이어야 합니다.")
             return
 
-        if not re.match(r'^[a-zA-Z0-9_]+$', username):
+        if not re.match(r"^[a-zA-Z0-9_]+$", username):
             self._show_error("아이디는 영문, 숫자, 밑줄(_)만 사용할 수 있습니다.")
             return
 
@@ -658,7 +714,7 @@ class RegistrationRequestDialog(QWidget):
             self._show_error("비밀번호가 일치하지 않습니다.")
             return
 
-        contact_digits = re.sub(r'[^0-9]', '', contact)
+        contact_digits = re.sub(r"[^0-9]", "", contact)
         if len(contact_digits) < 10:
             self._show_error("올바른 연락처를 입력해주세요.")
             return

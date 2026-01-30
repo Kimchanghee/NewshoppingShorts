@@ -1,5 +1,8 @@
+import os
 import ipaddress
 import os
+import re
+import logging
 from typing import Optional, List
 
 from fastapi import APIRouter, Depends, Request
@@ -19,6 +22,10 @@ from app.schemas.auth import (
     CheckWorkResponse,
 )
 from app.services.auth_service import AuthService
+from app.models.user import User
+from app.models.registration_request import RegistrationRequest, RequestStatus
+
+logger = logging.getLogger(__name__)
 
 # Trusted proxy configuration - configure for your infrastructure
 # 신뢰할 수 있는 프록시 설정 - 인프라에 맞게 설정하세요
@@ -57,7 +64,7 @@ def _is_trusted_proxy(ip: str) -> bool:
         client_addr = ipaddress.ip_address(ip)
         for proxy in trusted_proxies:
             try:
-                if '/' in proxy:
+                if "/" in proxy:
                     # CIDR notation (e.g., "10.0.0.0/8")
                     if client_addr in ipaddress.ip_network(proxy, strict=False):
                         return True
@@ -119,7 +126,9 @@ router = APIRouter(prefix="/user", tags=["auth"])
 
 
 # Rate limit exceeded exception handler
-async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
+async def rate_limit_exceeded_handler(
+    request: Request, exc: RateLimitExceeded
+) -> JSONResponse:
     """Handle rate limit exceeded errors with a JSON response."""
     return JSONResponse(
         status_code=429,
@@ -128,9 +137,9 @@ async def rate_limit_exceeded_handler(request: Request, exc: RateLimitExceeded) 
             "error": {
                 "code": "RATE_LIMIT_ERROR",
                 "message": "Too many login attempts. Please try again later.",
-                "retry_after": exc.detail
-            }
-        }
+                "retry_after": exc.detail,
+            },
+        },
     )
 
 
@@ -176,31 +185,42 @@ async def check_username(
     Check if username is available for registration.
     아이디 사용 가능 여부 확인
     """
-    import re
-    from app.models.user import User
-    from app.models.registration_request import RegistrationRequest
+    # Redundant imports removed
+    username = username.lower()
 
-    # 유효성 검사
-    if not username or len(username) < 4 or len(username) > 50:
-        return {"available": False, "message": "아이디는 4~50자여야 합니다."}
+    try:
+        # 유효성 검사
+        if not username or len(username) < 4 or len(username) > 50:
+            return {"available": False, "message": "아이디는 4~50자여야 합니다."}
 
-    if not re.match(r'^[a-zA-Z0-9_]+$', username):
-        return {"available": False, "message": "아이디는 영문, 숫자, 밑줄(_)만 사용 가능합니다."}
+        if not re.match(r"^[a-zA-Z0-9_]+$", username):
+            return {
+                "available": False,
+                "message": "아이디는 영문, 숫자, 밑줄(_)만 사용 가능합니다.",
+            }
 
-    # 기존 사용자 확인
-    existing_user = db.query(User).filter(User.username == username).first()
-    if existing_user:
-        return {"available": False, "message": "이미 사용 중인 아이디입니다."}
+        # 기존 사용자 확인
+        existing_user = db.query(User).filter(User.username == username).first()
+        if existing_user:
+            return {"available": False, "message": "이미 사용 중인 아이디입니다."}
 
-    # 대기 중인 가입 요청 확인
-    pending_request = db.query(RegistrationRequest).filter(
-        RegistrationRequest.username == username,
-        RegistrationRequest.status == "PENDING"
-    ).first()
-    if pending_request:
-        return {"available": False, "message": "승인 대기 중인 아이디입니다."}
+        # 대기 중인 가입 요청 확인
+        pending_request = (
+            db.query(RegistrationRequest)
+            .filter(
+                RegistrationRequest.username == username,
+                RegistrationRequest.status == RequestStatus.PENDING,
+            )
+            .first()
+        )
+        if pending_request:
+            return {"available": False, "message": "승인 대기 중인 아이디입니다."}
 
-    return {"available": True, "message": "사용 가능한 아이디입니다."}
+        return {"available": True, "message": "사용 가능한 아이디입니다."}
+    except Exception as e:
+        logger.error(f"Error checking username: {e}", exc_info=True)
+        # DEBUG: Return actual error to client
+        return {"available": False, "message": f"서버 오류: {str(e)}"}
 
 
 @router.post("/work/check", response_model=CheckWorkResponse)
@@ -213,9 +233,7 @@ async def check_work(
     작업 가능 여부 확인 (잔여 작업 횟수 확인)
     """
     service = AuthService(db)
-    return await service.check_work_available(
-        user_id=data.user_id, token=data.token
-    )
+    return await service.check_work_available(user_id=data.user_id, token=data.token)
 
 
 @router.post("/work/use", response_model=UseWorkResponse)
@@ -228,6 +246,4 @@ async def use_work(
     작업 완료 후 사용 횟수 증가
     """
     service = AuthService(db)
-    return await service.use_work(
-        user_id=data.user_id, token=data.token
-    )
+    return await service.use_work(user_id=data.user_id, token=data.token)

@@ -15,9 +15,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)],
 )
 
 # SQLAlchemy 로그 레벨 조정 (너무 많은 로그 방지)
@@ -38,20 +36,39 @@ app = FastAPI(
 )
 
 
+from sqlalchemy import text
+from app.database import engine
+
+def run_auto_migration():
+    """Temporary auto-migration for production"""
+    try:
+        with engine.connect() as conn:
+            # Check user_type column
+            result = conn.execute(text("SHOW COLUMNS FROM users LIKE 'user_type'"))
+            if not result.fetchone():
+                logger.info("Migrating: Adding user_type to users table...")
+                conn.execute(text("ALTER TABLE users ADD COLUMN user_type ENUM('trial', 'subscriber', 'admin') DEFAULT 'trial'"))
+                conn.commit()
+                logger.info("Migration successful: user_type added")
+            else:
+                logger.info("Schema check: user_type column exists")
+    except Exception as e:
+        logger.error(f"Auto-migration error: {e}")
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize database tables on startup"""
     logger.info("Starting application...")
-    # In production, tables should already exist via migrations
-    # Only attempt init_db in development
-    if settings.ENVIRONMENT != "production":
-        try:
-            init_db()
-            logger.info("Database tables initialized successfully")
-        except Exception as e:
-            logger.warning(f"Database init skipped (may already exist): {e}")
-    else:
-        logger.info("Production mode - skipping table creation (use migrations)")
+    
+    # Force init_db and migration in production to ensure schema is correct
+    try:
+        init_db()
+        logger.info("Database tables initialized successfully")
+        
+        # Run column migration
+        run_auto_migration()
+    except Exception as e:
+        logger.warning(f"Database init/migration warning: {e}")
 
 
 # Register rate limiter with app state
@@ -61,6 +78,7 @@ app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log all API requests and responses"""
+
     async def dispatch(self, request: Request, call_next) -> Response:
         # 요청 로깅
         client_ip = request.client.host if request.client else "unknown"
@@ -69,7 +87,9 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
         try:
             response = await call_next(request)
             # 응답 로깅
-            logger.info(f"<<< {request.method} {request.url.path} | Status: {response.status_code}")
+            logger.info(
+                f"<<< {request.method} {request.url.path} | Status: {response.status_code}"
+            )
             return response
         except Exception as e:
             logger.error(f"!!! {request.method} {request.url.path} | Error: {str(e)}")
@@ -78,6 +98,7 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """Add security headers to all responses"""
+
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
@@ -86,7 +107,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Cache-Control"] = "no-store"
         if settings.ENVIRONMENT == "production":
-            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+            response.headers["Strict-Transport-Security"] = (
+                "max-age=31536000; includeSubDomains"
+            )
         return response
 
 
@@ -107,7 +130,13 @@ app.add_middleware(
     allow_origins=settings.ALLOWED_ORIGINS,
     allow_credentials=allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allow_headers=["Authorization", "Content-Type", "X-Request-ID", "X-Admin-API-Key", "X-User-ID"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "X-Request-ID",
+        "X-Admin-API-Key",
+        "X-User-ID",
+    ],
 )
 
 # Include routers
@@ -125,3 +154,9 @@ async def root():
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
+
+
+@app.get("/free/lately")
+async def get_version(item: int = 22):
+    """Version check endpoint (legacy compatibility)"""
+    return {"version": "1.0.0", "item": item}

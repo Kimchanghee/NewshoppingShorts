@@ -432,7 +432,7 @@ class SubtitleProcessor:
             lambda t: _feather_blur(video.get_frame, t), duration=video.duration
         )
         if video.audio:
-            clip = clip.with_audio(video.audio)
+            clip = clip.set_audio(video.audio)
         if hasattr(video, "fps"):
             clip.fps = video.fps
         return clip
