@@ -1,67 +1,82 @@
-import random
-import os
+﻿import os
+from pathlib import Path
 from typing import Dict
 
-# API keys - Load from environment variables or api_keys_config.json
-# 기본 키는 비워 두고, 환경 변수 또는 UI/파일(api_keys_config.json)에서 불러옵니다.
+# API keys
 
 def _load_api_keys() -> Dict[str, str]:
-    """
-    Load API keys from secure storage, environment variables, or api_keys_config.json.
-
-    Priority order:
-    1. Secure storage (keyring via SecretsManager)
-    2. Environment variables
-    3. api_keys_config.json (loaded later by ApiKeyManager)
-
-    Environment variables checked:
-    - GEMINI_API_KEY: Gemini API key
-
-    Returns:
-        Dictionary of API keys
-    """
-    keys = {}
-
-    # Try loading from secure storage first
+    keys: Dict[str, str] = {}
     try:
         from utils.secrets_manager import SecretsManager
-
-        # Try to get Gemini key from secure storage
         secure_key = SecretsManager.get_api_key("gemini")
         if secure_key:
             keys["gemini"] = secure_key
-    except ImportError:
-        pass  # SecretsManager not available, fall back to env vars
-
-    # Fall back to environment variables if not in secure storage
-    if "gemini" not in keys:
-        if gemini_key := os.getenv("GEMINI_API_KEY"):
-            keys["gemini"] = gemini_key
-
-            # Auto-migrate to secure storage if available
-            try:
-                from utils.secrets_manager import SecretsManager
-                SecretsManager.store_api_key("gemini", gemini_key)
-            except ImportError:
-                pass
-
-    # api_keys_config.json will be loaded later by ApiKeyManager
+    except Exception:
+        pass
+    if "gemini" not in keys and (gemini_key := os.getenv("GEMINI_API_KEY")):
+        keys["gemini"] = gemini_key
+        try:
+            from utils.secrets_manager import SecretsManager
+            SecretsManager.store_api_key("gemini", gemini_key)
+        except Exception:
+            pass
     return keys
 
 GEMINI_API_KEYS = _load_api_keys()
 
-# Gemini 3.0 모델 사용
-GEMINI_VIDEO_MODEL = "gemini-3-pro-preview"  # 비디오 분석 및 복잡한 추론 작업용
-GEMINI_TEXT_MODEL = "gemini-2.5-flash"  # 빠른 텍스트 처리용
-# 사용 가능 TTS 모델 (Gemini 2.5 TTS 프리뷰)
+# Gemini
+GEMINI_VIDEO_MODEL = "gemini-3-pro-preview"
+GEMINI_TEXT_MODEL = "gemini-2.5-flash"
 GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
-
-# Gemini 3.0 파라미터 설정
-GEMINI_THINKING_LEVEL = "low"  # low: 최소 레이턴시 (속도 우선), high: 최대 추론 깊이
-GEMINI_MEDIA_RESOLUTION = "media_resolution_low"  # 비디오: low(70 tokens/frame), high(280 tokens/frame)
-GEMINI_TEMPERATURE = 1.0  # Gemini 3.0 권장 기본값
-
+GEMINI_THINKING_LEVEL = "low"
+GEMINI_MEDIA_RESOLUTION = "media_resolution_low"
+GEMINI_TEMPERATURE = 1.0
 FONTSIZE = 25
 DAESA_GILI = 1.1
+ENABLE_SHEET_SYNC = False
 
-# Google Sheet 연동 사용 여부 (False이면 시트 관련 기능이 비활성화됩니다)
+# Vertex AI (primary) - with default credentials
+# Default credential path
+_config_dir = Path(__file__).parent
+DEFAULT_VERTEX_JSON_PATH = _config_dir / "vertex-credentials.json"
+
+VERTEX_PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", "alien-baton-484113-g4")
+VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
+VERTEX_MODEL_ID = os.getenv("VERTEX_MODEL_ID", "gemini-1.5-flash-002")
+VERTEX_JSON_KEY_PATH = os.getenv(
+    "VERTEX_JSON_KEY_PATH",
+    str(DEFAULT_VERTEX_JSON_PATH) if DEFAULT_VERTEX_JSON_PATH.exists() else ""
+)
+
+# Warn if using default project ID
+if VERTEX_PROJECT_ID == "alien-baton-484113-g4" and not os.getenv("VERTEX_PROJECT_ID"):
+    import logging
+    logging.warning(
+        "[Config] Using default Vertex AI project ID. "
+        "Set VERTEX_PROJECT_ID environment variable for production deployments."
+    )
+
+# Payment API (web checkout + polling)
+PAYMENT_API_BASE_URL = os.getenv("PAYMENT_API_BASE_URL", "https://payments.example.com/api")
+CHECKOUT_POLL_INTERVAL = float(os.getenv("CHECKOUT_POLL_INTERVAL", "3"))
+CHECKOUT_POLL_MAX_TRIES = int(os.getenv("CHECKOUT_POLL_MAX_TRIES", "20"))
+
+__all__ = [
+    "GEMINI_API_KEYS",
+    "GEMINI_VIDEO_MODEL",
+    "GEMINI_TEXT_MODEL",
+    "GEMINI_TTS_MODEL",
+    "GEMINI_THINKING_LEVEL",
+    "GEMINI_MEDIA_RESOLUTION",
+    "GEMINI_TEMPERATURE",
+    "FONTSIZE",
+    "DAESA_GILI",
+    "ENABLE_SHEET_SYNC",
+    "VERTEX_PROJECT_ID",
+    "VERTEX_LOCATION",
+    "VERTEX_MODEL_ID",
+    "VERTEX_JSON_KEY_PATH",
+    "PAYMENT_API_BASE_URL",
+    "CHECKOUT_POLL_INTERVAL",
+    "CHECKOUT_POLL_MAX_TRIES",
+]

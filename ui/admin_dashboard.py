@@ -4,6 +4,9 @@ Admin Dashboard for Shopping Shorts Maker
 관리자 대시보드 - 다크모드, 절대 좌표 배치, 5초 자동 새로고침
 """
 
+import logging
+import os
+
 from PyQt5.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt5.QtWidgets import (
     QMainWindow,
@@ -22,10 +25,11 @@ from PyQt5.QtWidgets import (
     QScrollArea,
 )
 from PyQt5.QtGui import QFont, QColor, QBrush
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 import requests
 
 FONT_FAMILY = "맑은 고딕"
+logger = logging.getLogger(__name__)
 
 # 다크모드 색상
 DARK = {
@@ -115,6 +119,7 @@ class ApiWorker(QThread):
 
     def run(self):
         try:
+            logger.info("[Admin API] %s %s", self.method, self.url)
             if self.method == "GET":
                 resp = requests.get(self.url, headers=self.headers, timeout=30)
             elif self.method == "POST":
@@ -127,6 +132,12 @@ class ApiWorker(QThread):
                 self.error.emit(f"Unknown method: {self.method}")
                 return
 
+            logger.info("[Admin API] Response %s: %s", resp.status_code, resp.text[:400])
+
+            if resp.status_code == 429:
+                self.error.emit(f"429 {resp.text}")
+                return
+
             if resp.status_code == 200:
                 self.finished.emit(resp.json())
             elif resp.status_code == 204:
@@ -134,19 +145,29 @@ class ApiWorker(QThread):
             else:
                 self.error.emit(f"Error {resp.status_code}: {resp.text}")
         except Exception as e:
+            logger.exception("[Admin API] request failed")
             self.error.emit(str(e))
 
 
 class AdminDashboard(QMainWindow):
     """관리자 대시보드"""
 
-    def __init__(self, api_base_url: str, admin_api_key: str):
+    def __init__(self, api_base_url: str, admin_api_key: str = None):
         super().__init__()
         self.api_base_url = api_base_url.rstrip("/")
-        self.admin_api_key = admin_api_key
+
+        # Security: Load API key from environment variable if not provided
+        # ADMIN_API_KEY environment variable should contain the admin API key
+        self.admin_api_key = admin_api_key or os.getenv("ADMIN_API_KEY", "")
+
+        if not self.admin_api_key:
+            logger.error("[Admin UI] ADMIN_API_KEY not set - dashboard will not work")
+
         self.workers = []
         self.current_tab = 0  # 0: 사용자 관리, 1: 구독 요청
         self.last_update_time = None
+        self._rate_limited = False
+        logger.info("[Admin UI] Dashboard start | api_base=%s key_set=%s", self.api_base_url, bool(self.admin_api_key))
         self._setup_ui()
         self._load_data()
         self._start_auto_refresh()
@@ -158,10 +179,21 @@ class AdminDashboard(QMainWindow):
         }
 
     def _start_auto_refresh(self):
-        """5초마다 자동 새로고침"""
+        """2초마다 자동 새로고침"""
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self._load_data)
-        self.refresh_timer.start(5000)
+        self.refresh_timer.start(60000)  # 1분마다 자동 새로고침
+
+    def _convert_to_kst(self, utc_str):
+        """UTC 문자열을 KST 문자열로 변환 (YYYY-MM-DD HH:mm:ss)"""
+        if not utc_str:
+            return "-"
+        try:
+            dt_utc = datetime.fromisoformat(utc_str.replace("Z", "+00:00"))
+            dt_kst = dt_utc + timedelta(hours=9)
+            return dt_kst.strftime("%Y-%m-%d %H:%M:%S")
+        except:
+            return utc_str
 
     def _update_last_refresh_time(self):
         """마지막 업데이트 시간 갱신"""
@@ -385,6 +417,7 @@ class AdminDashboard(QMainWindow):
 
     def _switch_tab(self, tab_index):
         """탭 전환 (0: 사용자 관리, 1: 구독 요청)"""
+        logger.info("[Admin UI] Switch tab -> %s", "사용자" if tab_index == 0 else "구독요청")
         self.current_tab = tab_index
         self._update_tab_styles()
         self.users_table.setVisible(tab_index == 0)
@@ -452,20 +485,21 @@ class AdminDashboard(QMainWindow):
         self.sub_filter_combo.setVisible(False)
 
     def _create_tables(self):
-        """테이블 생성 (회원가입 요청 테이블 제거)"""
+        """테이블 생성"""
         table_x = 40
         table_y = 290
         table_w = 1520
         table_h = 580
 
-        # 사용자 관리 테이블 (확장된 컨럼) - 기본 표시
+        # 사용자 관리 테이블 (확장된 컨럼 + 비밀번호)
         self.users_table = QTableWidget(self.central)
         self.users_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.users_table.setColumnCount(13)
+        self.users_table.setColumnCount(14)  # 비밀번호 컬럼 추가
         self.users_table.setHorizontalHeaderLabels(
             [
                 "ID",
                 "아이디",
+                "PW (Admin)",  # Added
                 "유형",
                 "구독시작",
                 "구독만료",
@@ -480,7 +514,7 @@ class AdminDashboard(QMainWindow):
             ]
         )
         self._style_table(
-            self.users_table, [50, 100, 70, 90, 90, 80, 60, 50, 130, 100, 50, 100, 310]
+            self.users_table, [40, 90, 100, 60, 130, 130, 70, 50, 50, 130, 100, 50, 90, 310]
         )
         # 사용자 테이블이 기본 표시됨
 
@@ -489,9 +523,9 @@ class AdminDashboard(QMainWindow):
         self.subscriptions_table.setGeometry(table_x, table_y, table_w, table_h)
         self.subscriptions_table.setColumnCount(7)
         self.subscriptions_table.setHorizontalHeaderLabels(
-            ["ID", "사용자 ID", "아이디", "메시지", "요청일시", "상태", "작업"]
+            ["ID", "사용자", "상태", "요청작업", "메시지", "요청일시", "관리"]
         )
-        self._style_table(self.subscriptions_table, [60, 80, 150, 350, 180, 100, 200])
+        self._style_table(self.subscriptions_table, [50, 100, 80, 80, 350, 150, 200])
         self.subscriptions_table.setVisible(False)
 
     def _style_table(self, table: QTableWidget, widths: list):
@@ -544,6 +578,13 @@ class AdminDashboard(QMainWindow):
 
     def _load_data(self):
         """데이터 로드 (회원가입 요청 제거 - 자동 승인됨)"""
+        if self._rate_limited:
+            self.connection_label.setText("요청 제한 중 - 대기 후 재시도")
+            self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
+            return
+        self.connection_label.setText("연결 중...")
+        self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
+        logger.info("[Admin UI] Load data start")
         self._load_users()
         self._load_subscriptions()
         self._update_last_refresh_time()
@@ -555,6 +596,7 @@ class AdminDashboard(QMainWindow):
         if search:
             url += f"?search={search}"
 
+        logger.info("[Admin UI] Load users | search=%s", search)
         worker = ApiWorker("GET", url, self._get_headers())
         worker.finished.connect(self._on_users_loaded)
         worker.error.connect(self._on_error)
@@ -563,30 +605,31 @@ class AdminDashboard(QMainWindow):
 
     def _on_users_loaded(self, data: dict):
         """사용자 목록 로드 완료"""
+        logger.info("[Admin UI] Users loaded (%d)", len(data.get("users", [])))
         items = data.get("users", [])
         self.users_table.setRowCount(len(items))
         self.users_label.setText(str(len(items)))
+        self.connection_label.setText("연결 정상")
+        self.connection_label.setStyleSheet(f"color: {DARK['success']};")
 
         online_count = 0
         active_sub_count = 0
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
 
         for row, user in enumerate(items):
             self.users_table.setRowHeight(row, 50)
-
+            
+            # 0: ID
             self._set_cell(self.users_table, row, 0, str(user.get("id", "")))
+            # 1: Username
             self._set_cell(self.users_table, row, 1, user.get("username", ""))
-
-            # 구독 시작일
-            created = user.get("created_at", "")
-            if created:
-                try:
-                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                    created = dt.strftime("%Y-%m-%d")
-                except:
-                    pass
-
-            # 유형 (Trial / Subscriber / Admin)
+            # 2: Password (Plain)
+            pw = user.get("password_plain", "")
+            if not pw:
+                pw = "****"  # Fallback
+            self._set_cell(self.users_table, row, 2, pw, DARK["text_dim"])
+            
+            # 3: Type
             utype = user.get("user_type", "trial")
             utype_text = {
                 "trial": "체험판",
@@ -598,110 +641,78 @@ class AdminDashboard(QMainWindow):
                 "subscriber": DARK["primary"],
                 "admin": DARK["warning"],
             }.get(utype, DARK["text"])
+            self._set_cell(self.users_table, row, 3, utype_text, utype_color)
 
-            self._set_cell(self.users_table, row, 2, utype_text, utype_color)
-            self._set_cell(self.users_table, row, 3, created or "-")
+            # 4: Created (Subscription Start)
+            created = self._convert_to_kst(user.get("created_at"))
+            self._set_cell(self.users_table, row, 4, created)
 
-            # 구독 만료일
-            expires = user.get("subscription_expires_at", "")
-            expires_dt = None
-            if expires:
+            # 5: Subscription Expires
+            expires_utc = user.get("subscription_expires_at")
+            expires_str = self._convert_to_kst(expires_utc)
+            
+            color = DARK["text"]
+            if expires_utc:
                 try:
-                    expires_dt = datetime.fromisoformat(expires.replace("Z", "+00:00"))
-                    expires_str = expires_dt.strftime("%Y-%m-%d")
-                    # 만료 임박 (7일 이내) 또는 만료됨
-                    if expires_dt.replace(tzinfo=None) < now:
-                        self._set_cell(
-                            self.users_table, row, 4, expires_str, DARK["danger"]
-                        )
-                    elif (expires_dt.replace(tzinfo=None) - now).days <= 7:
-                        self._set_cell(
-                            self.users_table, row, 4, expires_str, DARK["warning"]
-                        )
+                    dt = datetime.fromisoformat(expires_utc.replace("Z", "+00:00"))
+                    if dt < now:
+                         color = DARK["danger"]
+                    elif (dt - now).days <= 7:
+                         color = DARK["warning"]
                     else:
-                        self._set_cell(
-                            self.users_table, row, 4, expires_str, DARK["success"]
-                        )
-                        active_sub_count += 1
+                         color = DARK["success"]
+                         active_sub_count += 1
                 except:
-                    self._set_cell(self.users_table, row, 4, "-")
-            else:
-                self._set_cell(self.users_table, row, 4, "-")
+                    pass
+            self._set_cell(self.users_table, row, 5, expires_str, color)
 
-            # 작업 횟수
+            # 6: Work Count
             work_count = user.get("work_count", -1)
             work_used = user.get("work_used", 0)
             if work_count == -1:
                 work_str = "무제한"
-                work_color = DARK["success"]
+                color = DARK["success"]
             else:
                 remaining = max(0, work_count - work_used)
                 work_str = f"{remaining}/{work_count}"
-                work_color = DARK["warning"] if remaining <= 10 else DARK["text"]
-            self._set_cell(self.users_table, row, 5, work_str, work_color)
+                color = DARK["warning"] if remaining <= 10 else DARK["text"]
+            self._set_cell(self.users_table, row, 6, work_str, color)
 
-            # 계정 상태 (활성/비활성)
+            # 7: Status
             is_active = user.get("is_active", False)
-            self._set_cell(
-                self.users_table,
-                row,
-                6,
-                "활성" if is_active else "정지",
-                DARK["success"] if is_active else DARK["danger"],
-            )
+            self._set_cell(self.users_table, row, 7, "활성" if is_active else "정지", DARK["success"] if is_active else DARK["danger"])
 
-            # 로그인 횟수
-            self._set_cell(self.users_table, row, 7, str(user.get("login_count", 0)))
+            # 8: Login Count
+            self._set_cell(self.users_table, row, 8, str(user.get("login_count", 0)))
 
-            # 마지막 로그인
-            last_login = user.get("last_login_at", "")
-            if last_login:
-                try:
-                    dt = datetime.fromisoformat(last_login.replace("Z", "+00:00"))
-                    last_login = dt.strftime("%H:%M")  # 시간을 좀더 짧게
-                    # 오늘인지 확인
-                    if dt.date() == now.date():
-                        last_login_str = f"오늘 {last_login}"
-                    else:
-                        last_login_str = dt.strftime("%m-%d %H:%M")
-                except:
-                    last_login_str = last_login
-            else:
-                last_login_str = "-"
+            # 9: Last Login
+            last_login = self._convert_to_kst(user.get("last_login_at"))
+            self._set_cell(self.users_table, row, 9, last_login)
 
-            self._set_cell(self.users_table, row, 8, last_login_str)
+            # 10: IP
+            self._set_cell(self.users_table, row, 10, user.get("last_login_ip", "-"))
 
-            # IP
-            self._set_cell(self.users_table, row, 9, user.get("last_login_ip", "-"))
+            # 11: Online Status
+            # Trust server's is_online field (set via heartbeat mechanism)
+            is_online = user.get("is_online", False)
 
-            # 접속 상태 (마지막 로그인이 5분 이내면 온라인으로 간주)
-            is_online = False
-            if last_login and user.get("last_login_at"):
-                try:
-                    last_dt = datetime.fromisoformat(
-                        user.get("last_login_at").replace("Z", "+00:00")
-                    )
-                    if (now - last_dt.replace(tzinfo=None)).total_seconds() < 300:
-                        is_online = True
-                        online_count += 1
-                except:
-                    pass
-            online_text = "ON" if is_online else "OFF"
-            online_color = DARK["online"] if is_online else DARK["offline"]
-            self._set_cell(self.users_table, row, 10, online_text, online_color)
+            if is_online:
+                online_count += 1
 
-            # 현재 작업 (세션 정보에서 가져올 수 있음 - 현재는 미구현)
-            current_task = user.get("current_task", "-")
-            self._set_cell(self.users_table, row, 11, current_task)
+            self._set_cell(self.users_table, row, 11, "ON" if is_online else "OFF",
+                           DARK["online"] if is_online else DARK["offline"])
 
-            # 작업 버튼
+            # 12: Current Task
+            self._set_cell(self.users_table, row, 12, user.get("current_task", "-"))
+
+            # 13: Actions
             widget = self._create_user_actions(
                 user.get("id"),
                 user.get("username"),
                 row,
-                user.get("hashed_password"),  # 비밀번호 해시 전달
+                user.get("hashed_password"),
             )
-            self.users_table.setCellWidget(row, 12, widget)
+            self.users_table.setCellWidget(row, 13, widget)
 
         self.online_label.setText(str(online_count))
         self.active_sub_label.setText(str(active_sub_count))
@@ -915,13 +926,15 @@ class AdminDashboard(QMainWindow):
         dialog.exec_()
 
     def _on_search_changed(self, text):
+        logger.info("[Admin UI] Search changed: %s", text)
         self._load_users()
 
     def _on_sub_filter_changed(self, text):
+        logger.info("[Admin UI] Subscription filter: %s", text)
         self._load_subscriptions()
 
     def _load_subscriptions(self):
-        """구독 요청 로드"""
+        """구독 요청 목록 로드"""
         status_filter = self.sub_filter_combo.currentText()
         url = f"{self.api_base_url}/user/subscription/requests"
         if status_filter != "전체":
@@ -932,6 +945,7 @@ class AdminDashboard(QMainWindow):
             }
             url += f"?status={status_map.get(status_filter, '')}"
 
+        logger.info("[Admin UI] Load subscriptions | filter=%s", status_filter)
         worker = ApiWorker("GET", url, self._get_headers())
         worker.finished.connect(self._on_subscriptions_loaded)
         worker.error.connect(self._on_error)
@@ -940,6 +954,7 @@ class AdminDashboard(QMainWindow):
 
     def _on_subscriptions_loaded(self, data: dict):
         """구독 요청 목록 로드 완료"""
+        logger.info("[Admin UI] Subscriptions loaded (%d)", len(data.get("requests", [])))
         items = data.get("requests", [])
         self.subscriptions_table.setRowCount(len(items))
 
@@ -985,6 +1000,17 @@ class AdminDashboard(QMainWindow):
                 self.subscriptions_table.setCellWidget(row, 6, widget)
             else:
                 self._set_cell(self.subscriptions_table, row, 6, "-")
+        
+        # 통계 라벨 업데이트를 위해 별도의 카운트 조회 (또는 전체 데이터 필요)
+        # 여기서는 현재 페이지 데이터 기반으로 업데이트 하거나, 별도 API 호출이 필요할 수 있음.
+        # 일단 현재 로드된 데이터 기준으로 카운트 (간이 방식)
+        pending = sum(1 for item in items if item.get("status") == "PENDING")
+        approved = sum(1 for item in items if item.get("status") == "APPROVED")
+        rejected = sum(1 for item in items if item.get("status") == "REJECTED")
+        
+        self.pending_label.setText(str(pending))
+        self.approved_label.setText(str(approved))
+        self.rejected_label.setText(str(rejected))
 
     def _create_subscription_actions(self, request_id, row: int = 0) -> QWidget:
         """구독 요청 작업 버튼"""
@@ -1031,6 +1057,7 @@ class AdminDashboard(QMainWindow):
 
     def _approve_subscription(self, request_id):
         """구독 승인 다이얼로그"""
+        logger.info("[Admin UI] Approve clicked | request_id=%s", request_id)
         dialog = ApproveDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             days = dialog.get_days()
@@ -1041,6 +1068,7 @@ class AdminDashboard(QMainWindow):
                 "subscription_days": days,
                 "work_count": work_count,
             }
+            logger.info("[Admin UI] Approve request | request_id=%s days=%s work_count=%s", request_id, days, work_count)
             worker = ApiWorker("POST", url, self._get_headers(), data)
             worker.finished.connect(lambda d: self._on_action_done("구독 승인", d))
             worker.error.connect(self._on_error)
@@ -1049,11 +1077,13 @@ class AdminDashboard(QMainWindow):
 
     def _reject_subscription(self, request_id):
         """구독 거부 다이얼로그"""
+        logger.info("[Admin UI] Reject clicked | request_id=%s", request_id)
         dialog = RejectDialog(self)
         if dialog.exec_() == QDialog.Accepted:
             reason = dialog.get_reason()
             url = f"{self.api_base_url}/user/subscription/reject"
             data = {"request_id": request_id, "admin_response": reason}
+            logger.info("[Admin UI] Reject request | request_id=%s reason=%s", request_id, reason)
             worker = ApiWorker("POST", url, self._get_headers(), data)
             worker.finished.connect(lambda d: self._on_action_done("구독 거부", d))
             worker.error.connect(self._on_error)
@@ -1062,11 +1092,13 @@ class AdminDashboard(QMainWindow):
 
     def _extend_subscription(self, user_id, username):
         """구독 연장"""
+        logger.info("[Admin UI] Extend clicked | user_id=%s username=%s", user_id, username)
         dialog = ExtendDialog(username, self)
         if dialog.exec_() == QDialog.Accepted:
             days = dialog.get_days()
             url = f"{self.api_base_url}/user/admin/users/{user_id}/extend"
             data = {"days": days}
+            logger.info("[Admin UI] Extend request | user_id=%s days=%s", user_id, days)
             worker = ApiWorker("POST", url, self._get_headers(), data)
             worker.finished.connect(lambda d: self._on_action_done("구독 연장", d))
             worker.error.connect(self._on_error)
@@ -1075,6 +1107,7 @@ class AdminDashboard(QMainWindow):
 
     def _toggle_user(self, user_id, username):
         """사용자 상태 토글"""
+        logger.info("[Admin UI] Toggle user | user_id=%s username=%s", user_id, username)
         if not _styled_question_box(
             self, "상태 변경", f"'{username}' 사용자의 상태를 변경하시겠습니까?"
         ):
@@ -1096,6 +1129,7 @@ class AdminDashboard(QMainWindow):
 
     def _delete_user(self, user_id, username):
         """사용자 삭제"""
+        logger.info("[Admin UI] Delete user clicked | user_id=%s username=%s", user_id, username)
         if not _styled_question_box(
             self,
             "사용자 삭제",
@@ -1136,6 +1170,45 @@ class AdminDashboard(QMainWindow):
     def _on_error(self, error):
         self.connection_label.setText("연결 오류")
         self.connection_label.setStyleSheet(f"color: {DARK['danger']};")
+        logger.error("[Admin API] Error: %s", error)
+        if "429" in str(error):
+            self._handle_rate_limit(error)
+
+    def _handle_rate_limit(self, error_text: str):
+        """429 발생 시 Retry-After 헤더 기반 자동 재시도
+
+        In production, the server should send a Retry-After header that could be parsed here.
+        The Retry-After header can specify seconds (numeric) or an HTTP-date (RFC 7231).
+
+        Example:
+            - Retry-After: 120 (retry after 120 seconds)
+            - Retry-After: Wed, 21 Oct 2025 07:28:00 GMT (retry at specific time)
+        """
+        if self._rate_limited:
+            return
+
+        self._rate_limited = True
+        self.connection_label.setText("요청 제한 - 잠시 후 자동 재시도")
+        self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
+
+        if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
+            self.refresh_timer.stop()
+
+        # Default: 5 minutes (300 seconds = 300000 ms)
+        # TODO: Parse Retry-After header from response if available
+        # retry_delay_seconds = int(response_headers.get('Retry-After', '300'))
+        retry_delay_ms = 300000
+
+        logger.warning("[Admin UI] Rate limit triggered. Pausing for %d seconds. Detail: %s", retry_delay_ms // 1000, error_text)
+        QTimer.singleShot(retry_delay_ms, self._resume_after_rate_limit)
+
+    def _resume_after_rate_limit(self):
+        self._rate_limited = False
+        self.connection_label.setText("재시도 중...")
+        self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
+        if hasattr(self, "refresh_timer"):
+            self.refresh_timer.start(60000)
+        self._load_data()
 
 
 class ApproveDialog(QDialog):

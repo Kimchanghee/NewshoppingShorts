@@ -1,65 +1,56 @@
-# Shopping Shorts Maker - Requirements
-# Python 3.14 호환 버전
+# Shopping Shorts Maker - Requirements (cleaned)
 
-# UI 및 네트워크
-PyQt5>=5.15.0  # GUI 프레임워크
-requests>=2.31.0  # HTTP 라이브러리
+# UI & HTTP
+PyQt6>=6.6.0
+requests>=2.31.0
+psutil>=5.9.0
 
-# 기본 패키지
-psutil>=5.9.0  # 시스템 정보 수집 및 모니터링
-
-# OCR 및 이미지 처리
+# OCR & Vision
 opencv-python>=4.8.0
 pytesseract>=0.3.13
 numpy>=1.24.0
 pillow>=10.0.0
-scikit-image>=0.22.0  # 추가 이미지 처리 기능
-scipy>=1.11.0  # 과학 계산 및 신호 처리
-
-# RapidOCR (Python 3.12 이하만 지원)
+scikit-image>=0.22.0
+scipy>=1.11.0
 rapidocr-onnxruntime>=1.3.0; python_version < "3.13"
 onnxruntime>=1.15.0; python_version < "3.13"
 
-# Whisper 음성 인식 (Python 3.12 이하만 지원)
-# Python 3.13+ 에서는 글자 수 비례 폴백 사용
+# Whisper / Audio
 faster-whisper>=1.0.0; python_version < "3.13"
 ctranslate2>=4.0.0; python_version < "3.13"
-
-# HuggingFace (Python 3.14 호환)
-huggingface-hub>=0.20.0
-tokenizers>=0.15.0; python_version < "3.13"
-
-# 오디오 처리
 pydub>=0.25.1
-audioop-lts>=0.2.0; python_version >= "3.13"  # Python 3.13+ 필수 (audioop 제거됨)
+audioop-lts>=0.2.0; python_version >= "3.13"
 more-itertools>=9.0.0
 
-# 비디오 및 이미지 처리
+# Video
 moviepy>=1.0.3,<2.0.0
-imageio-ffmpeg>=0.4.9  # moviepy FFmpeg 바이너리
+imageio-ffmpeg>=0.4.9
 
-# TTS (Text-to-Speech)
-edge-tts>=6.1.0  # Microsoft Edge TTS
+# TTS
+edge-tts>=6.1.0
 
-# 비디오 다운로드 (Douyin, TikTok, YouTube 등)
+# Downloaders
 yt-dlp>=2023.11.0
 
-# 진행률 표시
-tqdm>=4.66.0
+# Progress
+	qdm>=4.66.0
 
-# 파일 타입 감지
+# File type
 python-magic>=0.4.27; sys_platform != 'win32'
 python-magic-bin>=0.4.14; sys_platform == 'win32'
 
-# AI API 클라이언트
-google-genai>=1.0.0  # Gemini API (새 SDK)
-anthropic>=0.18.0  # Claude API
+# AI APIs
+google-genai>=1.0.0
+google-cloud-aiplatform>=1.66.0
+google-auth>=2.29.0
+anthropic>=0.18.0
 
-# JWT 및 인증 (백엔드용)
+# JWT / Security
 PyJWT>=2.8.0
 python-jose[cryptography]>=3.3.0
+cryptography>=41.0.0
 
-# 백엔드 (FastAPI)
+# Backend (FastAPI stack)
 fastapi>=0.104.0
 uvicorn[standard]>=0.24.0
 sqlalchemy>=2.0.0
@@ -70,22 +61,13 @@ passlib[bcrypt]>=1.7.4
 bcrypt>=4.0.0
 slowapi>=0.1.9
 
-# Windows 시스템 정보 (Windows 전용)
+# Windows
 pywin32>=305; sys_platform == 'win32'
 wmi>=1.5.1; sys_platform == 'win32'
-
-# 플랫폼 호환성
 platformdirs>=3.10.0
-
-# 로깅 및 디버깅
 colorama>=0.4.6
 
-# 보안 및 암호화
-cryptography>=41.0.0  # Fernet(AES) 암호화
-
-# 테스트
+# Testing
 pytest>=7.4.0
 pytest-cov>=4.1.0
 
-# 설치 방법:
-# pip install -r requirements.txt

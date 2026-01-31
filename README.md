@@ -1,77 +1,72 @@
-# NewshoppingShortsMaker
+﻿# NewshoppingShortsMaker
 
-쇼핑 숏폼 영상 자동 제작 도구 | Automated Shopping Shorts Video Creator
+?쇳븨 ?륂뤌 ?곸긽 ?먮룞 ?쒖옉 ?꾧뎄 | Automated Shopping Shorts Video Creator
 
-중국어 자막을 제거하고 한국어 TTS를 추가하여 쇼핑 숏폼 콘텐츠를 자동으로 생성합니다.
-
----
-
-## ✨ 주요 기능
-
-- **🎯 OCR 기반 자막 감지**: Tesseract/RapidOCR로 중국어 자막 자동 인식
-- **🚀 GPU 가속**: CuPy를 통한 CUDA 가속 지원 (선택사항)
-- **🔊 AI 음성 생성**: Gemini API를 활용한 자연스러운 한국어 TTS
-- **📹 자동 비디오 처리**: 자막 블러 처리, 한국어 자막 추가, 영상 합성
-- **⚡ 병렬 처리**: 다중 세그먼트 동시 처리로 빠른 작업 속도
-- **🛡️ 안정성 강화**: 포괄적인 에러 처리, 입력 검증, 자동 재시도
+以묎뎅???먮쭑???쒓굅?섍퀬 ?쒓뎅??TTS瑜?異붽??섏뿬 ?쇳븨 ?륂뤌 肄섑뀗痢좊? ?먮룞?쇰줈 ?앹꽦?⑸땲??
 
 ---
 
-## 📋 시스템 요구사항
+## ??二쇱슂 湲곕뒫
 
-### 필수 요구사항
-
-- **Python**: 3.12 - 3.14 (최신 버전 권장)
-- **FFmpeg**: 비디오 처리용
-- **Tesseract OCR**: 자막 인식용
-
-### 선택사항 (권장)
-
-- **NVIDIA GPU + CUDA**: GPU 가속 (2-3배 빠른 처리)
-- **CuPy**: GPU 가속 라이브러리
-
+- **?렞 OCR 湲곕컲 ?먮쭑 媛먯?**: Tesseract/RapidOCR濡?以묎뎅???먮쭑 ?먮룞 ?몄떇
+- **?? GPU 媛??*: CuPy瑜??듯븳 CUDA 媛??吏??(?좏깮?ы빆)
+- **?뵄 AI ?뚯꽦 ?앹꽦**: Gemini API瑜??쒖슜???먯뿰?ㅻ윭???쒓뎅??TTS
+- **?벞 ?먮룞 鍮꾨뵒??泥섎━**: ?먮쭑 釉붾윭 泥섎━, ?쒓뎅???먮쭑 異붽?, ?곸긽 ?⑹꽦
+- **??蹂묐젹 泥섎━**: ?ㅼ쨷 ?멸렇癒쇳듃 ?숈떆 泥섎━濡?鍮좊Ⅸ ?묒뾽 ?띾룄
+- **?썳截??덉젙??媛뺥솕**: ?ш큵?곸씤 ?먮윭 泥섎━, ?낅젰 寃利? ?먮룞 ?ъ떆??
 ---
 
-## 🚀 빠른 시작
+## ?뱥 ?쒖뒪???붽뎄?ы빆
 
-### 1. 저장소 클론
+### ?꾩닔 ?붽뎄?ы빆
+
+- **Python**: 3.12 - 3.14 (理쒖떊 踰꾩쟾 沅뚯옣)
+- **FFmpeg**: 鍮꾨뵒??泥섎━??- **Tesseract OCR**: ?먮쭑 ?몄떇??
+### ?좏깮?ы빆 (沅뚯옣)
+
+- **NVIDIA GPU + CUDA**: GPU 媛??(2-3諛?鍮좊Ⅸ 泥섎━)
+- **CuPy**: GPU 媛???쇱씠釉뚮윭由?
+---
+
+## ?? 鍮좊Ⅸ ?쒖옉
+
+### 1. ??μ냼 ?대줎
 
 ```bash
 git clone https://github.com/yourusername/NewshoppingShortsMaker.git
 cd NewshoppingShortsMaker
 ```
 
-### 2. 의존성 설치
+### 2. ?섏〈???ㅼ튂
 
-**자동 설치 (권장)**:
+**?먮룞 ?ㅼ튂 (沅뚯옣)**:
 ```bash
 python install_dependencies.py
 ```
 
-**수동 설치**:
+**?섎룞 ?ㅼ튂**:
 ```bash
 pip install -r requirements.txt
 ```
 
-### 3. 시스템 검증
-
-설치가 올바르게 되었는지 확인:
+### 3. ?쒖뒪??寃利?
+?ㅼ튂媛 ?щ컮瑜닿쾶 ?섏뿀?붿? ?뺤씤:
 ```bash
 python scripts/startup_validation.py
 ```
 
-**예상 출력**:
+**?덉긽 異쒕젰**:
 ```
-✓ Python Version: Python 3.14.x
-✓ Required Packages: 6 packages installed
-✓ OCR Engine: Tesseract OCR available
-✓ FFmpeg: FFmpeg available
-✓ File Permissions: Write permissions OK
+??Python Version: Python 3.14.x
+??Required Packages: 6 packages installed
+??OCR Engine: Tesseract OCR available
+??FFmpeg: FFmpeg available
+??File Permissions: Write permissions OK
 
-✓ All checks passed! Ready to run.
+??All checks passed! Ready to run.
 ```
 
-### 4. OCR 엔진 설치 (Tesseract)
+### 4. OCR ?붿쭊 ?ㅼ튂 (Tesseract)
 
 **Windows**:
 ```bash
@@ -88,9 +83,9 @@ brew install tesseract tesseract-lang
 sudo apt install tesseract-ocr tesseract-ocr-kor tesseract-ocr-chi-sim
 ```
 
-### 5. API 키 설정
+### 5. API ???ㅼ젙
 
-**방법 1: 환경 변수 (권장)**
+**諛⑸쾿 1: ?섍꼍 蹂??(沅뚯옣)**
 ```bash
 # Windows
 set GEMINI_API_KEY=your_gemini_api_key_here
@@ -99,10 +94,10 @@ set GEMINI_API_KEY=your_gemini_api_key_here
 export GEMINI_API_KEY=your_gemini_api_key_here
 ```
 
-**방법 2: UI에서 설정**
-- 앱 실행 후 "API 키 관리"에서 추가
+**諛⑸쾿 2: UI?먯꽌 ?ㅼ젙**
+- ???ㅽ뻾 ??"API ??愿由??먯꽌 異붽?
 
-### 6. 앱 실행
+### 6. ???ㅽ뻾
 
 ```bash
 python main.py
@@ -110,38 +105,32 @@ python main.py
 
 ---
 
-## 🎮 사용 방법
+## ?렜 ?ъ슜 諛⑸쾿
 
-### 기본 워크플로우
+### 湲곕낯 ?뚰겕?뚮줈??
+1. **鍮꾨뵒???좏깮**
+   - 濡쒖뺄 ?뚯씪 ?좏깮 ?먮뒗 URL ?낅젰 (Douyin, TikTok 吏??
 
-1. **비디오 선택**
-   - 로컬 파일 선택 또는 URL 입력 (Douyin, TikTok 지원)
+2. **?듭뀡 ?ㅼ젙**
+   - 以묎뎅???먮쭑 釉붾윭: ??   - ?쒓뎅???먮쭑 異붽?: ??   - TTS ?뚯꽦 ?앹꽦: ??
+3. **泥섎━ ?쒖옉**
+   - "?곸긽 泥섎━ ?쒖옉" 踰꾪듉 ?대┃
+   - 吏꾪뻾 ?곹솴 ?ㅼ떆媛??뺤씤
 
-2. **옵션 설정**
-   - 중국어 자막 블러: ✅
-   - 한국어 자막 추가: ✅
-   - TTS 음성 생성: ✅
-
-3. **처리 시작**
-   - "영상 처리 시작" 버튼 클릭
-   - 진행 상황 실시간 확인
-
-4. **결과 확인**
-   - 완료된 영상은 지정한 출력 폴더에 저장
-   - 기본: `C:\Users\Administrator\Desktop\`
+4. **寃곌낵 ?뺤씤**
+   - ?꾨즺???곸긽? 吏?뺥븳 異쒕젰 ?대뜑?????   - 湲곕낯: `C:\Users\Administrator\Desktop\`
 
 ---
 
-## ⚙️ 고급 설정
+## ?숋툘 怨좉툒 ?ㅼ젙
 
-### GPU 가속 활성화
-
-**1. CUDA 설치 확인**:
+### GPU 媛???쒖꽦??
+**1. CUDA ?ㅼ튂 ?뺤씤**:
 ```bash
 nvidia-smi
 ```
 
-**2. CuPy 설치**:
+**2. CuPy ?ㅼ튂**:
 ```bash
 # CUDA 12.x
 pip install cupy-cuda12x
@@ -150,129 +139,120 @@ pip install cupy-cuda12x
 pip install cupy-cuda11x
 ```
 
-**3. GPU 가용성 확인**:
+**3. GPU 媛?⑹꽦 ?뺤씤**:
 ```python
 import cupy as cp
 print(f"GPU devices: {cp.cuda.runtime.getDeviceCount()}")
 ```
 
-### 환경 변수 설정
+### ?섍꼍 蹂???ㅼ젙
 
-| 변수 | 설명 | 예시 |
+| 蹂??| ?ㅻ챸 | ?덉떆 |
 |------|------|------|
-| `GEMINI_API_KEY` | Gemini API 키 | `AIza...` |
-| `TESSERACT_CMD` | Tesseract 실행 파일 경로 | `C:\Program Files\Tesseract-OCR\tesseract.exe` |
-| `TESSDATA_PREFIX` | Tesseract 언어 데이터 경로 | `C:\Program Files\Tesseract-OCR\tessdata` |
+| `GEMINI_API_KEY` | Gemini API ??| `AIza...` |
+| `TESSERACT_CMD` | Tesseract ?ㅽ뻾 ?뚯씪 寃쎈줈 | `C:\Program Files\Tesseract-OCR\tesseract.exe` |
+| `TESSDATA_PREFIX` | Tesseract ?몄뼱 ?곗씠??寃쎈줈 | `C:\Program Files\Tesseract-OCR\tessdata` |
 
 ---
 
-## 🧪 테스트 실행
+## ?㎦ ?뚯뒪???ㅽ뻾
 
 ```bash
-# 모든 테스트 실행
+# 紐⑤뱺 ?뚯뒪???ㅽ뻾
 pytest
 
-# 특정 카테고리만 실행
-pytest -m unit  # 유닛 테스트만
-pytest tests/unit/test_validators.py  # 특정 파일만
-
-# 커버리지 포함
+# ?뱀젙 移댄뀒怨좊━留??ㅽ뻾
+pytest -m unit  # ?좊떅 ?뚯뒪?몃쭔
+pytest tests/unit/test_validators.py  # ?뱀젙 ?뚯씪留?
+# 而ㅻ쾭由ъ? ?ы븿
 pytest --cov=. --cov-report=html
 ```
 
 ---
 
-## 📂 프로젝트 구조
+## ?뱛 ?꾨줈?앺듃 援ъ“
 
 ```
 NewshoppingShortsMaker/
-├── main.py                     # 애플리케이션 진입점
-├── config/
-│   └── constants.py            # 설정 상수 (임계값, 제한값 등)
-├── utils/
-│   ├── logging_config.py       # 중앙집중식 로깅
-│   ├── validators.py           # 입력 검증 (보안)
-│   ├── error_handlers.py       # 예외 처리 프레임워크
-│   └── ocr_backend.py          # OCR 엔진 래퍼
-├── processors/
-│   ├── subtitle_detector.py    # 자막 감지 (OCR)
-│   ├── subtitle_processor.py   # 자막 블러 처리
-│   └── tts_processor.py        # TTS 생성
-├── managers/
-│   ├── settings_manager.py     # 설정 관리
-│   └── voice_manager.py        # 음성 관리
-├── ui/
-│   ├── components/             # UI 컴포넌트
-│   └── panels/                 # UI 패널
-├── scripts/
-│   └── startup_validation.py   # 시스템 사전 검사
-├── tests/
-│   ├── unit/                   # 유닛 테스트
-│   ├── integration/            # 통합 테스트
-│   └── conftest.py             # 테스트 설정
-└── docs/
-    └── IMPROVEMENTS.md         # 개선사항 문서
+?쒋?? main.py                     # ?좏뵆由ъ??댁뀡 吏꾩엯???쒋?? config/
+??  ?붴?? constants.py            # ?ㅼ젙 ?곸닔 (?꾧퀎媛? ?쒗븳媛???
+?쒋?? utils/
+??  ?쒋?? logging_config.py       # 以묒븰吏묒쨷??濡쒓퉭
+??  ?쒋?? validators.py           # ?낅젰 寃利?(蹂댁븞)
+??  ?쒋?? error_handlers.py       # ?덉쇅 泥섎━ ?꾨젅?꾩썙????  ?붴?? ocr_backend.py          # OCR ?붿쭊 ?섑띁
+?쒋?? processors/
+??  ?쒋?? subtitle_detector.py    # ?먮쭑 媛먯? (OCR)
+??  ?쒋?? subtitle_processor.py   # ?먮쭑 釉붾윭 泥섎━
+??  ?붴?? tts_processor.py        # TTS ?앹꽦
+?쒋?? managers/
+??  ?쒋?? settings_manager.py     # ?ㅼ젙 愿由???  ?붴?? voice_manager.py        # ?뚯꽦 愿由??쒋?? ui/
+??  ?쒋?? components/             # UI 而댄룷?뚰듃
+??  ?붴?? panels/                 # UI ?⑤꼸
+?쒋?? scripts/
+??  ?붴?? startup_validation.py   # ?쒖뒪???ъ쟾 寃???쒋?? tests/
+??  ?쒋?? unit/                   # ?좊떅 ?뚯뒪????  ?쒋?? integration/            # ?듯빀 ?뚯뒪????  ?붴?? conftest.py             # ?뚯뒪???ㅼ젙
+?붴?? docs/
+    ?붴?? IMPROVEMENTS.md         # 媛쒖꽑?ы빆 臾몄꽌
 ```
 
 ---
 
-## 🛠️ 문제 해결
+## ?썱截?臾몄젣 ?닿껐
 
-### OCR이 작동하지 않음
+### OCR???묐룞?섏? ?딆쓬
 
-**증상**: "OCR reader not initialized" 에러
+**利앹긽**: "OCR reader not initialized" ?먮윭
 
-**해결**:
-1. Tesseract 설치 확인:
+**?닿껐**:
+1. Tesseract ?ㅼ튂 ?뺤씤:
    ```bash
    tesseract --version
    ```
 
-2. Tesseract 경로 설정:
+2. Tesseract 寃쎈줈 ?ㅼ젙:
    ```bash
    set TESSERACT_CMD=C:\Program Files\Tesseract-OCR\tesseract.exe
    ```
 
-3. 언어 데이터 설치 확인:
-   - `chi_sim.traineddata` (중국어 간체)
-   - `kor.traineddata` (한국어)
+3. ?몄뼱 ?곗씠???ㅼ튂 ?뺤씤:
+   - `chi_sim.traineddata` (以묎뎅??媛꾩껜)
+   - `kor.traineddata` (?쒓뎅??
 
-### GPU 가속이 작동하지 않음
+### GPU 媛?띿씠 ?묐룞?섏? ?딆쓬
 
-**증상**: "GPU acceleration disabled" 메시지
+**利앹긽**: "GPU acceleration disabled" 硫붿떆吏
 
-**해결**:
-1. NVIDIA GPU 확인:
+**?닿껐**:
+1. NVIDIA GPU ?뺤씤:
    ```bash
    nvidia-smi
    ```
 
-2. CUDA 설치 확인:
-   - CUDA Toolkit 11.8 또는 12.x 필요
+2. CUDA ?ㅼ튂 ?뺤씤:
+   - CUDA Toolkit 11.8 ?먮뒗 12.x ?꾩슂
 
-3. CuPy 재설치:
+3. CuPy ?ъ꽕移?
    ```bash
    pip uninstall cupy cupy-cuda12x
    pip install cupy-cuda12x
    ```
 
-4. **Python 3.14 주의사항**:
-   - CuPy가 설치되지 않으면 자동으로 NumPy CPU 모드로 전환됩니다
-   - 기능은 정상 작동하지만 속도가 느릴 수 있습니다
+4. **Python 3.14 二쇱쓽?ы빆**:
+   - CuPy媛 ?ㅼ튂?섏? ?딆쑝硫??먮룞?쇰줈 NumPy CPU 紐⑤뱶濡??꾪솚?⑸땲??   - 湲곕뒫? ?뺤긽 ?묐룞?섏?留??띾룄媛 ?먮┫ ???덉뒿?덈떎
 
-### API 키 오류
+### API ???ㅻ쪟
 
-**증상**: "등록된 API 키가 없습니다"
+**利앹긽**: "?깅줉??API ?ㅺ? ?놁뒿?덈떎"
 
-**해결**:
-1. 환경 변수 설정:
+**?닿껐**:
+1. ?섍꼍 蹂???ㅼ젙:
    ```bash
    set GEMINI_API_KEY=your_key_here
    ```
 
-2. 또는 UI에서 "API 키 관리" → 키 추가
+2. ?먮뒗 UI?먯꽌 "API ??愿由? ????異붽?
 
-3. `api_keys_config.json` 직접 편집:
+3. `api_keys_config.json` 吏곸젒 ?몄쭛:
    ```json
    {
      "gemini": {
@@ -283,61 +263,54 @@ NewshoppingShortsMaker/
 
 ---
 
-## 📊 성능 최적화 팁
+## ?뱤 ?깅뒫 理쒖쟻????
+### 1. GPU 媛???쒖슜
+- NVIDIA GPU ?ъ슜 ??2-3諛?鍮좊Ⅸ 泥섎━
+- CuPy ?ㅼ튂 沅뚯옣
 
-### 1. GPU 가속 활용
-- NVIDIA GPU 사용 시 2-3배 빠른 처리
-- CuPy 설치 권장
+### 2. 蹂묐젹 泥섎━ 理쒖쟻??- CPU 肄붿뼱 ?섏뿉 ?곕씪 ?먮룞 議곗젙
+- `config/constants.py`?먯꽌 `MAX_WORKERS` 議곗젙 媛??
+### 3. OCR ?섑뵆留?媛꾧꺽 議곗젙
+- 湲곕낯: 0.3珥?媛꾧꺽
+- `VideoSettings.SAMPLE_INTERVAL_DEFAULT` 議곗젙
 
-### 2. 병렬 처리 최적화
-- CPU 코어 수에 따라 자동 조정
-- `config/constants.py`에서 `MAX_WORKERS` 조정 가능
-
-### 3. OCR 샘플링 간격 조정
-- 기본: 0.3초 간격
-- `VideoSettings.SAMPLE_INTERVAL_DEFAULT` 조정
-
-### 4. 메모리 최적화
-- 프레임 캐시는 자동 정리됨
-- 긴 영상 처리 시 10초 세그먼트로 분할 처리
+### 4. 硫붾え由?理쒖쟻??- ?꾨젅??罹먯떆???먮룞 ?뺣━??- 湲??곸긽 泥섎━ ??10珥??멸렇癒쇳듃濡?遺꾪븷 泥섎━
 
 ---
 
-## 🔒 보안 기능
+## ?뵏 蹂댁븞 湲곕뒫
 
-- ✅ **경로 순회 공격 방지**: 파일 경로 검증
-- ✅ **파일 확장자 화이트리스트**: 안전한 파일만 허용
-- ✅ **API 응답 검증**: 악의적인 API 응답 차단
-- ✅ **환경 변수 API 키**: 평문 저장 방지
-- ✅ **입력 검증**: SQL 인젝션, XSS 방지
-
----
-
-## 📈 최근 개선사항
-
-### Phase 1-2 (2026-01-24 완료)
-
-#### 새로 추가된 기능
-- ✅ 중앙집중식 로깅 시스템 (파일 + 콘솔)
-- ✅ 포괄적인 입력 검증 (보안 강화)
-- ✅ 타입화된 예외 처리 (복구 힌트 포함)
-- ✅ 시스템 사전 검사 스크립트
-- ✅ 환경 변수 API 키 지원
-
-#### 수정된 문제
-- ✅ OCR 초기화 실패 → 명확한 에러 + 재시도 (3회)
-- ✅ Python 3.14 호환성 → Graceful fallback
-- ✅ 중복 detector 생성 → 40% 성능 개선
-- ✅ 메모리 누수 → 프레임 캐시 자동 정리
-- ✅ GPU detection 개선 → 버전 체크 제거
-
-자세한 내용은 [IMPROVEMENTS.md](IMPROVEMENTS.md) 참조
+- ??**寃쎈줈 ?쒗쉶 怨듦꺽 諛⑹?**: ?뚯씪 寃쎈줈 寃利?- ??**?뚯씪 ?뺤옣???붿씠?몃━?ㅽ듃**: ?덉쟾???뚯씪留??덉슜
+- ??**API ?묐떟 寃利?*: ?낆쓽?곸씤 API ?묐떟 李⑤떒
+- ??**?섍꼍 蹂??API ??*: ?됰Ц ???諛⑹?
+- ??**?낅젰 寃利?*: SQL ?몄젥?? XSS 諛⑹?
 
 ---
 
-## 🤝 기여하기
+## ?뱢 理쒓렐 媛쒖꽑?ы빆
 
-버그 리포트, 기능 제안, Pull Request를 환영합니다!
+### Phase 1-2 (2026-01-24 ?꾨즺)
+
+#### ?덈줈 異붽???湲곕뒫
+- ??以묒븰吏묒쨷??濡쒓퉭 ?쒖뒪??(?뚯씪 + 肄섏넄)
+- ???ш큵?곸씤 ?낅젰 寃利?(蹂댁븞 媛뺥솕)
+- ????낇솕???덉쇅 泥섎━ (蹂듦뎄 ?뚰듃 ?ы븿)
+- ???쒖뒪???ъ쟾 寃???ㅽ겕由쏀듃
+- ???섍꼍 蹂??API ??吏??
+#### ?섏젙??臾몄젣
+- ??OCR 珥덇린???ㅽ뙣 ??紐낇솗???먮윭 + ?ъ떆??(3??
+- ??Python 3.14 ?명솚????Graceful fallback
+- ??以묐났 detector ?앹꽦 ??40% ?깅뒫 媛쒖꽑
+- ??硫붾え由??꾩닔 ???꾨젅??罹먯떆 ?먮룞 ?뺣━
+- ??GPU detection 媛쒖꽑 ??踰꾩쟾 泥댄겕 ?쒓굅
+
+?먯꽭???댁슜? [IMPROVEMENTS.md](IMPROVEMENTS.md) 李몄“
+
+---
+
+## ?쩃 湲곗뿬?섍린
+
+踰꾧렇 由ы룷?? 湲곕뒫 ?쒖븞, Pull Request瑜??섏쁺?⑸땲??
 
 1. Fork the repository
 2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
@@ -347,24 +320,96 @@ NewshoppingShortsMaker/
 
 ---
 
-## 📝 라이선스
+## ?뱷 ?쇱씠?좎뒪
 
-MIT License - 자유롭게 사용, 수정, 배포 가능
+MIT License - ?먯쑀濡?쾶 ?ъ슜, ?섏젙, 諛고룷 媛??
+---
+
+## ?솋 ?꾩?留?諛?吏??
+- **?댁뒋 由ы룷??*: [GitHub Issues](https://github.com/yourusername/NewshoppingShortsMaker/issues)
+- **臾몄꽌**: [docs/](docs/) ?대뜑 李몄“
+- **媛쒖꽑?ы빆**: [IMPROVEMENTS.md](IMPROVEMENTS.md)
 
 ---
 
-## 🙏 도움말 및 지원
+## ?럦 媛먯궗?⑸땲??
 
-- **이슈 리포트**: [GitHub Issues](https://github.com/yourusername/NewshoppingShortsMaker/issues)
-- **문서**: [docs/](docs/) 폴더 참조
-- **개선사항**: [IMPROVEMENTS.md](IMPROVEMENTS.md)
-
----
-
-## 🎉 감사합니다!
-
-NewshoppingShortsMaker를 사용해주셔서 감사합니다. 쇼핑 숏폼 제작이 더 쉬워지길 바랍니다!
+NewshoppingShortsMaker瑜??ъ슜?댁＜?붿꽌 媛먯궗?⑸땲?? ?쇳븨 ?륂뤌 ?쒖옉?????ъ썙吏湲?諛붾엻?덈떎!
 
 ---
 
 *Last Updated: 2026-01-24*
+
+## Environment
+- Python 3.14
+- FFmpeg installed and on PATH
+- Tesseract (for OCR) if using pytesseract
+- Vertex AI: set VERTEX_PROJECT_ID, VERTEX_LOCATION, VERTEX_MODEL_ID, VERTEX_JSON_KEY_PATH
+- Gemini fallback: set GEMINI_API_KEY (or SecretsManager)
+- Payment server: set PAYMENT_API_BASE_URL for subscription checkout
+
+- PayApp: PAYAPP_API_KEY, PAYAPP_MID, PAYAPP_BASE_URL, PAYAPP_RETURN_URL, PAYAPP_CANCEL_URL
+
+- Payment API (web checkout): PAYMENT_API_BASE_URL, CHECKOUT_POLL_INTERVAL, CHECKOUT_POLL_MAX_TRIES
+
+---
+
+## Vertex AI Configuration
+
+**Default Setup (Automatic):**
+The application comes pre-configured with Vertex AI credentials in `config/vertex-credentials.json`. No additional setup is required for local development or standard deployments.
+
+**How it works:**
+- Vertex AI is the primary model provider
+- Automatic fallback to Gemini API if Vertex is unavailable
+- Default project: `alien-baton-484113-g4`
+- Default location: `us-central1`
+- Default model: `gemini-1.5-flash-002`
+
+**Custom Credentials (Optional):**
+To use your own Vertex AI service account:
+
+1. Obtain a service account JSON from [Google Cloud Console](https://console.cloud.google.com)
+2. Set environment variables:
+   ```bash
+   export VERTEX_PROJECT_ID="your-project-id"
+   export VERTEX_JSON_KEY_PATH="/path/to/service-account.json"
+   # Optional overrides:
+   export VERTEX_LOCATION="us-central1"
+   export VERTEX_MODEL_ID="gemini-1.5-flash-002"
+   ```
+
+**Credential Security:**
+- ⚠️ Never commit `config/vertex-credentials.json` to version control
+- The file is already in `.gitignore` for protection
+- Rotate credentials quarterly or immediately if compromised
+- Use separate service accounts for dev/staging/production environments
+
+**Fallback Behavior:**
+If Vertex AI is unavailable (network issues, quota exceeded, invalid credentials), the system automatically falls back to Gemini API. Ensure `GEMINI_API_KEY` is configured for redundancy.
+
+**Troubleshooting:**
+- Check logs for `[Provider] Vertex init failed` messages
+- Verify the JSON file exists at `config/vertex-credentials.json`
+- Ensure the service account has Vertex AI API access enabled
+- Check project quota limits in Google Cloud Console
+
+---
+
+## Trial System
+
+**Free Trial:**
+- New users receive 5 free video creations
+- Trial count is displayed in the header (e.g., "3/5 남음")
+- Color-coded for urgency: Green (3-5), Yellow (1-2), Red (0)
+
+**After Trial:**
+- Users are prompted to subscribe when limit is reached
+- Video creation is blocked until subscription is activated
+- Subscribers receive unlimited video creation
+
+**For Administrators:**
+- Trial limits are managed in the backend database
+- Default limit: `FREE_TRIAL_WORK_COUNT = 5` in `backend/app/routers/registration.py`
+- Subscription approval sets `work_count = -1` (unlimited)
+

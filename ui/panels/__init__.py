@@ -1,7 +1,5 @@
-"""
-UI 패널 모듈
-
-각 섹션별 UI 패널 클래스들을 포함합니다.
+﻿"""
+UI 패널 모듈 집합
 """
 
 from .header_panel import HeaderPanel
@@ -12,6 +10,7 @@ from .cta_panel import CTAPanel
 from .queue_panel import QueuePanel
 from .progress_panel import ProgressPanel
 from .url_content_panel import URLContentPanel
+from .subscription_panel import SubscriptionPanel
 
 __all__ = [
     'HeaderPanel',
@@ -22,4 +21,5 @@ __all__ = [
     'QueuePanel',
     'ProgressPanel',
     'URLContentPanel',
+    'SubscriptionPanel',
 ]

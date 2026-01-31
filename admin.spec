@@ -1,21 +1,23 @@
 # -*- mode: python ; coding: utf-8 -*-
-"""
-Admin Dashboard PyInstaller Spec File
-관리자 대시보드 빌드 설정 - 모든 모듈 포함
-"""
-
-import os
 from PyInstaller.utils.hooks import collect_all, collect_submodules
+import os
 
 block_cipher = None
 
-# ui 패키지 수집 (수동 데이터 추가 사용)
-ui_datas, ui_binaries, ui_hiddenimports = [], [], []
+project_path = os.path.abspath('.')
 
-# requests 패키지 수집
-requests_datas, requests_binaries, requests_hiddenimports = collect_all('requests')
+# Data files
+datas = [
+    ('ui', 'ui'),
+    ('caller', 'caller'),
+    ('utils', 'utils'),
+    ('resource', 'resource'),
+]
 
-# 모든 hiddenimports 합치기
+# Binaries
+binaries = []
+
+# Hidden imports
 all_hiddenimports = [
     'PyQt5',
     'PyQt5.QtWidgets',
@@ -27,35 +29,30 @@ all_hiddenimports = [
     'certifi',
     'charset_normalizer',
     'idna',
-] + ui_hiddenimports + requests_hiddenimports + collect_submodules('ui')
+] + collect_submodules('ui') + collect_submodules('caller') + collect_submodules('utils')
 
-# ui 폴더를 datas에 추가
-datas = [
-    ('ui', 'ui'),
+# Collect requests completely
+requests_datas, requests_binaries, requests_hiddenimports = collect_all('requests')
+datas += requests_datas
+binaries += requests_binaries
+all_hiddenimports += requests_hiddenimports
+
+excludes = [
+    'matplotlib', 'numpy', 'pandas', 'scipy', 'PIL', 
+    'cv2', 'torch', 'tensorflow', 'google', 'moviepy', 
+    'faster_whisper', 'whisper', 'openai-whisper'
 ]
 
 a = Analysis(
     ['admin_launcher.py'],
-    pathex=[os.path.abspath('.')],
-    binaries=ui_binaries + requests_binaries,
-    datas=datas + ui_datas + requests_datas,
+    pathex=[project_path],
+    binaries=binaries,
+    datas=datas,
     hiddenimports=all_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[
-        'matplotlib',
-        'numpy',
-        'pandas',
-        'scipy',
-        'PIL',
-        'cv2',
-        'torch',
-        'tensorflow',
-        'google',
-        'moviepy',
-        'faster_whisper',
-    ],
+    excludes=excludes,
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -67,28 +64,24 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
     [],
-    exclude_binaries=True,
-    name='SSMaker_Admin',
+    name='AdminDashboard',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+    icon=['resource\\app_icon.ico'],
 )
 
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name='SSMaker_Admin',
-)
+# COLLECT is not needed for --onefile mode

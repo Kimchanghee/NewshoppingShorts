@@ -609,20 +609,20 @@ def validate_user_id(user_id: str) -> bool:
 
     Rules:
         - Not empty
-        - Length between 3-50 characters
-        - Alphanumeric, underscore, dash, dot, @ allowed
+        - Length between 4-50 characters (서버/클라이언트와 일치)
+        - Alphanumeric and underscore only (영문, 숫자, 밑줄만 허용)
         - No SQL injection patterns
     """
     if not user_id or not isinstance(user_id, str):
         return False
 
-    # Length check
-    if not (3 <= len(user_id) <= 50):
+    # Length check (4~50자로 변경 - 서버/클라이언트와 일치)
+    if not (4 <= len(user_id) <= 50):
         return False
 
-    # Character whitelist
-    # Allows: alphanumeric, underscore, dash, dot, @
-    if not re.match(r'^[a-zA-Z0-9_\-\.@]+$', user_id):
+    # Character whitelist (서버/클라이언트와 일치)
+    # Allows: alphanumeric, underscore only
+    if not re.match(r'^[a-zA-Z0-9_]+$', user_id):
         return False
 
     # SQL injection check

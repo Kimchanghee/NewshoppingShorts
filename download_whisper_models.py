@@ -1,102 +1,83 @@
 """
-Faster-Whisper 모델 사전 다운로드 스크립트
+Faster-Whisper 모델 사전 다운로드 및 로컬 패키징 스크립트
+Build Preparation Script
 
-빌드 전에 실행하여 Faster-Whisper 모델을 미리 다운로드합니다.
-빌드 시 이 모델들이 함께 포함되어 오프라인에서도 작동합니다.
-
-Faster-Whisper는 CTranslate2 기반으로 PyTorch 없이 동작합니다.
+1. Faster-Whisper 모델을 미리 다운로드합니다.
+2. 다운로드된 모델을 프로젝트 로컬 폴더(faster_whisper_models)로 복사합니다.
+3. 이 폴더는 PyInstaller 빌드 시 포함되어 오프라인에서도 작동합니다.
 """
 
 import logging
 import os
 import sys
+import shutil
+from pathlib import Path
 
+# 로깅 설정
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-
-def download_faster_whisper_models():
-    """Faster-Whisper 모델들을 미리 다운로드"""
+def download_and_bundle_models():
+    """Faster-Whisper 모델들을 다운로드하고 로컬로 복사"""
     logger.info("=" * 60)
-    logger.info("Faster-Whisper 모델 다운로드 시작")
+    logger.info("Faster-Whisper 모델 준비 시작 (Build Preparation)")
     logger.info("=" * 60)
-
-    # Python 3.13+ 호환성 체크
-    if sys.version_info >= (3, 13):
-        logger.warning(
-            f"[건너뜀] Python {sys.version_info.major}.{sys.version_info.minor}는 "
-            "faster-whisper를 지원하지 않습니다."
-        )
-        logger.info("Python 3.13+에서는 글자 수 비례 타이밍이 자동으로 사용됩니다.")
-        logger.info("Whisper STT가 필요하면 Python 3.12 이하를 사용하세요.")
-        return True  # 성공으로 처리 (빌드 진행 가능)
 
     try:
         from faster_whisper import WhisperModel
-        logger.info("[OK] faster_whisper 모듈 import 성공")
+        logger.info("[OK] faster_whisper 모듈 확인됨")
     except ImportError:
-        logger.error("[오류] faster-whisper 패키지가 설치되지 않았습니다.")
-        logger.error("다음 명령어로 설치하세요: pip install faster-whisper")
+        logger.error("[오류] faster-whisper 패키지가 없습니다. 설치하세요: pip install faster-whisper")
         return False
 
-    # 다운로드할 모델 목록
-    # Faster-Whisper 모델 크기 및 성능 비교 (CTranslate2 형식):
-    # - tiny:     ~75MB   (가장 빠름, 정확도 낮음)
-    # - base:     ~140MB  (균형잡힌 성능, 일반적으로 권장)
-    # - small:    ~244MB  (좋은 정확도)
-    # - medium:   ~769MB  (높은 정확도)
-    # - large-v3: ~1.5GB+ (최고 정확도, 가장 느림)
-    models_to_download = [
-        "tiny",      # 저사양 PC용
-        "base",      # 일반 PC용 (기본 권장)
-        "small",     # 중간 사양 PC용
-    ]
-
-    logger.info(f"\n다운로드할 모델: {', '.join(models_to_download)}")
-    logger.info("이 작업은 인터넷 연결이 필요하며, 몇 분 정도 걸릴 수 있습니다.")
-    logger.info("모델은 HuggingFace Hub에서 다운로드됩니다.\n")
+    # 다운로드할 모델 목록 (base는 필수)
+    models_to_download = ["tiny", "base"]
+    
+    # 프로젝트 루트 내 모델 저장 경로
+    bundled_base_dir = Path("faster_whisper_models")
+    bundled_base_dir.mkdir(exist_ok=True)
 
     for model_name in models_to_download:
-        logger.info(f"[다운로드 중] {model_name} 모델...")
+        logger.info(f"\n[작업] {model_name} 모델 처리 중...")
+        
         try:
-            # Faster-Whisper 모델 로드 (자동으로 HuggingFace에서 다운로드)
-            # CPU + int8로 테스트 로드
+            # 1. 모델 다운로드 (캐시 사용)
+            # download_root를 지정하여 해당 폴더에 바로 다운로드되게 시도
+            local_model_path = bundled_base_dir / model_name
+            
+            logger.info(f"  - 모델 다운로드/로드 중: {model_name}")
             model = WhisperModel(
                 model_name,
                 device="cpu",
                 compute_type="int8",
-                download_root=None  # 기본 HuggingFace 캐시 사용
+                download_root=str(local_model_path)
             )
-            logger.info(f"[완료] {model_name} 모델 다운로드 및 로드 성공")
-
-            # 모델 저장 위치 확인
-            cache_dir = os.path.join(os.path.expanduser("~"), ".cache", "huggingface", "hub")
-            logger.info(f"  저장 위치: {cache_dir}")
-
-            # 메모리 해제
+            
+            # 2. 파일 확인
+            # download_root를 쓰면 해당 경로에 직접 파일들이 배치됨
+            expected_files = ["model.bin", "config.json", "vocabulary.txt", "tokenizer.json"]
+            all_exist = True
+            for f in expected_files:
+                if not (local_model_path / f).exists():
+                    all_exist = False
+                    break
+            
+            if all_exist:
+                logger.info(f"  ✅ {model_name} 모델이 {local_model_path}에 준비되었습니다.")
+            else:
+                logger.warning(f"  ⚠️ {model_name} 모델 파일이 일부 누락되었을 수 있습니다.")
+                
             del model
 
-        except (OSError, RuntimeError, ValueError) as e:
-            logger.error(f"[오류] {model_name} 모델 다운로드 실패: {e}", exc_info=True)
+        except Exception as e:
+            logger.error(f"  ❌ {model_name} 모델 처리패 실패: {e}")
             return False
 
     logger.info("\n" + "=" * 60)
-    logger.info("모든 Faster-Whisper 모델 다운로드 완료!")
+    logger.info("모든 모델 준비 완료! (faster_whisper_models/)")
     logger.info("=" * 60)
-    logger.info("\n이제 PyInstaller 빌드를 진행하세요.")
-    logger.info("모델 파일들이 자동으로 포함됩니다.")
-    logger.info("\n참고: Faster-Whisper는 PyTorch 없이 CTranslate2로 동작합니다.")
-    logger.info("      빌드 크기가 OpenAI Whisper 대비 약 60% 감소합니다.\n")
-
     return True
 
-
 if __name__ == "__main__":
-    try:
-        success = download_faster_whisper_models()
-        sys.exit(0 if success else 1)
-    except KeyboardInterrupt:
-        logger.warning("\n\n다운로드가 중단되었습니다.")
-        sys.exit(1)
-    except (OSError, RuntimeError) as e:
-        logger.error(f"\n\n다운로드 중 오류 발생: {e}", exc_info=True)
-        sys.exit(1)
+    success = download_and_bundle_models()
+    sys.exit(0 if success else 1)

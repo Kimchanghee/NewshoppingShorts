@@ -1,6 +1,7 @@
 import hashlib
 import logging
 from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import func
 from app.models.user import User
@@ -49,13 +50,14 @@ def _hash_ip(ip_address: str) -> str:
 
 
 class AuthService:
-    def __init__(self, db: Session):
+    def __init__(self, db: Session) -> None:
         self.db = db
 
-    async def login(self, username: str, password: str, ip_address: str, force: bool):
+    async def login(self, username: str, password: str, ip_address: str, force: bool) -> Dict[str, Any]:
         """Login logic with dual rate limiting (username + IP)"""
         username = username.lower()
-        logger.info(
+        # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
+        logger.debug(
             f"Login attempt: username={_mask_username(username)}, ip={ip_address}, force={force}"
         )
 
@@ -149,7 +151,7 @@ class AuthService:
 
         # Security: Hash IP in logs for privacy
         logger.info(
-            f"Login successful: user_id={user.id}, ip_hash={_hash_ip(ip_address)}"
+            f"Login successful: user_id={user.id}, ip_hash={_hash_ip(ip_address)}, login_count={user.login_count}"
         )
 
         # Backward compatible response with subscription info
@@ -172,7 +174,7 @@ class AuthService:
             },
         }
 
-    async def logout(self, user_id: str, token: str):
+    async def logout(self, user_id: str, token: str) -> Union[bool, str]:
         """Logout logic with proper error handling"""
         try:
             payload = decode_access_token(token)
@@ -205,7 +207,7 @@ class AuthService:
             logger.exception(f"Logout failed - unexpected error")
             return "error"
 
-    async def check_session(self, user_id: str, token: str, ip_address: str):
+    async def check_session(self, user_id: str, token: str, ip_address: str) -> Dict[str, Any]:
         """Session check logic (called every 5 seconds)"""
         try:
             payload = decode_access_token(token)
