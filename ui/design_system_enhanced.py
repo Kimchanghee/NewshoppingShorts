@@ -28,16 +28,16 @@ class ColorPalette:
     Refined from STITCH base with bolder, more memorable colors
     """
 
-    # Primary Colors - PUNCHY RED (elevated from Stitch)
-    primary: str = "#FF1744"           # Material Red A400 - bold & energetic
-    primary_hover: str = "#F01440"     # Slightly darker on hover
-    primary_light: str = "#FFE8EC"     # Soft red background
-    primary_dark: str = "#C41235"      # Deep red for depth
+    # Primary Colors - PUNCHY RED (Matched to Login UI)
+    primary: str = "#e31639"           # Main Red from Login
+    primary_hover: str = "#c41231"     # Darker Red from Login hover
+    primary_light: str = "#fce8eb"     # Soft red background
+    primary_dark: str = "#a01028"      # Deep red from Login pressed
 
-    # Accent Colors - CORAL PINK for warmth
-    accent: str = "#FF6B9D"            # Coral pink - friendly, approachable
-    accent_light: str = "#FFD4E5"      # Light coral for subtle highlights
-    accent_hover: str = "#FF5689"      # Darker coral on hover
+    # Accent Colors - CORAL PINK
+    accent: str = "#ff4d6a"            # Gradient End from Login
+    accent_light: str = "#fff0f3"      # Light pink
+    accent_hover: str = "#ff6b84"      # Lighter accent
 
     # Background Colors - CLEAN STUDIO
     bg_main: str = "#FAFAFA"           # Almost white, clean studio feel
@@ -81,21 +81,21 @@ class ColorPalette:
     info_border: str = "#93C5FD"       # Blue border
 
     # Gradient Colors - DYNAMIC DIAGONALS
-    gradient_start: str = "#FF1744"    # Primary red
-    gradient_mid: str = "#FF4D6A"      # Transition
-    gradient_end: str = "#FF6B9D"      # Coral pink
+    gradient_start: str = "#e31639"    # Primary red
+    gradient_mid: str = "#f03252"      # Transition
+    gradient_end: str = "#ff4d6a"      # Coral pink
 
     # Special Effects
     overlay_light: str = "rgba(255, 255, 255, 0.9)"     # Light overlay
     overlay_dark: str = "rgba(0, 0, 0, 0.4)"            # Dark overlay
     shadow_color: str = "rgba(0, 0, 0, 0.1)"            # Shadow base color
-    glow_primary: str = "rgba(255, 23, 68, 0.4)"        # Red glow
-    glow_accent: str = "rgba(255, 107, 157, 0.3)"       # Coral glow
+    glow_primary: str = "rgba(227, 22, 57, 0.4)"        # Red glow
+    glow_accent: str = "rgba(255, 77, 106, 0.3)"        # Coral glow
 
     # Scrollbar Colors
     scrollbar_bg: str = "#F5F5F5"      # Scrollbar background
     scrollbar_thumb: str = "#D1D5DB"   # Scrollbar thumb
-    scrollbar_hover: str = "#FF1744"   # Scrollbar on hover (brand color)
+    scrollbar_hover: str = "#e31639"   # Scrollbar on hover (brand color)
 
 
 @dataclass(frozen=True)
@@ -106,43 +106,43 @@ class DarkColorPalette(ColorPalette):
     """
 
     # Primary Colors - GLOWING RED in dark
-    primary: str = "#FF5C7C"           # Brighter red for dark backgrounds
-    primary_hover: str = "#FF7A94"     # Even brighter on hover
-    primary_light: str = "#2D1518"     # Very dark red background
-    primary_dark: str = "#FF1744"      # Original red for contrast
+    primary: str = "#ff4d6a"           # Brighter red for dark backgrounds
+    primary_hover: str = "#ff6b84"     # Even brighter on hover
+    primary_light: str = "#3d1a1e"     # Very dark red background
+    primary_dark: str = "#e31639"      # Original red for contrast
 
     # Accent Colors
-    accent: str = "#FF8FB3"            # Lighter coral for visibility
-    accent_light: str = "#3D1F2A"      # Dark coral background
+    accent: str = "#ff8599"            # Lighter coral for visibility
+    accent_light: str = "#4d2a2e"      # Dark coral background
     accent_hover: str = "#FFA3C1"      # Bright coral hover
 
     # Background Colors - DEEP CHARCOAL STUDIO
-    bg_main: str = "#0F0F0F"           # Deep black (not pure black)
-    bg_card: str = "#1A1A1A"           # Charcoal cards
-    bg_sidebar: str = "#141414"        # Slightly darker sidebar
-    bg_input: str = "#262626"          # Input backgrounds
-    bg_hover: str = "#2A2A2A"          # Hover state
-    bg_selected: str = "#2D1518"       # Selected with red tint
-    bg_secondary: str = "#1F1F1F"      # Secondary backgrounds
-    bg_header: str = "#161616"         # Dark header
+    bg_main: str = "#211113"           # Deep black (not pure black)
+    bg_card: str = "#2d1a1c"           # Charcoal cards
+    bg_sidebar: str = "#1a0d0e"        # Slightly darker sidebar
+    bg_input: str = "#3d2426"          # Input backgrounds
+    bg_hover: str = "#3d2426"          # Hover state
+    bg_selected: str = "#4d2a2e"       # Selected with red tint
+    bg_secondary: str = "#2d1a1c"      # Secondary backgrounds
+    bg_header: str = "#1a0d0e"         # Dark header
 
     # Text Colors - SOFT FOR DARK MODE
     text_primary: str = "#F9FAFB"      # Soft white
-    text_secondary: str = "#9CA3AF"    # Gray-400
-    text_tertiary: str = "#6B7280"     # Gray-500
+    text_secondary: str = "#a0a0a0"    # Gray-400
+    text_tertiary: str = "#666666"     # Gray-500
     text_disabled: str = "#4B5563"     # Gray-600
     text_on_primary: str = "#FFFFFF"   # Pure white
     text_on_dark: str = "#F9FAFB"      # Soft white
 
     # Border Colors
-    border_light: str = "#2A2A2A"      # Subtle dark borders
-    border_medium: str = "#404040"     # Visible dark borders
-    border_focus: str = "#FF5C7C"      # Bright red focus
-    border_card: str = "#262626"       # Card borders
+    border_light: str = "#3d2426"      # Subtle dark borders
+    border_medium: str = "#4d2a2e"     # Visible dark borders
+    border_focus: str = "#ff4d6a"      # Bright red focus
+    border_card: str = "#3d2426"       # Card borders
 
     # Status Colors - BRIGHTER for visibility
     success: str = "#34D399"           # Emerald-400
-    success_light: str = "#1A2E23"     # Dark green background
+    success_light: str = "#1A2E1A"     # Dark green background
     success_border: str = "#059669"    # Green border
 
     error: str = "#F87171"             # Red-400
@@ -154,25 +154,25 @@ class DarkColorPalette(ColorPalette):
     warning_border: str = "#D97706"    # Amber border
 
     info: str = "#60A5FA"              # Blue-400
-    info_light: str = "#1A2433"        # Dark blue background
+    info_light: str = "#1E3A5F"        # Dark blue background
     info_border: str = "#2563EB"       # Blue border
 
     # Gradient Colors
-    gradient_start: str = "#FF1744"
-    gradient_mid: str = "#FF5C7C"
-    gradient_end: str = "#FF8FB3"
+    gradient_start: str = "#e31639"
+    gradient_mid: str = "#ff4d6a"
+    gradient_end: str = "#ff8599"
 
     # Special Effects
     overlay_light: str = "rgba(255, 255, 255, 0.05)"    # Subtle light overlay
     overlay_dark: str = "rgba(0, 0, 0, 0.6)"            # Strong dark overlay
-    shadow_color: str = "rgba(0, 0, 0, 0.5)"            # Darker shadows
-    glow_primary: str = "rgba(255, 92, 124, 0.6)"       # Stronger red glow
-    glow_accent: str = "rgba(255, 143, 179, 0.5)"       # Stronger coral glow
+    shadow_color: str = "rgba(227, 22, 57, 0.2)"        # Darker shadows
+    glow_primary: str = "rgba(255, 77, 106, 0.6)"       # Stronger red glow
+    glow_accent: str = "rgba(255, 133, 153, 0.5)"       # Stronger coral glow
 
     # Scrollbar Colors
-    scrollbar_bg: str = "#1A1A1A"
-    scrollbar_thumb: str = "#404040"
-    scrollbar_hover: str = "#FF5C7C"   # Glowing red on hover
+    scrollbar_bg: str = "#2d1a1c"
+    scrollbar_thumb: str = "#4d2a2e"
+    scrollbar_hover: str = "#ff4d6a"   # Glowing red on hover
 
 
 @dataclass
@@ -183,12 +183,12 @@ class Typography:
     """
 
     # Font Families - BOLD CHOICES
-    # Headlines: Outfit - geometric, modern, confident
-    font_family_heading: str = "Outfit, sans-serif"
-    # Body: Manrope - friendly, readable, professional
-    font_family_body: str = "Manrope, sans-serif"
+    # Headlines: Outfit - geometric, modern, confident (+ Malgun Gothic for KR)
+    font_family_heading: str = "'Outfit', 'Malgun Gothic', sans-serif"
+    # Body: Manrope - friendly, readable, professional (+ Malgun Gothic for KR)
+    font_family_body: str = "'Manrope', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif"
     # Primary fallback with Korean support
-    font_family_primary: str = "Manrope, Pretendard, 'Malgun Gothic', -apple-system, BlinkMacSystemFont, sans-serif"
+    font_family_primary: str = "'Manrope', 'Pretendard', 'Malgun Gothic', sans-serif"
     # Mono: JetBrains Mono for code/technical
     font_family_mono: str = "'JetBrains Mono', 'Consolas', 'Monaco', monospace"
 

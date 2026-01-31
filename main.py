@@ -1,7 +1,7 @@
 ﻿# -*- coding: utf-8 -*-
 """
 Shopping Shorts Maker - PyQt6 main application entry.
-Option 1 shell: Header + StepNav + stacked cards.
+Re-designed with Enhanced Design System (Industrial-Creative Hybrid)
 """
 import sys
 import os
@@ -29,6 +29,7 @@ import config
 FFMPEG_FALLBACK = r"C:\Program Files (x86)\UltData\Resources\ffmpegs"
 if os.path.isdir(FFMPEG_FALLBACK) and FFMPEG_FALLBACK not in os.environ.get("PATH", ""):
     os.environ["PATH"] = FFMPEG_FALLBACK + os.pathsep + os.environ.get("PATH", "")
+
 from app.state import AppState
 from app.api_handler import APIHandler
 from managers.queue_manager import QueueManager
@@ -39,6 +40,7 @@ from ui.panels.style_tab import StyleTab
 from ui.components.status_bar import StatusBar
 from ui.components.custom_dialog import show_info, show_warning
 from ui.theme_manager import get_theme_manager
+from ui.design_system_enhanced import get_design_system
 from utils.logging_config import get_logger
 from utils.error_handlers import global_exception_handler
 from core.providers import VertexGeminiProvider
@@ -51,7 +53,7 @@ URL_PATTERN = re.compile(r"https?://[^\\s\"'<>]+")
 
 class VideoAnalyzerGUI(QMainWindow):
     # Signals for cross-thread logging/progress
-    update_status_signal = None  # Placeholder signals removed for simplified UI
+    update_status_signal = None
     log_signal = None
 
     def __init__(self, parent=None, login_data=None, preloaded_ocr=None):
@@ -60,6 +62,7 @@ class VideoAnalyzerGUI(QMainWindow):
         self.preloaded_ocr = preloaded_ocr
         self.state = AppState(root=self, login_data=login_data)
         self.theme_manager = get_theme_manager()
+        self.design = get_design_system()  # Load enhanced design system
 
         self.url_queue: List[str] = []
         self.url_status: Dict[str, str] = {}
@@ -91,11 +94,11 @@ class VideoAnalyzerGUI(QMainWindow):
 
     # ---------------- UI -----------------
     def init_ui(self):
-        self.setWindowTitle("쇼핑 쇼츠 메이커")
+        self.setWindowTitle("쇼핑 쇼츠 메이커 - Studio")
         icon_path = os.path.join(os.path.dirname(__file__), "resource", "mainTrayIcon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
-        self.resize(1360, 960)
+        self.resize(1440, 960)
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -109,7 +112,8 @@ class VideoAnalyzerGUI(QMainWindow):
 
         # Body with splitter
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setSizes([260, 1100])
+        splitter.setSizes([260, 1180])
+        splitter.setHandleWidth(1)
 
         # Sidebar steps
         steps = [
@@ -123,9 +127,16 @@ class VideoAnalyzerGUI(QMainWindow):
         self.step_nav = StepNav(steps)
         splitter.addWidget(self.step_nav)
 
+        # Main Content Area
+        content_area = QWidget()
+        content_layout = QVBoxLayout(content_area)
+        content_layout.setContentsMargins(24, 24, 24, 24)
+        content_layout.setSpacing(20)
+
         # Stacked pages
         self.stack = QStackedWidget()
-        splitter.addWidget(self.stack)
+        content_layout.addWidget(self.stack)
+        splitter.addWidget(content_area)
 
         # Build pages as cards
         self.url_input_panel = URLInputPanel(self.stack, self, theme_manager=self.theme_manager)
@@ -136,12 +147,12 @@ class VideoAnalyzerGUI(QMainWindow):
         self.subscription_panel = SubscriptionPanel(self.stack, self)
 
         pages = [
-            ("source", "소스 입력", "링크 또는 파일을 추가하세요.", self.url_input_panel),
-            ("style", "스타일", "추천 프리셋과 커스텀 스타일을 구성합니다.", self.style_tab),
-            ("voice", "음성/TTS", "목소리 선택 및 미리듣기.", self.voice_panel),
-            ("queue", "대기/진행", "진행 대기열과 상태 관리.", self.queue_panel),
-            ("progress", "결과/로그", "실시간 로그와 결과 확인.", self.progress_panel),
-            ("subscription", "구독/결제", "구독 플랜과 결제 상태를 관리합니다.", self.subscription_panel),
+            ("source", "소스 입력", "숏폼으로 변환할 쇼핑몰 링크나 영상을 추가하세요.", self.url_input_panel),
+            ("style", "스타일", "자막, 배경음악, 폰트 등 영상 스타일을 설정합니다.", self.style_tab),
+            ("voice", "음성/TTS", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", self.voice_panel),
+            ("queue", "대기/진행", "작업 대기열 및 진행 상황을 관리합니다.", self.queue_panel),
+            ("progress", "결과/로그", "변환 결과물과 시스템 로그를 확인합니다.", self.progress_panel),
+            ("subscription", "구독/결제", "요금제 관리 및 결제 내역을 확인합니다.", self.subscription_panel),
         ]
 
         self.page_index = {}
@@ -163,7 +174,6 @@ class VideoAnalyzerGUI(QMainWindow):
 
     # ------------- URL helpers -------------
     def add_url_from_entry(self):
-        # placeholder: connect to URLInputPanel logic if needed
         show_warning(self, "안내", "URL 추가 로직은 미구현 상태입니다.")
 
     def paste_and_extract(self):
@@ -222,53 +232,100 @@ class VideoAnalyzerGUI(QMainWindow):
             logger.info("[Vertex] 서비스 계정 키 경로가 비어 있습니다. ADC 또는 기본 자격 증명 사용을 시도합니다.")
 
     def _build_topbar(self) -> QWidget:
+        d = self.design
+        c = d.colors
+        
         bar = QFrame()
         bar.setObjectName("TopBar")
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(16, 12, 16, 12)
-        layout.setSpacing(12)
+        layout.setContentsMargins(24, 16, 24, 16)
+        layout.setSpacing(16)
 
-        title = QLabel("Shopping Shorts Maker")
+        # Logo / Brand
+        logo_label = QLabel("SS")
+        logo_label.setObjectName("BrandLogo")
+        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        logo_label.setFixedSize(36, 36)
+        layout.addWidget(logo_label)
+
+        title = QLabel("쇼핑 쇼츠 메이커")
         title.setObjectName("AppTitle")
-        title.setFont(QFont("Inter", 16, QFont.Weight.Bold))
+        title.setFont(QFont(d.typography.font_family_heading, 18, QFont.Weight.Bold))
         layout.addWidget(title)
+
+        # Vertical separator
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.VLine)
+        sep.setFixedSize(1, 20)
+        sep.setStyleSheet(f"background-color: {c.border_light};")
+        layout.addWidget(sep)
 
         project = QLabel("프로젝트: 기본 작업")
         project.setObjectName("ProjectName")
+        project.setFont(QFont(d.typography.font_family_body, 14))
         layout.addWidget(project)
 
         layout.addStretch()
 
-        self.subscription_badge = QLabel("구독: 미설정")
+        # Subscription Badge
+        self.subscription_badge = QLabel("PRO")
         self.subscription_badge.setObjectName("SubBadge")
         self.subscription_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.subscription_badge)
 
+        # Action Buttons
         help_btn = QPushButton("도움말")
         help_btn.setObjectName("GhostButton")
+        help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         layout.addWidget(help_btn)
 
         settings_btn = QPushButton("설정")
         settings_btn.setObjectName("PrimaryButton")
+        settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         settings_btn.clicked.connect(self.show_api_status)
         layout.addWidget(settings_btn)
 
         return bar
 
     def _wrap_card(self, widget: QWidget, title: str, subtitle: str) -> QWidget:
+        d = self.design
+        
         card = QFrame()
-        card.setObjectName("Card")
+        card.setObjectName("ContentCard")
+        
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 20, 20, 20)
-        card_layout.setSpacing(12)
+        card_layout.setContentsMargins(40, 40, 40, 40)
+        card_layout.setSpacing(16)
 
-        header = QLabel(title)
-        header.setObjectName("CardTitle")
-        sub = QLabel(subtitle)
-        sub.setObjectName("CardSubtitle")
-        card_layout.addWidget(header)
-        card_layout.addWidget(sub)
+        # Header Area
+        header_frame = QFrame()
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(0, 0, 0, 8)
+        header_layout.setSpacing(4)
+        
+        title_lbl = QLabel(title)
+        title_lbl.setObjectName("PageTitle")
+        title_lbl.setFont(QFont(d.typography.font_family_heading, 28, QFont.Weight.Bold))
+        
+        sub_lbl = QLabel(subtitle)
+        sub_lbl.setObjectName("PageSubtitle")
+        sub_lbl.setFont(QFont(d.typography.font_family_body, 14))
+        
+        header_layout.addWidget(title_lbl)
+        header_layout.addWidget(sub_lbl)
+        
+        card_layout.addWidget(header_frame)
+        
+        # Separator
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet(f"background-color: {d.colors.border_light}; max-height: 1px;")
+        card_layout.addWidget(line)
+        
+        # Content
+        card_layout.addSpacing(16)
         card_layout.addWidget(widget)
+        
         return card
 
     def _on_step_selected(self, step_id: str):
@@ -281,26 +338,133 @@ class VideoAnalyzerGUI(QMainWindow):
         self._on_step_selected("subscription")
 
     def _apply_shell_styles(self):
+        d = self.design
+        c = d.colors
+        t = d.typography
+        r = d.radius
+
         self.setStyleSheet(
-            """
-            #TopBar { background:#0f172a; color:#e2e8f0; border-bottom:1px solid #1e293b; }
-            #AppTitle { color:#e2e8f0; }
-            #ProjectName { color:#94a3b8; }
-            #SubBadge { padding:6px 12px; border-radius:12px; background:#1d4ed8; color:white; min-width:110px; }
-            #GhostButton { background:transparent; color:#e2e8f0; border:1px solid #334155; padding:6px 12px; border-radius:8px; }
-            #PrimaryButton { background:#2563eb; color:white; border:none; padding:6px 14px; border-radius:8px; }
-            QSplitter::handle { background: #e2e8f0; width: 3px; }
-            #StepNav { background:#111827; border-right:1px solid #1f2937; }
-            #StepNav QPushButton { 
-                background: #111827; color:#cbd5e1; border:1px solid #1f2937; 
-                padding:10px 12px; border-radius:8px; text-align:left; 
-                font-weight:600;
-            }
-            #StepNav QPushButton:checked { background:#1d4ed8; color:white; border-color:#1d4ed8; }
-            #StepNav QPushButton:hover { background:#1f2937; }
-            #Card { background:white; border:1px solid #e2e8f0; border-radius:16px; }
-            #CardTitle { font-size:18px; font-weight:700; color:#0f172a; }
-            #CardSubtitle { color:#475569; margin-bottom:4px; }
+            f"""
+            /* Global Reset */
+            QMainWindow {{
+                background-color: {c.bg_main};
+            }}
+            
+            /* Top Bar */
+            #TopBar {{
+                background-color: {c.bg_header};
+                border-bottom: 1px solid {c.border_light};
+            }}
+            #BrandLogo {{
+                background-color: {c.primary};
+                color: white;
+                border-radius: 8px;
+                font-family: {t.font_family_heading};
+                font-weight: 800;
+                font-size: 16px;
+            }}
+            #AppTitle {{
+                color: {c.text_primary};
+            }}
+            #ProjectName {{
+                color: {c.text_secondary};
+            }}
+            
+            /* Badges & Buttons */
+            #SubBadge {{
+                background-color: {c.primary_light};
+                color: {c.primary};
+                padding: 4px 12px;
+                border-radius: 12px;
+                font-weight: 700;
+                font-size: 11px;
+            }}
+            #GhostButton {{
+                background-color: transparent;
+                color: {c.text_secondary};
+                border: 1px solid {c.border_light};
+                padding: 6px 16px;
+                border-radius: 8px;
+                font-weight: 600;
+            }}
+            #GhostButton:hover {{
+                background-color: {c.bg_hover};
+                color: {c.text_primary};
+                border-color: {c.border_medium};
+            }}
+            #PrimaryButton {{
+                background-color: {c.primary};
+                color: white;
+                border: none;
+                padding: 6px 16px;
+                border-radius: 8px;
+                font-weight: 600;
+            }}
+            #PrimaryButton:hover {{
+                background-color: {c.primary_hover};
+            }}
+            
+            /* Navigation Splitter */
+            QSplitter::handle {{
+                background: {c.border_light};
+                width: 1px;
+            }}
+            
+            /* Sidebar (StepNav) Styles controlled in StepNav component directly or here */
+            #StepNav {{
+                background-color: {c.bg_sidebar};
+                border-right: 1px solid {c.border_light};
+            }}
+            #StepNav QPushButton {{
+                background-color: transparent;
+                color: {c.text_secondary};
+                border: none;
+                border-radius: 8px;
+                padding: 12px 16px;
+                text-align: left;
+                font-family: {t.font_family_body};
+                font-size: 14px;
+                font-weight: 500;
+                margin: 0 8px;
+            }}
+            #StepNav QPushButton:hover {{
+                background-color: {c.bg_hover};
+                color: {c.text_primary};
+            }}
+            #StepNav QPushButton:checked {{
+                background-color: {c.bg_selected};
+                color: {c.primary};
+                font-weight: 700;
+            }}
+            
+            /* Content Cards */
+            #ContentCard {{
+                background-color: {c.bg_card};
+                border: 1px solid {c.border_card};
+                border-radius: 20px;
+                /* Shadows are not supported well in QSS on all widgets, using border for clean look */
+            }}
+            #PageTitle {{
+                color: {c.text_primary};
+            }}
+            #PageSubtitle {{
+                color: {c.text_tertiary};
+            }}
+            
+            /* Scrollbars */
+            QScrollBar:vertical {{
+                background: {c.bg_main};
+                width: 10px;
+                margin: 0px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {c.scrollbar_thumb};
+                min-height: 20px;
+                border-radius: 5px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
             """
         )
 
@@ -308,6 +472,10 @@ class VideoAnalyzerGUI(QMainWindow):
 def main():
     sys.excepthook = global_exception_handler
     app = QApplication(sys.argv)
+    
+    # Load fonts if possible, or rely on system
+    # here we assume fonts are installed or fallback to system sans-serif
+    
     gui = VideoAnalyzerGUI()
     gui.show()
     sys.exit(app.exec())
