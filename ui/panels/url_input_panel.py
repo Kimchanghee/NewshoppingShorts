@@ -1,93 +1,128 @@
 """
 URL Input Panel for PyQt6
+Refactored to integrity with Main Shell Design System
 """
 import logging
 import os
 import subprocess
 import sys
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
-    QTextEdit, QFileDialog, QWidget
+    QVBoxLayout, QHBoxLayout, QLabel, 
+    QTextEdit, QWidget, QFrame
 )
-from PyQt6.QtCore import Qt, pyqtSignal
-from ui.components.rounded_widgets import RoundedButton, create_rounded_button
-from ui.components.base_widget import ThemedMixin
+from PyQt6.QtCore import Qt
+from ui.design_system_enhanced import get_design_system
+from PyQt6.QtGui import QFont
 
 logger = logging.getLogger(__name__)
 
-class URLInputPanel(QFrame, ThemedMixin):
+class URLInputPanel(QWidget):
     def __init__(self, parent, gui, theme_manager=None):
         super().__init__(parent)
         self.gui = gui
-        self.__init_themed__(theme_manager)
+        self.ds = get_design_system()
         self.create_widgets()
-        self.apply_theme()
-
+        
     def create_widgets(self):
+        c = self.ds.colors
+        t = self.ds.typography
+        r = self.ds.radius
+        
         # Main vertical layout
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 12, 16, 12)
-        self.main_layout.setSpacing(10)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.main_layout.setSpacing(24)
 
-        # Header: Title + Buttons
-        header_layout = QHBoxLayout()
+        # 1. Input Area
+        input_container = QVBoxLayout()
+        input_container.setSpacing(8)
         
-        # Title area
-        title_area = QVBoxLayout()
-        self.title_label = QLabel("URL 입력 및 설정")
-        self.title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
-        title_area.addWidget(self.title_label)
+        lbl = QLabel("쇼핑몰 상품 링크 또는 영상 URL 입력")
+        lbl.setFont(QFont(t.font_family_body, 14, QFont.Weight.Bold))
+        lbl.setStyleSheet(f"color: {c.text_primary};")
+        input_container.addWidget(lbl)
         
-        self.subtitle_label = QLabel("텍스트 붙여넣기 시 자동으로 링크 추출됩니다. Enter 키로 추가할 수 있습니다.")
-        self.subtitle_label.setStyleSheet("font-size: 12px;")
-        title_area.addWidget(self.subtitle_label)
-        header_layout.addLayout(title_area)
-        
-        # API Buttons
-        api_layout = QHBoxLayout()
-        self.api_btn = create_rounded_button(self, "API 키 관리", self.gui.show_api_key_manager)
-        api_layout.addWidget(self.api_btn)
-        
-        self.status_btn = create_rounded_button(self, "API 상태 확인", self.gui.show_api_status, style="secondary")
-        api_layout.addWidget(self.status_btn)
-        
-        header_layout.addLayout(api_layout)
-        self.main_layout.addLayout(header_layout)
-
-        # URL Entry
         self.gui.url_entry = QTextEdit()
-        self.gui.url_entry.setFixedHeight(60)
-        self.gui.url_entry.setPlaceholderText("예: https://www.tiktok.com/@...")
-        self.main_layout.addWidget(self.gui.url_entry)
+        self.gui.url_entry.setFixedHeight(120)
+        self.gui.url_entry.setPlaceholderText("https://www.tiktok.com/@user/video/...\nhttps://smartstore.naver.com/...")
+        self.gui.url_entry.setStyleSheet(self.ds.get_input_style())
+        input_container.addWidget(self.gui.url_entry)
         
-        # Example label
-        self.example_label = QLabel("예: https://www.tiktok.com/@...")
-        self.example_label.setStyleSheet("font-size: 11px;")
-        self.main_layout.addWidget(self.example_label)
+        hint = QLabel("💡 팁: 여러 개의 링크를 붙여넣으면 자동으로 분리하여 목록에 추가됩니다.")
+        hint.setFont(QFont(t.font_family_body, 12))
+        hint.setStyleSheet(f"color: {c.text_tertiary};")
+        input_container.addWidget(hint)
+        
+        self.main_layout.addLayout(input_container)
 
-        # Action Bar
-        action_bar = QHBoxLayout()
+        # 2. Action Area
+        action_layout = QHBoxLayout()
+        action_layout.setSpacing(12)
         
-        self.add_btn = create_rounded_button(self, "URL 추가", self.gui.add_url_from_entry)
-        action_bar.addWidget(self.add_btn)
+        from PyQt6.QtWidgets import QPushButton
         
-        self.clipboard_btn = create_rounded_button(self, "클립보드 추가", self.gui.paste_and_extract, style="secondary")
-        action_bar.addWidget(self.clipboard_btn)
+        # Add Button
+        self.add_btn = QPushButton("목록에 추가")
+        self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_btn.setStyleSheet(self.ds.get_button_style("primary", "md"))
+        self.add_btn.clicked.connect(self.gui.add_url_from_entry)
+        action_layout.addWidget(self.add_btn)
         
-        self.folder_open_btn = create_rounded_button(self, "📁 저장 폴더 열기", self._open_output_folder, style="secondary")
-        action_bar.addWidget(self.folder_open_btn)
+        # Clipboard Button
+        self.clipboard_btn = QPushButton("클립보드에서 붙여넣기")
+        self.clipboard_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clipboard_btn.setStyleSheet(self.ds.get_button_style("secondary", "md"))
+        self.clipboard_btn.clicked.connect(self.gui.paste_and_extract)
+        action_layout.addWidget(self.clipboard_btn)
         
-        action_bar.addSpacing(20)
+        action_layout.addStretch()
         
-        self.gui.output_folder_button = create_rounded_button(self, "저장폴더 선택", self.gui.select_output_folder)
-        action_bar.addWidget(self.gui.output_folder_button)
+        self.main_layout.addLayout(action_layout)
         
-        self.gui.output_folder_label = QLabel("폴더를 선택해주세요")
-        self.gui.output_folder_label.setStyleSheet("font-size: 11px;")
-        # Link label to sync with gui logic (though gui logic will need updating too)
-        action_bar.addWidget(self.gui.output_folder_label, 1)
+        # Divider
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background-color: {c.border_light};")
+        self.main_layout.addWidget(line)
         
-        self.main_layout.addLayout(action_bar)
+        # 3. Output Folder Settings
+        folder_layout = QHBoxLayout()
+        folder_layout.setSpacing(12)
+        
+        f_lbl = QLabel("저장 위치:")
+        f_lbl.setFont(QFont(t.font_family_body, 13, QFont.Weight.Bold))
+        f_lbl.setStyleSheet(f"color: {c.text_primary};")
+        folder_layout.addWidget(f_lbl)
+        
+        self.folder_path_lbl = QLabel("설정되지 않음")
+        self.folder_path_lbl.setFont(QFont(t.font_family_mono, 12))
+        self.folder_path_lbl.setStyleSheet(f"""
+            color: {c.text_secondary}; 
+            background: {c.bg_input}; 
+            padding: 4px 8px; 
+            border-radius: 4px;
+        """)
+        # Link to gui for updates
+        self.gui.output_folder_label = self.folder_path_lbl 
+        folder_layout.addWidget(self.folder_path_lbl)
+        
+        chg_btn = QPushButton("변경")
+        chg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        chg_btn.setStyleSheet(self.ds.get_button_style("secondary", "sm"))
+        chg_btn.clicked.connect(self.gui.select_output_folder)
+        folder_layout.addWidget(chg_btn)
+        
+        open_btn = QPushButton("폴더 열기")
+        open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_btn.setStyleSheet(self.ds.get_button_style("ghost", "sm"))
+        open_btn.clicked.connect(self._open_output_folder)
+        folder_layout.addWidget(open_btn)
+        
+        folder_layout.addStretch()
+        self.main_layout.addLayout(folder_layout)
+        
+        self.main_layout.addStretch()
 
     def _open_output_folder(self):
         output_path = getattr(self.gui, 'output_folder_path', None)
@@ -105,26 +140,3 @@ class URLInputPanel(QFrame, ThemedMixin):
                 subprocess.run(['xdg-open', output_path])
         except Exception as e:
             logger.error(f"폴더 열기 오류: {e}")
-
-    def apply_theme(self):
-        bg_card = self.get_color("bg_card")
-        bg_input = self.get_color("bg_input")
-        text_primary = self.get_color("text_primary")
-        text_secondary = self.get_color("text_secondary")
-        border = self.get_color("border_light")
-        
-        self.setStyleSheet(f"background-color: {bg_card}; border: 1px solid {border}; border-radius: 8px;")
-        self.title_label.setStyleSheet(f"color: {text_primary}; font-weight: bold; border: none;")
-        self.subtitle_label.setStyleSheet(f"color: {text_secondary}; border: none;")
-        self.example_label.setStyleSheet(f"color: {text_secondary}; border: none;")
-        self.gui.output_folder_label.setStyleSheet(f"color: {text_secondary}; border: none;")
-        
-        self.gui.url_entry.setStyleSheet(f"""
-            QTextEdit {{
-                background-color: {bg_input};
-                color: {text_primary};
-                border: 1px solid {border};
-                border-radius: 4px;
-                padding: 4px;
-            }}
-        """)
