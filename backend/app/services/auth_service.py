@@ -89,11 +89,13 @@ class AuthService:
         if not user:
             # User enumeration is allowed per user request for better UX
             self._record_login_attempt(username, ip_address, success=False)
+            logger.info(f"[Login Failed] User not found: username={_mask_username(username)}, ip={ip_address}")
             return {"status": "EU001", "message": "EU001"}  # User not found - masked as invalid credentials
 
         if not password_valid:
             # Record failed attempt
             self._record_login_attempt(username, ip_address, success=False)
+            logger.info(f"[Login Failed] Invalid password: username={_mask_username(username)}, ip={ip_address}")
             return {"status": "EU001", "message": "EU001"}  # Invalid password
 
         # Check subscription and active status
@@ -102,10 +104,13 @@ class AuthService:
             and user.subscription_expires_at < datetime.utcnow()
         ):
             self._record_login_attempt(username, ip_address, success=False)
+            logger.info(f"[Login Failed] Subscription expired: username={_mask_username(username)}, ip={ip_address}")
             return {"status": "EU002", "message": "EU002"}  # Subscription expired
 
         if not user.is_active:
+        if not user.is_active:
             self._record_login_attempt(username, ip_address, success=False)
+            logger.info(f"[Login Failed] User inactive: username={_mask_username(username)}, ip={ip_address}")
             return {"status": "EU001", "message": "EU001"}  # Unified error for inactive
 
         # Check existing session
@@ -120,6 +125,7 @@ class AuthService:
         )
 
         if existing_session and not force:
+            logger.info(f"[Login Failed] Duplicate login: username={_mask_username(username)}, ip={ip_address}")
             return {"status": "EU003", "message": "EU003"}  # Duplicate login
 
         # Force logout if needed
