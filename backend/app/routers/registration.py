@@ -19,7 +19,7 @@ from fastapi import APIRouter, Depends, Request, Query
 from slowapi import Limiter
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from passlib.context import CryptContext
+from app.utils.password import hash_password
 
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
@@ -46,7 +46,7 @@ ADMIN_ACTION_RATE_LIMIT = "50/hour"
 logger = logging.getLogger(__name__)
 
 # Password hashing
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
 
 
 def get_client_ip(request: Request) -> str:
@@ -77,13 +77,14 @@ async def submit_registration_request(
     IP당 시간당 5회로 제한하여 남용 방지.
     """
     # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
-    logger.debug(
-        f"Registration request received: username={data.username}, name={data.name}"
+    logger.info(
+        f"[Register Request] Filename: registration.py, Username: {data.username}, Name: {data.name}, Contact: {data.contact}"
     )
     try:
         # Check if username already exists in users table
         existing_user = db.query(User).filter(User.username == data.username).first()
         if existing_user:
+            logger.info(f"[Register Fail] Username exists in Users table: {data.username}")
             return RegistrationResponse(
                 success=False,
                 message="이미 사용 중인 아이디입니다. 다른 아이디를 사용해주세요.",
@@ -97,6 +98,7 @@ async def submit_registration_request(
         )
         if existing_request:
             if existing_request.status == RequestStatus.APPROVED:
+                logger.info(f"[Register Fail] Username exists in RegistrationRequest (Approved): {data.username}")
                 return RegistrationResponse(
                     success=False, message="이미 가입된 계정입니다. 로그인해 주세요."
                 )
@@ -105,7 +107,7 @@ async def submit_registration_request(
             db.flush()
 
         # Hash the password
-        password_hash = pwd_context.hash(data.password)
+        password_hash = hash_password(data.password)
 
         # 자동 승인: 직접 User 생성 (체험판)
         subscription_expires_at = datetime.utcnow() + timedelta(days=DEFAULT_TRIAL_DAYS)
@@ -151,7 +153,7 @@ async def submit_registration_request(
         db.refresh(new_user)
 
         logger.info(
-            f"User auto-registered: id={new_user.id}, username={new_user.username}, work_count={FREE_TRIAL_WORK_COUNT}"
+            f"[Register Success] User auto-registered: id={new_user.id}, username={new_user.username}, work_count={FREE_TRIAL_WORK_COUNT}"
         )
 
         return RegistrationResponse(

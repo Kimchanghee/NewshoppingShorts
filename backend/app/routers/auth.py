@@ -148,10 +148,18 @@ async def rate_limit_exceeded_handler(
 async def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
     """Login endpoint - backward compatible with existing client"""
     client_ip = get_client_ip(request)
+    logger.info(f"[Login Request] ID: {data.id}, IP: {client_ip}, Force: {data.force}")
+    
     service = AuthService(db)
-    return await service.login(
+    result = await service.login(
         username=data.id, password=data.pw, ip_address=client_ip, force=data.force
     )
+    
+    log_status = result.get("status")
+    log_msg = result.get("message", "-") if not isinstance(log_status, bool) else "Success"
+    logger.info(f"[Login Response] ID: {data.id}, Status: {log_status}, Message: {log_msg}")
+    
+    return result
 
 
 @router.post("/logout/god")
