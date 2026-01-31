@@ -126,25 +126,22 @@ class BatchHandler:
                         == "trial"
                     )
 
-                    if not work_check.get("can_work", True):
                         if is_trial_user:
-                            # 체험판 사용자: 구체적인 안내 제공
+                            # 체험판 사용자: 구독 신청 다이얼로그 표시
                             self.app.add_log(
-                                "[작업] 체험판 5회 소진. 웹사이트 안내 표시."
+                                "[작업] 체험판 5회 소진. 구독 신청 안내."
                             )
-                            show_warning(
-                                self.app.root,
-                                "체험판 소진",
-                                "체험판 5회를 모두 소진했습니다.\n\n"
-                                "더 많은 작업을 하시려면 유료 플랜으로 전환하세요.\n\n"
-                                "【유료 플랜 특징】\n"
-                                "• 무제한 작업 가능\n"
-                                "• 더 나은 TTS 음성 옵션\n"
-                                "• 우선 기술 지원\n\n"
-                                "웹사이트에서 플랜 확인 및 결제 가능합니다.\n\n"
-                                "• 웹사이트 접속:\n  "
-                                "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
-                            )
+                            # Run dialog in main thread
+                            def show_sub_dialog():
+                                try:
+                                    from ui.components.subscription_dialog import SubscriptionDialog
+                                    dialog = SubscriptionDialog(self.app.root, user_id, work_used, work_count)
+                                    self.app.root.wait_window(dialog)
+                                except Exception as e:
+                                    logger.error(f"Failed to show subscription dialog: {e}")
+                                    show_warning(self.app.root, "오류", f"구독 신청 창을 열 수 없습니다: {e}")
+
+                            self.app.root.after(0, show_sub_dialog)
                         else:
                             # 유료 사용자: 일반 초과 알림
                             self.app.add_log("[작업] 잔여 작업 횟수가 없습니다.")

@@ -17,6 +17,7 @@ from typing import List
 
 from utils.logging_config import get_logger
 from caller import rest
+from utils.error_handlers import TrialLimitExceededError
 
 logger = get_logger(__name__)
 
@@ -69,6 +70,7 @@ from ui.components.custom_dialog import (
     show_question,
     show_success,
 )
+from ui.components.trial_limit_dialog import TrialLimitDialog
 
 # moviepy 2.x compatible imports
 from moviepy.editor import (
@@ -364,6 +366,49 @@ def dynamic_batch_processing_thread(app):
 
                     break
 
+                except TrialLimitExceededError as e:
+                    # Trial limit exceeded - show dialog and stop processing
+                    app.add_log(f"[체험판] {str(e)}")
+                    logger.info("[TrialLimit] Trial limit exceeded for user")
+
+                    # Stop batch processing immediately
+                    app.batch_processing = False
+                    _safe_set_url_status(app, url, "failed")
+                    app.url_status_message[url] = "체험판 한도 초과"
+
+                    # Show trial limit dialog on main thread
+                    def show_trial_dialog():
+                        try:
+                            # Calculate used from total and remaining
+                            used = e.total - e.remaining
+                            dialog = TrialLimitDialog(
+                                parent=app,  # app is QMainWindow
+                                used=used,
+                                total=e.total
+                            )
+
+                            # Connect signal to open subscription panel
+                            dialog.subscription_requested.connect(
+                                lambda: app._show_subscription_panel() if hasattr(app, '_show_subscription_panel') else None
+                            )
+
+                            # Show dialog modally
+                            dialog.exec()
+                        except Exception as dialog_err:
+                            logger.error(f"Failed to show trial limit dialog: {dialog_err}")
+                            show_warning(
+                                app,
+                                "체험판 한도 초과",
+                                f"{str(e)}\n\n구독이 필요합니다."
+                            )
+
+                    # Use QTimer to show dialog on main thread
+                    from PyQt6.QtCore import QTimer
+                    QTimer.singleShot(0, show_trial_dialog)
+
+                    # Break out of retry loop and stop processing
+                    break
+
                 except Exception as e:
                     ui_controller.write_error_log(e)
                     error_msg = str(e)
@@ -604,6 +649,28 @@ def dynamic_batch_processing_thread(app):
 
 def _process_single_video(app, url, current_number, total_urls):
     """Process a single video inside the dynamic batch workflow."""
+
+    # Check trial limit before starting video processing
+    try:
+        user_id = (
+            app.login_data.get("data", {}).get("data", {}).get("id", "")
+            if app.login_data
+            else ""
+        )
+        if user_id:
+            work_status = rest.check_work_available(user_id)
+            if not work_status.get("available", False):
+                used = work_status.get("used", 0)
+                total = work_status.get("total", 5)
+                raise TrialLimitExceededError(
+                    f"체험판 사용 횟수를 초과했습니다 ({used}/{total}). 구독이 필요합니다.",
+                    remaining=0,
+                    total=total
+                )
+    except TrialLimitExceededError:
+        raise
+    except Exception as trial_check_err:
+        logger.warning("[Trial Check] Failed to verify work availability: %s", trial_check_err)
 
     app.reset_progress_states()
     if hasattr(app, "set_active_job"):

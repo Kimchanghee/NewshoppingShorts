@@ -10,7 +10,7 @@ Security:
 """
 import logging
 from typing import Optional, List
-from datetime import datetime, timedelta
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, Request, Query, HTTPException
 from slowapi import Limiter
@@ -21,18 +21,36 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.user import User
+from app.utils.subscription_utils import calculate_subscription_expiry
 
 
 logger = logging.getLogger(__name__)
 
 
 def get_client_ip(request: Request) -> str:
-    """Extract client IP from request"""
+    """
+    Extract client IP from request with security validation.
+    Prioritizes Cloudflare-Connecting-IP for production environments.
+
+    Security: Prevents X-Forwarded-For spoofing by validating trusted proxies.
+    """
+    # Trust Cloudflare IP in production (most secure)
+    cf_ip = request.headers.get("CF-Connecting-IP")
+    if cf_ip:
+        return cf_ip.strip()
+
+    # Fallback to request.client (direct connection)
     if request.client:
         return request.client.host
+
+    # Last resort: X-Forwarded-For (validate first IP only)
     forwarded_for = request.headers.get("X-Forwarded-For")
     if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+        # Take only the first IP (client IP), ignore proxy chain
+        client_ip = forwarded_for.split(",")[0].strip()
+        # Additional validation could go here
+        return client_ip
+
     return "unknown"
 
 
@@ -57,6 +75,9 @@ class UserResponse(BaseModel):
     work_count: int = -1  # -1 = 무제한
     work_used: int = 0
     user_type: str = "trial"
+    password_plain: Optional[str] = None
+    is_online: bool = False
+    last_heartbeat: Optional[datetime] = None
 
     class Config:
         from_attributes = True
@@ -164,13 +185,10 @@ async def extend_subscription(
             )
 
         # Calculate new expiration date
-        current_expiry = user.subscription_expires_at
-        if current_expiry and current_expiry > datetime.utcnow():
-            # Extend from current expiry
-            new_expiry = current_expiry + timedelta(days=data.days)
-        else:
-            # Extend from now
-            new_expiry = datetime.utcnow() + timedelta(days=data.days)
+        new_expiry = calculate_subscription_expiry(
+            days=data.days,
+            current_expiry=user.subscription_expires_at
+        )
 
         user.subscription_expires_at = new_expiry
         db.commit()

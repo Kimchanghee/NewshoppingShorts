@@ -21,32 +21,33 @@ logger = get_logger(__name__)
 secrets_manager = get_secrets_manager()
 
 # Generic error messages for client responses (don't expose internals)
-# 클라이언트 응답용 일반 오류 메시지 (내부 정보 노출 방지)
+# ???????? ?  (?? ? ? ?)
 _ERROR_MESSAGES = {
-    "timeout": "요청 시간이 초과되었습니다. 다시 시도해 주세요.",
-    "connection": "서버 연결에 실패했습니다. 네트워크를 확인해 주세요.",
+    "timeout": "요청 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.",
+    "connection": "서버에 연결하지 못했습니다. 네트워크를 확인해주세요.",
     "network": "네트워크 오류가 발생했습니다.",
-    "parse": "서버 응답을 처리할 수 없습니다.",
-    "unexpected": "예상치 못한 오류가 발생했습니다.",
+    "parse": "서버 응답을 처리하지 못했습니다.",
+    "unexpected": "알 수 없는 오류가 발생했습니다.",
     "invalid_input": "입력값이 올바르지 않습니다.",
 }
 
 # Server URL from environment variable (secure configuration)
-# 환경 변수에서 서버 URL 가져오기 (보안 설정)
+# ? ???? URL ??( ? )
 # Production: Cloud Run, Development: localhost
 main_server = os.getenv(
     "API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
 ).rstrip("/")
 
 # Production environment detection
-# 운영 환경 감지
+# ? ? ?
 _IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() == "production"
 
 
 def _sanitize_user_id_for_logging(user_id: str) -> str:
     """
     Mask user ID for safe logging - shows only first 2 and last 2 characters.
-    안전한 로깅을 위해 사용자 ID 마스킹 - 처음 2자와 마지막 2자만 표시.
+    ? ??
+??? ???ID ??-  2?? ??2? ?.
 
     Args:
         user_id: The user ID to sanitize
@@ -62,7 +63,7 @@ def _sanitize_user_id_for_logging(user_id: str) -> str:
 def _check_https_security() -> bool:
     """
     Check if HTTPS is enforced in production environment.
-    운영 환경에서 HTTPS가 강제되는지 확인.
+    ? ?? HTTPS  ? ?.
 
     Returns:
         True if secure, False if insecure in production
@@ -88,7 +89,7 @@ def _check_https_security() -> bool:
 def _check_token_expiration(token: str) -> bool:
     """
     Check if JWT token is expired without verification.
-    검증 없이 JWT 토큰 만료 여부 확인.
+    ?? JWT ?   ?? ?.
 
     Args:
         token: JWT token to check
@@ -98,7 +99,6 @@ def _check_token_expiration(token: str) -> bool:
     """
     try:
         # Decode without verification to check expiration
-        # 만료 확인을 위해 검증 없이 디코딩
         payload = jwt.decode(token, options={"verify_signature": False})
         exp = payload.get("exp")
         if exp:
@@ -118,7 +118,8 @@ def _check_token_expiration(token: str) -> bool:
 def _create_secure_session() -> requests.Session:
     """
     Create a requests session with connection pooling and SSL verification.
-    연결 풀링 및 SSL 검증이 활성화된 requests 세션 생성.
+    ? ???SSL  ?? requests ?
+ ?.
 
     Returns:
         Configured requests.Session with SSL verification and connection pooling
@@ -129,11 +130,11 @@ def _create_secure_session() -> requests.Session:
     session = requests.Session()
     session.verify = True  # Explicit SSL certificate verification
 
-    # 향상된 재시도 전략: 구독 시스템에 최적화
-    # - total=3: 최대 3회 재시도
-    # - backoff_factor=1.0: 지수 백오프 (1, 2, 4초)
-    # - status_forcelist: 서버 오류 시 재시도
-    # - method_whitelist: GET, POST, PUT, DELETE 모두 재시도
+    # Retry configuration:
+    # - total=3: maximum retries
+    # - backoff_factor=1.0: exponential backoff (1, 2, 4 seconds)
+    # - status_forcelist: retry on common transient HTTP errors
+    # - allowed_methods: enable retries for idempotent methods
     retry_strategy = Retry(
         total=3,
         backoff_factor=1.0,
@@ -142,9 +143,13 @@ def _create_secure_session() -> requests.Session:
         raise_on_status=False,
         respect_retry_after_header=True,
     )
+    # Connection pool optimization:
+    # - pool_connections=50: Support up to 50 concurrent different hosts
+    # - pool_maxsize=100: Allow up to 100 total connections per host
+    # This improves performance for high-concurrency scenarios
     adapter = HTTPAdapter(
-        pool_connections=10,  # 증가된 연결 풀
-        pool_maxsize=20,
+        pool_connections=50,   # Increased from 10 (concurrent hosts)
+        pool_maxsize=100,      # Increased from 20 (total connections per host)
         max_retries=retry_strategy,
     )
     session.mount("https://", adapter)
@@ -154,14 +159,49 @@ def _create_secure_session() -> requests.Session:
 
 
 # Create a module-level secure session for reuse
-# 재사용을 위한 모듈 수준 보안 세션 생성
 _secure_session = _create_secure_session()
+
+
+def _friendly_login_message(login_object: Dict[str, Any]) -> str:
+    """
+    Convert server/login status codes into user-friendly Korean messages.
+    """
+    status = login_object.get("status")
+    message = str(login_object.get("message") or "").strip()
+
+    # Map known/likely status codes from the backend
+    if status in ("EU001", "BAD_REQUEST", "MISSING_FIELDS"):
+        return "필수 정보가 누락되었거나 형식이 잘못되었습니다. 아이디/비밀번호를 확인하세요."
+    if status in (False, "EU004", "AUTH_FAIL", "INVALID_CREDENTIALS"):
+        return "아이디 또는 비밀번호가 올바르지 않습니다."
+    if status in ("EU003", "USER_NOT_FOUND", "NOT_FOUND"):
+        return "해당 계정을 찾을 수 없습니다."
+    if status in ("EU002", "LOCKED", "BLOCKED"):
+        return "계정이 잠겨 있거나 비활성화되었습니다. 관리자에게 문의하세요."
+
+    # Add EU005 handling for rate limiting (before generic 429)
+    if status in ("EU005", "RATE_LIMITED"):
+        return "너무 많은 로그인 시도가 있었습니다. 잠시 후 다시 시도해주세요."
+
+    if status in ("EU429", 429):
+        # 서버의 로그인 시도 제한 안내를 숨기고 일반 오류로 처리
+        return "아이디 또는 비밀번호가 올바르지 않습니다."
+
+    # If server already sent a readable message, keep it
+    if message:
+        if "Too many login attempts" in message:
+            # 사용자에게 노출하지 않고 일반 오류로 통일
+            return "아이디 또는 비밀번호가 올바르지 않습니다."
+        return message
+
+    # Fallback generic message
+    return "로그인에 실패했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요."
 
 
 def _get_auth_token() -> Optional[str]:
     """
     Get stored JWT token from secure credential manager.
-    보안 credential manager에서 JWT 토큰 가져오기.
+     credential manager? JWT ?  ??
 
     Returns:
         JWT token or None if not set
@@ -176,7 +216,7 @@ def _get_auth_token() -> Optional[str]:
 def _set_auth_token(token: Optional[str]) -> None:
     """
     Store JWT token in secure credential manager.
-    JWT 토큰을 보안 credential manager에 저장.
+    JWT ? ?? credential manager?????
 
     Args:
         token: JWT token to store, or None to clear
@@ -195,7 +235,8 @@ def _set_auth_token(token: Optional[str]) -> None:
 def login(**data) -> Dict[str, Any]:
     """
     User login with input validation.
-    입력 검증이 포함된 사용자 로그인.
+    ?
+   ????????
 
     Args:
         data: Login data containing userId, userPw, key, ip, force
@@ -204,13 +245,13 @@ def login(**data) -> Dict[str, Any]:
         Login response dict
     """
     # HTTPS security check for production
-    # 운영 환경에서 HTTPS 보안 확인
+    # ? ?? HTTPS  ?
     if not _check_https_security():
         return {"status": "error", "message": "Secure connection required"}
 
     # Input validation
-    # 입력 검증
-    user_id = data.get("userId", "")
+    # ?
+    user_id = (data.get("userId", "") or "").strip().lower()
     if not validate_user_id(user_id):
         logger.error(
             f"Invalid user ID format: {_sanitize_user_id_for_logging(user_id)}"
@@ -231,8 +272,9 @@ def login(**data) -> Dict[str, Any]:
     }
 
     try:
+        # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
         logger.info(f"[Login] Requesting login to: {main_server}/user/login/god")
-        logger.info(f"[Login] Params: id={_sanitize_user_id_for_logging(user_id)}, ip={ip_address}, force={data.get('force', False)}")
+        logger.debug(f"[Login] Params: id={_sanitize_user_id_for_logging(user_id)}, ip={ip_address}, force={data.get('force', False)}")
         
         start_time = time.time()
         response = _secure_session.post(
@@ -243,11 +285,12 @@ def login(**data) -> Dict[str, Any]:
         elapsed = time.time() - start_time
         
         logger.info(f"[Login] Response received in {elapsed:.2f}s, Status: {response.status_code}")
+        logger.debug(f"[Login] Raw response text: {response.text[:500]}")
         
-        # 응답 바디 로깅 (에러 발생 전 수행)
+        # Parse response body for logging (mask sensitive data)
         try:
             loginObject = json.loads(response.text)
-            # 로그에 응답 구조만 남기고 민감 정보 제외
+            # ??? ??? ? ?
             safe_log_obj = loginObject.copy()
             if "data" in safe_log_obj and isinstance(safe_log_obj["data"], dict):
                 data_part = safe_log_obj["data"].copy()
@@ -257,7 +300,8 @@ def login(**data) -> Dict[str, Any]:
             logger.info(f"[Login] Response body: {json.dumps(safe_log_obj, ensure_ascii=False)}")
         except Exception:
             logger.warning("[Login] Failed to parse response body for logging")
-            # JSON 파싱 실패 시 텍스트라도 로깅
+            # JSON ? ? ??????
+
             logger.info(f"[Login] Raw response: {response.text[:500]}")
 
         response.raise_for_status()
@@ -273,6 +317,9 @@ def login(**data) -> Dict[str, Any]:
                     logger.warning("[Login] Received expired JWT token from server")
             else:
                 logger.warning("[Login] No token found in successful login response")
+        else:
+            # Normalize message for common failure cases
+            loginObject["message"] = _friendly_login_message(loginObject)
 
         return loginObject
     except requests.exceptions.Timeout:
@@ -285,16 +332,25 @@ def login(**data) -> Dict[str, Any]:
         if e.response.status_code == 401:
             return {
                 "status": "error",
-                "message": "비밀번호가 일치하지 않거나 인증에 실패했습니다.",
+                "message": "아이디 또는 비밀번호가 올바르지 않습니다.",
             }
         elif e.response.status_code == 404:
-            return {"status": "error", "message": "존재하지 않는 아이디입니다."}
+            return {"status": "error", "message": "해당 계정을 찾을 수 없습니다."}
         elif e.response.status_code == 403:
             return {
                 "status": "error",
-                "message": "접근 권한이 없습니다. (승인 대기중일 수 있습니다)",
+                "message": "접근이 거부되었습니다. (인증 또는 권한 오류)",
             }
-        return {"status": "error", "message": f"서버 오류: {e.response.status_code}"}
+        elif e.response.status_code == 429:
+            # 서버가 rate limit을 반환해도 사용자에게는 일반 로그인 오류만 알림
+            return {
+                "status": "error",
+                "message": "아이디 또는 비밀번호가 올바르지 않습니다.",
+            }
+        return {
+            "status": "error",
+            "message": f"서버 오류가 발생했습니다. (HTTP {e.response.status_code})",
+        }
     except requests.exceptions.RequestException as e:
         logger.error(f"Login network error: {str(e)[:100]}")
         return {"status": "error", "message": _ERROR_MESSAGES["network"]}
@@ -309,7 +365,7 @@ def login(**data) -> Dict[str, Any]:
 def logOut(**data) -> str:
     """
     User logout with secure token cleanup.
-    보안 토큰 정리가 포함된 사용자 로그아웃.
+     ?  ? ???????.
 
     Args:
         data: Logout data containing userId, key
@@ -326,7 +382,7 @@ def logOut(**data) -> str:
         return "error"
 
     # Use stored token if available
-    # 저장된 토큰이 있으면 사용
+    # ?? ? ?????
     stored_token = _get_auth_token()
     body = {"id": user_id, "key": stored_token or data.get("key", "")}
 
@@ -338,7 +394,7 @@ def logOut(**data) -> str:
         loginObject = json.loads(response.text)
 
         # Clear token on logout (success or failure)
-        # 로그아웃 시 토큰 클리어 (성공/실패 무관)
+        # ? ???  ???(?/? ?)
         _set_auth_token(None)
 
         return loginObject.get("status", "error")
@@ -367,7 +423,7 @@ def logOut(**data) -> str:
 def loginCheck(**data) -> Dict[str, Any]:
     """
     Check login status (heartbeat).
-    로그인 상태 확인 (하트비트).
+    ??? ? (?).
 
     Args:
         data: Check data containing userId, key, ip
@@ -376,7 +432,7 @@ def loginCheck(**data) -> Dict[str, Any]:
         Check response dict
     """
     user_id = data.get("userId", "")
-    # 하트비트 체크는 검증 실패 시 조용히 스킵 (에러 로그 없이)
+    # ? ???? ????? (?  ?)
     if not user_id:
         return {"status": "skip", "message": "No user ID"}
 
@@ -419,7 +475,7 @@ def loginCheck(**data) -> Dict[str, Any]:
 def getVersion() -> str:
     """
     Get server version with fallback.
-    폴백이 있는 서버 버전 가져오기.
+    ???? ?   ??
 
     Returns:
         Version string
@@ -456,44 +512,54 @@ def submitRegistrationRequest(
 ) -> Dict[str, Any]:
     """
     Submit a registration request to the server.
-    서버에 회원가입 요청을 제출합니다.
+    ?????????????
 
     Args:
-        name: 가입자 명
-        username: 사용할 아이디
-        password: 비밀번호
-        contact: 연락처
-
+        name: ?
+ ?        username: ??????        password: ?
+        contact: ??
     Returns:
         Response dict with 'success' boolean and optional 'message'
     """
     # HTTPS security check
     if not _check_https_security():
-        return {"success": False, "message": "보안 연결이 필요합니다."}
+        return {"success": False, "message": "Secure connection required."}
 
     # Input validation
     if not name or len(name.strip()) < 2:
-        return {"success": False, "message": "가입자 명은 2자 이상이어야 합니다."}
+        return {"success": False, "message": "Name must be at least 2 characters."}
 
     if not validate_user_id(username):
-        return {"success": False, "message": "아이디 형식이 올바르지 않습니다."}
+        return {"success": False, "message": "Username format is invalid."}
 
     if not password or len(password) < 6:
-        return {"success": False, "message": "비밀번호는 6자 이상이어야 합니다."}
+        return {"success": False, "message": "Password must be at least 6 characters."}
 
-    if not contact or len(contact.strip()) < 10:
-        return {"success": False, "message": "연락처를 올바르게 입력해주세요."}
+    # 연락처: 숫자/하이픈만 허용되므로 미리 정제
+    import re
+    cleaned_contact = re.sub(r"[^0-9\\-]", "", contact or "")
+    if not cleaned_contact or len(cleaned_contact) < 10:
+        return {
+            "success": False,
+            "message": "연락처는 숫자/하이픈 10자리 이상 입력해주세요.",
+        }
 
     body = {
         "name": name.strip(),
-        "username": username.strip(),
+        "username": username.strip().lower(),
         "password": password,
-        "contact": contact.strip(),
+        "contact": cleaned_contact,
     }
 
     try:
         logger.info(
             f"Sending registration request to: {main_server}/user/register/request"
+        )
+        logger.info(
+            "Registration payload: name=%s username=%s contact=%s",
+            _sanitize_user_id_for_logging(username),
+            _sanitize_user_id_for_logging(username),
+            cleaned_contact,
         )
         response = _secure_session.post(
             f"{main_server}/user/register/request", json=body, timeout=30
@@ -506,7 +572,24 @@ def submitRegistrationRequest(
             # Username already exists
             return {
                 "success": False,
-                "message": "이미 사용 중인 아이디입니다.",
+                "message": "Username already exists.",
+            }
+
+        if response.status_code == 422:
+            # FastAPI validation error
+            try:
+                detail = response.json().get("detail", [])
+                if detail and isinstance(detail, list):
+                    msg = detail[0].get("msg", "")
+                    return {
+                        "success": False,
+                        "message": f"입력값이 올바르지 않습니다. {msg}",
+                    }
+            except Exception:
+                pass
+            return {
+                "success": False,
+                "message": "입력값이 올바르지 않습니다. (연락처는 숫자/하이픈 10자리 이상)",
             }
 
         if response.status_code == 429:
@@ -514,16 +597,16 @@ def submitRegistrationRequest(
                 error_data = response.json()
                 error_info = error_data.get("error", {})
                 retry_after = error_info.get(
-                    "retry_after", "1시간 후 다시 시도해주세요."
+                    "retry_after", "1? ??? ???."
                 )
                 return {
                     "success": False,
-                    "message": f"회원가입 요청이 너무 많습니다.\n{retry_after} 후 다시 시도해주세요.",
+                    "message": f"??????? ?.\n{retry_after} ??? ???.",
                 }
             except json.JSONDecodeError:
                 return {
                     "success": False,
-                    "message": "회원가입 요청이 너무 많습니다.\n잠시 후 다시 시도해주세요.",
+                    "message": "??????? ?.\n?  ??? ???.",
                 }
 
         response.raise_for_status()
@@ -536,8 +619,8 @@ def submitRegistrationRequest(
             # Return full result to allow auto-login
             return result
         else:
-            # 서버에서 온 에러 메시지 처리 (SQL 에러 숨기기)
-            server_message = result.get("message", "요청 처리에 실패했습니다.")
+            # Server-side error handling (SQL or validation issues)
+            server_message = result.get("message", "Registration failed.")
 
             if (
                 "Duplicate entry" in server_message
@@ -545,10 +628,10 @@ def submitRegistrationRequest(
                 or "1062" in str(server_message)
             ):
                 server_message = (
-                    "이미 존재하는 아이디입니다. 다른 아이디를 사용해주세요."
+                    "Username or contact already exists. Please use different values."
                 )
             elif "SQL" in server_message or "pymysql" in server_message:
-                server_message = "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
+                server_message = "Server database error. Please try again later."
 
             logger.error(f"Registration failed: {server_message}")
             return {"success": False, "message": server_message}
@@ -573,7 +656,8 @@ def submitRegistrationRequest(
 def checkWorkAvailable(user_id: str) -> Dict[str, Any]:
     """
     Check if user has remaining work count available.
-    사용자의 잔여 작업 횟수 확인.
+    ?? ? ?
+ ? ?.
 
     Args:
         user_id: User ID
@@ -605,36 +689,74 @@ def checkWorkAvailable(user_id: str) -> Dict[str, Any]:
         logger.error("Work check request timed out")
         return {
             "success": False,
-            "can_work": True,
+            "can_work": False,  # Security: deny access on verification failure
             "message": _ERROR_MESSAGES["timeout"],
         }
     except requests.exceptions.ConnectionError as e:
         logger.error(f"Work check connection error: {e}")
         return {
             "success": False,
-            "can_work": True,
+            "can_work": False,  # Security: deny access on verification failure
             "message": _ERROR_MESSAGES["connection"],
         }
     except requests.exceptions.RequestException as e:
         logger.error(f"Work check network error: {str(e)[:100]}")
         return {
             "success": False,
-            "can_work": True,
+            "can_work": False,  # Security: deny access on verification failure
             "message": _ERROR_MESSAGES["network"],
         }
     except Exception as e:
         logger.exception(f"Unexpected work check error: {e}")
         return {
             "success": False,
-            "can_work": True,
+            "can_work": False,  # Security: deny access on verification failure
             "message": _ERROR_MESSAGES["unexpected"],
+        }
+
+
+def check_work_available(user_id: str) -> Dict[str, Any]:
+    """
+    Check if user has trial uses remaining.
+    ?? ??? ? ? (checkWorkAvailable ).
+
+    Returns:
+        dict with available (bool), remaining (int), total (int), used (int)
+    """
+    try:
+        result = checkWorkAvailable(user_id)
+
+        # Transform response to match expected format
+        if result.get("success"):
+            return {
+                "available": result.get("can_work", False),
+                "remaining": result.get("remaining", 0),
+                "total": result.get("work_count", 5),
+                "used": result.get("work_used", 0)
+            }
+        else:
+            logger.error(f"Failed to check work availability: {result.get('message', 'Unknown error')}")
+            return {
+                "available": False,
+                "remaining": 0,
+                "total": 5,
+                "used": 5
+            }
+    except Exception as e:
+        logger.error(f"Failed to check work availability: {e}")
+        return {
+            "available": False,
+            "remaining": 0,
+            "total": 5,
+            "used": 5
         }
 
 
 def useWork(user_id: str) -> Dict[str, Any]:
     """
     Increment work_used count after successful work completion.
-    작업 완료 후 사용 횟수 증가.
+    ?
+ ? ??? ? ?.
 
     Args:
         user_id: User ID
@@ -678,7 +800,7 @@ def useWork(user_id: str) -> Dict[str, Any]:
 def setPort() -> bool:
     """
     Set port configuration from info.on file.
-    info.on 파일에서 포트 설정.
+    info.on ?? ? ? .
 
     Returns:
         True if successful, False otherwise
@@ -721,7 +843,8 @@ def setPort() -> bool:
 def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
     """
     Get detailed subscription status for the user.
-    사용자의 상세 구독 상태 조회.
+    ?? ? 
+ ? .
 
     Args:
         user_id: User ID
@@ -756,7 +879,7 @@ def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
         return {
             "success": False,
             "is_trial": True,
-            "can_work": True,
+            "can_work": False,  # Security: deny access on verification failure
             "message": _ERROR_MESSAGES["timeout"],
         }
     except requests.exceptions.ConnectionError as e:
@@ -764,7 +887,7 @@ def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
         return {
             "success": False,
             "is_trial": True,
-            "can_work": True,
+            "can_work": False,  # Security: deny access on verification failure
             "message": _ERROR_MESSAGES["connection"],
         }
     except requests.exceptions.RequestException as e:
@@ -772,7 +895,7 @@ def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
         return {
             "success": False,
             "is_trial": True,
-            "can_work": True,
+            "can_work": False,  # Security: deny access on verification failure
             "message": _ERROR_MESSAGES["network"],
         }
     except Exception as e:
@@ -780,7 +903,7 @@ def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
         return {
             "success": False,
             "is_trial": True,
-            "can_work": True,
+            "can_work": False,  # Security: deny access on verification failure
             "message": _ERROR_MESSAGES["unexpected"],
         }
 
@@ -788,7 +911,8 @@ def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
 def submitSubscriptionRequest(user_id: str, message: str = "") -> Dict[str, Any]:
     """
     Submit a subscription request.
-    구독 신청을 제출합니다.
+    
+ ? ??????
 
     Args:
         user_id: User ID
@@ -799,7 +923,7 @@ def submitSubscriptionRequest(user_id: str, message: str = "") -> Dict[str, Any]
     """
     stored_token = _get_auth_token()
     if not stored_token:
-        return {"success": False, "message": "로그인이 필요합니다."}
+        return {"success": False, "message": "? ????"}
 
     headers = {"X-User-ID": str(user_id), "Authorization": f"Bearer {stored_token}"}
 
@@ -839,20 +963,19 @@ def submitSubscriptionRequest(user_id: str, message: str = "") -> Dict[str, Any]
 
 
 # ============================================================================
-# 에지 케이스 처리 및 재시도 유틸리티
+# ?? ?  ????? 
 # ============================================================================
 
 
 def with_retry(max_retries: int = 3, backoff_factor: float = 1.0):
     """
-    재시도 데코레이터: 네트워크 오류 시 자동 재시도
-
+    ??????? ?? ? ??? ???
     Args:
-        max_retries: 최대 재시도 횟수
-        backoff_factor: 지수 백오프 계수 (초)
+        max_retries: ? ????
+        backoff_factor: ???? (?
 
     Returns:
-        데코레이터 함수
+        ?????
     """
 
     def decorator(func):
@@ -873,19 +996,19 @@ def with_retry(max_retries: int = 3, backoff_factor: float = 1.0):
                     if attempt < max_retries:
                         wait_time = backoff_factor * (2**attempt)
                         logger.warning(
-                            f"네트워크 오류 발생: {type(e).__name__}. "
-                            f"{wait_time:.1f}초 후 재시도 ({attempt + 1}/{max_retries})"
+                            f"?? ? : {type(e).__name__}. "
+                            f"{wait_time:.1f}??????({attempt + 1}/{max_retries})"
                         )
                         time.sleep(wait_time)
                     else:
-                        logger.error(f"최대 재시도 횟수 초과: {type(e).__name__}")
+                        logger.error(f"? ???? : {type(e).__name__}")
                 except Exception as e:
-                    # 네트워크 오류가 아닌 다른 예외는 즉시 전파
+                    # ?? ? ? ? ??? ?
                     raise e
 
             if last_exception:
                 raise last_exception
-            raise RuntimeError("재시도 로직 오류")
+            raise RuntimeError("??? ?")
 
         return wrapper
 
@@ -894,13 +1017,13 @@ def with_retry(max_retries: int = 3, backoff_factor: float = 1.0):
 
 def handle_token_expiry(func):
     """
-    토큰 만료 처리 데코레이터: 401 에러 시 토큰 갱신 시도
+    ?    ???? 401 ? ???    ?
 
     Args:
-        func: 데코레이트할 함수
+        func: ???  ?
 
     Returns:
-        데코레이터 함수
+        ?????
     """
 
     @functools.wraps(func)
@@ -909,9 +1032,9 @@ def handle_token_expiry(func):
             return func(*args, **kwargs)
         except requests.exceptions.HTTPError as e:
             if e.response.status_code == 401:
-                logger.warning("토큰 만료 감지, 로그인 필요")
+                logger.warning("?   ?, ???")
                 raise PermissionError(
-                    "인증 토큰이 만료되었습니다. 다시 로그인해주세요."
+                    "? ? ?????? ? ???"
                 )
             raise e
 
@@ -920,10 +1043,12 @@ def handle_token_expiry(func):
 
 class SubscriptionStateManager:
     """
-    구독 상태 관리자: 상태 불일치 감지 및 복구
+    
+ ? : ? ?? ?
 
-    이 클래스는 구독 상태의 일관성을 유지하고,
-    네트워크 문제나 경쟁 조건으로 인한 상태 불일치를 감지/복구합니다.
+    ???? 
+ ?????? ? ?? ,
+    ??  ?? ? ? ? ? ?/???
     """
 
     def __init__(self):
@@ -934,29 +1059,31 @@ class SubscriptionStateManager:
 
     def update_state(self, new_state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        상태 업데이트
+        ? ?
+?
         
-        서버의 최신 상태를 신뢰하고 업데이트합니다.
+        ???  ??? ?  ?
+????
         
         Args:
-            new_state: 새로운 상태 데이터
-            
+            new_state: ???? ???            
         Returns:
-            업데이트된 상태 데이터
-        """
+            ?
+???? ???        """
         with self._state_lock:
             if self._last_known_state is None:
                 self._last_known_state = new_state
                 return new_state
             
-            # 상태 변경 감지 (로깅용)
+            # Log state differences before updating
             self._log_state_changes(self._last_known_state, new_state)
             
             self._last_known_state = new_state
             return new_state
 
     def _log_state_changes(self, old_state: Dict[str, Any], new_state: Dict[str, Any]):
-        """상태 변경 사항 로깅"""
+        """? ?? 
+"""
         if not new_state.get("success", False):
             return
 
@@ -970,10 +1097,10 @@ class SubscriptionStateManager:
                 changes.append(f"{field}: {old_val} -> {new_val}")
         
         if changes:
-            logger.info(f"구독 상태 변경됨: {', '.join(changes)}")
+            logger.info(f"State changed: {', '.join(changes)}")
 
     def _detect_inconsistency(self, new_state: Dict[str, Any]) -> bool:
-        """상태 불일치 감지 로직"""
+        """? ?? """
         if not new_state.get("success", False):
             return False
 
@@ -993,48 +1120,50 @@ class SubscriptionStateManager:
         return False
 
     def _reset_state(self):
-        """상태 재설정"""
+        """Reset cached subscription state and inconsistency counter."""
         self._last_known_state = None
         self._inconsistent_count = 0
-        logger.info("구독 상태 관리자 재설정 완료")
+        logger.info("Subscription state reset")
 
     def get_last_state(self) -> Optional[Dict[str, Any]]:
-        """마지막으로 알려진 상태 반환"""
+        """Return last known subscription state."""
         return self._last_known_state
 
 
-# 전역 상태 관리자 인스턴스
+# ? ?  ??
 _subscription_state_manager = SubscriptionStateManager()
 
 
 def get_subscription_status_with_consistency(user_id: str) -> Dict[str, Any]:
     """
-    일관성 있는 구독 상태 조회
+    ????? 
+ ? 
 
     Args:
-        user_id: 사용자 ID
+        user_id: ???ID
 
     Returns:
-        일관성 검증된 구독 상태
+        ???? 
+ ?
     """
     raw_status = getSubscriptionStatus(user_id)
 
-    # 상태 관리자를 통해 일관성 검증
-    validated_status = _subscription_state_manager.update_state(raw_status)
+    # ? ?? ?????    validated_status = _subscription_state_manager.update_state(raw_status)
 
     return validated_status
 
 
 def safe_subscription_request(user_id: str, message: str = "") -> Dict[str, Any]:
     """
-    안전한 구독 신청: 재시도 및 에러 처리 포함
+    ? ??
+ ? : ?????  ?
 
     Args:
-        user_id: 사용자 ID
-        message: 신청 메시지
+        user_id: ???ID
+        message: ?  
 
     Returns:
-        신청 결과
+        ?  
     """
 
     @with_retry(max_retries=2, backoff_factor=1.5)
@@ -1045,8 +1174,8 @@ def safe_subscription_request(user_id: str, message: str = "") -> Dict[str, Any]
     try:
         return _make_request()
     except PermissionError as e:
-        logger.error(f"인증 오류로 구독 신청 실패: {e}")
+        logger.error(f"Permission error during subscription request: {e}")
         return {"success": False, "message": str(e)}
     except Exception as e:
-        logger.error(f"구독 신청 중 예상치 못한 오류: {e}")
-        return {"success": False, "message": "내부 오류가 발생했습니다."}
+        logger.error(f"Subscription request failed: {e}")
+        return {"success": False, "message": "Subscription request failed."}

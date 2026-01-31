@@ -102,18 +102,11 @@ class SystemOptimizer:
                 except Exception as e:
                     logger.debug("Failed to detect GPU via WMI: %s", e)
 
-            # CUDA 사용 가능 여부 확인 (GPU가 감지되었어도 torch CUDA 미지원이면 False)
+            # CUDA 사용 가능 여부 확인 (torch 없이 확인)
             if has_gpu:
-                try:
-                    import torch
-                    if not torch.cuda.is_available():
-                        has_gpu = False
-                        gpu_memory_gb = None
-                except Exception as e:
-                    # torch 없거나 import 실패 시 CPU로 간주
-                    logger.debug("CUDA check failed, falling back to CPU: %s", e)
-                    has_gpu = False
-                    gpu_memory_gb = None
+                # torch 가 없어도 GPU 하드웨어가 존재하면 일단 True로 유지
+                # 실제 whisper 등에서 디바이스 로딩 시 예외처리로 대응
+                logger.info("GPU detected: %s (approx. %.1f GB)", "Yes", gpu_memory_gb or 0)
             
             return SystemSpecs(
                 cpu_cores=cpu_cores,

@@ -41,3 +41,4 @@ class RegistrationRequest(Base):
     reviewed_at = Column(TIMESTAMP, nullable=True)  # 검토 일시
     reviewed_by = Column(Integer, nullable=True)  # 검토한 관리자 ID
     rejection_reason = Column(Text, nullable=True)  # 거부 사유
+

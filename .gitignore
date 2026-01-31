@@ -20,6 +20,11 @@ credentials.json
 *_keys.txt
 *_keys.json
 
+# Vertex AI credentials (security-sensitive)
+config/vertex-credentials.json
+config/*-vertex.json
+*.serviceaccount.json
+
 # 로그인 정보 (절대 푸시 금지!)
 info.on
 

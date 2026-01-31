@@ -37,3 +37,6 @@ class User(Base):
         default=UserType.TRIAL,
         nullable=False
     )
+    # Admin purpose fields
+    last_heartbeat = Column(TIMESTAMP, nullable=True)    # For precise online status
+    is_online = Column(Boolean, default=False, nullable=False) # Direct online status tracking

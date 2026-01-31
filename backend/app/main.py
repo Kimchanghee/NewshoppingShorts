@@ -160,3 +160,79 @@ async def health():
 async def get_version(item: int = 22):
     """Version check endpoint (legacy compatibility)"""
     return {"version": "1.0.0", "item": item}
+
+
+# ===== Auto Update API =====
+# 최신 버전 정보 (배포 시 이 값을 업데이트)
+APP_VERSION_INFO = {
+    "version": "1.0.0",
+    "min_required_version": "1.0.0",
+    "download_url": None,  # 배포 시 설정: "https://example.com/ssmaker_v1.0.1.exe"
+    "release_notes": "Initial release",
+    "is_mandatory": False,
+    "update_channel": "stable",
+}
+
+
+@app.get("/app/version")
+async def get_app_version():
+    """
+    Get latest app version info for auto-update.
+    자동 업데이트를 위한 최신 앱 버전 정보 반환.
+    
+    Returns:
+        {
+            "version": "1.0.1",
+            "min_required_version": "1.0.0",
+            "download_url": "https://...",
+            "release_notes": "...",
+            "is_mandatory": false
+        }
+    """
+    return APP_VERSION_INFO
+
+
+@app.get("/app/version/check")
+async def check_app_version(current_version: str):
+    """
+    Check if update is available.
+    업데이트 가능 여부 확인.
+    
+    Args:
+        current_version: Current client version (e.g., "1.0.0")
+    
+    Returns:
+        {
+            "update_available": true/false,
+            "current_version": "1.0.0",
+            "latest_version": "1.0.1",
+            "download_url": "https://...",
+            "is_mandatory": false
+        }
+    """
+    latest_version = APP_VERSION_INFO["version"]
+    min_required = APP_VERSION_INFO.get("min_required_version", "0.0.0")
+    
+    # Parse versions for comparison
+    def parse_ver(v: str):
+        try:
+            parts = v.strip().split('.')
+            return tuple(int(p) for p in parts[:3])
+        except (ValueError, IndexError):
+            return (0, 0, 0)
+    
+    current_tuple = parse_ver(current_version)
+    latest_tuple = parse_ver(latest_version)
+    min_tuple = parse_ver(min_required)
+    
+    update_available = current_tuple < latest_tuple
+    is_mandatory = current_tuple < min_tuple
+    
+    return {
+        "update_available": update_available,
+        "current_version": current_version,
+        "latest_version": latest_version,
+        "download_url": APP_VERSION_INFO.get("download_url"),
+        "release_notes": APP_VERSION_INFO.get("release_notes", ""),
+        "is_mandatory": is_mandatory,
+    }

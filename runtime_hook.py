@@ -1,79 +1,66 @@
-# -*- coding: utf-8 -*-
+# -*- mode: python ; coding: utf-8 -*-
 """
 PyInstaller Runtime Hook
 다른 컴퓨터에서 실행 시 필요한 환경 변수 및 경로 설정
-
-This hook runs before the main application starts.
 """
 
 import os
 import sys
 
-
 def _setup_runtime_environment():
     """런타임 환경 설정"""
-    # PyInstaller가 생성한 임시 디렉토리 경로
     if getattr(sys, "frozen", False):
-        # EXE로 실행 중
         base_path = sys._MEIPASS
+        
+        # PyInstaller 6+ onedir layout: items inside _internal subdirectory
+        internal_path = os.path.join(base_path, "_internal")
+        
+        def find_path(subdir):
+            # Check both root and _internal
+            p1 = os.path.join(base_path, subdir)
+            if os.path.exists(p1): return p1
+            p2 = os.path.join(internal_path, subdir)
+            if os.path.exists(p2): return p2
+            return None
 
-        # SSL 인증서 경로 설정 (HTTPS 요청 시 필수)
-        cert_path = os.path.join(base_path, "certifi", "cacert.pem")
-        if os.path.exists(cert_path):
+        # SSL 인증서
+        cert_path = find_path("certifi/cacert.pem")
+        if cert_path:
             os.environ["SSL_CERT_FILE"] = cert_path
             os.environ["REQUESTS_CA_BUNDLE"] = cert_path
 
-        # PyQt5 플러그인 경로 설정
-        qt_plugin_path = os.path.join(base_path, "PyQt5", "Qt5", "plugins")
-        if os.path.exists(qt_plugin_path):
-            os.environ["QT_PLUGIN_PATH"] = qt_plugin_path
-
-        # QML 경로 설정 (필요시)
-        qml_path = os.path.join(base_path, "PyQt5", "Qt5", "qml")
-        if os.path.exists(qml_path):
-            os.environ["QML2_IMPORT_PATH"] = qml_path
-
-        # imageio-ffmpeg 경로 설정 (Dedicated ffmpeg folder)
-        ffmpeg_dir = os.path.join(base_path, "ffmpeg")
-        # Fallback to imageio_ffmpeg binaries if manual bundle missing
-        if not os.path.exists(ffmpeg_dir):
-            ffmpeg_dir = os.path.join(base_path, "imageio_ffmpeg", "binaries")
-
-        if os.path.exists(ffmpeg_dir):
-            # Find any ffmpeg*.exe in the directory
+        # FFmpeg
+        ffmpeg_dir = find_path("ffmpeg")
+        # Fallback to imageio_ffmpeg
+        if not ffmpeg_dir:
+            ffmpeg_dir = find_path("imageio_ffmpeg/binaries")
+            
+        if ffmpeg_dir:
             ffmpeg_exe = None
             for f in os.listdir(ffmpeg_dir):
                 if f.lower().startswith("ffmpeg") and f.lower().endswith(".exe"):
                     ffmpeg_exe = os.path.join(ffmpeg_dir, f)
                     break
-
             if ffmpeg_exe:
                 os.environ["IMAGEIO_FFMPEG_EXE"] = ffmpeg_exe
-                # Add to PATH so 'ffmpeg' command works
-                os.environ["PATH"] = (
-                    ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
-                )
-        else:
-            # Last resort fallback logic or log
-            pass
+                os.environ["PATH"] = ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
 
-        # Faster-Whisper 모델 경로 설정
-        whisper_model_path = os.path.join(base_path, "faster_whisper_models")
-        if os.path.exists(whisper_model_path):
+        # Faster-Whisper Models
+        whisper_model_path = find_path("faster_whisper_models")
+        if whisper_model_path:
             os.environ["FASTER_WHISPER_MODEL_PATH"] = whisper_model_path
+            # Also set the app-specific attribute if possible, but environment variable is better
 
-        # ONNX Runtime 라이브러리 경로 추가
-        onnx_path = os.path.join(base_path, "onnxruntime", "capi")
-        if os.path.exists(onnx_path) and onnx_path not in os.environ.get("PATH", ""):
+        # ONNX Runtime
+        onnx_path = find_path("onnxruntime/capi")
+        if onnx_path:
             os.environ["PATH"] = onnx_path + os.pathsep + os.environ.get("PATH", "")
 
-        # 임시 디렉토리 설정 (moviepy 등에서 사용)
+        # Temp directory
         temp_dir = os.path.join(os.environ.get("TEMP", os.getcwd()), "ssmaker_temp")
         os.makedirs(temp_dir, exist_ok=True)
         os.environ["TMPDIR"] = temp_dir
         os.environ["TEMP"] = temp_dir
         os.environ["TMP"] = temp_dir
 
-
-# 런타임 환경 설정 실행
 _setup_runtime_environment()

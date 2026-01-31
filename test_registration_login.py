@@ -121,10 +121,13 @@ def test_login(username: str, password: str = "test1234"):
     print_header(f"3. Login: '{username}'")
 
     url = f"{API_SERVER}/user/login/god"
+    # API Key는 서버의 SSMAKER_API_KEY 환경변수와 일치해야 함
+    # 배포 설정: SSMAKER_API_KEY=ssmaker
+    api_key = os.environ.get("SSMAKER_API_KEY", "ssmaker")
     body = {
         "id": username,
         "pw": password,
-        "key": "ssmaker_client_api_key_2026_secure_6662aaa72e390b7c999894336f9981a4",
+        "key": api_key,
         "ip": "127.0.0.1",
         "force": False,
     }
@@ -143,13 +146,31 @@ def test_login(username: str, password: str = "test1234"):
             print_info(f"User ID: {user_data.get('id')}")
             print_info(f"Token: {data.get('data', {}).get('token', 'N/A')[:20]}...")
             return {"success": True, "login_data": data}
+        elif data and (data.get("status") == "EU003" or data.get("message") == "EU003"):
+            print_info("Duplicate login detected (EU003). Retrying with force=True...")
+            
+            # Retry with force=True
+            body["force"] = True
+            response = requests.post(url, json=body, timeout=TIMEOUT)
+            data = print_response(response, "Retry Response")
+            
+            if data and data.get("status") is True:
+                print_success("Login successful (Forced)")
+                user_data = data.get("data", {}).get("data", {})
+                print_info(f"User ID: {user_data.get('id')}")
+                return {"success": True, "login_data": data}
+            else:
+                status = data.get("status") if data else response.status_code
+                message = data.get("message", "Unknown error") if data else response.text[:100]
+                print_error(f"Forced login failed: Status={status}, Message={message}")
+                return {"success": False, "status": status, "message": message}
         else:
             status = data.get("status") if data else response.status_code
             message = (
                 data.get("message", "Unknown error") if data else response.text[:100]
             )
             print_error(f"Login failed: Status={status}, Message={message}")
-            return {"success": False, "error": message}
+            return {"success": False, "status": status, "message": message}
     except Exception as e:
         print_error(f"Request exception: {e}")
         return {"success": False, "error": str(e)}

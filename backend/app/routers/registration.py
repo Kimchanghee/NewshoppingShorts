@@ -74,7 +74,8 @@ async def submit_registration_request(
     Rate limited to 5 requests per hour per IP to prevent abuse.
     IP당 시간당 5회로 제한하여 남용 방지.
     """
-    logger.info(
+    # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
+    logger.debug(
         f"Registration request received: username={data.username}, name={data.name}"
     )
     try:
@@ -179,7 +180,7 @@ async def submit_registration_request(
 
 
 @router.get("/register/requests", response_model=RegistrationRequestList)
-@limiter.limit("100/hour")
+@limiter.limit(ADMIN_LIST_RATE_LIMIT)
 async def list_registration_requests(
     request: Request,
     status: Optional[RequestStatusEnum] = Query(None, description="필터할 상태"),
@@ -221,7 +222,7 @@ async def list_registration_requests(
 
 
 @router.post("/register/approve", response_model=RegistrationResponse)
-@limiter.limit("50/hour")
+@limiter.limit(ADMIN_ACTION_RATE_LIMIT)
 async def approve_registration(
     request: Request,
     data: ApproveRequest,
@@ -327,7 +328,7 @@ async def approve_registration(
 
 
 @router.post("/register/reject", response_model=RegistrationResponse)
-@limiter.limit("50/hour")
+@limiter.limit(ADMIN_ACTION_RATE_LIMIT)
 async def reject_registration(
     request: Request,
     data: RejectRequest,

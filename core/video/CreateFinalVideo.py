@@ -1,5 +1,3 @@
-from tkinter import ttk, filedialog, scrolledtext, simpledialog
-
 from ui.components.custom_dialog import show_error
 
 import logging
