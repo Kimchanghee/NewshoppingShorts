@@ -75,7 +75,7 @@ class UserResponse(BaseModel):
     work_count: int = -1  # -1 = 무제한
     work_used: int = 0
     user_type: str = "trial"
-    password_plain: Optional[str] = None
+
     is_online: bool = False
     last_heartbeat: Optional[datetime] = None
 

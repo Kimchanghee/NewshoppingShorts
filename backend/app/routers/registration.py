@@ -40,6 +40,8 @@ from app.schemas.registration import (
 # 체험판 설정
 FREE_TRIAL_WORK_COUNT = 5  # 체험판 작업 횟수 (5회 무료체험)
 DEFAULT_TRIAL_DAYS = 365  # 체험판 유효 기간 (1년)
+ADMIN_LIST_RATE_LIMIT = "100/hour"
+ADMIN_ACTION_RATE_LIMIT = "50/hour"
 
 logger = logging.getLogger(__name__)
 

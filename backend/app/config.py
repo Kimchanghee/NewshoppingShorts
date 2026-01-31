@@ -40,8 +40,8 @@ class Settings(BaseSettings):
 
     # Security
     BCRYPT_ROUNDS: int = 12
-    MAX_LOGIN_ATTEMPTS: int = 5
-    MAX_IP_ATTEMPTS: int = 20  # Higher threshold for IP-based limiting
+    MAX_LOGIN_ATTEMPTS: int = 3
+    MAX_IP_ATTEMPTS: int = 10  # Higher threshold for IP-based limiting
     LOGIN_ATTEMPT_WINDOW_MINUTES: int = 15
 
     # API Key for client authentication
