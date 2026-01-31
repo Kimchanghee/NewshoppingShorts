@@ -51,6 +51,13 @@ DARK = {
     "offline": "#757575",
 }
 
+# Constants
+WINDOW_WIDTH = 1600
+WINDOW_HEIGHT = 900
+API_TIMEOUT = 30
+REFRESH_INTERVAL_MS = 60000
+RETRY_DELAY_MS = 300000
+
 
 def _styled_msg_box(parent, title: str, message: str, icon_type: str = "info"):
     """
@@ -121,13 +128,13 @@ class ApiWorker(QThread):
         try:
             logger.info("[Admin API] %s %s", self.method, self.url)
             if self.method == "GET":
-                resp = requests.get(self.url, headers=self.headers, timeout=30)
+                resp = requests.get(self.url, headers=self.headers, timeout=API_TIMEOUT)
             elif self.method == "POST":
                 resp = requests.post(
-                    self.url, headers=self.headers, json=self.data, timeout=30
+                    self.url, headers=self.headers, json=self.data, timeout=API_TIMEOUT
                 )
             elif self.method == "DELETE":
-                resp = requests.delete(self.url, headers=self.headers, timeout=30)
+                resp = requests.delete(self.url, headers=self.headers, timeout=API_TIMEOUT)
             else:
                 self.error.emit(f"Unknown method: {self.method}")
                 return
@@ -172,6 +179,12 @@ class AdminDashboard(QMainWindow):
         self._load_data()
         self._start_auto_refresh()
 
+    def _cleanup_worker(self, worker):
+        """작업 완료된 워커 정리"""
+        if worker in self.workers:
+            self.workers.remove(worker)
+        worker.deleteLater()
+
     def _get_headers(self) -> dict:
         return {
             "X-Admin-API-Key": self.admin_api_key,
@@ -182,7 +195,7 @@ class AdminDashboard(QMainWindow):
         """2초마다 자동 새로고침"""
         self.refresh_timer = QTimer(self)
         self.refresh_timer.timeout.connect(self._load_data)
-        self.refresh_timer.start(60000)  # 1분마다 자동 새로고침
+        self.refresh_timer.start(REFRESH_INTERVAL_MS)  # 1분마다 자동 새로고침
 
     def _convert_to_kst(self, utc_str):
         """UTC 문자열을 KST 문자열로 변환 (YYYY-MM-DD HH:mm:ss)"""
@@ -203,7 +216,7 @@ class AdminDashboard(QMainWindow):
 
     def _setup_ui(self):
         self.setWindowTitle("관리자 대시보드")
-        self.setFixedSize(1600, 900)
+        self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
         self.setStyleSheet(f"background-color: {DARK['bg']};")
 
         # 중앙 위젯
@@ -494,12 +507,12 @@ class AdminDashboard(QMainWindow):
         # 사용자 관리 테이블 (확장된 컨럼 + 비밀번호)
         self.users_table = QTableWidget(self.central)
         self.users_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.users_table.setColumnCount(14)  # 비밀번호 컬럼 추가
+        self.users_table.setColumnCount(13)  # 비밀번호 컬럼 제거
         self.users_table.setHorizontalHeaderLabels(
             [
                 "ID",
                 "아이디",
-                "PW (Admin)",  # Added
+
                 "유형",
                 "구독시작",
                 "구독만료",
@@ -514,7 +527,7 @@ class AdminDashboard(QMainWindow):
             ]
         )
         self._style_table(
-            self.users_table, [40, 90, 100, 60, 130, 130, 70, 50, 50, 130, 100, 50, 90, 310]
+            self.users_table, [40, 90, 60, 130, 130, 70, 50, 50, 130, 100, 50, 90, 310]
         )
         # 사용자 테이블이 기본 표시됨
 
@@ -600,6 +613,8 @@ class AdminDashboard(QMainWindow):
         worker = ApiWorker("GET", url, self._get_headers())
         worker.finished.connect(self._on_users_loaded)
         worker.error.connect(self._on_error)
+        worker.finished.connect(lambda _: self._cleanup_worker(worker))
+        worker.error.connect(lambda _: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 
@@ -623,11 +638,7 @@ class AdminDashboard(QMainWindow):
             self._set_cell(self.users_table, row, 0, str(user.get("id", "")))
             # 1: Username
             self._set_cell(self.users_table, row, 1, user.get("username", ""))
-            # 2: Password (Plain)
-            pw = user.get("password_plain", "")
-            if not pw:
-                pw = "****"  # Fallback
-            self._set_cell(self.users_table, row, 2, pw, DARK["text_dim"])
+
             
             # 3: Type
             utype = user.get("user_type", "trial")
@@ -641,11 +652,11 @@ class AdminDashboard(QMainWindow):
                 "subscriber": DARK["primary"],
                 "admin": DARK["warning"],
             }.get(utype, DARK["text"])
-            self._set_cell(self.users_table, row, 3, utype_text, utype_color)
+            self._set_cell(self.users_table, row, 2, utype_text, utype_color)
 
             # 4: Created (Subscription Start)
             created = self._convert_to_kst(user.get("created_at"))
-            self._set_cell(self.users_table, row, 4, created)
+            self._set_cell(self.users_table, row, 3, created)
 
             # 5: Subscription Expires
             expires_utc = user.get("subscription_expires_at")
@@ -664,7 +675,7 @@ class AdminDashboard(QMainWindow):
                          active_sub_count += 1
                 except:
                     pass
-            self._set_cell(self.users_table, row, 5, expires_str, color)
+            self._set_cell(self.users_table, row, 4, expires_str, color)
 
             # 6: Work Count
             work_count = user.get("work_count", -1)
@@ -676,21 +687,21 @@ class AdminDashboard(QMainWindow):
                 remaining = max(0, work_count - work_used)
                 work_str = f"{remaining}/{work_count}"
                 color = DARK["warning"] if remaining <= 10 else DARK["text"]
-            self._set_cell(self.users_table, row, 6, work_str, color)
+            self._set_cell(self.users_table, row, 5, work_str, color)
 
             # 7: Status
             is_active = user.get("is_active", False)
-            self._set_cell(self.users_table, row, 7, "활성" if is_active else "정지", DARK["success"] if is_active else DARK["danger"])
+            self._set_cell(self.users_table, row, 6, "활성" if is_active else "정지", DARK["success"] if is_active else DARK["danger"])
 
             # 8: Login Count
-            self._set_cell(self.users_table, row, 8, str(user.get("login_count", 0)))
+            self._set_cell(self.users_table, row, 7, str(user.get("login_count", 0)))
 
             # 9: Last Login
             last_login = self._convert_to_kst(user.get("last_login_at"))
-            self._set_cell(self.users_table, row, 9, last_login)
+            self._set_cell(self.users_table, row, 8, last_login)
 
             # 10: IP
-            self._set_cell(self.users_table, row, 10, user.get("last_login_ip", "-"))
+            self._set_cell(self.users_table, row, 9, user.get("last_login_ip", "-"))
 
             # 11: Online Status
             # Trust server's is_online field (set via heartbeat mechanism)
@@ -699,11 +710,11 @@ class AdminDashboard(QMainWindow):
             if is_online:
                 online_count += 1
 
-            self._set_cell(self.users_table, row, 11, "ON" if is_online else "OFF",
+            self._set_cell(self.users_table, row, 10, "ON" if is_online else "OFF",
                            DARK["online"] if is_online else DARK["offline"])
 
             # 12: Current Task
-            self._set_cell(self.users_table, row, 12, user.get("current_task", "-"))
+            self._set_cell(self.users_table, row, 11, user.get("current_task", "-"))
 
             # 13: Actions
             widget = self._create_user_actions(
@@ -712,7 +723,7 @@ class AdminDashboard(QMainWindow):
                 row,
                 user.get("hashed_password"),
             )
-            self.users_table.setCellWidget(row, 13, widget)
+            self.users_table.setCellWidget(row, 12, widget)
 
         self.online_label.setText(str(online_count))
         self.active_sub_label.setText(str(active_sub_count))
@@ -949,6 +960,8 @@ class AdminDashboard(QMainWindow):
         worker = ApiWorker("GET", url, self._get_headers())
         worker.finished.connect(self._on_subscriptions_loaded)
         worker.error.connect(self._on_error)
+        worker.finished.connect(lambda _: self._cleanup_worker(worker))
+        worker.error.connect(lambda _: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 
@@ -1072,6 +1085,8 @@ class AdminDashboard(QMainWindow):
             worker = ApiWorker("POST", url, self._get_headers(), data)
             worker.finished.connect(lambda d: self._on_action_done("구독 승인", d))
             worker.error.connect(self._on_error)
+            worker.finished.connect(lambda _: self._cleanup_worker(worker))
+            worker.error.connect(lambda _: self._cleanup_worker(worker))
             self.workers.append(worker)
             worker.start()
 
@@ -1087,6 +1102,8 @@ class AdminDashboard(QMainWindow):
             worker = ApiWorker("POST", url, self._get_headers(), data)
             worker.finished.connect(lambda d: self._on_action_done("구독 거부", d))
             worker.error.connect(self._on_error)
+            worker.finished.connect(lambda _: self._cleanup_worker(worker))
+            worker.error.connect(lambda _: self._cleanup_worker(worker))
             self.workers.append(worker)
             worker.start()
 
@@ -1102,6 +1119,8 @@ class AdminDashboard(QMainWindow):
             worker = ApiWorker("POST", url, self._get_headers(), data)
             worker.finished.connect(lambda d: self._on_action_done("구독 연장", d))
             worker.error.connect(self._on_error)
+            worker.finished.connect(lambda _: self._cleanup_worker(worker))
+            worker.error.connect(lambda _: self._cleanup_worker(worker))
             self.workers.append(worker)
             worker.start()
 
@@ -1117,6 +1136,8 @@ class AdminDashboard(QMainWindow):
         worker = ApiWorker("POST", url, self._get_headers(), {})
         worker.finished.connect(lambda d: self._on_action_done("상태 변경", d))
         worker.error.connect(self._on_error)
+        worker.finished.connect(lambda _: self._cleanup_worker(worker))
+        worker.error.connect(lambda _: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 
@@ -1141,6 +1162,8 @@ class AdminDashboard(QMainWindow):
         worker = ApiWorker("DELETE", url, self._get_headers())
         worker.finished.connect(lambda d: self._on_action_done("삭제", d))
         worker.error.connect(lambda e: self._on_action_error("삭제", e))
+        worker.finished.connect(lambda _: self._cleanup_worker(worker))
+        worker.error.connect(lambda _: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 
@@ -1197,7 +1220,7 @@ class AdminDashboard(QMainWindow):
         # Default: 5 minutes (300 seconds = 300000 ms)
         # TODO: Parse Retry-After header from response if available
         # retry_delay_seconds = int(response_headers.get('Retry-After', '300'))
-        retry_delay_ms = 300000
+        retry_delay_ms = RETRY_DELAY_MS
 
         logger.warning("[Admin UI] Rate limit triggered. Pausing for %d seconds. Detail: %s", retry_delay_ms // 1000, error_text)
         QTimer.singleShot(retry_delay_ms, self._resume_after_rate_limit)
@@ -1207,7 +1230,7 @@ class AdminDashboard(QMainWindow):
         self.connection_label.setText("재시도 중...")
         self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
         if hasattr(self, "refresh_timer"):
-            self.refresh_timer.start(60000)
+            self.refresh_timer.start(REFRESH_INTERVAL_MS)
         self._load_data()
 
 
@@ -1568,7 +1591,7 @@ class LoginHistoryDialog(QDialog):
         # 현재는 샘플 데이터 표시
         try:
             url = f"{self.api_base_url}/user/admin/users/{self.user_id}"
-            resp = requests.get(url, headers=self.headers, timeout=30)
+            resp = requests.get(url, headers=self.headers, timeout=API_TIMEOUT)
             if resp.status_code == 200:
                 user = resp.json()
                 # 단일 사용자 정보만 있으므로 마지막 로그인 정보만 표시

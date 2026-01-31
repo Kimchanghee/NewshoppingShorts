@@ -89,7 +89,7 @@ class AuthService:
         if not user:
             # User enumeration is allowed per user request for better UX
             self._record_login_attempt(username, ip_address, success=False)
-            return {"status": "EU004", "message": "EU004"}  # User not found
+            return {"status": "EU001", "message": "EU001"}  # User not found - masked as invalid credentials
 
         if not password_valid:
             # Record failed attempt
@@ -325,6 +325,22 @@ class AuthService:
                     "remaining": 0,
                 }
 
+            # Check if session is active (Revocation check)
+            jti = payload.get("jti")
+            session = (
+                self.db.query(SessionModel)
+                .filter(SessionModel.token_jti == jti, SessionModel.is_active == True)
+                .first()
+            )
+            if not session:
+                return {
+                    "success": False,
+                    "can_work": False,
+                    "work_count": 0,
+                    "work_used": 0,
+                    "remaining": 0,
+                }
+
             user = self.db.query(User).filter(User.id == int(user_id)).first()
             if not user:
                 return {
@@ -389,6 +405,21 @@ class AuthService:
                 return {
                     "success": False,
                     "message": "Token mismatch",
+                    "remaining": None,
+                    "used": None,
+                }
+
+            # Check if session is active (Revocation check)
+            jti = payload.get("jti")
+            session = (
+                self.db.query(SessionModel)
+                .filter(SessionModel.token_jti == jti, SessionModel.is_active == True)
+                .first()
+            )
+            if not session:
+                return {
+                    "success": False,
+                    "message": "Session expired or revoked",
                     "remaining": None,
                     "used": None,
                 }
