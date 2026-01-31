@@ -94,6 +94,7 @@ class VideoAnalyzerGUI(QMainWindow):
 
     # ---------------- UI -----------------
     def init_ui(self):
+        d = self.design
         self.setWindowTitle("쇼핑 쇼츠 메이커 - Studio")
         icon_path = os.path.join(os.path.dirname(__file__), "resource", "mainTrayIcon.png")
         if os.path.exists(icon_path):
@@ -101,21 +102,16 @@ class VideoAnalyzerGUI(QMainWindow):
         self.resize(1440, 960)
 
         central = QWidget()
+        central.setObjectName("CentralWidget")
+        central.setStyleSheet(f"#CentralWidget {{ background-color: {d.colors.bg_main}; }}")
         self.setCentralWidget(central)
 
-        main_layout = QVBoxLayout(central)
+        # Main Horizontal Layout (Sidebar + Content)
+        main_layout = QHBoxLayout(central)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # Top bar
-        main_layout.addWidget(self._build_topbar())
-
-        # Body with splitter
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setSizes([260, 1180])
-        splitter.setHandleWidth(1)
-
-        # Sidebar steps
+        # 1. Sidebar (StepNav)
         steps = [
             ("source", "소스 입력", "🧲"),
             ("style", "스타일", "🎨"),
@@ -125,18 +121,31 @@ class VideoAnalyzerGUI(QMainWindow):
             ("subscription", "구독/결제", "💳"),
         ]
         self.step_nav = StepNav(steps)
-        splitter.addWidget(self.step_nav)
+        main_layout.addWidget(self.step_nav)
 
-        # Main Content Area
-        content_area = QWidget()
-        content_layout = QVBoxLayout(content_area)
-        content_layout.setContentsMargins(24, 24, 24, 24)
-        content_layout.setSpacing(20)
+        # 2. Main Content Area (Right Side)
+        content_container = QWidget()
+        content_container.setObjectName("ContentContainer")
+        content_container.setStyleSheet(f"#ContentContainer {{ background-color: {d.colors.bg_main}; }}")
+        
+        content_layout = QVBoxLayout(content_container)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
 
-        # Stacked pages
+        # 2-1. Top Bar
+        content_layout.addWidget(self._build_topbar())
+
+        # 2-2. Stacked Pages
         self.stack = QStackedWidget()
-        content_layout.addWidget(self.stack)
-        splitter.addWidget(content_area)
+        
+        # Add padding around the stack for better visual balance
+        stack_wrapper = QWidget()
+        stack_layout = QVBoxLayout(stack_wrapper)
+        stack_layout.setContentsMargins(40, 30, 40, 30)  # Generous padding
+        stack_layout.addWidget(self.stack)
+        
+        content_layout.addWidget(stack_wrapper)
+        main_layout.addWidget(content_container)
 
         # Build pages as cards
         self.url_input_panel = URLInputPanel(self.stack, self, theme_manager=self.theme_manager)
@@ -164,13 +173,10 @@ class VideoAnalyzerGUI(QMainWindow):
         self.step_nav.step_selected.connect(self._on_step_selected)
         self._on_step_selected("source")
 
-        main_layout.addWidget(splitter)
-
-        # Status bar
+        # Status bar is separate at main window level or can be added to bottom of content
+        # Adding to content layout to keep sidebar full height
         self.status_bar = StatusBar(self, self)
-        main_layout.addWidget(self.status_bar)
-
-        self._apply_shell_styles()
+        content_layout.addWidget(self.status_bar)
 
     # ------------- URL helpers -------------
     def add_url_from_entry(self):
@@ -237,51 +243,66 @@ class VideoAnalyzerGUI(QMainWindow):
         
         bar = QFrame()
         bar.setObjectName("TopBar")
+        # Removing border-bottom here if we want a cleaner look, or keeping it subtle
+        bar.setStyleSheet(f"""
+            #TopBar {{
+                background-color: {c.bg_header};
+                border-bottom: 1px solid {c.border_light};
+            }}
+        """)
+        
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(24, 16, 24, 16)
-        layout.setSpacing(16)
+        layout.setContentsMargins(40, 20, 40, 20)  # Matching content padding
+        layout.setSpacing(20)
 
-        # Logo / Brand
-        logo_label = QLabel("SS")
-        logo_label.setObjectName("BrandLogo")
-        logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        logo_label.setFixedSize(36, 36)
-        layout.addWidget(logo_label)
-
-        title = QLabel("쇼핑 쇼츠 메이커")
-        title.setObjectName("AppTitle")
-        title.setFont(QFont(d.typography.font_family_heading, 18, QFont.Weight.Bold))
-        layout.addWidget(title)
-
-        # Vertical separator
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.VLine)
-        sep.setFixedSize(1, 20)
-        sep.setStyleSheet(f"background-color: {c.border_light};")
-        layout.addWidget(sep)
-
-        project = QLabel("프로젝트: 기본 작업")
-        project.setObjectName("ProjectName")
-        project.setFont(QFont(d.typography.font_family_body, 14))
-        layout.addWidget(project)
+        # Breadcrumbs / Title
+        title_box = QVBoxLayout()
+        title_box.setSpacing(4)
+        
+        app_title = QLabel("Shopping Shorts Maker")
+        app_title.setFont(QFont(d.typography.font_family_heading, 14, QFont.Weight.Bold))
+        app_title.setStyleSheet(f"color: {c.text_primary};")
+        
+        project_sub = QLabel("Project: New Video")
+        project_sub.setFont(QFont(d.typography.font_family_body, 12))
+        project_sub.setStyleSheet(f"color: {c.text_secondary};")
+        
+        title_box.addWidget(app_title)
+        title_box.addWidget(project_sub)
+        layout.addLayout(title_box)
 
         layout.addStretch()
 
+        # Right side actions
+        
         # Subscription Badge
-        self.subscription_badge = QLabel("PRO")
-        self.subscription_badge.setObjectName("SubBadge")
-        self.subscription_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.subscription_badge)
+        sub_badge = QLabel("PRO PLAN")
+        sub_badge.setFont(QFont(d.typography.font_family_body, 10, QFont.Weight.Bold))
+        sub_badge.setStyleSheet(f"""
+            background-color: {c.primary_light};
+            color: {c.primary};
+            padding: 6px 12px;
+            border-radius: 6px;
+        """)
+        layout.addWidget(sub_badge)
 
-        # Action Buttons
-        help_btn = QPushButton("도움말")
-        help_btn.setObjectName("GhostButton")
-        help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        layout.addWidget(help_btn)
-
-        settings_btn = QPushButton("설정")
-        settings_btn.setObjectName("PrimaryButton")
+        # Settings Button
+        settings_btn = QPushButton("Preferences")
         settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        settings_btn.setFont(QFont(d.typography.font_family_body, 11))
+        settings_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {c.text_secondary};
+                border: 1px solid {c.border_light};
+                border-radius: 8px;
+                padding: 8px 16px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.bg_hover};
+                color: {c.text_primary};
+            }}
+        """)
         settings_btn.clicked.connect(self.show_api_status)
         layout.addWidget(settings_btn)
 
@@ -290,40 +311,46 @@ class VideoAnalyzerGUI(QMainWindow):
     def _wrap_card(self, widget: QWidget, title: str, subtitle: str) -> QWidget:
         d = self.design
         
+        # We wrap the content in a container that provides the "Card" look
         card = QFrame()
         card.setObjectName("ContentCard")
+        card.setStyleSheet(f"""
+            #ContentCard {{
+                background-color: {d.colors.bg_card};
+                border: 1px solid {d.colors.border_card};
+                border-radius: 16px;
+            }}
+        """)
         
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(40, 40, 40, 40)
-        card_layout.setSpacing(16)
+        card_layout.setSpacing(24)
 
         # Header Area
-        header_frame = QFrame()
-        header_layout = QVBoxLayout(header_frame)
-        header_layout.setContentsMargins(0, 0, 0, 8)
-        header_layout.setSpacing(4)
+        header_layout = QVBoxLayout()
+        header_layout.setSpacing(8)
         
         title_lbl = QLabel(title)
-        title_lbl.setObjectName("PageTitle")
-        title_lbl.setFont(QFont(d.typography.font_family_heading, 28, QFont.Weight.Bold))
+        title_lbl.setFont(QFont(d.typography.font_family_heading, 24, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {d.colors.text_primary};")
         
         sub_lbl = QLabel(subtitle)
-        sub_lbl.setObjectName("PageSubtitle")
-        sub_lbl.setFont(QFont(d.typography.font_family_body, 14))
+        sub_lbl.setFont(QFont(d.typography.font_family_body, 13))
+        sub_lbl.setStyleSheet(f"color: {d.colors.text_secondary};")
         
         header_layout.addWidget(title_lbl)
         header_layout.addWidget(sub_lbl)
         
-        card_layout.addWidget(header_frame)
+        card_layout.addLayout(header_layout)
         
-        # Separator
+        # Divider
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
-        line.setStyleSheet(f"background-color: {d.colors.border_light}; max-height: 1px;")
+        line.setFixedHeight(1)
+        line.setStyleSheet(f"background-color: {d.colors.border_light};")
         card_layout.addWidget(line)
         
         # Content
-        card_layout.addSpacing(16)
         card_layout.addWidget(widget)
         
         return card
@@ -337,136 +364,7 @@ class VideoAnalyzerGUI(QMainWindow):
         """Show the subscription/payment panel"""
         self._on_step_selected("subscription")
 
-    def _apply_shell_styles(self):
-        d = self.design
-        c = d.colors
-        t = d.typography
-        r = d.radius
-
-        self.setStyleSheet(
-            f"""
-            /* Global Reset */
-            QMainWindow {{
-                background-color: {c.bg_main};
-            }}
-            
-            /* Top Bar */
-            #TopBar {{
-                background-color: {c.bg_header};
-                border-bottom: 1px solid {c.border_light};
-            }}
-            #BrandLogo {{
-                background-color: {c.primary};
-                color: white;
-                border-radius: 8px;
-                font-family: {t.font_family_heading};
-                font-weight: 800;
-                font-size: 16px;
-            }}
-            #AppTitle {{
-                color: {c.text_primary};
-            }}
-            #ProjectName {{
-                color: {c.text_secondary};
-            }}
-            
-            /* Badges & Buttons */
-            #SubBadge {{
-                background-color: {c.primary_light};
-                color: {c.primary};
-                padding: 4px 12px;
-                border-radius: 12px;
-                font-weight: 700;
-                font-size: 11px;
-            }}
-            #GhostButton {{
-                background-color: transparent;
-                color: {c.text_secondary};
-                border: 1px solid {c.border_light};
-                padding: 6px 16px;
-                border-radius: 8px;
-                font-weight: 600;
-            }}
-            #GhostButton:hover {{
-                background-color: {c.bg_hover};
-                color: {c.text_primary};
-                border-color: {c.border_medium};
-            }}
-            #PrimaryButton {{
-                background-color: {c.primary};
-                color: white;
-                border: none;
-                padding: 6px 16px;
-                border-radius: 8px;
-                font-weight: 600;
-            }}
-            #PrimaryButton:hover {{
-                background-color: {c.primary_hover};
-            }}
-            
-            /* Navigation Splitter */
-            QSplitter::handle {{
-                background: {c.border_light};
-                width: 1px;
-            }}
-            
-            /* Sidebar (StepNav) Styles controlled in StepNav component directly or here */
-            #StepNav {{
-                background-color: {c.bg_sidebar};
-                border-right: 1px solid {c.border_light};
-            }}
-            #StepNav QPushButton {{
-                background-color: transparent;
-                color: {c.text_secondary};
-                border: none;
-                border-radius: 8px;
-                padding: 12px 16px;
-                text-align: left;
-                font-family: {t.font_family_body};
-                font-size: 14px;
-                font-weight: 500;
-                margin: 0 8px;
-            }}
-            #StepNav QPushButton:hover {{
-                background-color: {c.bg_hover};
-                color: {c.text_primary};
-            }}
-            #StepNav QPushButton:checked {{
-                background-color: {c.bg_selected};
-                color: {c.primary};
-                font-weight: 700;
-            }}
-            
-            /* Content Cards */
-            #ContentCard {{
-                background-color: {c.bg_card};
-                border: 1px solid {c.border_card};
-                border-radius: 20px;
-                /* Shadows are not supported well in QSS on all widgets, using border for clean look */
-            }}
-            #PageTitle {{
-                color: {c.text_primary};
-            }}
-            #PageSubtitle {{
-                color: {c.text_tertiary};
-            }}
-            
-            /* Scrollbars */
-            QScrollBar:vertical {{
-                background: {c.bg_main};
-                width: 10px;
-                margin: 0px;
-            }}
-            QScrollBar::handle:vertical {{
-                background: {c.scrollbar_thumb};
-                min-height: 20px;
-                border-radius: 5px;
-            }}
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                height: 0px;
-            }}
-            """
-        )
+    # Removed _apply_shell_styles as we now apply consistent styles via DesignSystem inline or in components
 
 
 def main():
