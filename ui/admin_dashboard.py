@@ -1563,31 +1563,41 @@ class LoginHistoryDialog(QDialog):
         close_btn.clicked.connect(self.accept)
 
     def _load_history(self):
-        """로그인 이력 로드 (현재는 세션 테이블에서 가져옴)"""
-        # 실제로는 API에서 로그인 이력을 가져와야 함
-        # 현재는 샘플 데이터 표시
+        """로그인 이력 로드 (API 연동 완료)"""
         try:
-            url = f"{self.api_base_url}/user/admin/users/{self.user_id}"
+            url = f"{self.api_base_url}/user/admin/users/{self.user_id}/history"
             resp = requests.get(url, headers=self.headers, timeout=API_TIMEOUT)
             if resp.status_code == 200:
-                user = resp.json()
-                # 단일 사용자 정보만 있으므로 마지막 로그인 정보만 표시
-                self.history_table.setRowCount(1)
-                last_login = user.get("last_login_at", "-")
-                if last_login and last_login != "-":
+                data = resp.json()
+                history = data.get("history", [])
+                
+                self.history_table.setRowCount(len(history))
+                for row, item in enumerate(history):
+                    # 0: 일시
+                    at = item.get("attempted_at", "-")
                     try:
-                        dt = datetime.fromisoformat(last_login.replace("Z", "+00:00"))
-                        last_login = dt.strftime("%Y-%m-%d %H:%M:%S")
+                        dt = datetime.fromisoformat(at.replace("Z", "+00:00"))
+                        at = dt.strftime("%Y-%m-%d %H:%M:%S")
                     except:
                         pass
-
-                self._set_history_cell(0, 0, last_login)
-                self._set_history_cell(0, 1, user.get("last_login_ip", "-"))
-                self._set_history_cell(0, 2, "-")
-                self._set_history_cell(0, 3, "성공", DARK["success"])
+                    
+                    self._set_history_cell(row, 0, at)
+                    # 1: IP 주소
+                    self._set_history_cell(row, 1, item.get("ip_address", "-"))
+                    # 2: 기기 (현재는 IP로 대체)
+                    self._set_history_cell(row, 2, "PC/APP")
+                    # 3: 상태
+                    success = item.get("success", False)
+                    status_text = "성공" if success else "실패"
+                    status_color = DARK["success"] if success else DARK["danger"]
+                    self._set_history_cell(row, 3, status_text, status_color)
+            else:
+                self.history_table.setRowCount(1)
+                self._set_history_cell(0, 0, f"로드 실패 (HTTP {resp.status_code})", DARK["danger"])
         except Exception as e:
+            logger.exception("Failed to load history")
             self.history_table.setRowCount(1)
-            self._set_history_cell(0, 0, f"로드 실패: {str(e)[:50]}", DARK["danger"])
+            self._set_history_cell(0, 0, f"로드 오류: {str(e)[:50]}", DARK["danger"])
 
     def _set_history_cell(self, row, col, text, color=None):
         """히스토리 테이블 셀 설정"""
