@@ -492,7 +492,7 @@ class AdminDashboard(QMainWindow):
         """테이블 스타일"""
         table.setFont(QFont(FONT_FAMILY, 10))
         table.setStyleSheet(f"""
-            QTableWidget {
+            QTableWidget {{
                 background-color: {DARK["table_bg"]};
                 color: {DARK["text"]};
                 border: 1px solid {DARK["border"]};
@@ -500,12 +500,12 @@ class AdminDashboard(QMainWindow):
                 gridline-color: {DARK["border"]};
                 selection-background-color: {DARK["primary"]};
                 selection-color: {DARK["text"]};
-            }
-            QTableWidget::item {
+            }}
+            QTableWidget::item {{
                 padding: 4px 8px;
                 border-bottom: 1px solid {DARK["border"]};
-            }
-            QHeaderView::section {
+            }}
+            QHeaderView::section {{
                 background-color: {DARK["table_header"]};
                 color: {DARK["text_dim"]};
                 font-weight: bold;
@@ -513,20 +513,20 @@ class AdminDashboard(QMainWindow):
                 border: none;
                 border-bottom: 1px solid {DARK["border"]};
                 text-transform: uppercase;
-            }
-            QScrollBar:vertical {
+            }}
+            QScrollBar:vertical {{
                 background-color: {DARK["bg"]};
                 width: 10px;
                 margin: 0px;
-            }
-            QScrollBar::handle:vertical {
+            }}
+            QScrollBar::handle:vertical {{
                 background-color: {DARK["border"]};
                 min-height: 20px;
                 border-radius: 5px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
                 height: 0px;
-            }
+            }}
         """)
         # 기본 교차 색상 비활성화 (직접 행 배경색 설정)
         table.setAlternatingRowColors(False)
