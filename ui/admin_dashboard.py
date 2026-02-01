@@ -24,35 +24,43 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QScrollArea,
     QAbstractItemView,
+    QFrame,
 )
 from PyQt6.QtGui import QFont, QColor, QBrush
 from datetime import datetime, timedelta, timezone
 import requests
 
+# Design System V2
+from ui.design_system_v2 import get_design_system, get_color, set_dark_mode
+
+# Initialize design system and set dark mode
+ds = get_design_system()
+set_dark_mode(True)
+
 FONT_FAMILY = "맑은 고딕"
 logger = logging.getLogger(__name__)
 
-# 다크모드 색상
-# Professional Slate Theme
-DARK = {
-    "bg": "#0f172a",          # slate-950
-    "card": "#1e293b",        # slate-800
-    "primary": "#3b82f6",     # blue-500
-    "primary_hover": "#2563eb", # blue-600
-    "brand": "#e11d48",       # rose-600
-    "success": "#10b981",     # emerald-500
-    "warning": "#f59e0b",     # amber-500
-    "danger": "#ef4444",      # red-500
-    "info": "#0ea5e9",        # sky-500
-    "text": "#f1f5f9",        # slate-100
-    "text_dim": "#94a3b8",    # slate-400
-    "border": "#334155",      # slate-700
-    "table_bg": "#1e293b",    # slate-800
-    "table_alt": "#334155",   # slate-700 (distinct alternate)
-    "table_header": "#0f172a", # slate-950
-    "online": "#22c55e",      # green-500
-    "offline": "#64748b",     # slate-500
-}
+# 색상 매핑 - DarkColorPalette 사용
+def get_status_color(status: str) -> str:
+    """상태에 따른 색상 반환"""
+    color_map = {
+        "primary": get_color("primary"),
+        "secondary": get_color("secondary"),
+        "success": get_color("success"),
+        "warning": get_color("warning"),
+        "error": get_color("error"),
+        "info": get_color("info"),
+        "bg": get_color("background"),
+        "card": get_color("surface"),
+        "surface_variant": get_color("surface_variant"),
+        "text": get_color("text_primary"),
+        "text_dim": get_color("text_muted"),
+        "border": get_color("border"),
+        "border_light": get_color("border_light"),
+        "online": get_color("success"),
+        "offline": get_color("text_muted"),
+    }
+    return color_map.get(status, get_color("text_primary"))
 
 # Constants
 WINDOW_WIDTH = 1600
@@ -82,24 +90,24 @@ def _styled_msg_box(parent, title: str, message: str, icon_type: str = "info"):
 
     msg.setStyleSheet(f"""
         QMessageBox {{
-            background-color: {DARK["card"]};
-            color: {DARK["text"]};
+            background-color: {get_color('surface')};
+            color: {get_color('text_primary')};
         }}
         QMessageBox QLabel {{
-            color: {DARK["text"]};
-            font-size: 13px;
+            color: {get_color('text_primary')};
+            font-size: {ds.typography.size_sm}px;
         }}
         QPushButton {{
-            background-color: {DARK["primary"]};
+            background-color: {get_color('primary')};
             color: white;
             border: none;
-            border-radius: 6px;
-            padding: 8px 20px;
+            border-radius: {ds.border_radius.radius_base}px;
+            padding: {ds.spacing.space_2}px {ds.spacing.space_5}px;
             font-weight: bold;
             min-width: 80px;
         }}
         QPushButton:hover {{
-            background-color: {DARK["primary_hover"]};
+            background-color: {get_color('secondary')};
         }}
     """)
     return msg
@@ -224,7 +232,7 @@ class AdminDashboard(QMainWindow):
     def _setup_ui(self):
         self.setWindowTitle("관리자 대시보드")
         self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
-        self.setStyleSheet(f"background-color: {DARK['bg']};")
+        self.setStyleSheet(f"background-color: {get_color('background')};")
 
         # 중앙 위젯
         self.central = QWidget(self)
@@ -233,30 +241,30 @@ class AdminDashboard(QMainWindow):
         # 타이틀
         title = QLabel("관리자 대시보드", self.central)
         title.setGeometry(40, 20, 400, 40)
-        title.setFont(QFont(FONT_FAMILY, 22, QFont.Weight.Bold))
-        title.setStyleSheet(f"color: {DARK['text']};")
+        title.setFont(QFont(FONT_FAMILY, ds.typography.size_2xl // 2, QFont.Weight.Bold))  # 32 -> 16pt
+        title.setStyleSheet(f"color: {get_color('text_primary')};")
 
         # 마지막 업데이트 시간 라벨
         self.last_update_label = QLabel("마지막 업데이트: -", self.central)
         self.last_update_label.setGeometry(900, 25, 300, 30)
-        self.last_update_label.setFont(QFont(FONT_FAMILY, 10))
-        self.last_update_label.setStyleSheet(f"color: {DARK['text_dim']};")
+        self.last_update_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))  # 10 -> 5pt
+        self.last_update_label.setStyleSheet(f"color: {get_color('text_muted')};")
         self.last_update_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         # 새로고침 버튼
         refresh_btn = QPushButton("새로고침", self.central)
         refresh_btn.setGeometry(1220, 20, 120, 40)
-        refresh_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
+        refresh_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))  # 14 -> 7pt
         refresh_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["card"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
+                background-color: {get_color('surface')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
-                background-color: {DARK["border"]};
-                border: 1px solid {DARK["text_dim"]};
+                background-color: {get_color('border')};
+                border: 1px solid {get_color('text_muted')};
             }}
         """)
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -265,8 +273,8 @@ class AdminDashboard(QMainWindow):
         # 연결 상태 표시
         self.connection_label = QLabel("", self.central)
         self.connection_label.setGeometry(1360, 25, 200, 30)
-        self.connection_label.setFont(QFont(FONT_FAMILY, 10))
-        self.connection_label.setStyleSheet(f"color: {DARK['success']};")
+        self.connection_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))  # 10 -> 5pt
+        self.connection_label.setStyleSheet(f"color: {get_color('success')};")
 
         # 통계 카드들 (Y: 75)
         self._create_stat_cards()
@@ -286,18 +294,18 @@ class AdminDashboard(QMainWindow):
         card_h = 80
         # 6개 카드를 균등 배치
         total_w = 1520
-        gap = 16
+        gap = ds.spacing.space_4  # 16px
         card_w = (total_w - (gap * 5)) // 6
         start_x = 40
 
         # Create 6 cards
         items = [
-            ("구독요청 대기", DARK["warning"], "pending_label"),
-            ("구독요청 승인", DARK["success"], "approved_label"),
-            ("구독요청 거부", DARK["danger"], "rejected_label"),
-            ("전체 사용자", DARK["primary"], "users_label"),
-            ("온라인 사용자", DARK["online"], "online_label"),
-            ("활성 구독자", DARK["brand"], "active_sub_label")
+            ("구독요청 대기", get_color("warning"), "pending_label"),
+            ("구독요청 승인", get_color("success"), "approved_label"),
+            ("구독요청 거부", get_color("error"), "rejected_label"),
+            ("전체 사용자", get_color("primary"), "users_label"),
+            ("온라인 사용자", get_color("success"), "online_label"),
+            ("활성 구독자", get_color("secondary"), "active_sub_label")
         ]
 
         for i, (title, color, attr_name) in enumerate(items):
@@ -312,35 +320,35 @@ class AdminDashboard(QMainWindow):
         card = QWidget(self.central)
         card.setGeometry(x, y, w, h)
         card.setStyleSheet(f"""
-            background-color: {DARK["card"]};
-            border-radius: 10px;
+            background-color: {get_color('surface')};
+            border-radius: {ds.border_radius.radius_md}px;
             border-left: 4px solid {color};
         """)
 
         title_lbl = QLabel(title, card)
         title_lbl.setGeometry(15, 10, w - 30, 20)
-        title_lbl.setFont(QFont(FONT_FAMILY, 10))
-        title_lbl.setStyleSheet(f"color: {DARK['text_dim']}; background: transparent;")
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))  # 10 -> 5pt
+        title_lbl.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
 
     def _get_value_label(self, x, y, w, h) -> QLabel:
         """값 라벨 생성 및 반환"""
         lbl = QLabel("0", self.central)
         lbl.setGeometry(x + 15, y + 35, w - 30, 40)
-        lbl.setFont(QFont(FONT_FAMILY, 24, QFont.Weight.Bold))
-        lbl.setStyleSheet(f"color: {DARK['text']}; background: transparent;")
+        lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_xl // 2, QFont.Weight.Bold))  # 24 -> 12pt
+        lbl.setStyleSheet(f"color: {get_color('text_primary')}; background: transparent;")
         return lbl
 
     def _create_tab_buttons(self):
         """탭 버튼 생성 (회원가입 요청 탭 제거 - 자동 승인됨)"""
         self.tab_users = QPushButton("사용자 관리", self.central)
         self.tab_users.setGeometry(40, 180, 130, 42)
-        self.tab_users.setFont(QFont(FONT_FAMILY, 12, QFont.Weight.Bold))
+        self.tab_users.setFont(QFont(FONT_FAMILY, ds.typography.size_base // 2, QFont.Weight.Bold))  # 16 -> 8pt
         self.tab_users.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tab_users.clicked.connect(lambda: self._switch_tab(0))
 
         self.tab_subscriptions = QPushButton("구독 요청", self.central)
         self.tab_subscriptions.setGeometry(180, 180, 130, 42)
-        self.tab_subscriptions.setFont(QFont(FONT_FAMILY, 12))
+        self.tab_subscriptions.setFont(QFont(FONT_FAMILY, ds.typography.size_base // 2))  # 16 -> 8pt
         self.tab_subscriptions.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tab_subscriptions.clicked.connect(lambda: self._switch_tab(1))
 
@@ -351,23 +359,23 @@ class AdminDashboard(QMainWindow):
         active = f"""
             QPushButton {{
                 background-color: transparent;
-                color: {DARK["primary"]};
+                color: {get_color('primary')};
                 border: none;
-                border-bottom: 2px solid {DARK["primary"]};
-                border-radius: 0px;
+                border-bottom: 2px solid {get_color('primary')};
+                border-radius: {ds.border_radius.radius_none}px;
                 font-weight: bold;
             }}
         """
         inactive = f"""
             QPushButton {{
                 background-color: transparent;
-                color: {DARK["text_dim"]};
+                color: {get_color('text_muted')};
                 border: none;
                 border-bottom: 2px solid transparent;
-                border-radius: 0px;
+                border-radius: {ds.border_radius.radius_none}px;
             }}
             QPushButton:hover {{
-                color: {DARK["text"]};
+                color: {get_color('text_primary')};
             }}
         """
         self.tab_users.setStyleSheet(active if self.current_tab == 0 else inactive)
@@ -390,23 +398,23 @@ class AdminDashboard(QMainWindow):
         # 사용자 검색 (기본 표시)
         self.search_label = QLabel("아이디 검색:", self.central)
         self.search_label.setGeometry(40, 245, 90, 30)
-        self.search_label.setFont(QFont(FONT_FAMILY, 11))
-        self.search_label.setStyleSheet(f"color: {DARK['text']};")
+        self.search_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))  # 14 -> 7pt
+        self.search_label.setStyleSheet(f"color: {get_color('text_primary')};")
 
         self.search_edit = QLineEdit(self.central)
         self.search_edit.setGeometry(135, 242, 200, 36)
-        self.search_edit.setFont(QFont(FONT_FAMILY, 11))
+        self.search_edit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))  # 14 -> 7pt
         self.search_edit.setPlaceholderText("검색어 입력...")
         self.search_edit.setStyleSheet(f"""
             QLineEdit {{
-                background-color: {DARK["card"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                padding: 5px 15px;
+                background-color: {get_color('surface')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
+                padding: 5px {ds.spacing.space_4}px;
             }}
             QLineEdit::placeholder {{
-                color: {DARK["text_dim"]};
+                color: {get_color('text_muted')};
             }}
         """)
         self.search_edit.textChanged.connect(self._on_search_changed)
@@ -414,29 +422,29 @@ class AdminDashboard(QMainWindow):
         # 구독 요청 필터
         self.sub_filter_label = QLabel("상태 필터:", self.central)
         self.sub_filter_label.setGeometry(40, 245, 80, 30)
-        self.sub_filter_label.setFont(QFont(FONT_FAMILY, 11))
-        self.sub_filter_label.setStyleSheet(f"color: {DARK['text']};")
+        self.sub_filter_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))  # 14 -> 7pt
+        self.sub_filter_label.setStyleSheet(f"color: {get_color('text_primary')};")
         self.sub_filter_label.setVisible(False)
 
         self.sub_filter_combo = QComboBox(self.central)
         self.sub_filter_combo.setGeometry(125, 242, 140, 36)
-        self.sub_filter_combo.setFont(QFont(FONT_FAMILY, 11))
+        self.sub_filter_combo.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))  # 14 -> 7pt
         self.sub_filter_combo.addItems(["대기 중", "승인됨", "거부됨", "전체"])
         self.sub_filter_combo.setStyleSheet(f"""
             QComboBox {{
-                background-color: {DARK["card"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                padding: 5px 15px;
+                background-color: {get_color('surface')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
+                padding: 5px {ds.spacing.space_4}px;
             }}
             QComboBox::drop-down {{
                 border: none;
             }}
             QComboBox QAbstractItemView {{
-                background-color: {DARK["card"]};
-                color: {DARK["text"]};
-                selection-background-color: {DARK["primary"]};
+                background-color: {get_color('surface')};
+                color: {get_color('text_primary')};
+                selection-background-color: {get_color('primary')};
             }}
         """)
         self.sub_filter_combo.currentTextChanged.connect(self._on_sub_filter_changed)
@@ -494,37 +502,37 @@ class AdminDashboard(QMainWindow):
 
     def _style_table(self, table: QTableWidget, widths: list):
         """테이블 스타일"""
-        table.setFont(QFont(FONT_FAMILY, 10))
+        table.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))  # 10 -> 5pt
         table.setStyleSheet(f"""
             QTableWidget {{
-                background-color: {DARK["table_bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 4px;
-                gridline-color: {DARK["border"]};
-                selection-background-color: {DARK["primary"]};
-                selection-color: {DARK["text"]};
+                background-color: {get_color('surface')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_sm}px;
+                gridline-color: {get_color('border')};
+                selection-background-color: {get_color('primary')};
+                selection-color: {get_color('text_primary')};
             }}
             QTableWidget::item {{
-                padding: 4px 8px;
-                border-bottom: 1px solid {DARK["border"]};
+                padding: {ds.spacing.space_1}px {ds.spacing.space_2}px;
+                border-bottom: 1px solid {get_color('border')};
             }}
             QHeaderView::section {{
-                background-color: {DARK["table_header"]};
-                color: {DARK["text_dim"]};
+                background-color: {get_color('background')};
+                color: {get_color('text_muted')};
                 font-weight: bold;
-                padding: 8px;
+                padding: {ds.spacing.space_2}px;
                 border: none;
-                border-bottom: 1px solid {DARK["border"]};
+                border-bottom: 1px solid {get_color('border')};
                 text-transform: uppercase;
             }}
             QScrollBar:vertical {{
-                background-color: {DARK["bg"]};
+                background-color: {get_color('background')};
                 width: 10px;
                 margin: 0px;
             }}
             QScrollBar::handle:vertical {{
-                background-color: {DARK["border"]};
+                background-color: {get_color('border')};
                 min-height: 20px;
                 border-radius: 5px;
             }}
@@ -545,10 +553,10 @@ class AdminDashboard(QMainWindow):
         """데이터 로드 (회원가입 요청 제거 - 자동 승인됨)"""
         if self._rate_limited:
             self.connection_label.setText("요청 제한 중 - 대기 후 재시도")
-            self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
+            self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
             return
         self.connection_label.setText("연결 중...")
-        self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
+        self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
         logger.info("[Admin UI] Load data start")
         self._load_users()
         self._load_subscriptions()
@@ -577,7 +585,7 @@ class AdminDashboard(QMainWindow):
         self.users_table.setRowCount(len(items))
         self.users_label.setText(str(len(items)))
         self.connection_label.setText("연결 정상")
-        self.connection_label.setStyleSheet(f"color: {DARK['success']};")
+        self.connection_label.setStyleSheet(f"color: {get_color('success')};")
 
         online_count = 0
         active_sub_count = 0
@@ -608,26 +616,26 @@ class AdminDashboard(QMainWindow):
                 "admin": "관리자",
             }.get(utype, utype)
             utype_color = {
-                "trial": DARK["text_dim"],
-                "subscriber": DARK["primary"],
-                "admin": DARK["warning"],
-            }.get(utype, DARK["text"])
+                "trial": get_color("text_muted"),
+                "subscriber": get_color("primary"),
+                "admin": get_color("warning"),
+            }.get(utype, get_color("text_primary"))
             self._set_cell(self.users_table, row, 6, utype_text, utype_color)
 
             # 7: Subscription Expires
             expires_utc = user.get("subscription_expires_at")
             expires_str = self._convert_to_kst(expires_utc)
             
-            color = DARK["text"]
+            color = get_color("text_primary")
             if expires_utc:
                 try:
                     dt = datetime.fromisoformat(expires_utc.replace("Z", "+00:00"))
                     if dt < now:
-                         color = DARK["danger"]
+                         color = get_color("error")
                     elif (dt - now).days <= 7:
-                         color = DARK["warning"]
+                         color = get_color("warning")
                     else:
-                         color = DARK["success"]
+                         color = get_color("success")
                          active_sub_count += 1
                 except:
                     pass
@@ -638,11 +646,11 @@ class AdminDashboard(QMainWindow):
             work_used = user.get("work_used", 0)
             if work_count == -1:
                 work_str = "무제한"
-                color = DARK["success"]
+                color = get_color("success")
             else:
                 remaining = max(0, work_count - work_used)
                 work_str = f"{remaining}/{work_count}"
-                color = DARK["warning"] if remaining <= 10 else DARK["text"]
+                color = get_color("warning") if remaining <= 10 else get_color("text_primary")
             self._set_cell(self.users_table, row, 8, work_str, color)
 
             # 9: Login Count
@@ -663,7 +671,7 @@ class AdminDashboard(QMainWindow):
                 online_count += 1
 
             self._set_cell(self.users_table, row, 12, "ON" if is_online else "OFF",
-                           DARK["online"] if is_online else DARK["offline"])
+                           get_color("success") if is_online else get_color("text_muted"))
 
             # 13: Current Task
             self._set_cell(self.users_table, row, 13, user.get("current_task", "-"))
@@ -686,9 +694,9 @@ class AdminDashboard(QMainWindow):
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         # 항상 텍스트 색상 설정 (기본: 흰색)
-        item.setForeground(QBrush(QColor(color if color else DARK["text"])))
+        item.setForeground(QBrush(QColor(color if color else get_color("text_primary"))))
         # 행 번호에 따른 배경색 설정 (교차 색상)
-        bg_color = DARK["table_alt"] if row % 2 == 1 else DARK["table_bg"]
+        bg_color = get_color("surface_variant") if row % 2 == 1 else get_color("surface")
         item.setBackground(QBrush(QColor(bg_color)))
         table.setItem(row, col, item)
 
@@ -702,7 +710,7 @@ class AdminDashboard(QMainWindow):
         # 투명 배경 (테이블 행 색상 통과)
         widget.setStyleSheet("background-color: transparent;")
 
-        layout =  QWidget(widget)
+        layout = QWidget(widget)
         layout.setGeometry(0, 0, 330, 40)
 
         # Style definition for action buttons
@@ -711,10 +719,10 @@ class AdminDashboard(QMainWindow):
             QPushButton {
                 background-color: transparent;
                 border: 1px solid %s;
-                border-radius: 4px;
+                border-radius: %dpx;
                 color: %s;
                 font-family: "Segoe UI", "맑은 고딕";
-                font-size: 11px;
+                font-size: %dpx;
                 font-weight: bold;
             }
             QPushButton:hover {
@@ -728,42 +736,42 @@ class AdminDashboard(QMainWindow):
         pw_btn.setGeometry(0, 5, 40, 30)
         pw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         # Gray theme
-        c_norm = DARK["text_dim"]
-        c_hov = DARK["border"]
-        pw_btn.setStyleSheet(base_style % (c_norm, c_norm, c_hov))
+        c_norm = get_color("text_muted")
+        c_hov = get_color("border")
+        pw_btn.setStyleSheet(base_style % (c_norm, ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_hov))
         pw_btn.clicked.connect(lambda: self._show_password_info(username, hashed_password))
 
         # 2. Extension (Green/Success)
         ext_btn = QPushButton("연장", widget)
         ext_btn.setGeometry(45, 5, 50, 30)
         ext_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        c_norm = DARK["info"] # Blue
-        ext_btn.setStyleSheet(base_style % (c_norm, c_norm, c_norm))
+        c_norm = get_color("info") # Blue
+        ext_btn.setStyleSheet(base_style % (c_norm, ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_norm))
         ext_btn.clicked.connect(lambda: self._extend_subscription(user_id, username))
         
         # 3. Status (Yellow/Warning)
         stat_btn = QPushButton("상태", widget)
         stat_btn.setGeometry(100, 5, 50, 30)
         stat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        c_norm = DARK["warning"]
-        stat_btn.setStyleSheet(base_style % (c_norm, c_norm, c_norm))
+        c_norm = get_color("warning")
+        stat_btn.setStyleSheet(base_style % (c_norm, ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_norm))
         stat_btn.clicked.connect(lambda: self._check_work_status(user_id, username))
 
         # 4. History (Gray/Info)
         hist_btn = QPushButton("이력", widget)
         hist_btn.setGeometry(155, 5, 50, 30)
         hist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        c_norm = DARK["text"]
-        c_hov = DARK["table_alt"]
-        hist_btn.setStyleSheet(base_style % (DARK["border"], c_norm, c_hov))
+        c_norm = get_color("text_primary")
+        c_hov = get_color("surface_variant")
+        hist_btn.setStyleSheet(base_style % (get_color("border"), ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_hov))
         hist_btn.clicked.connect(lambda: self._show_login_history(user_id, username))
 
         # 5. Delete (Red/Danger)
         del_btn = QPushButton("삭제", widget)
         del_btn.setGeometry(210, 5, 50, 30)
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        c_norm = DARK["danger"]
-        del_btn.setStyleSheet(base_style % (c_norm, c_norm, c_norm))
+        c_norm = get_color("error")
+        del_btn.setStyleSheet(base_style % (c_norm, ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_norm))
         del_btn.clicked.connect(lambda: self._delete_user(user_id, username))
 
         return widget
@@ -784,41 +792,41 @@ class AdminDashboard(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle(f"'{username}' 비밀번호 정보")
         dialog.setFixedSize(500, 320)  # 크기 증가
-        dialog.setStyleSheet(f"background-color: {DARK['card']};")
+        dialog.setStyleSheet(f"background-color: {get_color('surface')};")
 
         title_lbl = QLabel(f"'{username}' 비밀번호 해시 정보:", dialog)
         title_lbl.setGeometry(30, 25, 440, 25)
-        title_lbl.setFont(QFont(FONT_FAMILY, 12, QFont.Weight.Bold))
-        title_lbl.setStyleSheet(f"color: {DARK['text']};")
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         # 보안 경고 메시지 강화
         warning_lbl = QLabel("⚠️ 보안 경고: 비밀번호 해시는 민감한 정보입니다.", dialog)
         warning_lbl.setGeometry(30, 55, 440, 20)
-        warning_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.Weight.Bold))
-        warning_lbl.setStyleSheet(f"color: {DARK['warning']};")
+        warning_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2, QFont.Weight.Bold))
+        warning_lbl.setStyleSheet(f"color: {get_color('warning')};")
 
         warning2_lbl = QLabel("이 정보는 관리자 권한으로만 확인 가능합니다.", dialog)
         warning2_lbl.setGeometry(30, 75, 440, 20)
-        warning2_lbl.setFont(QFont(FONT_FAMILY, 9))
-        warning2_lbl.setStyleSheet(f"color: {DARK['danger']};")
+        warning2_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
+        warning2_lbl.setStyleSheet(f"color: {get_color('error')};")
 
         info_lbl = QLabel("필요한 경우에만 확인하고, 무단 공유를 금지합니다.", dialog)
         info_lbl.setGeometry(30, 95, 440, 20)
-        info_lbl.setFont(QFont(FONT_FAMILY, 9))
-        info_lbl.setStyleSheet(f"color: {DARK['text_dim']};")
+        info_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
+        info_lbl.setStyleSheet(f"color: {get_color('text_muted')};")
 
         hash_edit = QLineEdit(dialog)
         hash_edit.setGeometry(30, 125, 440, 40)
         hash_edit.setText(masked_hash)
         hash_edit.setReadOnly(True)
-        hash_edit.setFont(QFont("Consolas", 9))
+        hash_edit.setFont(QFont("Consolas", ds.typography.size_2xs // 2))
         hash_edit.setStyleSheet(f"""
             QLineEdit {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                padding: 8px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
+                padding: {ds.spacing.space_2}px;
             }}
         """)
 
@@ -827,8 +835,8 @@ class AdminDashboard(QMainWindow):
             dialog,
         )
         note_lbl.setGeometry(30, 175, 440, 40)
-        note_lbl.setFont(QFont(FONT_FAMILY, 9))
-        note_lbl.setStyleSheet(f"color: {DARK['text_dim']};")
+        note_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
+        note_lbl.setStyleSheet(f"color: {get_color('text_muted')};")
 
         # 추가 보안 정보
         security_lbl = QLabel(
@@ -836,21 +844,21 @@ class AdminDashboard(QMainWindow):
             dialog,
         )
         security_lbl.setGeometry(30, 215, 440, 40)
-        security_lbl.setFont(QFont(FONT_FAMILY, 9))
-        security_lbl.setStyleSheet(f"color: {DARK['info']};")
+        security_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
+        security_lbl.setStyleSheet(f"color: {get_color('info')};")
 
         close_btn = QPushButton("닫기", dialog)
         close_btn.setGeometry(370, 265, 100, 35)
-        close_btn.setFont(QFont(FONT_FAMILY, 10))
+        close_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         close_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
-                background-color: {DARK["border"]};
+                background-color: {get_color('border')};
             }}
         """)
         close_btn.clicked.connect(dialog.accept)
@@ -922,10 +930,10 @@ class AdminDashboard(QMainWindow):
                 "REJECTED": "거부됨",
             }.get(status, status)
             status_color = {
-                "PENDING": DARK["warning"],
-                "APPROVED": DARK["success"],
-                "REJECTED": DARK["danger"],
-            }.get(status, DARK["text"])
+                "PENDING": get_color("warning"),
+                "APPROVED": get_color("success"),
+                "REJECTED": get_color("error"),
+            }.get(status, get_color("text_primary"))
             self._set_cell(self.subscriptions_table, row, 5, status_text, status_color)
 
             # 6: 작업 버튼
@@ -959,18 +967,18 @@ class AdminDashboard(QMainWindow):
         """구독 요청 작업 버튼"""
         widget = QWidget()
         widget.setMinimumSize(200, 50)
-        bg_color = DARK["table_alt"] if row % 2 == 1 else DARK["table_bg"]
+        bg_color = get_color("surface_variant") if row % 2 == 1 else get_color("surface")
         widget.setStyleSheet(f"background-color: {bg_color};")
 
         approve_btn = QPushButton("승인", widget)
         approve_btn.setGeometry(10, 10, 80, 30)
-        approve_btn.setFont(QFont(FONT_FAMILY, 10))
+        approve_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
         approve_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["success"]};
+                background-color: {get_color('success')};
                 color: white;
                 border: none;
-                border-radius: 4px;
+                border-radius: {ds.border_radius.radius_sm}px;
             }}
             QPushButton:hover {{
                 background-color: #00e676;
@@ -981,13 +989,13 @@ class AdminDashboard(QMainWindow):
 
         reject_btn = QPushButton("거부", widget)
         reject_btn.setGeometry(100, 10, 80, 30)
-        reject_btn.setFont(QFont(FONT_FAMILY, 10))
+        reject_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
         reject_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["danger"]};
+                background-color: {get_color('error')};
                 color: white;
                 border: none;
-                border-radius: 4px;
+                border-radius: {ds.border_radius.radius_sm}px;
             }}
             QPushButton:hover {{
                 background-color: #ff8a80;
@@ -1088,12 +1096,12 @@ class AdminDashboard(QMainWindow):
         dialog = QDialog(self)
         dialog.setWindowTitle(f"'{username}' 작업 상태")
         dialog.setFixedSize(450, 480)
-        dialog.setStyleSheet(f"background-color: {DARK['card']};")
+        dialog.setStyleSheet(f"background-color: {get_color('surface')};")
         
         title_lbl = QLabel(f"'{username}' 상세 정보 및 상태", dialog)
         title_lbl.setGeometry(30, 25, 390, 25)
-        title_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
-        title_lbl.setStyleSheet(f"color: {DARK['text']};")
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
         
         # 작업 횟수 정보
         work_count = data.get("work_count", -1)
@@ -1102,11 +1110,11 @@ class AdminDashboard(QMainWindow):
         if work_count == -1:
             work_status = "무제한"
             remaining = "무제한"
-            color = DARK["success"]
+            color = get_color("success")
         else:
             remaining = max(0, work_count - work_used)
             work_status = f"{remaining} / {work_count}"
-            color = DARK["warning"] if remaining <= 10 else DARK["success"]
+            color = get_color("warning") if remaining <= 10 else get_color("success")
         
         # 정보 표시
         y_pos = 70
@@ -1130,35 +1138,35 @@ class AdminDashboard(QMainWindow):
                 sep.setFrameShape(QFrame.Shape.HLine)
                 sep.setFrameShadow(QFrame.Shadow.Sunken)
                 sep.setGeometry(30, y_pos + 10, 390, 1)
-                sep.setStyleSheet(f"background-color: {DARK['border']};")
+                sep.setStyleSheet(f"background-color: {get_color('border')};")
                 y_pos += 25
                 continue
 
             lbl = QLabel(label, dialog)
             lbl.setGeometry(30, y_pos, 120, 25)
-            lbl.setFont(QFont(FONT_FAMILY, 11))
-            lbl.setStyleSheet(f"color: {DARK['text_dim']};")
+            lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+            lbl.setStyleSheet(f"color: {get_color('text_muted')};")
             
             val_lbl = QLabel(value, dialog)
             val_lbl.setGeometry(160, y_pos, 260, 25)
-            val_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
-            val_lbl.setStyleSheet(f"color: {color if '남은 작업' in label else DARK['text']};")
+            val_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
+            val_lbl.setStyleSheet(f"color: {color if '남은 작업' in label else get_color('text_primary')};")
             
             y_pos += 35
         
         # 닫기 버튼
         close_btn = QPushButton("닫기", dialog)
         close_btn.setGeometry(320, 420, 100, 35)
-        close_btn.setFont(QFont(FONT_FAMILY, 11))
+        close_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         close_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
-                background-color: {DARK["border"]};
+                background-color: {get_color('border')};
             }}
         """)
         close_btn.clicked.connect(dialog.accept)
@@ -1216,7 +1224,7 @@ class AdminDashboard(QMainWindow):
 
     def _on_error(self, error):
         self.connection_label.setText("연결 오류")
-        self.connection_label.setStyleSheet(f"color: {DARK['danger']};")
+        self.connection_label.setStyleSheet(f"color: {get_color('error')};")
         logger.error("[Admin API] Error: %s", error)
         if "429" in str(error):
             self._handle_rate_limit(error)
@@ -1236,7 +1244,7 @@ class AdminDashboard(QMainWindow):
 
         self._rate_limited = True
         self.connection_label.setText("요청 제한 - 잠시 후 자동 재시도")
-        self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
+        self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
 
         if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
             self.refresh_timer.stop()
@@ -1252,7 +1260,7 @@ class AdminDashboard(QMainWindow):
     def _resume_after_rate_limit(self):
         self._rate_limited = False
         self.connection_label.setText("재시도 중...")
-        self.connection_label.setStyleSheet(f"color: {DARK['warning']};")
+        self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
         if hasattr(self, "refresh_timer"):
             self.refresh_timer.start(REFRESH_INTERVAL_MS)
         self._load_data()
@@ -1265,115 +1273,115 @@ class ApproveDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("구독 승인")
         self.setFixedSize(420, 300)
-        self.setStyleSheet(f"background-color: {DARK['card']};")
+        self.setStyleSheet(f"background-color: {get_color('surface')};")
         self._setup_ui()
 
     def _setup_ui(self):
         # 구독 기간
         lbl = QLabel("구독 기간:", self)
         lbl.setGeometry(30, 25, 120, 25)
-        lbl.setFont(QFont(FONT_FAMILY, 12))
-        lbl.setStyleSheet(f"color: {DARK['text']};")
+        lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         self.days_spin = QSpinBox(self)
         self.days_spin.setGeometry(30, 55, 120, 40)
-        self.days_spin.setFont(QFont(FONT_FAMILY, 14))
+        self.days_spin.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2))
         self.days_spin.setRange(1, 365)
         self.days_spin.setValue(30)
         self.days_spin.setStyleSheet(f"""
             QSpinBox {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                padding: 8px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
+                padding: {ds.spacing.space_2}px;
             }}
         """)
 
         day_lbl = QLabel("일", self)
         day_lbl.setGeometry(160, 63, 30, 25)
-        day_lbl.setFont(QFont(FONT_FAMILY, 12))
-        day_lbl.setStyleSheet(f"color: {DARK['text']};")
+        day_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        day_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         # 작업 횟수
         work_lbl = QLabel("작업 횟수:", self)
         work_lbl.setGeometry(30, 110, 120, 25)
-        work_lbl.setFont(QFont(FONT_FAMILY, 12))
-        work_lbl.setStyleSheet(f"color: {DARK['text']};")
+        work_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        work_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         self.unlimited_check = QPushButton("무제한", self)
         self.unlimited_check.setGeometry(230, 140, 80, 40)
-        self.unlimited_check.setFont(QFont(FONT_FAMILY, 10))
+        self.unlimited_check.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
         self.unlimited_check.setCheckable(True)
         self.unlimited_check.setChecked(True)
         self.unlimited_check.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["success"]};
+                background-color: {get_color('success')};
                 color: white;
                 border: none;
-                border-radius: 6px;
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:checked {{
-                background-color: {DARK["success"]};
+                background-color: {get_color('success')};
             }}
             QPushButton:!checked {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
             }}
         """)
         self.unlimited_check.clicked.connect(self._toggle_unlimited)
 
         self.work_count_spin = QSpinBox(self)
         self.work_count_spin.setGeometry(30, 140, 120, 40)
-        self.work_count_spin.setFont(QFont(FONT_FAMILY, 14))
+        self.work_count_spin.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2))
         self.work_count_spin.setRange(1, 99999)
         self.work_count_spin.setValue(100)
         self.work_count_spin.setEnabled(False)
         self.work_count_spin.setStyleSheet(f"""
             QSpinBox {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                padding: 8px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
+                padding: {ds.spacing.space_2}px;
             }}
             QSpinBox:disabled {{
-                color: {DARK["text_dim"]};
+                color: {get_color('text_muted')};
             }}
         """)
 
         work_unit_lbl = QLabel("회", self)
         work_unit_lbl.setGeometry(160, 148, 30, 25)
-        work_unit_lbl.setFont(QFont(FONT_FAMILY, 12))
-        work_unit_lbl.setStyleSheet(f"color: {DARK['text']};")
+        work_unit_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        work_unit_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         # 버튼
         cancel_btn = QPushButton("취소", self)
         cancel_btn.setGeometry(180, 240, 100, 40)
-        cancel_btn.setFont(QFont(FONT_FAMILY, 11))
+        cancel_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
-                background-color: {DARK["border"]};
+                background-color: {get_color('border')};
             }}
         """)
         cancel_btn.clicked.connect(self.reject)
 
         ok_btn = QPushButton("승인", self)
         ok_btn.setGeometry(290, 240, 100, 40)
-        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
+        ok_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
         ok_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["success"]};
+                background-color: {get_color('success')};
                 color: white;
                 border: none;
-                border-radius: 6px;
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
                 background-color: #00e676;
@@ -1402,54 +1410,54 @@ class RejectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("회원가입 거부")
         self.setFixedSize(420, 280)
-        self.setStyleSheet(f"background-color: {DARK['card']};")
+        self.setStyleSheet(f"background-color: {get_color('surface')};")
         self._setup_ui()
 
     def _setup_ui(self):
         lbl = QLabel("거부 사유를 입력하세요 (선택사항):", self)
         lbl.setGeometry(30, 25, 360, 25)
-        lbl.setFont(QFont(FONT_FAMILY, 12))
-        lbl.setStyleSheet(f"color: {DARK['text']};")
+        lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         self.reason_edit = QTextEdit(self)
         self.reason_edit.setGeometry(30, 60, 360, 130)
-        self.reason_edit.setFont(QFont(FONT_FAMILY, 11))
+        self.reason_edit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         self.reason_edit.setPlaceholderText("거부 사유 입력...")
         self.reason_edit.setStyleSheet(f"""
             QTextEdit {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                padding: 10px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
+                padding: {ds.spacing.space_3}px;
             }}
         """)
 
         cancel_btn = QPushButton("취소", self)
         cancel_btn.setGeometry(190, 210, 100, 40)
-        cancel_btn.setFont(QFont(FONT_FAMILY, 11))
+        cancel_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
-                background-color: {DARK["border"]};
+                background-color: {get_color('border')};
             }}
         """)
         cancel_btn.clicked.connect(self.reject)
 
         ok_btn = QPushButton("거부", self)
         ok_btn.setGeometry(300, 210, 100, 40)
-        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
+        ok_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
         ok_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["danger"]};
+                background-color: {get_color('error')};
                 color: white;
                 border: none;
-                border-radius: 6px;
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
                 background-color: #ff8a80;
@@ -1469,60 +1477,60 @@ class ExtendDialog(QDialog):
         self.username = username
         self.setWindowTitle("구독 연장")
         self.setFixedSize(380, 200)
-        self.setStyleSheet(f"background-color: {DARK['card']};")
+        self.setStyleSheet(f"background-color: {get_color('surface')};")
         self._setup_ui()
 
     def _setup_ui(self):
         lbl = QLabel(f"'{self.username}' 구독 연장 기간:", self)
         lbl.setGeometry(30, 30, 320, 25)
-        lbl.setFont(QFont(FONT_FAMILY, 12))
-        lbl.setStyleSheet(f"color: {DARK['text']};")
+        lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         self.days_spin = QSpinBox(self)
         self.days_spin.setGeometry(30, 70, 120, 40)
-        self.days_spin.setFont(QFont(FONT_FAMILY, 14))
+        self.days_spin.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2))
         self.days_spin.setRange(1, 365)
         self.days_spin.setValue(30)
         self.days_spin.setStyleSheet(f"""
             QSpinBox {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                padding: 8px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
+                padding: {ds.spacing.space_2}px;
             }}
         """)
 
         day_lbl = QLabel("일 추가", self)
         day_lbl.setGeometry(160, 78, 60, 25)
-        day_lbl.setFont(QFont(FONT_FAMILY, 12))
-        day_lbl.setStyleSheet(f"color: {DARK['text']};")
+        day_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        day_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         cancel_btn = QPushButton("취소", self)
         cancel_btn.setGeometry(150, 140, 100, 40)
-        cancel_btn.setFont(QFont(FONT_FAMILY, 11))
+        cancel_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
-                background-color: {DARK["border"]};
+                background-color: {get_color('border')};
             }}
         """)
         cancel_btn.clicked.connect(self.reject)
 
         ok_btn = QPushButton("연장", self)
         ok_btn.setGeometry(260, 140, 100, 40)
-        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
+        ok_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
         ok_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["info"]};
+                background-color: {get_color('info')};
                 color: white;
                 border: none;
-                border-radius: 6px;
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
                 background-color: #82b1ff;
@@ -1547,15 +1555,15 @@ class LoginHistoryDialog(QDialog):
         self.headers = headers
         self.setWindowTitle(f"'{username}' 로그인 이력")
         self.setFixedSize(700, 500)
-        self.setStyleSheet(f"background-color: {DARK['card']};")
+        self.setStyleSheet(f"background-color: {get_color('surface')};")
         self._setup_ui()
         self._load_history()
 
     def _setup_ui(self):
         title_lbl = QLabel(f"'{self.username}' 로그인 이력", self)
         title_lbl.setGeometry(30, 20, 640, 30)
-        title_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
-        title_lbl.setStyleSheet(f"color: {DARK['text']};")
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         # 이력 테이블
         self.history_table = QTableWidget(self)
@@ -1568,25 +1576,25 @@ class LoginHistoryDialog(QDialog):
         self.history_table.setColumnWidth(1, 150)
         self.history_table.setColumnWidth(2, 200)
         self.history_table.setColumnWidth(3, 80)
-        self.history_table.setFont(QFont(FONT_FAMILY, 10))
+        self.history_table.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
         self.history_table.setStyleSheet(f"""
             QTableWidget {{
-                background-color: {DARK["table_bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
-                gridline-color: {DARK["border"]};
+                background-color: {get_color('surface')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
+                gridline-color: {get_color('border')};
             }}
             QTableWidget::item {{
-                padding: 8px;
-                color: {DARK["text"]};
-                background-color: {DARK["table_bg"]};
+                padding: {ds.spacing.space_2}px;
+                color: {get_color('text_primary')};
+                background-color: {get_color('surface')};
             }}
             QHeaderView::section {{
-                background-color: {DARK["table_header"]};
-                color: {DARK["text"]};
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
                 font-weight: bold;
-                padding: 10px;
+                padding: {ds.spacing.space_3}px;
                 border: none;
             }}
         """)
@@ -1595,16 +1603,16 @@ class LoginHistoryDialog(QDialog):
         # 닫기 버튼
         close_btn = QPushButton("닫기", self)
         close_btn.setGeometry(560, 450, 100, 40)
-        close_btn.setFont(QFont(FONT_FAMILY, 11))
+        close_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         close_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["bg"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 6px;
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.border_radius.radius_base}px;
             }}
             QPushButton:hover {{
-                background-color: {DARK["border"]};
+                background-color: {get_color('border')};
             }}
         """)
         close_btn.clicked.connect(self.accept)
@@ -1636,22 +1644,22 @@ class LoginHistoryDialog(QDialog):
                     # 3: 상태
                     success = item.get("success", False)
                     status_text = "성공" if success else "실패"
-                    status_color = DARK["success"] if success else DARK["danger"]
+                    status_color = get_color("success") if success else get_color("error")
                     self._set_history_cell(row, 3, status_text, status_color)
             else:
                 self.history_table.setRowCount(1)
-                self._set_history_cell(0, 0, f"로드 실패 (HTTP {resp.status_code})", DARK["danger"])
+                self._set_history_cell(0, 0, f"로드 실패 (HTTP {resp.status_code})", get_color("error"))
         except Exception as e:
             logger.exception("Failed to load history")
             self.history_table.setRowCount(1)
-            self._set_history_cell(0, 0, f"로드 오류: {str(e)[:50]}", DARK["danger"])
+            self._set_history_cell(0, 0, f"로드 오류: {str(e)[:50]}", get_color("error"))
 
     def _set_history_cell(self, row, col, text, color=None):
         """히스토리 테이블 셀 설정"""
         item = QTableWidgetItem(text)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        item.setForeground(QBrush(QColor(color if color else DARK["text"])))
-        item.setBackground(QBrush(QColor(DARK["table_bg"])))
+        item.setForeground(QBrush(QColor(color if color else get_color("text_primary"))))
+        item.setBackground(QBrush(QColor(get_color("surface"))))
         self.history_table.setItem(row, col, item)
 
 
@@ -1673,7 +1681,7 @@ if __name__ == "__main__":
     app = QApplication(sys.argv)
     
     # Set default font
-    font = QFont(FONT_FAMILY, 10)
+    font = QFont(FONT_FAMILY, ds.typography.size_sm // 2)
     app.setFont(font)
 
     window = AdminDashboard(API_URL, API_KEY)

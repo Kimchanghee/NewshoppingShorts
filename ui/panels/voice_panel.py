@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ui.components.base_widget import ThemedMixin
+from ui.design_system_v2 import get_design_system, get_color
 
 logger = logging.getLogger(__name__)
 
@@ -20,13 +21,15 @@ class VoiceCard(QFrame, ThemedMixin):
         super().__init__()
         self.profile = profile
         self.is_selected = is_selected
+        self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         self.create_widgets()
         self.apply_theme()
         
     def create_widgets(self):
+        ds = self.ds
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(ds.spacing.space_3, ds.spacing.space_2, ds.spacing.space_3, ds.spacing.space_2)
         
         top_row = QHBoxLayout()
         
@@ -40,7 +43,7 @@ class VoiceCard(QFrame, ThemedMixin):
         gender_icon = "♀" if self.profile.get("gender") == "female" else "♂"
         icon_color = "#FF6B81" if self.profile.get("gender") == "female" else "#5B9BD5"
         self.name_label = QLabel(f"{gender_icon} {self.profile['label']}")
-        self.name_label.setStyleSheet(f"font-weight: bold; font-size: 14px; color: {icon_color};")
+        self.name_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_sm}px; color: {icon_color};")
         top_row.addWidget(self.name_label)
         
         top_row.addStretch()
@@ -54,7 +57,7 @@ class VoiceCard(QFrame, ThemedMixin):
                 background-color: {icon_color};
                 color: white;
                 border: none;
-                border-radius: 4px;
+                border-radius: {ds.border_radius.radius_sm}px;
             }}
         """)
         top_row.addWidget(self.play_btn)
@@ -64,7 +67,7 @@ class VoiceCard(QFrame, ThemedMixin):
         # Description
         self.desc_label = QLabel(self.profile["description"])
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet("font-size: 11px;")
+        self.desc_label.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
         layout.addWidget(self.desc_label)
 
     def mousePressEvent(self, event):
@@ -72,29 +75,30 @@ class VoiceCard(QFrame, ThemedMixin):
             self.clicked.emit(self.profile["id"])
 
     def apply_theme(self):
-        bg = self.get_color("bg_selected") if self.is_selected else self.get_color("bg_card")
-        border = self.get_color("primary") if self.is_selected else self.get_color("border_light")
+        ds = self.ds
+        bg = get_color('surface_variant') if self.is_selected else get_color('surface')
+        border = get_color('primary') if self.is_selected else get_color('border_light')
         thickness = 2 if self.is_selected else 1
         
         self.setStyleSheet(f"""
             VoiceCard {{
                 background-color: {bg};
                 border: {thickness}px solid {border};
-                border-radius: 8px;
+                border-radius: {ds.border_radius.radius_base}px;
             }}
         """)
         
-        check_bg = self.get_color("primary") if self.is_selected else self.get_color("bg_secondary")
+        check_bg = get_color('primary') if self.is_selected else get_color('surface_variant')
         check_fg = "white" if self.is_selected else "transparent"
         self.check_label.setStyleSheet(f"""
             background-color: {check_bg};
             color: {check_fg};
-            border-radius: 4px;
+            border-radius: {ds.border_radius.radius_sm}px;
         """)
         
-        text_primary = self.get_color("text_primary")
-        text_secondary = self.get_color("text_secondary")
-        self.desc_label.setStyleSheet(f"color: {text_secondary}; border: none;")
+        text_primary = get_color('text_primary')
+        text_secondary = get_color('text_secondary')
+        self.desc_label.setStyleSheet(f"color: {text_secondary}; border: none; font-size: {ds.typography.size_2xs}px;")
 
 class VoicePanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):
@@ -102,29 +106,32 @@ class VoicePanel(QFrame, ThemedMixin):
         self.gui = gui
         self.gender_filter = "all"
         self.voice_cards = {}
+        self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         self.create_widgets()
         self.apply_theme()
 
     def create_widgets(self):
+        ds = self.ds
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 12, 16, 12)
+        self.main_layout.setContentsMargins(ds.spacing.space_4, ds.spacing.space_3, ds.spacing.space_4, ds.spacing.space_3)
         
         # Header
         header = QHBoxLayout()
         title = QLabel("음성 선택")
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        title.setStyleSheet(f"font-size: {ds.typography.size_xl}px; font-weight: {ds.typography.weight_bold};")
         header.addWidget(title)
         
         header.addStretch()
         
         self.count_badge = QLabel("0개 선택")
-        self.count_badge.setStyleSheet("""
-            background-color: #e31639;
+        self.count_badge.setStyleSheet(f"""
+            background-color: {get_color('primary')};
             color: white;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-weight: bold;
+            padding: {ds.spacing.space_1}px {ds.spacing.space_3}px;
+            border-radius: {ds.border_radius.radius_sm}px;
+            font-weight: {ds.typography.weight_bold};
+            font-size: {ds.typography.size_xs}px;
         """)
         header.addWidget(self.count_badge)
         self.main_layout.addLayout(header)
@@ -150,7 +157,7 @@ class VoicePanel(QFrame, ThemedMixin):
         
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout(self.grid_widget)
-        self.grid_layout.setSpacing(10)
+        self.grid_layout.setSpacing(ds.spacing.space_2)
         self.scroll_area.setWidget(self.grid_widget)
         self.main_layout.addWidget(self.scroll_area)
         
@@ -161,6 +168,7 @@ class VoicePanel(QFrame, ThemedMixin):
         self.rebuild_grid()
 
     def rebuild_grid(self):
+        ds = self.ds
         # Clear layout
         for i in reversed(range(self.grid_layout.count())): 
             self.grid_layout.itemAt(i).widget().setParent(None)
@@ -201,27 +209,29 @@ class VoicePanel(QFrame, ThemedMixin):
                 card.apply_theme()
 
     def apply_theme(self):
-        bg = self.get_color("bg_card")
+        ds = self.ds
+        bg = get_color('surface')
         self.setStyleSheet(f"background-color: {bg}; border: none;")
         self.scroll_area.setStyleSheet(f"background-color: {bg};")
         self.grid_widget.setStyleSheet(f"background-color: {bg};")
         
-        primary = self.get_color("primary")
-        text_primary = self.get_color("text_primary")
-        text_secondary = self.get_color("text_secondary")
+        primary = get_color('primary')
+        text_primary = get_color('text_primary')
+        text_secondary = get_color('text_secondary')
         
         tab_style = f"""
             QPushButton {{
-                background-color: {self.get_color("bg_secondary")};
+                background-color: {get_color('surface_variant')};
                 color: {text_secondary};
-                border-radius: 4px;
-                padding: 6px 16px;
+                border-radius: {ds.border_radius.radius_sm}px;
+                padding: 6px {ds.spacing.space_4}px;
                 border: none;
+                font-size: {ds.typography.size_sm}px;
             }}
             QPushButton:checked {{
                 background-color: {primary};
                 color: white;
-                font-weight: bold;
+                font-weight: {ds.typography.weight_bold};
             }}
         """
         self.tab_all.setStyleSheet(tab_style)

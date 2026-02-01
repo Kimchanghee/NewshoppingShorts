@@ -1,14 +1,19 @@
 """
 Subscription status widget for PyQt6
+Uses the design system v2 for consistent styling.
 """
 from PyQt6.QtWidgets import QWidget, QHBoxLayout, QVBoxLayout, QLabel, QPushButton, QGraphicsOpacityEffect
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
+
+from ui.design_system_v2 import get_design_system, get_color
+
 
 class SubscriptionStatusWidget(QWidget):
     requestSubscription = pyqtSignal()
 
     def __init__(self, parent=None, on_request_subscription=None, theme_manager=None):
         super().__init__(parent)
+        self.ds = get_design_system()
         self._on_request_subscription = on_request_subscription
         self._is_trial = True
         self._work_count = 3
@@ -21,38 +26,46 @@ class SubscriptionStatusWidget(QWidget):
 
     def _setup_ui(self):
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(10, 8, 10, 8)
+        layout.setContentsMargins(
+            self.ds.spacing.space_3,
+            self.ds.spacing.space_2,
+            self.ds.spacing.space_3,
+            self.ds.spacing.space_2
+        )
         
         self.type_label = QLabel("체험판")
-        self.type_label.setStyleSheet("font-weight: bold; color: #F59E0B;")
+        self.type_label.setStyleSheet(f"font-weight: bold; color: {get_color('warning')};")
         layout.addWidget(self.type_label)
         
         self.count_label = QLabel("남은 횟수:")
-        self.count_label.setStyleSheet("color: #64748b;")
+        self.count_label.setStyleSheet(f"color: {get_color('text_secondary')};")
         layout.addWidget(self.count_label)
         
         self.count_value = QLabel("3/3")
-        self.count_value.setStyleSheet("font-weight: bold; color: #e31639;")
+        self.count_value.setStyleSheet(f"font-weight: bold; color: {get_color('primary')};")
         layout.addWidget(self.count_value)
         
         layout.addStretch()
         
         self.request_btn = QPushButton("구독 신청")
-        self.request_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #e31639;
-                color: #ffffff;
-                border-radius: 4px;
-                padding: 4px 10px;
-                font-size: 8pt;
-            }
-            QPushButton:hover { background-color: #c41231; }
+        self.request_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color('primary')};
+                color: {get_color('surface')};
+                border-radius: {self.ds.border_radius.radius_sm}px;
+                padding: {self.ds.spacing.space_1}px {self.ds.spacing.space_3}px;
+                font-size: {self.ds.typography.size_xs}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color('secondary')};
+            }}
         """)
         self.request_btn.clicked.connect(self._on_request_click)
         layout.addWidget(self.request_btn)
         
         self.pending_label = QLabel("신청 대기중")
-        self.pending_label.setStyleSheet("color: #3B82F6; font-size: 8pt;")
+        self.pending_label.setStyleSheet(f"color: {get_color('info')}; font-size: {self.ds.typography.size_xs}px;")
         self.pending_label.hide()
         layout.addWidget(self.pending_label)
 
@@ -74,15 +87,15 @@ class SubscriptionStatusWidget(QWidget):
 
         if is_unlimited:
             self.type_label.setText("구독")
-            self.type_label.setStyleSheet("font-weight: bold; color: #22C55E;")
+            self.type_label.setStyleSheet(f"font-weight: bold; color: {get_color('success')};")
             self.count_value.setText("무제한")
-            self.count_value.setStyleSheet("font-weight: bold; color: #22C55E;")
+            self.count_value.setStyleSheet(f"font-weight: bold; color: {get_color('success')};")
             self.request_btn.hide()
             self.pending_label.hide()
             self._stop_pulse_animation()
         else:
             self.type_label.setText("체험판")
-            self.type_label.setStyleSheet("font-weight: bold; color: #F59E0B;")
+            self.type_label.setStyleSheet(f"font-weight: bold; color: {get_color('warning')};")
             remaining = max(0, self._work_count - self._work_used)
             self.count_value.setText(f"{remaining}/{self._work_count}")
 
@@ -110,13 +123,13 @@ class SubscriptionStatusWidget(QWidget):
         """
         if remaining >= 3:
             # Green - healthy status (3-5 uses remaining)
-            return "#4CAF50", False
+            return get_color('success'), False
         elif remaining >= 1:
             # Yellow/Orange - warning (1-2 uses remaining)
-            return "#FFC107", False
+            return get_color('warning'), False
         else:
             # Red - critical (0 uses remaining)
-            return "#F44336", True
+            return get_color('error'), True
 
     def _start_pulse_animation(self):
         """Start pulsing animation for critical state (0 remaining)"""
@@ -128,7 +141,7 @@ class SubscriptionStatusWidget(QWidget):
             self._opacity_effect = QGraphicsOpacityEffect(self.count_value)
             self.count_value.setGraphicsEffect(self._opacity_effect)
 
-        # Create pulsing animation
+        # Create pulsing animation using design system duration
         self._pulse_animation = QPropertyAnimation(self._opacity_effect, b"opacity")
         self._pulse_animation.setDuration(1000)  # 1 second per pulse
         self._pulse_animation.setStartValue(1.0)  # Full opacity

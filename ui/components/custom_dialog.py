@@ -1,5 +1,6 @@
 """
 Custom dialog components with theme support for PyQt6
+Uses the design system v2 for consistent styling.
 """
 from typing import Optional, List, Tuple, Callable
 from PyQt6.QtWidgets import (
@@ -9,24 +10,25 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QIcon
 
-from ..theme_manager import ThemeManager, get_theme_manager
+from ..design_system_v2 import get_design_system, get_color
+
 
 class CustomDialog(QDialog):
     """Custom dialog with theme support for PyQt6"""
 
-    def __init__(self, parent, title, message, dialog_type="info", buttons=None, theme_manager: Optional[ThemeManager] = None):
+    def __init__(self, parent, title, message, dialog_type="info", buttons=None, theme_manager=None):
         super().__init__(parent)
         self.result_value = None
-        self._theme_manager = theme_manager or get_theme_manager()
+        self.ds = get_design_system()
         self.setWindowTitle(title)
         self.setModal(True)
         
-        # Determine background color
-        self.bg_color = self._theme_manager.get_color("bg_main")
-        self.card_bg = self._theme_manager.get_color("bg_card")
-        self.text_color = self._theme_manager.get_color("text_primary")
-        self.secondary_text = self._theme_manager.get_color("text_secondary")
-        self.accent_color = self._theme_manager.get_color("primary")
+        # Get colors from design system
+        self.bg_color = get_color('background')
+        self.card_bg = get_color('surface')
+        self.text_color = get_color('text_primary')
+        self.secondary_text = get_color('text_secondary')
+        self.accent_color = get_color('primary')
         
         self.setStyleSheet(f"background-color: {self.bg_color}; border: none;")
         
@@ -36,22 +38,22 @@ class CustomDialog(QDialog):
         
         # Container frame
         container = QFrame()
-        container.setStyleSheet(f"background-color: {self.card_bg}; margin: 2px; border-radius: 8px;")
+        container.setStyleSheet(f"background-color: {self.card_bg}; margin: 2px; border-radius: {self.ds.border_radius.radius_base}px;")
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(24, 24, 24, 24)
-        container_layout.setSpacing(16)
+        container_layout.setContentsMargins(self.ds.spacing.space_6, self.ds.spacing.space_6, self.ds.spacing.space_6, self.ds.spacing.space_6)
+        container_layout.setSpacing(self.ds.spacing.space_4)
         
         # Header (Icon + Title)
         header_layout = QHBoxLayout()
-        header_layout.setSpacing(12)
+        header_layout.setSpacing(self.ds.spacing.space_3)
         
         # Type-specific icon/color
         icon_map = {
-            "info": ("i", self._theme_manager.get_color("primary")),
-            "warning": ("!", self._theme_manager.get_color("warning")),
-            "error": ("x", self._theme_manager.get_color("error")),
-            "question": ("?", self._theme_manager.get_color("primary")),
-            "success": ("v", self._theme_manager.get_color("success"))
+            "info": ("i", get_color('info')),
+            "warning": ("!", get_color('warning')),
+            "error": ("x", get_color('error')),
+            "question": ("?", get_color('info')),
+            "success": ("v", get_color('success'))
         }
         icon_char, icon_color = icon_map.get(dialog_type, ("i", self.accent_color))
         
@@ -63,12 +65,12 @@ class CustomDialog(QDialog):
             color: white;
             border-radius: 14px;
             font-weight: bold;
-            font-size: 16px;
+            font-size: {self.ds.typography.size_base}px;
         """)
         header_layout.addWidget(icon_label)
         
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"color: {self.text_color}; font-size: 16px; font-weight: bold;")
+        title_label.setStyleSheet(f"color: {self.text_color}; font-size: {self.ds.typography.size_base}px; font-weight: bold;")
         header_layout.addWidget(title_label)
         header_layout.addStretch()
         
@@ -77,7 +79,7 @@ class CustomDialog(QDialog):
         # Message
         msg_label = QLabel(message)
         msg_label.setWordWrap(True)
-        msg_label.setStyleSheet(f"color: {self.secondary_text}; font-size: 14px;")
+        msg_label.setStyleSheet(f"color: {self.secondary_text}; font-size: {self.ds.typography.size_sm}px;")
         container_layout.addWidget(msg_label)
         
         # Buttons
@@ -91,29 +93,32 @@ class CustomDialog(QDialog):
             btn = QPushButton(text)
             is_primary = text in ["확인", "예"]
             
+            # Get button size from design system
+            btn_size = self.ds.get_button_size('md')
+            
             if is_primary:
                 btn.setStyleSheet(f"""
                     QPushButton {{
                         background-color: {self.accent_color};
                         color: white;
-                        border-radius: 6px;
-                        padding: 8px 20px;
+                        border-radius: {self.ds.border_radius.radius_sm}px;
+                        padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_5}px;
                         font-weight: bold;
                     }}
                     QPushButton:hover {{
-                        background-color: {self._theme_manager.get_color("primary_hover")};
+                        background-color: {get_color('secondary')};
                     }}
                 """)
             else:
                 btn.setStyleSheet(f"""
                     QPushButton {{
-                        background-color: {self._theme_manager.get_color("bg_secondary")};
+                        background-color: {get_color('surface_variant')};
                         color: {self.text_color};
-                        border-radius: 6px;
-                        padding: 8px 20px;
+                        border-radius: {self.ds.border_radius.radius_sm}px;
+                        padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_5}px;
                     }}
                     QPushButton:hover {{
-                        background-color: {self._theme_manager.get_color("bg_hover")};
+                        background-color: {get_color('border')};
                     }}
                 """)
             
@@ -136,6 +141,7 @@ class CustomDialog(QDialog):
     def show_and_wait(self):
         self.exec()
         return self.result_value
+
 
 def show_info(parent, title, message):
     return CustomDialog(parent, title, message, "info").show_and_wait()

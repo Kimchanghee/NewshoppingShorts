@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from ui.components.base_widget import ThemedMixin
 from managers.settings_manager import get_settings_manager
+from ui.design_system_v2 import get_design_system, get_color
 
 CTA_OPTIONS = [
     {"name": "댓글형", "id": "default", "description": "고정댓글로 유도하는 깔끔한 멘트", "lines": ["영상 속 제품 정보는", "아래 고정댓글에서", "확인해 보세요!"]},
@@ -29,19 +30,21 @@ class CTACard(QFrame, ThemedMixin):
         super().__init__()
         self.option = option
         self.is_selected = is_selected
+        self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         self.create_widgets()
         self.apply_theme()
 
     def create_widgets(self):
+        ds = self.ds
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(ds.spacing.space_3, ds.spacing.space_2, ds.spacing.space_3, ds.spacing.space_2)
         
         # Header
         header = QHBoxLayout()
         icon_text = "📍" if self.option["id"] == "default" else "📝" if self.option["id"] == "option1" else "🔥"
         self.title_label = QLabel(f"{icon_text} {self.option['name']}")
-        self.title_label.setStyleSheet("font-weight: bold; font-size: 13px;")
+        self.title_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_xs}px;")
         header.addWidget(self.title_label)
         header.addStretch()
         layout.addLayout(header)
@@ -49,19 +52,19 @@ class CTACard(QFrame, ThemedMixin):
         # Preview box
         self.preview_box = QFrame()
         preview_layout = QVBoxLayout(self.preview_box)
-        preview_layout.setContentsMargins(8, 6, 8, 6)
+        preview_layout.setContentsMargins(ds.spacing.space_2, ds.spacing.space_1, ds.spacing.space_2, ds.spacing.space_1)
         preview_layout.setSpacing(2)
         
         for line in self.option["lines"]:
             lbl = QLabel(line)
-            lbl.setStyleSheet("font-size: 11px;")
+            lbl.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
             preview_layout.addWidget(lbl)
             
         layout.addWidget(self.preview_box)
         
         # Description
         self.desc_label = QLabel(self.option["description"])
-        self.desc_label.setStyleSheet("font-size: 11px;")
+        self.desc_label.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
         self.desc_label.setWordWrap(True)
         layout.addWidget(self.desc_label)
 
@@ -70,62 +73,66 @@ class CTACard(QFrame, ThemedMixin):
             self.clicked.emit(self.option["id"])
 
     def apply_theme(self):
-        bg = self.get_color("bg_selected") if self.is_selected else self.get_color("bg_card")
-        border = self.get_color("primary") if self.is_selected else self.get_color("border_light")
+        ds = self.ds
+        bg = get_color('surface_variant') if self.is_selected else get_color('surface')
+        border = get_color('primary') if self.is_selected else get_color('border_light')
         thickness = 2 if self.is_selected else 1
         
         self.setStyleSheet(f"""
             CTACard {{
                 background-color: {bg};
                 border: {thickness}px solid {border};
-                border-radius: 8px;
+                border-radius: {ds.border_radius.radius_base}px;
             }}
         """)
         
         self.preview_box.setStyleSheet(f"""
             QFrame {{
-                background-color: {self.get_color("bg_secondary")};
-                border-radius: 4px;
+                background-color: {get_color('surface_variant')};
+                border-radius: {ds.border_radius.radius_sm}px;
                 border: none;
             }}
             QLabel {{
-                color: {self.get_color("text_secondary")};
+                color: {get_color('text_secondary')};
             }}
         """)
         
-        primary_color = self.get_color("primary")
-        text_primary = self.get_color("text_primary")
-        self.title_label.setStyleSheet(f"color: {primary_color if self.is_selected else text_primary}; border: none; font-weight: bold;")
-        self.desc_label.setStyleSheet(f"color: {self.get_color('text_secondary')}; border: none;")
+        primary_color = get_color('primary')
+        text_primary = get_color('text_primary')
+        self.title_label.setStyleSheet(f"color: {primary_color if self.is_selected else text_primary}; border: none; font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_xs}px;")
+        self.desc_label.setStyleSheet(f"color: {get_color('text_secondary')}; border: none; font-size: {ds.typography.size_2xs}px;")
 
 class CTAPanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):
         super().__init__(parent)
         self.gui = gui
         self.cards = {}
+        self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         self.create_widgets()
         self.apply_theme()
 
     def create_widgets(self):
+        ds = self.ds
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 12, 16, 12)
+        self.main_layout.setContentsMargins(ds.spacing.space_4, ds.spacing.space_3, ds.spacing.space_4, ds.spacing.space_3)
         
         # Header
         header = QHBoxLayout()
         title = QLabel("CTA 선택")
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        title.setStyleSheet(f"font-size: {ds.typography.size_xl}px; font-weight: {ds.typography.weight_bold};")
         header.addWidget(title)
         
         header.addStretch()
         
         self.selected_badge = QLabel("✓ 선택됨")
         self.selected_badge.setStyleSheet(f"""
-            background-color: {self.get_color("primary")};
+            background-color: {get_color('primary')};
             color: white;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-weight: bold;
+            padding: {ds.spacing.space_1}px {ds.spacing.space_3}px;
+            border-radius: {ds.border_radius.radius_sm}px;
+            font-weight: {ds.typography.weight_bold};
+            font-size: {ds.typography.size_xs}px;
         """)
         header.addWidget(self.selected_badge)
         self.main_layout.addLayout(header)
@@ -137,7 +144,7 @@ class CTAPanel(QFrame, ThemedMixin):
         
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout(self.grid_widget)
-        self.grid_layout.setSpacing(10)
+        self.grid_layout.setSpacing(ds.spacing.space_2)
         self.grid_layout.setContentsMargins(0, 0, 0, 0)
         self.scroll.setWidget(self.grid_widget)
         self.main_layout.addWidget(self.scroll)
@@ -169,7 +176,8 @@ class CTAPanel(QFrame, ThemedMixin):
             card.apply_theme()
 
     def apply_theme(self):
-        bg = self.get_color("bg_card")
+        ds = self.ds
+        bg = get_color('surface')
         self.setStyleSheet(f"background-color: {bg}; border: none;")
         self.scroll.setStyleSheet(f"background-color: {bg};")
         self.grid_widget.setStyleSheet(f"background-color: {bg};")

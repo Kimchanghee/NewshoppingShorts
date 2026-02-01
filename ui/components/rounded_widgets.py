@@ -1,5 +1,6 @@
 """
 Rounded UI widgets for PyQt6 with theme support
+Uses the design system v2 for consistent styling.
 """
 import logging
 from typing import Optional, Callable
@@ -10,10 +11,11 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QSize, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QCursor
 
+from ui.design_system_v2 import get_design_system, get_color
 from .base_widget import ThemedMixin
-from ..theme_manager import ThemeManager, get_theme_manager
 
 logger = logging.getLogger(__name__)
+
 
 class RoundedButton(QPushButton, ThemedMixin):
     """Rounded button with theme support in PyQt6"""
@@ -24,13 +26,14 @@ class RoundedButton(QPushButton, ThemedMixin):
         text="",
         command: Optional[Callable] = None,
         style: str = "primary",  # "primary", "secondary", "outline", "danger", "success"
-        theme_manager: Optional[ThemeManager] = None,
+        theme_manager=None,
         font=None,
         **kwargs
     ):
         super().__init__(text, parent)
         self.command = command
         self._style = style
+        self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         
         if font:
@@ -50,46 +53,48 @@ class RoundedButton(QPushButton, ThemedMixin):
         self.apply_theme()
 
     def apply_theme(self):
-        primary = self.get_color("primary")
-        primary_hover = self.get_color("primary_hover")
-        primary_text = self.get_color("primary_text")
-        bg_secondary = self.get_color("bg_secondary")
-        bg_hover = self.get_color("bg_hover")
-        text_primary = self.get_color("text_primary")
-        error_bg = self.get_color("error_bg")
-        error = self.get_color("error")
-        success_bg = self.get_color("success_bg")
-        success = self.get_color("success")
+        primary = get_color('primary')
+        secondary = get_color('secondary')
+        text_primary = get_color('text_primary')
+        error = get_color('error')
+        success = get_color('success')
+        surface_variant = get_color('surface_variant')
+        border_light = get_color('border_light')
+        
+        # Get button size from design system
+        btn_size = self.ds.get_button_size('md')
         
         style_sheet = ""
         if self._style == "primary":
             style_sheet = f"""
                 QPushButton {{
                     background-color: {primary};
-                    color: {primary_text};
-                    border-radius: 8px;
-                    padding: 8px 16px;
+                    color: white;
+                    border-radius: {self.ds.border_radius.radius_base}px;
+                    padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
                     font-weight: bold;
                     border: none;
+                    font-size: {self.ds.typography.size_sm}px;
                 }}
                 QPushButton:hover {{
-                    background-color: {primary_hover};
+                    background-color: {secondary};
                 }}
                 QPushButton:disabled {{
-                    background-color: {self.get_color("text_disabled")};
+                    background-color: {get_color('text_muted')};
                 }}
             """
         elif self._style == "secondary":
             style_sheet = f"""
                 QPushButton {{
-                    background-color: {bg_secondary};
+                    background-color: {surface_variant};
                     color: {text_primary};
-                    border-radius: 8px;
-                    padding: 8px 16px;
-                    border: 1px solid {self.get_color("border_light")};
+                    border-radius: {self.ds.border_radius.radius_base}px;
+                    padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
+                    border: 1px solid {border_light};
+                    font-size: {self.ds.typography.size_sm}px;
                 }}
                 QPushButton:hover {{
-                    background-color: {bg_hover};
+                    background-color: {border_light};
                 }}
             """
         elif self._style == "outline":
@@ -98,21 +103,23 @@ class RoundedButton(QPushButton, ThemedMixin):
                     background-color: transparent;
                     color: {primary};
                     border: 1px solid {primary};
-                    border-radius: 8px;
-                    padding: 8px 16px;
+                    border-radius: {self.ds.border_radius.radius_base}px;
+                    padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
+                    font-size: {self.ds.typography.size_sm}px;
                 }}
                 QPushButton:hover {{
-                    background-color: {self.get_color("primary_light")};
+                    background-color: {surface_variant};
                 }}
             """
         elif self._style == "danger":
             style_sheet = f"""
                 QPushButton {{
-                    background-color: {error_bg};
+                    background-color: {get_color('background')};
                     color: {error};
                     border: 1px solid {error};
-                    border-radius: 8px;
-                    padding: 8px 16px;
+                    border-radius: {self.ds.border_radius.radius_base}px;
+                    padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
+                    font-size: {self.ds.typography.size_sm}px;
                 }}
                 QPushButton:hover {{
                     background-color: {error};
@@ -122,23 +129,27 @@ class RoundedButton(QPushButton, ThemedMixin):
         
         self.setStyleSheet(style_sheet)
 
+
 def create_rounded_button(parent, text, command, style="primary", gui=None, **kwargs):
     """Helper to create RoundedButton with compatible signature"""
     return RoundedButton(parent, text=text, command=command, style=style, **kwargs)
 
+
 class RoundedFrame(QFrame, ThemedMixin):
     """Rounded frame with theme support in PyQt6"""
     
-    def __init__(self, parent=None, radius=12, bg_key="bg_card", theme_manager=None, **kwargs):
+    def __init__(self, parent=None, radius=None, bg_key="surface", theme_manager=None, **kwargs):
         super().__init__(parent)
-        self.radius = radius
+        self.ds = get_design_system()
+        # Use design system radius if not specified
+        self.radius = radius if radius is not None else self.ds.border_radius.radius_lg
         self._bg_key = bg_key
         self.__init_themed__(theme_manager)
         self.apply_theme()
 
     def apply_theme(self):
-        bg_color = self.get_color(self._bg_key)
-        border_color = self.get_color("border_light")
+        bg_color = get_color(self._bg_key)
+        border_color = get_color('border_light')
         self.setStyleSheet(f"""
             QFrame {{
                 background-color: {bg_color};
@@ -147,30 +158,33 @@ class RoundedFrame(QFrame, ThemedMixin):
             }}
         """)
 
+
 class RoundedEntry(QLineEdit, ThemedMixin):
     """Rounded entry field with theme support in PyQt6"""
     
     def __init__(self, parent=None, theme_manager=None, **kwargs):
         super().__init__(parent)
+        self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         self.apply_theme()
 
     def apply_theme(self):
-        bg = self.get_color("bg_input")
-        fg = self.get_color("text_primary")
-        border = self.get_color("border_light")
-        focus = self.get_color("border_focus")
+        bg = get_color('surface')
+        fg = get_color('text_primary')
+        border = get_color('border_light')
+        focus = get_color('primary')
         
         self.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {bg};
                 color: {fg};
                 border: 1px solid {border};
-                border-radius: 8px;
-                padding: 8px 12px;
+                border-radius: {self.ds.border_radius.radius_base}px;
+                padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_3}px;
+                font-size: {self.ds.typography.size_sm}px;
             }}
             QLineEdit:focus {{
                 border: 2px solid {focus};
-                background-color: white;
+                background-color: {get_color('surface_variant')};
             }}
         """)
