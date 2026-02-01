@@ -227,7 +227,7 @@ class AdminDashboard(QMainWindow):
         # 타이틀
         title = QLabel("관리자 대시보드", self.central)
         title.setGeometry(40, 20, 400, 40)
-        title.setFont(QFont(FONT_FAMILY, 22, QFont.Bold))
+        title.setFont(QFont(FONT_FAMILY, 22, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {DARK['text']};")
 
         # 마지막 업데이트 시간 라벨
@@ -1621,3 +1621,30 @@ class LoginHistoryDialog(QDialog):
         item.setForeground(QBrush(QColor(color if color else DARK["text"])))
         item.setBackground(QBrush(QColor(DARK["table_bg"])))
         self.history_table.setItem(row, col, item)
+
+
+if __name__ == "__main__":
+    import sys
+    from PyQt6.QtWidgets import QApplication
+    from dotenv import load_dotenv
+
+    # Load environment variables
+    load_dotenv()
+
+    # Setup logging
+    logging.basicConfig(level=logging.INFO)
+
+    # Get configuration from env or use defaults
+    API_URL = os.getenv("API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app")
+    API_KEY = os.getenv("ADMIN_API_KEY", "ROTATED_LEGACY_ADMIN_KEY_REMOVED_FROM_HISTORY")
+
+    app = QApplication(sys.argv)
+    
+    # Set default font
+    font = QFont(FONT_FAMILY, 10)
+    app.setFont(font)
+
+    window = AdminDashboard(API_URL, API_KEY)
+    window.show()
+
+    sys.exit(app.exec())
