@@ -474,7 +474,8 @@ class AdminDashboard(QMainWindow):
             ]
         )
         self._style_table(
-            self.users_table, [40, 80, 90, 80, 110, 150, 60, 130, 70, 50, 130, 100, 50, 90, 250]
+             # Increased Action column (last) to 330px to prevent button overflow
+            self.users_table, [40, 80, 90, 80, 110, 150, 60, 130, 70, 50, 130, 100, 50, 90, 330]
         )
         # 사용자 테이블이 기본 표시됨
 
@@ -485,7 +486,11 @@ class AdminDashboard(QMainWindow):
         self.subscriptions_table.setHorizontalHeaderLabels(
             ["ID", "사용자", "상태", "요청작업", "메시지", "요청일시", "관리"]
         )
-        self._style_table(self.subscriptions_table, [50, 100, 80, 80, 350, 150, 200])
+        self._style_table(
+            # Column widths adjusted to prevent Action column overflow
+            # Last column (Actions) increased from 250 -> 320 to fit 5 buttons
+            self.users_table, [40, 80, 90, 80, 110, 150, 60, 130, 70, 50, 130, 100, 50, 90, 320]
+        )
         self.subscriptions_table.setVisible(False)
 
     def _style_table(self, table: QTableWidget, widths: list):
@@ -693,12 +698,13 @@ class AdminDashboard(QMainWindow):
     ) -> QWidget:
         """사용자 작업 버튼 - 미니멀 디자인"""
         widget = QWidget()
-        widget.setMinimumSize(300, 40)
+        # Widen container to fit 5 buttons (55px * 5 + spacing)
+        widget.setMinimumSize(320, 40)
         # 투명 배경 (테이블 행 색상 통과)
         widget.setStyleSheet("background-color: transparent;")
 
         layout =  QWidget(widget)
-        layout.setGeometry(0, 0, 300, 40)
+        layout.setGeometry(0, 0, 330, 40)
 
         # Style definition for action buttons
         # Base style: Transparent with border and colored text on hover
