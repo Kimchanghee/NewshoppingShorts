@@ -45,6 +45,7 @@ from utils.logging_config import get_logger
 from utils.error_handlers import global_exception_handler
 from core.providers import VertexGeminiProvider
 from ui.components.step_nav import StepNav
+from caller import rest
 
 logger = get_logger(__name__)
 
@@ -91,6 +92,7 @@ class VideoAnalyzerGUI(QMainWindow):
 
         self.init_ui()
         self.api_handler.load_saved_api_keys()
+        self.refresh_user_status()
 
     # ---------------- UI -----------------
     def init_ui(self):
@@ -243,7 +245,6 @@ class VideoAnalyzerGUI(QMainWindow):
         
         bar = QFrame()
         bar.setObjectName("TopBar")
-        # Removing border-bottom here if we want a cleaner look, or keeping it subtle
         bar.setStyleSheet(f"""
             #TopBar {{
                 background-color: {c.bg_header};
@@ -252,7 +253,7 @@ class VideoAnalyzerGUI(QMainWindow):
         """)
         
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(40, 20, 40, 20)  # Matching content padding
+        layout.setContentsMargins(40, 20, 40, 20)
         layout.setSpacing(20)
 
         # Breadcrumbs / Title
@@ -275,16 +276,44 @@ class VideoAnalyzerGUI(QMainWindow):
 
         # Right side actions
         
+        # User Credits Label
+        self.credits_label = QLabel("")
+        self.credits_label.setFont(QFont(d.typography.font_family_body, 11))
+        self.credits_label.setStyleSheet(f"color: {c.text_secondary}; margin-right: 10px;")
+        layout.addWidget(self.credits_label)
+
         # Subscription Badge
-        sub_badge = QLabel("PRO PLAN")
-        sub_badge.setFont(QFont(d.typography.font_family_body, 10, QFont.Weight.Bold))
-        sub_badge.setStyleSheet(f"""
-            background-color: {c.primary_light};
-            color: {c.primary};
+        self.sub_badge = QLabel("Guest")
+        self.sub_badge.setFont(QFont(d.typography.font_family_body, 10, QFont.Weight.Bold))
+        self.sub_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.sub_badge.setStyleSheet(f"""
+            background-color: {c.bg_card};
+            color: {c.text_secondary};
             padding: 6px 12px;
             border-radius: 6px;
+            border: 1px solid {c.border_light};
         """)
-        layout.addWidget(sub_badge)
+        layout.addWidget(self.sub_badge)
+
+        # Refresh User Status Button
+        refresh_btn = QPushButton("↻")
+        refresh_btn.setToolTip("상태 새로고침")
+        refresh_btn.setFixedSize(30, 30)
+        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {c.text_secondary};
+                border: 1px solid {c.border_light};
+                border-radius: 15px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.bg_hover};
+                color: {c.text_primary};
+            }}
+        """)
+        refresh_btn.clicked.connect(self.refresh_user_status)
+        layout.addWidget(refresh_btn)
 
         # Settings Button
         settings_btn = QPushButton("Preferences")
@@ -307,6 +336,82 @@ class VideoAnalyzerGUI(QMainWindow):
         layout.addWidget(settings_btn)
 
         return bar
+
+    def refresh_user_status(self):
+        """Update user subscription status and credits from server"""
+        if not self.login_data:
+            self.sub_badge.setText("Guest")
+            return
+
+        try:
+            # Extract user ID safely
+            # Structure: {'data': {'data': {'id': ...}}}
+            data_part = self.login_data.get("data", {})
+            if isinstance(data_part, dict):
+                inner_data = data_part.get("data", {})
+                user_id = inner_data.get("id")
+            else:
+                user_id = None
+            
+            if not user_id:
+                # Fallback if structure is different
+                user_id = self.login_data.get("userId")
+
+            if user_id:
+                # Call API
+                info = rest.check_work_available(user_id)
+                
+                # Update Credits
+                remaining = info.get("remaining", 0)
+                total = info.get("total", 0)
+                used = info.get("used", 0)
+                
+                # 'available' means user can still work
+                is_available = info.get("available", False)
+                
+                self.credits_label.setText(f"Credits: {remaining}/{total}")
+                
+                # Update Badge based on logic
+                # You might want to get actual user_type if available from another API, 
+                # but currently we can infer from credits or initial login data
+                top_data = self.login_data.get("data", {}).get("data", {})
+                user_type = top_data.get("user_type", "trial")
+                
+                d = self.design
+                c = d.colors
+
+                badge_text = user_type.upper()
+                badge_bg = c.bg_card
+                badge_color = c.text_secondary
+                
+                if user_type == "subscriber":
+                    badge_text = "PRO PLAN"
+                    badge_bg = c.primary_light
+                    badge_color = c.primary
+                elif user_type == "admin":
+                    badge_text = "ADMIN"
+                    badge_bg = "#374151"  # Dark gray
+                    badge_color = "#FFFFFF"
+                else: # trial
+                    badge_text = "TRIAL"
+                    if remaining <= 0:
+                        badge_bg = "#FEF2F2" # Red tint
+                        badge_color = "#EF4444" # Red
+                
+                self.sub_badge.setText(badge_text)
+                self.sub_badge.setStyleSheet(f"""
+                    background-color: {badge_bg};
+                    color: {badge_color};
+                    padding: 6px 12px;
+                    border-radius: 6px;
+                    font-weight: bold;
+                """)
+                
+                logger.info(f"User status refreshed: {user_id} | {user_type} | {remaining}/{total}")
+            else:
+                logger.warning("Could not extract user_id from login_data for status refresh")
+        except Exception as e:
+            logger.error(f"Failed to refresh user status: {e}")
 
     def _wrap_card(self, widget: QWidget, title: str, subtitle: str) -> QWidget:
         d = self.design
