@@ -240,7 +240,7 @@ class AdminDashboard(QMainWindow):
         # 새로고침 버튼
         refresh_btn = QPushButton("새로고침", self.central)
         refresh_btn.setGeometry(1220, 20, 120, 40)
-        refresh_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+        refresh_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         refresh_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK["primary"]};
@@ -371,7 +371,7 @@ class AdminDashboard(QMainWindow):
         """값 라벨 생성 및 반환"""
         lbl = QLabel("0", self.central)
         lbl.setGeometry(x + 15, y + 35, w - 30, 40)
-        lbl.setFont(QFont(FONT_FAMILY, 24, QFont.Bold))
+        lbl.setFont(QFont(FONT_FAMILY, 24, QFont.Weight.Bold))
         lbl.setStyleSheet(f"color: {DARK['text']}; background: transparent;")
         return lbl
 
@@ -379,7 +379,7 @@ class AdminDashboard(QMainWindow):
         """탭 버튼 생성 (회원가입 요청 탭 제거 - 자동 승인됨)"""
         self.tab_users = QPushButton("사용자 관리", self.central)
         self.tab_users.setGeometry(40, 180, 130, 42)
-        self.tab_users.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        self.tab_users.setFont(QFont(FONT_FAMILY, 12, QFont.Weight.Bold))
         self.tab_users.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tab_users.clicked.connect(lambda: self._switch_tab(0))
 
@@ -420,12 +420,12 @@ class AdminDashboard(QMainWindow):
         )
         self.tab_users.setFont(
             QFont(
-                FONT_FAMILY, 12, QFont.Bold if self.current_tab == 0 else QFont.Normal
+                FONT_FAMILY, 12, QFont.Weight.Bold if self.current_tab == 0 else QFont.Weight.Normal
             )
         )
         self.tab_subscriptions.setFont(
             QFont(
-                FONT_FAMILY, 12, QFont.Bold if self.current_tab == 1 else QFont.Normal
+                FONT_FAMILY, 12, QFont.Weight.Bold if self.current_tab == 1 else QFont.Weight.Normal
             )
         )
 
@@ -869,13 +869,13 @@ class AdminDashboard(QMainWindow):
 
         title_lbl = QLabel(f"'{username}' 비밀번호 해시 정보:", dialog)
         title_lbl.setGeometry(30, 25, 440, 25)
-        title_lbl.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
+        title_lbl.setFont(QFont(FONT_FAMILY, 12, QFont.Weight.Bold))
         title_lbl.setStyleSheet(f"color: {DARK['text']};")
 
         # 보안 경고 메시지 강화
         warning_lbl = QLabel("⚠️ 보안 경고: 비밀번호 해시는 민감한 정보입니다.", dialog)
         warning_lbl.setGeometry(30, 55, 440, 20)
-        warning_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+        warning_lbl.setFont(QFont(FONT_FAMILY, 10, QFont.Weight.Bold))
         warning_lbl.setStyleSheet(f"color: {DARK['warning']};")
 
         warning2_lbl = QLabel("이 정보는 관리자 권한으로만 확인 가능합니다.", dialog)
@@ -1345,7 +1345,7 @@ class ApproveDialog(QDialog):
 
         ok_btn = QPushButton("승인", self)
         ok_btn.setGeometry(290, 240, 100, 40)
-        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         ok_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK["success"]};
@@ -1421,7 +1421,7 @@ class RejectDialog(QDialog):
 
         ok_btn = QPushButton("거부", self)
         ok_btn.setGeometry(300, 210, 100, 40)
-        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         ok_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK["danger"]};
@@ -1494,7 +1494,7 @@ class ExtendDialog(QDialog):
 
         ok_btn = QPushButton("연장", self)
         ok_btn.setGeometry(260, 140, 100, 40)
-        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+        ok_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         ok_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {DARK["info"]};
@@ -1532,7 +1532,7 @@ class LoginHistoryDialog(QDialog):
     def _setup_ui(self):
         title_lbl = QLabel(f"'{self.username}' 로그인 이력", self)
         title_lbl.setGeometry(30, 20, 640, 30)
-        title_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        title_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         title_lbl.setStyleSheet(f"color: {DARK['text']};")
 
         # 이력 테이블
@@ -1617,7 +1617,7 @@ class LoginHistoryDialog(QDialog):
     def _set_history_cell(self, row, col, text, color=None):
         """히스토리 테이블 셀 설정"""
         item = QTableWidgetItem(text)
-        item.setTextAlignment(Qt.AlignCenter)
+        item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         item.setForeground(QBrush(QColor(color if color else DARK["text"])))
         item.setBackground(QBrush(QColor(DARK["table_bg"])))
         self.history_table.setItem(row, col, item)
