@@ -1,6 +1,6 @@
 """
 Step navigation bar for the main shell (PyQt6).
-Modernized with Enhanced Design System.
+Modernized with Design System V2.
 """
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QPushButton, QSizePolicy, 
@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
 from PyQt6.QtGui import QIcon, QFont, QColor
 
-from ui.design_system_enhanced import get_design_system
+from ui.design_system_v2 import get_design_system, get_color
 
 
 class StepButton(QPushButton):
@@ -26,19 +26,24 @@ class StepButton(QPushButton):
         
         # Layout
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(20, 0, 20, 0)
-        layout.setSpacing(12)
+        layout.setContentsMargins(
+            self.ds.spacing.space_5,
+            0,
+            self.ds.spacing.space_5,
+            0
+        )
+        layout.setSpacing(self.ds.spacing.space_3)
         
         # Icon (Text for now, typically would be SVG/Pixmap)
         self.icon_label = QLabel(icon_text)
-        self.icon_label.setFont(QFont(self.ds.typography.font_family_body, 16))
+        self.icon_label.setFont(QFont(self.ds.typography.font_family_primary, self.ds.typography.size_lg))
         self.icon_label.setStyleSheet("background: transparent; border: none;")
-        self.icon_label.setFixedWidth(24)
+        self.icon_label.setFixedWidth(self.ds.spacing.space_6)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         # Text
         self.text_label = QLabel(label)
-        self.text_label.setFont(QFont(self.ds.typography.font_family_body, 10, QFont.Weight.Medium))
+        self.text_label.setFont(QFont(self.ds.typography.font_family_primary, self.ds.typography.size_xs, QFont.Weight.Medium))
         self.text_label.setStyleSheet("background: transparent; border: none;")
         
         layout.addWidget(self.icon_label)
@@ -53,15 +58,14 @@ class StepButton(QPushButton):
         self.update_style(checked)
 
     def update_style(self, checked):
-        c = self.ds.colors
         if checked:
-            bg = c.bg_selected
-            text_color = c.primary
-            border = f"4px solid {c.primary}"
+            bg = get_color('surface_variant')
+            text_color = get_color('primary')
+            border = f"4px solid {get_color('primary')}"
             font_weight = QFont.Weight.Bold
         else:
             bg = "transparent"
-            text_color = c.text_secondary
+            text_color = get_color('text_secondary')
             border = "4px solid transparent"
             font_weight = QFont.Weight.Medium
 
@@ -70,11 +74,11 @@ class StepButton(QPushButton):
                 background-color: {bg};
                 border: none;
                 border-left: {border};
-                border-radius: 0px; /* Rectangular full width or minimal radius usually for sidebars */
+                border-radius: 0px;
                 text-align: left;
             }}
             StepButton:hover {{
-                background-color: {c.bg_hover};
+                background-color: {get_color('border_light')};
             }}
         """)
         
@@ -100,14 +104,19 @@ class StepNav(QFrame):
         
         # Main Layout
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 30, 0, 30)  # Top/Bottom padding
-        layout.setSpacing(4)
+        layout.setContentsMargins(
+            0,
+            self.ds.spacing.space_7,
+            0,
+            self.ds.spacing.space_7
+        )
+        layout.setSpacing(self.ds.spacing.space_1)
         
         # Styling
         self.setStyleSheet(f"""
             #StepNav {{
-                background-color: {self.ds.colors.bg_sidebar};
-                border-right: 1px solid {self.ds.colors.border_light};
+                background-color: {get_color('surface')};
+                border-right: 1px solid {get_color('border_light')};
             }}
         """)
 
@@ -119,9 +128,6 @@ class StepNav(QFrame):
             self._buttons[step_id] = btn
 
         layout.addStretch()
-        
-        # Footer / Info area?
-        # Could add version info or something here if needed.
         
         if steps:
             self.set_active(steps[0][0])

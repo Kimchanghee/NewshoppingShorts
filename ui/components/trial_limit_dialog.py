@@ -2,6 +2,7 @@
 """
 Trial Limit Dialog Component for PyQt6
 Modern dialog shown when user exceeds trial usage limit
+Uses the design system v2 for consistent styling.
 """
 from typing import Optional
 from PyQt6.QtWidgets import (
@@ -11,7 +12,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
-from ..theme_manager import ThemeManager, get_theme_manager
+from ui.design_system_v2 import get_design_system, get_color
 
 
 class TrialLimitDialog(QDialog):
@@ -32,7 +33,7 @@ class TrialLimitDialog(QDialog):
         parent=None,
         used: int = 5,
         total: int = 5,
-        theme_manager: Optional[ThemeManager] = None
+        theme_manager=None
     ):
         """
         Initialize trial limit dialog
@@ -41,12 +42,12 @@ class TrialLimitDialog(QDialog):
             parent: Parent widget
             used: Number of trials used
             total: Total number of trials allowed
-            theme_manager: Optional theme manager instance
+            theme_manager: Optional theme manager instance (kept for compatibility)
         """
         super().__init__(parent)
         self.used = used
         self.total = total
-        self._theme_manager = theme_manager or get_theme_manager()
+        self.ds = get_design_system()
         self._init_ui()
 
     def _init_ui(self):
@@ -56,15 +57,14 @@ class TrialLimitDialog(QDialog):
         self.setModal(True)
         self.setMinimumWidth(450)
 
-        # Get theme colors
-        bg_main = self._theme_manager.get_color("bg_main")
-        bg_card = self._theme_manager.get_color("bg_card")
-        text_primary = self._theme_manager.get_color("text_primary")
-        text_secondary = self._theme_manager.get_color("text_secondary")
-        primary = self._theme_manager.get_color("primary")
-        error = self._theme_manager.get_color("error")
-        error_light = self._theme_manager.get_color("error_bg")
-        border_light = self._theme_manager.get_color("border_light")
+        # Get colors from design system
+        bg_main = get_color('background')
+        bg_card = get_color('surface')
+        text_primary = get_color('text_primary')
+        text_secondary = get_color('text_secondary')
+        primary = get_color('primary')
+        error = get_color('error')
+        border_light = get_color('border_light')
 
         # Main layout with no margins (frame will have margins)
         main_layout = QVBoxLayout(self)
@@ -80,18 +80,23 @@ class TrialLimitDialog(QDialog):
             QFrame {{
                 background-color: {bg_card};
                 border: 1px solid {border_light};
-                border-radius: 12px;
+                border-radius: {self.ds.border_radius.radius_md}px;
                 margin: 2px;
             }}
         """)
 
         container_layout = QVBoxLayout(container)
-        container_layout.setContentsMargins(24, 24, 24, 24)
-        container_layout.setSpacing(20)
+        container_layout.setContentsMargins(
+            self.ds.spacing.space_6,
+            self.ds.spacing.space_6,
+            self.ds.spacing.space_6,
+            self.ds.spacing.space_6
+        )
+        container_layout.setSpacing(self.ds.spacing.space_5)
 
         # Header with icon and title
         header_layout = QHBoxLayout()
-        header_layout.setSpacing(12)
+        header_layout.setSpacing(self.ds.spacing.space_3)
 
         # Warning icon
         icon_label = QLabel("!")
@@ -101,10 +106,10 @@ class TrialLimitDialog(QDialog):
             QLabel {{
                 background-color: {error};
                 color: white;
-                border-radius: 16px;
+                border-radius: {self.ds.border_radius.radius_full}px;
                 font-weight: bold;
-                font-size: 18px;
-                font-family: Inter, Pretendard, sans-serif;
+                font-size: {self.ds.typography.size_md}px;
+                font-family: {self.ds.typography.font_family_primary};
             }}
         """)
         header_layout.addWidget(icon_label)
@@ -114,10 +119,10 @@ class TrialLimitDialog(QDialog):
         title_label.setStyleSheet(f"""
             QLabel {{
                 color: {text_primary};
-                font-size: 18px;
+                font-size: {self.ds.typography.size_md}px;
                 font-weight: bold;
                 background: transparent;
-                font-family: Inter, Pretendard, sans-serif;
+                font-family: {self.ds.typography.font_family_primary};
             }}
         """)
         header_layout.addWidget(title_label)
@@ -129,15 +134,20 @@ class TrialLimitDialog(QDialog):
         usage_box = QFrame()
         usage_box.setStyleSheet(f"""
             QFrame {{
-                background-color: {error_light};
+                background-color: {get_color('surface_variant')};
                 border: 1px solid {error};
-                border-radius: 8px;
-                padding: 16px;
+                border-radius: {self.ds.border_radius.radius_base}px;
+                padding: {self.ds.spacing.space_4}px;
             }}
         """)
         usage_layout = QVBoxLayout(usage_box)
-        usage_layout.setContentsMargins(16, 16, 16, 16)
-        usage_layout.setSpacing(8)
+        usage_layout.setContentsMargins(
+            self.ds.spacing.space_4,
+            self.ds.spacing.space_4,
+            self.ds.spacing.space_4,
+            self.ds.spacing.space_4
+        )
+        usage_layout.setSpacing(self.ds.spacing.space_2)
 
         # Usage message
         usage_label = QLabel(f"체험판 사용 횟수를 모두 소진했습니다 ({self.used}/{self.total})")
@@ -145,10 +155,10 @@ class TrialLimitDialog(QDialog):
         usage_label.setStyleSheet(f"""
             QLabel {{
                 color: {error};
-                font-size: 14px;
+                font-size: {self.ds.typography.size_sm}px;
                 font-weight: bold;
                 background: transparent;
-                font-family: Inter, Pretendard, sans-serif;
+                font-family: {self.ds.typography.font_family_primary};
             }}
         """)
         usage_layout.addWidget(usage_label)
@@ -165,45 +175,44 @@ class TrialLimitDialog(QDialog):
         explanation_label.setStyleSheet(f"""
             QLabel {{
                 color: {text_secondary};
-                font-size: 14px;
-                line-height: 1.6;
+                font-size: {self.ds.typography.size_sm}px;
+                line-height: {self.ds.typography.line_height_normal};
                 background: transparent;
-                font-family: Inter, Pretendard, sans-serif;
+                font-family: {self.ds.typography.font_family_primary};
             }}
         """)
         container_layout.addWidget(explanation_label)
 
         # Spacer for better visual balance
-        container_layout.addSpacing(8)
+        container_layout.addSpacing(self.ds.spacing.space_2)
 
         # Button layout
         button_layout = QHBoxLayout()
-        button_layout.setSpacing(12)
+        button_layout.setSpacing(self.ds.spacing.space_3)
         button_layout.addStretch()
+
+        # Get button size from design system
+        btn_size = self.ds.get_button_size('md')
 
         # Cancel button (secondary style)
         cancel_btn = QPushButton("취소")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         cancel_btn.setMinimumWidth(100)
-        cancel_btn.setMinimumHeight(40)
-
-        btn_secondary = self._theme_manager.get_color("btn_secondary")
-        btn_secondary_hover = self._theme_manager.get_color("btn_secondary_hover")
-        btn_secondary_text = self._theme_manager.get_color("btn_secondary_text")
+        cancel_btn.setMinimumHeight(btn_size.height)
 
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {btn_secondary};
-                color: {btn_secondary_text};
+                background-color: {get_color('surface_variant')};
+                color: {text_primary};
                 border: 1px solid {border_light};
-                border-radius: 8px;
-                padding: 10px 20px;
-                font-size: 14px;
+                border-radius: {self.ds.border_radius.radius_base}px;
+                padding: {self.ds.spacing.space_3}px {self.ds.spacing.space_5}px;
+                font-size: {self.ds.typography.size_sm}px;
                 font-weight: bold;
-                font-family: Inter, Pretendard, sans-serif;
+                font-family: {self.ds.typography.font_family_primary};
             }}
             QPushButton:hover {{
-                background-color: {btn_secondary_hover};
+                background-color: {border_light};
                 border-color: {primary};
             }}
             QPushButton:pressed {{
@@ -217,29 +226,24 @@ class TrialLimitDialog(QDialog):
         subscribe_btn = QPushButton("구독 신청하기")
         subscribe_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         subscribe_btn.setMinimumWidth(130)
-        subscribe_btn.setMinimumHeight(40)
-
-        primary_hover = self._theme_manager.get_color("primary_hover")
-        primary_text = self._theme_manager.get_color("primary_text")
+        subscribe_btn.setMinimumHeight(btn_size.height)
 
         subscribe_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {primary};
-                color: {primary_text};
+                color: white;
                 border: none;
-                border-radius: 8px;
-                padding: 10px 24px;
-                font-size: 14px;
+                border-radius: {self.ds.border_radius.radius_base}px;
+                padding: {self.ds.spacing.space_3}px {self.ds.spacing.space_6}px;
+                font-size: {self.ds.typography.size_sm}px;
                 font-weight: bold;
-                font-family: Inter, Pretendard, sans-serif;
+                font-family: {self.ds.typography.font_family_primary};
             }}
             QPushButton:hover {{
-                background-color: {primary_hover};
+                background-color: {get_color('secondary')};
             }}
             QPushButton:pressed {{
-                background-color: {primary_hover};
-                padding-top: 11px;
-                padding-bottom: 9px;
+                background-color: {get_color('secondary')};
             }}
         """)
         subscribe_btn.clicked.connect(self._on_subscribe_clicked)

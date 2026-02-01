@@ -1,5 +1,6 @@
 """
 Sidebar container module for PyQt6
+Uses the design system v2 for consistent styling.
 """
 from typing import Dict, Optional, List, Callable
 from PyQt6.QtWidgets import (
@@ -8,6 +9,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QColor
+
+from ui.design_system_v2 import get_design_system, get_color
+
 
 class SidebarMenuItem(QFrame):
     clicked = pyqtSignal(str)
@@ -20,37 +24,49 @@ class SidebarMenuItem(QFrame):
         self._icon = icon
         self._active = False
         self._completed = False
+        self.ds = get_design_system()
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setFixedHeight(56)
+        self.setFixedHeight(self.ds.spacing.space_14)  # 56px
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(12, 0, 12, 0)
-        layout.setSpacing(12)
+        layout.setContentsMargins(
+            self.ds.spacing.space_3,
+            0,
+            self.ds.spacing.space_3,
+            0
+        )
+        layout.setSpacing(self.ds.spacing.space_3)
 
         # Step number circle
         self.circle_label = QLabel(str(self._step_number))
         self.circle_label.setFixedSize(28, 28)
         self.circle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.circle_label.setStyleSheet("border-radius: 14px; font-weight: bold;")
+        self.circle_label.setStyleSheet(f"border-radius: 14px; font-weight: bold;")
         layout.addWidget(self.circle_label)
 
         # Text
         self.title_label = QLabel(self._text)
-        self.title_label.setStyleSheet("font-size: 11pt; font-weight: bold;")
+        self.title_label.setStyleSheet(f"font-size: {self.ds.typography.size_sm}px; font-weight: bold;")
         layout.addWidget(self.title_label)
         layout.addStretch()
         
         self.update_style()
 
     def update_style(self):
-        bg = "#fce8eb" if self._active else "transparent"
-        text_color = "#e31639" if self._active else "#64748b"
-        circle_bg = "#e31639" if self._active or self._completed else "#e2e8f0"
-        circle_text = "#ffffff" if self._active or self._completed else "#64748b"
+        # Get colors from design system
+        primary = get_color('primary')
+        text_secondary = get_color('text_secondary')
+        border_light = get_color('border_light')
+        surface_variant = get_color('surface_variant')
         
-        self.setStyleSheet(f"background-color: {bg}; border-radius: 8px;")
+        bg = surface_variant if self._active else "transparent"
+        text_color = primary if self._active else text_secondary
+        circle_bg = primary if self._active or self._completed else border_light
+        circle_text = get_color('surface') if self._active or self._completed else text_secondary
+        
+        self.setStyleSheet(f"background-color: {bg}; border-radius: {self.ds.border_radius.radius_base}px;")
         self.title_label.setStyleSheet(f"color: {text_color}; background: transparent;")
         self.circle_label.setStyleSheet(f"background-color: {circle_bg}; color: {circle_text}; border-radius: 14px; font-weight: bold;")
         
@@ -71,27 +87,34 @@ class SidebarMenuItem(QFrame):
         self.clicked.emit(self._name)
         super().mousePressEvent(event)
 
+
 class SidebarProgressMini(QFrame):
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.ds = get_design_system()
         self._setup_ui()
 
     def _setup_ui(self):
         self.setFixedHeight(120)
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(
+            self.ds.spacing.space_4,
+            self.ds.spacing.space_3,
+            self.ds.spacing.space_4,
+            self.ds.spacing.space_3
+        )
         
         title = QLabel("제작 진행")
-        title.setStyleSheet("font-weight: bold; color: #1b0e10;")
+        title.setStyleSheet(f"font-weight: bold; color: {get_color('text_primary')};")
         layout.addWidget(title)
         
         self.status_label = QLabel("대기 중")
-        self.status_label.setStyleSheet("color: #64748b; font-size: 9pt;")
+        self.status_label.setStyleSheet(f"color: {get_color('text_secondary')}; font-size: {self.ds.typography.size_xs}px;")
         layout.addWidget(self.status_label)
         
         self.progress_label = QLabel("0%")
         self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.progress_label.setStyleSheet("font-size: 14pt; font-weight: bold; color: #e31639;")
+        self.progress_label.setStyleSheet(f"font-size: {self.ds.typography.size_lg}px; font-weight: bold; color: {get_color('primary')};")
         layout.addWidget(self.progress_label)
 
     def update_status(self, status: str):
@@ -100,10 +123,12 @@ class SidebarProgressMini(QFrame):
     def update_progress(self, progress: int):
         self.progress_label.setText(f"{progress}%")
 
+
 class SidebarContainer(QWidget):
-    def __init__(self, parent=None, sidebar_width=240, gui=None):
+    def __init__(self, parent=None, sidebar_width=None, gui=None):
         super().__init__(parent)
-        self._sidebar_width = sidebar_width
+        self.ds = get_design_system()
+        self._sidebar_width = sidebar_width if sidebar_width is not None else 240
         self._gui = gui
         self._menu_items: Dict[str, SidebarMenuItem] = {}
         self._setup_ui()
@@ -116,14 +141,24 @@ class SidebarContainer(QWidget):
         # Sidebar
         self.sidebar_frame = QFrame()
         self.sidebar_frame.setFixedWidth(self._sidebar_width)
-        self.sidebar_frame.setStyleSheet("background-color: #ffffff; border-right: 1px solid #e2e8f0;")
+        self.sidebar_frame.setStyleSheet(f"""
+            QFrame {{
+                background-color: {get_color('surface')};
+                border-right: 1px solid {get_color('border_light')};
+            }}
+        """)
         sidebar_layout = QVBoxLayout(self.sidebar_frame)
-        sidebar_layout.setContentsMargins(8, 16, 8, 16)
+        sidebar_layout.setContentsMargins(
+            self.ds.spacing.space_2,
+            self.ds.spacing.space_4,
+            self.ds.spacing.space_2,
+            self.ds.spacing.space_4
+        )
         
         self.menu_container = QWidget()
         self.menu_layout = QVBoxLayout(self.menu_container)
         self.menu_layout.setContentsMargins(0, 0, 0, 0)
-        self.menu_layout.setSpacing(4)
+        self.menu_layout.setSpacing(self.ds.spacing.space_1)
         sidebar_layout.addWidget(self.menu_container)
         
         sidebar_layout.addStretch()

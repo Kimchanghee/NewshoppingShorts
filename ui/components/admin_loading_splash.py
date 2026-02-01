@@ -3,24 +3,14 @@
 Admin Loading Splash Screen
 A visually striking loading screen for the admin dashboard with dark theme,
 animated spinner, and smooth fade transitions.
+Uses the design system v2 for consistent styling.
 """
 
 from PyQt6.QtWidgets import QWidget, QLabel, QProgressBar, QApplication
 from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, pyqtProperty
 from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QPainterPath, QRadialGradient
 
-# Dark color scheme matching admin_dashboard.py
-DARK = {
-    "bg": "#1a1a2e",
-    "card": "#16213e",
-    "primary": "#e31639",
-    "primary_hover": "#ff1744",
-    "text": "#ffffff",
-    "text_dim": "#8892b0",
-    "border": "#2d3748",
-}
-
-FONT_FAMILY = "맑은 고딕"
+from ui.design_system_v2 import get_design_system, get_color
 
 
 class SpinningLoader(QWidget):
@@ -28,6 +18,7 @@ class SpinningLoader(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self.ds = get_design_system()
         self.setFixedSize(80, 80)
         self._rotation = 0
 
@@ -42,7 +33,7 @@ class SpinningLoader(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # Center point
         center = QPoint(40, 40)
@@ -54,9 +45,9 @@ class SpinningLoader(QWidget):
 
         # Create gradient for the ring
         gradient = QLinearGradient(-40, -40, 40, 40)
-        gradient.setColorAt(0.0, QColor(DARK["primary"]))
-        gradient.setColorAt(0.5, QColor(DARK["primary_hover"]))
-        gradient.setColorAt(1.0, QColor(DARK["primary"]))
+        gradient.setColorAt(0.0, QColor(get_color('primary')))
+        gradient.setColorAt(0.5, QColor(get_color('secondary')))
+        gradient.setColorAt(1.0, QColor(get_color('primary')))
 
         # Draw spinning arc segments
         pen = QPen(gradient, 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
@@ -73,9 +64,9 @@ class SpinningLoader(QWidget):
 
         # Draw inner glow circle
         glow_gradient = QRadialGradient(center, 25)
-        glow_gradient.setColorAt(0.0, QColor(DARK["primary"] + "40"))
-        glow_gradient.setColorAt(0.7, QColor(DARK["primary"] + "20"))
-        glow_gradient.setColorAt(1.0, QColor(DARK["primary"] + "00"))
+        glow_gradient.setColorAt(0.0, QColor(get_color('primary') + "40"))
+        glow_gradient.setColorAt(0.7, QColor(get_color('primary') + "20"))
+        glow_gradient.setColorAt(1.0, QColor(get_color('primary') + "00"))
 
         painter.setBrush(glow_gradient)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -87,6 +78,7 @@ class PulsingDot(QWidget):
 
     def __init__(self, parent=None, delay=0):
         super().__init__(parent)
+        self.ds = get_design_system()
         self.setFixedSize(12, 12)
         self._opacity = 0.3
         self._growing = True
@@ -112,9 +104,9 @@ class PulsingDot(QWidget):
 
     def paintEvent(self, event):
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        color = QColor(DARK["primary"])
+        color = QColor(get_color('primary'))
         color.setAlphaF(self._opacity)
 
         painter.setBrush(color)
@@ -131,6 +123,10 @@ class AdminLoadingSplash(QWidget):
     def __init__(self):
         super().__init__()
         self._opacity = 0.0
+        self.ds = get_design_system()
+        # Set dark mode for admin splash
+        from ui.design_system_v2 import set_dark_mode
+        set_dark_mode(True)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -141,14 +137,23 @@ class AdminLoadingSplash(QWidget):
         # Fixed size
         self.setFixedSize(500, 400)
 
+        # Get colors from design system (dark mode)
+        bg_color = get_color('background')
+        surface_color = get_color('surface')
+        primary_color = get_color('primary')
+        secondary_color = get_color('secondary')
+        text_color = get_color('text_primary')
+        text_secondary = get_color('text_secondary')
+        border_color = get_color('border')
+
         # Main container with rounded corners
         self.container = QWidget(self)
         self.container.setGeometry(0, 0, 500, 400)
         self.container.setStyleSheet(f"""
             QWidget {{
-                background-color: {DARK["bg"]};
-                border: 2px solid {DARK["border"]};
-                border-radius: 16px;
+                background-color: {bg_color};
+                border: 2px solid {border_color};
+                border-radius: {self.ds.border_radius.radius_lg}px;
             }}
         """)
 
@@ -157,20 +162,20 @@ class AdminLoadingSplash(QWidget):
         accent_bar.setGeometry(0, 0, 500, 6)
         accent_bar.setStyleSheet(f"""
             background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                stop:0 {DARK["primary"]},
-                stop:0.5 {DARK["primary_hover"]},
-                stop:1 {DARK["primary"]});
-            border-top-left-radius: 16px;
-            border-top-right-radius: 16px;
+                stop:0 {primary_color},
+                stop:0.5 {secondary_color},
+                stop:1 {primary_color});
+            border-top-left-radius: {self.ds.border_radius.radius_lg}px;
+            border-top-right-radius: {self.ds.border_radius.radius_lg}px;
         """)
 
         # Logo/Icon area (geometric design)
         logo_container = QWidget(self.container)
         logo_container.setGeometry(185, 60, 130, 130)
         logo_container.setStyleSheet(f"""
-            background-color: {DARK["card"]};
-            border: 3px solid {DARK["border"]};
-            border-radius: 65px;
+            background-color: {surface_color};
+            border: 3px solid {border_color};
+            border-radius: {self.ds.border_radius.radius_full}px;
         """)
 
         # Inner logo circle
@@ -179,9 +184,9 @@ class AdminLoadingSplash(QWidget):
         inner_logo.setStyleSheet(f"""
             background: qradialgradient(cx:0.5, cy:0.5, radius:0.5,
                 fx:0.5, fy:0.5,
-                stop:0 {DARK["primary"]},
-                stop:0.7 {DARK["primary_hover"]},
-                stop:1 {DARK["card"]});
+                stop:0 {primary_color},
+                stop:0.7 {secondary_color},
+                stop:1 {surface_color});
             border-radius: 40px;
         """)
 
@@ -193,9 +198,9 @@ class AdminLoadingSplash(QWidget):
         title = QLabel("관리자 대시보드", self.container)
         title.setGeometry(0, 310, 500, 35)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title.setFont(QFont(FONT_FAMILY, 18, QFont.Bold))
+        title.setFont(QFont(self.ds.typography.font_family_primary, self.ds.typography.size_lg, QFont.Weight.Bold))
         title.setStyleSheet(f"""
-            color: {DARK["text"]};
+            color: {text_color};
             background: transparent;
             letter-spacing: 2px;
         """)
@@ -204,9 +209,9 @@ class AdminLoadingSplash(QWidget):
         self.subtitle = QLabel("로딩 중", self.container)
         self.subtitle.setGeometry(0, 350, 500, 25)
         self.subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.subtitle.setFont(QFont(FONT_FAMILY, 11))
+        self.subtitle.setFont(QFont(self.ds.typography.font_family_primary, self.ds.typography.size_sm))
         self.subtitle.setStyleSheet(f"""
-            color: {DARK["text_dim"]};
+            color: {text_secondary};
             background: transparent;
         """)
 
@@ -240,10 +245,10 @@ class AdminLoadingSplash(QWidget):
 
         # Fade in animation
         self.fade_in = QPropertyAnimation(self, b"windowOpacity")
-        self.fade_in.setDuration(300)
+        self.fade_in.setDuration(self.ds.transition.duration_normal)
         self.fade_in.setStartValue(0.0)
         self.fade_in.setEndValue(1.0)
-        self.fade_in.setEasingCurve(QEasingCurve.OutCubic)
+        self.fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
         self.fade_in.start()
 
     def update_progress(self, value: int, message: str = ""):
@@ -260,10 +265,10 @@ class AdminLoadingSplash(QWidget):
     def close_splash(self):
         """Close splash with fade-out animation"""
         self.fade_out = QPropertyAnimation(self, b"windowOpacity")
-        self.fade_out.setDuration(250)
+        self.fade_out.setDuration(self.ds.transition.duration_fast)
         self.fade_out.setStartValue(1.0)
         self.fade_out.setEndValue(0.0)
-        self.fade_out.setEasingCurve(QEasingCurve.InCubic)
+        self.fade_out.setEasingCurve(QEasingCurve.Type.InCubic)
         self.fade_out.finished.connect(self.close)
         self.fade_out.start()
 

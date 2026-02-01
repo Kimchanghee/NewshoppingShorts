@@ -7,14 +7,17 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from ui.panels.font_panel import FontPanel
 from ui.panels.cta_panel import CTAPanel
+from ui.design_system_v2 import get_design_system, get_color
 
 class StyleTab(QWidget):
     def __init__(self, parent=None, gui=None, theme_manager=None):
         super().__init__(parent)
         self.gui = gui
+        self.ds = get_design_system()
         self._setup_ui()
 
     def _setup_ui(self):
+        ds = self.ds
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         
@@ -24,8 +27,8 @@ class StyleTab(QWidget):
         
         content = QWidget()
         self.content_layout = QVBoxLayout(content)
-        self.content_layout.setContentsMargins(20, 20, 20, 20)
-        self.content_layout.setSpacing(30)
+        self.content_layout.setContentsMargins(ds.spacing.space_5, ds.spacing.space_5, ds.spacing.space_5, ds.spacing.space_5)
+        self.content_layout.setSpacing(ds.spacing.space_6)
         
         # Voice Section (Placeholder or integration if needed)
         self._add_section("음성 선택", QLabel("음성 선택 패널 (통합 예정)"))
@@ -43,12 +46,18 @@ class StyleTab(QWidget):
         layout.addWidget(scroll)
 
     def _add_section(self, title, widget):
+        ds = self.ds
         section = QWidget()
         section_layout = QVBoxLayout(section)
         section_layout.setContentsMargins(0, 0, 0, 0)
         
         header = QLabel(title)
-        header.setStyleSheet("font-size: 14pt; font-weight: bold; color: #1b0e10; margin-bottom: 10px;")
+        header.setStyleSheet(f"""
+            font-size: {ds.typography.size_base}px; 
+            font-weight: {ds.typography.weight_bold}; 
+            color: {get_color('text_primary')}; 
+            margin-bottom: {ds.spacing.space_2}px;
+        """)
         section_layout.addWidget(header)
         section_layout.addWidget(widget)
         

@@ -1,5 +1,5 @@
 ﻿"""
-Animation utilities placeholder (PyQt6)
+애니메이션 유틸리티 (PyQt6)
 """
 
 def ease_out_quad(t):
@@ -8,5 +8,5 @@ def ease_out_quad(t):
 class TkAnimation:
     @staticmethod
     def animate_value(*args, **kwargs):
-        # Placeholder: animations handled by Qt elsewhere
+        # 참고: 애니메이션은 Qt에서 별도로 처리됩니다
         pass

@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase
 from ui.components.base_widget import ThemedMixin
 from managers.settings_manager import get_settings_manager
+from ui.design_system_v2 import get_design_system, get_color
 
 class FontCard(QFrame, ThemedMixin):
     clicked = pyqtSignal(str)
@@ -18,14 +19,16 @@ class FontCard(QFrame, ThemedMixin):
         super().__init__()
         self.option = option
         self.is_selected = is_selected
+        self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         
         self.create_widgets()
         self.apply_theme()
 
     def create_widgets(self):
+        ds = self.ds
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setContentsMargins(ds.spacing.space_4, ds.spacing.space_3, ds.spacing.space_4, ds.spacing.space_3)
         
         # Radio indicator simulation
         self.radio_label = QLabel("●" if self.is_selected else "○")
@@ -35,11 +38,11 @@ class FontCard(QFrame, ThemedMixin):
         # Info area
         info_layout = QVBoxLayout()
         self.name_label = QLabel(self.option["name"])
-        self.name_label.setStyleSheet("font-weight: bold; font-size: 14px;")
+        self.name_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_sm}px;")
         info_layout.addWidget(self.name_label)
         
         self.desc_label = QLabel(self.option["description"])
-        self.desc_label.setStyleSheet("font-size: 11px;")
+        self.desc_label.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
         info_layout.addWidget(self.desc_label)
         layout.addLayout(info_layout)
         
@@ -54,11 +57,11 @@ class FontCard(QFrame, ThemedMixin):
                 font_id = QFontDatabase.addApplicationFont(fp)
                 if font_id != -1:
                     family = QFontDatabase.applicationFontFamilies(font_id)[0]
-                    self.preview_label.setFont(QFont(family, 16))
+                    self.preview_label.setFont(QFont(family, ds.typography.size_base))
                     break
         
         if font_id == -1:
-             self.preview_label.setFont(QFont("Arial", 16))
+             self.preview_label.setFont(QFont("Arial", ds.typography.size_base))
              
         layout.addWidget(self.preview_label)
 
@@ -67,23 +70,24 @@ class FontCard(QFrame, ThemedMixin):
             self.clicked.emit(self.option["id"])
 
     def apply_theme(self):
-        bg = self.get_color("bg_selected") if self.is_selected else self.get_color("bg_card")
-        border = self.get_color("primary") if self.is_selected else self.get_color("border_light")
+        ds = self.ds
+        bg = get_color('surface_variant') if self.is_selected else get_color('surface')
+        border = get_color('primary') if self.is_selected else get_color('border_light')
         thickness = 2 if self.is_selected else 1
         
         self.setStyleSheet(f"""
             FontCard {{
                 background-color: {bg};
                 border: {thickness}px solid {border};
-                border-radius: 8px;
+                border-radius: {ds.border_radius.radius_base}px;
             }}
         """)
         
-        text_primary = self.get_color("text_primary")
-        text_secondary = self.get_color("text_secondary")
-        self.name_label.setStyleSheet(f"color: {text_primary}; border: none; font-weight: bold;")
-        self.desc_label.setStyleSheet(f"color: {text_secondary}; border: none;")
-        self.radio_label.setStyleSheet(f"color: {self.get_color('primary') if self.is_selected else text_secondary}; border: none;")
+        text_primary = get_color('text_primary')
+        text_secondary = get_color('text_secondary')
+        self.name_label.setStyleSheet(f"color: {text_primary}; border: none; font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_sm}px;")
+        self.desc_label.setStyleSheet(f"color: {text_secondary}; border: none; font-size: {ds.typography.size_2xs}px;")
+        self.radio_label.setStyleSheet(f"color: {get_color('primary') if self.is_selected else text_secondary}; border: none;")
         self.preview_label.setStyleSheet(f"color: {text_primary}; border: none;")
 
 class FontPanel(QFrame, ThemedMixin):
@@ -91,29 +95,32 @@ class FontPanel(QFrame, ThemedMixin):
         super().__init__(parent)
         self.gui = gui
         self.cards = {}
+        self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         self.create_widgets()
         self.apply_theme()
 
     def create_widgets(self):
+        ds = self.ds
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(16, 12, 16, 12)
+        self.main_layout.setContentsMargins(ds.spacing.space_4, ds.spacing.space_3, ds.spacing.space_4, ds.spacing.space_3)
         
         # Header
         header = QHBoxLayout()
         title = QLabel("폰트 선택")
-        title.setStyleSheet("font-size: 18px; font-weight: bold;")
+        title.setStyleSheet(f"font-size: {ds.typography.size_xl}px; font-weight: {ds.typography.weight_bold};")
         header.addWidget(title)
         
         header.addStretch()
         
         self.selected_display = QLabel("선택됨")
         self.selected_display.setStyleSheet(f"""
-            background-color: {self.get_color("primary")};
+            background-color: {get_color('primary')};
             color: white;
-            padding: 4px 12px;
-            border-radius: 4px;
-            font-weight: bold;
+            padding: {ds.spacing.space_1}px {ds.spacing.space_3}px;
+            border-radius: {ds.border_radius.radius_sm}px;
+            font-weight: {ds.typography.weight_bold};
+            font-size: {ds.typography.size_xs}px;
         """)
         header.addWidget(self.selected_display)
         self.main_layout.addLayout(header)
@@ -125,7 +132,7 @@ class FontPanel(QFrame, ThemedMixin):
         
         self.scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_content)
-        self.scroll_layout.setSpacing(8)
+        self.scroll_layout.setSpacing(ds.spacing.space_2)
         self.scroll.setWidget(self.scroll_content)
         self.main_layout.addWidget(self.scroll)
         
@@ -167,7 +174,8 @@ class FontPanel(QFrame, ThemedMixin):
             card.apply_theme()
 
     def apply_theme(self):
-        bg = self.get_color("bg_card")
+        ds = self.ds
+        bg = get_color('surface')
         self.setStyleSheet(f"background-color: {bg}; border: none;")
         self.scroll.setStyleSheet(f"background-color: {bg};")
         self.scroll_content.setStyleSheet(f"background-color: {bg};")

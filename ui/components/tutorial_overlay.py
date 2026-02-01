@@ -1,12 +1,16 @@
 # -*- coding: utf-8 -*-
 """
 Tutorial Overlay for PyQt6
+Uses the design system v2 for consistent styling.
 """
 import sys
 from typing import Optional, Callable, List, Dict, Any
 from PyQt6.QtCore import Qt, QRect
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QApplication
 from PyQt6.QtGui import QColor, QPainter, QBrush, QPen, QFont
+
+from ui.design_system_v2 import get_design_system, get_color
+
 
 class TutorialOverlay(QWidget):
     STEPS: List[Dict[str, Any]] = [
@@ -18,12 +22,17 @@ class TutorialOverlay(QWidget):
 
     def __init__(self, parent_window, on_complete=None, on_skip=None):
         super().__init__()
+        self.ds = get_design_system()
         self.parent_window = parent_window
         self.on_complete = on_complete
         self.on_skip = on_skip
         self.current_step = 0
-        self.bg_color = QColor(26, 26, 46, 200)
-        self.border_color = QColor(227, 22, 57) # primary red
+        
+        # Use design system colors
+        self.bg_color = QColor(get_color('background'))
+        self.bg_color.setAlpha(200)
+        self.border_color = QColor(get_color('primary'))
+        
         self._setup_window()
         self._sync_position()
 
@@ -44,24 +53,54 @@ class TutorialOverlay(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRect(self.rect())
         
-        # Step card
+        # Step card dimensions
         card_w, card_h = 300, 200
         card_x = (self.width() - card_w) // 2
         card_y = (self.height() - card_h) // 2
         
-        painter.setBrush(QBrush(Qt.GlobalColor.white))
-        painter.drawRoundedRect(card_x, card_y, card_w, card_h, 12, 12)
+        # Draw card with design system colors
+        painter.setBrush(QBrush(QColor(get_color('surface'))))
+        painter.drawRoundedRect(
+            card_x, card_y, card_w, card_h,
+            self.ds.border_radius.radius_md,
+            self.ds.border_radius.radius_md
+        )
         
         step = self.STEPS[self.current_step]
-        painter.setPen(QPen(Qt.GlobalColor.black))
-        painter.setFont(QFont("Malgun Gothic", 14, QFont.Weight.Bold))
-        painter.drawText(QRect(card_x, card_y+20, card_w, 30), Qt.AlignmentFlag.AlignCenter, step["title"])
+        painter.setPen(QPen(QColor(get_color('text_primary'))))
         
-        painter.setFont(QFont("Malgun Gothic", 10))
-        painter.drawText(QRect(card_x+20, card_y+60, card_w-40, 80), Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap, step["description"])
+        # Title with design system font
+        title_font = QFont(self.ds.typography.font_family_primary, self.ds.typography.size_lg, QFont.Weight.Bold)
+        painter.setFont(title_font)
+        painter.drawText(
+            QRect(card_x, card_y + self.ds.spacing.space_5, card_w, self.ds.spacing.space_7),
+            Qt.AlignmentFlag.AlignCenter,
+            step["title"]
+        )
+        
+        # Description with design system font
+        desc_font = QFont(self.ds.typography.font_family_primary, self.ds.typography.size_sm)
+        painter.setFont(desc_font)
+        painter.drawText(
+            QRect(
+                card_x + self.ds.spacing.space_5,
+                card_y + self.ds.spacing.space_15,
+                card_w - self.ds.spacing.space_10,
+                self.ds.spacing.space_20
+            ),
+            Qt.AlignmentFlag.AlignCenter | Qt.TextFlag.TextWordWrap,
+            step["description"]
+        )
         
         # Placeholder for buttons
-        painter.drawText(QRect(card_x, card_y+160, card_w, 30), Qt.AlignmentFlag.AlignCenter, "클릭하여 다음으로")
+        hint_font = QFont(self.ds.typography.font_family_primary, self.ds.typography.size_xs)
+        painter.setFont(hint_font)
+        painter.setPen(QPen(QColor(get_color('text_secondary'))))
+        painter.drawText(
+            QRect(card_x, card_y + 160, card_w, self.ds.spacing.space_7),
+            Qt.AlignmentFlag.AlignCenter,
+            "클릭하여 다음으로"
+        )
 
     def mousePressEvent(self, event):
         if self.current_step < len(self.STEPS) - 1:
@@ -69,4 +108,5 @@ class TutorialOverlay(QWidget):
             self.update()
         else:
             self.close()
-            if self.on_complete: self.on_complete()
+            if self.on_complete:
+                self.on_complete()
