@@ -14,7 +14,7 @@ error_log.txt
 # API Keys (절대 푸시 금지!)
 api_keys.json
 api_keys_config.json
-.env
+# .env  <-- Commented out to allow tracking
 credentials.json
 *_key.txt
 *_keys.txt
