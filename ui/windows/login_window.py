@@ -78,9 +78,13 @@ class Login(QMainWindow, Ui_LoginWindow):
             if res.get("status") is True:
                 self._handle_login_success(res)
             else:
-                self.showCustomMessageBox("로그인 실패", res.get("message", "오류 발생"))
+                # Use friendly message converter
+                error_msg = rest._friendly_login_message(res)
+                logger.warning(f"Login failed: {error_msg} (Raw: {res})")
+                self.showCustomMessageBox("로그인 실패", error_msg)
         except Exception as e:
-            self.showCustomMessageBox("오류", str(e))
+            logger.error(f"Login exception: {str(e)}", exc_info=True)
+            self.showCustomMessageBox("오류", f"로그인 처리 중 오류가 발생했습니다.\n{str(e)}")
 
     def _handle_login_success(self, res):
         # Notify controller or app
