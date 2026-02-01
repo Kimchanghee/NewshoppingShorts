@@ -68,15 +68,24 @@ class Login(QMainWindow, Ui_LoginWindow):
             s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
 
-    def _loginCheck(self):
+    def _loginCheck(self, force: bool = False):
         user_id = self.idEdit.text()
         user_pw = self.pwEdit.text()
         ip = self._get_local_ip()
         
         try:
-            res = rest.login(userId=user_id, userPw=user_pw, key="ssmaker", ip=ip)
+            res = rest.login(userId=user_id, userPw=user_pw, key="ssmaker", ip=ip, force=force)
             if res.get("status") is True:
                 self._handle_login_success(res)
+            elif res.get("status") == "EU003":
+                # Handle duplicate login
+                msg = "이미 다른 기기(또는 브라우저)에서 로그인 중입니다.\n기존 연결을 끊고 현재 기기에서 로그인하시겠습니까?"
+                choice = QtWidgets.QMessageBox.question(
+                    self, "중복 로그인", msg, 
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
+                )
+                if choice == QtWidgets.QMessageBox.StandardButton.Yes:
+                    self._loginCheck(force=True)
             else:
                 # Use friendly message converter
                 error_msg = rest._friendly_login_message(res)

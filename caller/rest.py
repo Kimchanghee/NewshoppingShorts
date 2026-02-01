@@ -174,27 +174,22 @@ def _friendly_login_message(login_object: Dict[str, Any]) -> str:
     raw_message = str(login_object.get("message") or "").strip()
     
     # If the server returned a clear Korean message (not just an error code), use it.
-    # We check if it contains Hangul or is long enough to be a real message.
     if raw_message and raw_message not in ["EU001", "EU002", "EU003", "EU004", "EU005"] and len(raw_message) > 10:
          return raw_message
 
-    # Map known/likely status codes from the backend
-    if status in ("EU001", "BAD_REQUEST", "MISSING_FIELDS"):
-        return "필수 정보가 누락되었거나 형식이 잘못되었습니다. 아이디/비밀번호를 확인하세요."
-    if status in (False, "EU004", "AUTH_FAIL", "INVALID_CREDENTIALS"):
+    # Map known status codes from the backend
+    if status in ("EU001", "EU004", "INVALID_CREDENTIALS", "AUTH_FAIL", False):
+        # Security: Unified error for user not found and invalid password
         return "아이디 또는 비밀번호가 틀렸습니다."
-    if status in ("EU003", "USER_NOT_FOUND", "NOT_FOUND"):
-        return "회원 정보가 없습니다. 회원가입 진행해주세요"
-    if status in ("EU002", "LOCKED", "BLOCKED"):
-        return "계정이 잠겨 있거나 비활성화되었습니다. 관리자에게 문의하세요."
-
-    # Add EU005 handling for rate limiting (before generic 429)
-    if status in ("EU005", "RATE_LIMITED"):
+    if status == "EU002":
+        return "구독 또는 체험판 사용 기간이 만료되었습니다."
+    if status == "EU003":
+        return "이미 다른 기기(또는 브라우저)에서 로그인 중입니다."
+    if status == "EU005":
         return "너무 많은 로그인 시도가 있었습니다. 잠시 후 다시 시도해주세요."
-
+    
     if status in ("EU429", 429):
-        # 서버의 로그인 시도 제한 안내를 숨기고 일반 오류로 처리
-        return "아이디 또는 비밀번호가 올바르지 않습니다."
+        return "로그인 요청이 일시적으로 제한되었습니다. 잠시 후 시도해주세요."
 
     # Fallback generic message
     return "로그인에 실패했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요."
