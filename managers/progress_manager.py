@@ -634,13 +634,30 @@ class ProgressManager(ProgressObserver):
             self.update_all_progress_displays()
             self.refresh_stage_indicator(step, status, progress)
 
-            current_task_var = getattr(self.gui, 'current_task_var', None)
-            if current_task_var is not None:
-                current_task_var.set(highlight_message)
+            # Update current task display (PyQt6 / State)
+            if hasattr(self.gui, 'current_task_label'):
+                self.gui.current_task_label.setText(highlight_message)
+            
+            # Update state for heartbeat
+            if hasattr(self.gui, 'state'):
+                self.gui.state.current_task_var = highlight_message
+            elif hasattr(self.gui, 'current_task_var'):
+                # Backward compatibility for StringVar or other types
+                var = self.gui.current_task_var
+                if hasattr(var, 'set'):
+                    var.set(highlight_message)
+                else:
+                    self.gui.current_task_var = highlight_message
 
+            # Status bar update (PyQt6 / Tkinter compatible)
             status_bar = getattr(self.gui, 'status_bar', None)
             if status_bar is not None:
-                status_bar.config(text=stage_message)
+                if hasattr(status_bar, 'showMessage'):
+                    status_bar.showMessage(stage_message)
+                elif hasattr(status_bar, 'setText'):
+                    status_bar.setText(stage_message)
+                elif hasattr(status_bar, 'config'):
+                    status_bar.config(text=stage_message)
 
             # 깜빡임 효과 처리
             # Handle blink effect

@@ -108,7 +108,6 @@ class AuthService:
             return {"status": "EU002", "message": "EU002"}  # Subscription expired
 
         if not user.is_active:
-        if not user.is_active:
             self._record_login_attempt(username, ip_address, success=False)
             logger.info(f"[Login Failed] User inactive: username={_mask_username(username)}, ip={ip_address}")
             return {"status": "EU001", "message": "EU001"}  # Unified error for inactive
@@ -213,7 +212,9 @@ class AuthService:
             logger.exception(f"Logout failed - unexpected error")
             return "error"
 
-    async def check_session(self, user_id: str, token: str, ip_address: str) -> Dict[str, Any]:
+    async def check_session(
+        self, user_id: str, token: str, ip_address: str, current_task: Optional[str] = None
+    ) -> dict:
         """Session check logic (called every 5 seconds)"""
         try:
             payload = decode_access_token(token)
@@ -248,10 +249,27 @@ class AuthService:
             )
 
             if not session:
+                logger.info(f"Session not found or inactive: user_id={user_id}, jti={jti}")
                 return {"status": "EU003"}  # Session invalid/expired
 
-            # Update last activity
+            # Update last activity in session
             session.last_activity_at = datetime.utcnow()
+            
+            # Update User heartbeat and online status
+            # Ensure user_id is integer for query
+            try:
+                numeric_user_id = int(user_id)
+            except (ValueError, TypeError):
+                logger.error(f"Invalid user_id format in session check: {user_id}")
+                return {"status": "EU003"}
+
+            user = self.db.query(User).filter(User.id == numeric_user_id).first()
+            if user:
+                user.last_heartbeat = datetime.utcnow()
+                user.is_online = True
+                if current_task is not None:
+                    user.current_task = current_task
+            
             self.db.commit()
 
             return {"status": True}

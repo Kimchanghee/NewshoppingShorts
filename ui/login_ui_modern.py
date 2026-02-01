@@ -502,7 +502,8 @@ class RegistrationRequestDialog(QWidget):
             self.usernameStatusLabel.setStyleSheet("color: #F59E0B; background: transparent;")
         else:
             self._username_available = False
-            self.usernameStatusLabel.setText("✗ 이미 사용 중인 아이디입니다")
+            # Show the actual message from the server (e.g. "Pending approval", "Server error", etc.)
+            self.usernameStatusLabel.setText(f"✗ {message}")
             self.usernameStatusLabel.setStyleSheet("color: #EF4444; background: transparent;")
         logger.info(
             "[UI] Username check result | available=%s message=%s",

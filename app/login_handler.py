@@ -96,7 +96,8 @@ class LoginHandler:
                 if loop_count % 12 == 0: # 1분마다 로그 남기기 (5초 * 12)
                     logger.debug(f"[watch_loop] Heartbeat check... (seq={loop_count})")
                     
-                data = {"userId": userId, "key": "ssmaker", "ip": userIp}
+                current_task = getattr(self.app.state, 'current_task_var', None)
+                data = {"userId": userId, "key": "ssmaker", "ip": userIp, "current_task": current_task}
                 res = rest.loginCheck(**data)
                 st = res.get("status") if isinstance(res, dict) else None
                 

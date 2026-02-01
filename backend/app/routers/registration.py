@@ -73,28 +73,41 @@ async def submit_registration_request(
         f"[Register Request] Filename: registration.py, Username: {data.username}, Name: {data.name}, Email: {data.email}, Contact: {data.contact}"
     )
     try:
-        # Check if username already exists in users table
-        existing_user = db.query(User).filter(User.username == data.username).first()
+        # Pre-process username
+        username_clean = data.username.lower().strip()
+
+        # 1. User 테이블 중복 확인
+        existing_user = db.query(User).filter(User.username == username_clean).first()
         if existing_user:
-            logger.info(f"[Register Fail] Username exists in Users table: {data.username}")
+            logger.info(f"[Register Fail] Username exists in Users table: {username_clean}")
             return RegistrationResponse(
                 success=False,
-                message="이미 사용 중인 아이디입니다. 다른 아이디를 사용해주세요.",
+                message="이미 가입된 아이디입니다. 로그인해 주세요.",
             )
 
-        # Check if there's already an approved request with same username
+        # 2. RegistrationRequest 테이블 중복 확인 (모든 상태 체크)
         existing_request = (
             db.query(RegistrationRequest)
-            .filter(RegistrationRequest.username == data.username)
+            .filter(RegistrationRequest.username == username_clean)
             .first()
         )
+        
         if existing_request:
             if existing_request.status == RequestStatus.APPROVED:
-                logger.info(f"[Register Fail] Username exists in RegistrationRequest (Approved): {data.username}")
+                # 이미 승인됨 (보통 User 테이블에도 있어야 함)
+                logger.info(f"[Register Fail] Username exists in RegistrationRequest (Approved): {username_clean}")
                 return RegistrationResponse(
                     success=False, message="이미 가입된 계정입니다. 로그인해 주세요."
                 )
-            logger.info(f"Deleting old request for re-registration: {data.username}")
+            elif existing_request.status == RequestStatus.PENDING:
+                # 대기 중인 요청이 있음
+                logger.info(f"[Register Fail] Pending request exists: {username_clean}")
+                return RegistrationResponse(
+                    success=False, message="승인 대기 중인 아이디입니다. 관라자 승인을 기다려주세요."
+                )
+            
+            # 그 외 상태 (REJECTED 등)는 기존 요청 삭제 후 재시도 허용
+            logger.info(f"Deleting existing request (status: {existing_request.status}) for re-registration: {username_clean}")
             db.delete(existing_request)
             db.flush()
 
@@ -105,7 +118,7 @@ async def submit_registration_request(
         subscription_expires_at = datetime.utcnow() + timedelta(days=DEFAULT_TRIAL_DAYS)
 
         new_user = User(
-            username=data.username,
+            username=username_clean,
             password_hash=password_hash,
             subscription_expires_at=subscription_expires_at,
             is_active=True,
@@ -136,7 +149,7 @@ async def submit_registration_request(
         # 감사 로그용으로 registration_requests에도 기록 (APPROVED 상태)
         registration_request = RegistrationRequest(
             name=data.name,
-            username=data.username,
+            username=username_clean,
             password_hash=password_hash,
             contact=data.contact,
             email=data.email,

@@ -10,21 +10,19 @@ def get_client_ip(request: Request) -> str:
 
     Security: Prevents X-Forwarded-For spoofing by validating trusted proxies.
     """
-    # Trust Cloudflare IP in production (most secure)
+    # Prioritize Cloudflare or standard X-Forwarded-For in proxy environments
+    forwarded_for = request.headers.get("X-Forwarded-For")
+    if forwarded_for:
+        # Take the first IP which is the original client
+        return forwarded_for.split(",")[0].strip()
+
+    # Trust Cloudflare IP (most secure if using Cloudflare)
     cf_ip = request.headers.get("CF-Connecting-IP")
     if cf_ip:
         return cf_ip.strip()
 
-    # Fallback to request.client (direct connection)
-    if request.client:
+    # Fallback to direct connection IP
+    if request.client and request.client.host:
         return request.client.host
-
-    # Last resort: X-Forwarded-For (validate first IP only)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # Take only the first IP (client IP), ignore proxy chain
-        client_ip = forwarded_for.split(",")[0].strip()
-        # Additional validation could go here
-        return client_ip
 
     return "unknown"

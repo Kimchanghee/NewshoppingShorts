@@ -488,7 +488,7 @@ class AdminDashboard(QMainWindow):
         self._style_table(
             # Column widths adjusted to prevent Action column overflow
             # Last column (Actions) increased from 250 -> 320 to fit 5 buttons
-            self.users_table, [40, 80, 90, 80, 110, 150, 60, 130, 70, 50, 130, 100, 50, 90, 320]
+            self.subscriptions_table, [60, 80, 100, 350, 150, 80, 200]
         )
         self.subscriptions_table.setVisible(False)
 
@@ -768,62 +768,6 @@ class AdminDashboard(QMainWindow):
 
         return widget
 
-        # 상태 변경
-        toggle_btn = QPushButton("상태", widget)
-        toggle_btn.setGeometry(110, btn_y, btn_w, btn_h)
-        toggle_btn.setFont(QFont(FONT_FAMILY, 9))
-        toggle_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK["warning"]};
-                color: black;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: #ffecb3;
-            }}
-        """)
-        toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        toggle_btn.clicked.connect(lambda: self._toggle_user(user_id, username))
-
-        # 이력 보기
-        history_btn = QPushButton("이력", widget)
-        history_btn.setGeometry(170, btn_y, btn_w, btn_h)
-        history_btn.setFont(QFont(FONT_FAMILY, 9))
-        history_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK["card"]};
-                color: {DARK["text"]};
-                border: 1px solid {DARK["border"]};
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: {DARK["border"]};
-            }}
-        """)
-        history_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        history_btn.clicked.connect(lambda: self._show_login_history(user_id, username))
-
-        # 삭제
-        delete_btn = QPushButton("삭제", widget)
-        delete_btn.setGeometry(230, btn_y, btn_w, btn_h)
-        delete_btn.setFont(QFont(FONT_FAMILY, 9))
-        delete_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK["danger"]};
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: #ff8a80;
-            }}
-        """)
-        delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        delete_btn.clicked.connect(lambda: self._delete_user(user_id, username))
-
-        return widget
-
     def _show_password_info(self, username, hashed_password):
         """비밀번호 정보 표시 (보안 마스킹 적용)"""
         if not hashed_password:
@@ -951,16 +895,16 @@ class AdminDashboard(QMainWindow):
         for row, req in enumerate(items):
             self.subscriptions_table.setRowHeight(row, 50)
 
+            # 0: ID
             self._set_cell(self.subscriptions_table, row, 0, str(req.get("id", "")))
-            self._set_cell(
-                self.subscriptions_table, row, 1, str(req.get("user_id", ""))
-            )
-            self._set_cell(self.subscriptions_table, row, 2, req.get("username", ""))
-            self._set_cell(
-                self.subscriptions_table, row, 3, req.get("message", "") or "-"
-            )
+            # 1: 사용자ID
+            self._set_cell(self.subscriptions_table, row, 1, str(req.get("user_id", "")))
+            # 2: 아이디 (username)
+            self._set_cell(self.subscriptions_table, row, 2, req.get("username", "-"))
+            # 3: 메시지
+            self._set_cell(self.subscriptions_table, row, 3, req.get("message", "") or "-")
 
-            # 요청 일시
+            # 4: 요청일시
             created = req.get("created_at", "")
             if created:
                 try:
@@ -970,7 +914,7 @@ class AdminDashboard(QMainWindow):
                     pass
             self._set_cell(self.subscriptions_table, row, 4, created or "-")
 
-            # 상태
+            # 5: 상태
             status = req.get("status", "")
             status_text = {
                 "PENDING": "대기 중",
@@ -984,23 +928,32 @@ class AdminDashboard(QMainWindow):
             }.get(status, DARK["text"])
             self._set_cell(self.subscriptions_table, row, 5, status_text, status_color)
 
-            # 작업 버튼
+            # 6: 작업 버튼
             if status == "PENDING":
                 widget = self._create_subscription_actions(req.get("id"), row)
                 self.subscriptions_table.setCellWidget(row, 6, widget)
             else:
                 self._set_cell(self.subscriptions_table, row, 6, "-")
         
-        # 통계 라벨 업데이트를 위해 별도의 카운트 조회 (또는 전체 데이터 필요)
-        # 여기서는 현재 페이지 데이터 기반으로 업데이트 하거나, 별도 API 호출이 필요할 수 있음.
-        # 일단 현재 로드된 데이터 기준으로 카운트 (간이 방식)
-        pending = sum(1 for item in items if item.get("status") == "PENDING")
-        approved = sum(1 for item in items if item.get("status") == "APPROVED")
-        rejected = sum(1 for item in items if item.get("status") == "REJECTED")
-        
-        self.pending_label.setText(str(pending))
-        self.approved_label.setText(str(approved))
-        self.rejected_label.setText(str(rejected))
+        # 정확한 통계를 위해 별도 API 호출
+        self._load_subscription_stats()
+    
+    def _load_subscription_stats(self):
+        """구독 요청 통계 로드 (정확한 카운트)"""
+        url = f"{self.api_base_url}/user/subscription/stats"
+        worker = ApiWorker("GET", url, self._get_headers())
+        worker.finished.connect(self._on_subscription_stats_loaded)
+        worker.error.connect(lambda e: logger.warning("[Admin UI] Failed to load subscription stats: %s", e))
+        worker.finished.connect(lambda _: self._cleanup_worker(worker))
+        worker.error.connect(lambda _: self._cleanup_worker(worker))
+        self.workers.append(worker)
+        worker.start()
+    
+    def _on_subscription_stats_loaded(self, data: dict):
+        """구독 요청 통계 로드 완료"""
+        self.pending_label.setText(str(data.get("pending", 0)))
+        self.approved_label.setText(str(data.get("approved", 0)))
+        self.rejected_label.setText(str(data.get("rejected", 0)))
 
     def _create_subscription_actions(self, request_id, row: int = 0) -> QWidget:
         """구독 요청 작업 버튼"""
@@ -1117,6 +1070,100 @@ class AdminDashboard(QMainWindow):
         worker.error.connect(lambda _: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
+
+    def _check_work_status(self, user_id, username):
+        """작업 상태 확인"""
+        logger.info("[Admin UI] Check work status | user_id=%s username=%s", user_id, username)
+        url = f"{self.api_base_url}/user/admin/users/{user_id}"
+        worker = ApiWorker("GET", url, self._get_headers())
+        worker.finished.connect(lambda d: self._show_work_status_dialog(username, d))
+        worker.error.connect(self._on_error)
+        worker.finished.connect(lambda _: self._cleanup_worker(worker))
+        worker.error.connect(lambda _: self._cleanup_worker(worker))
+        self.workers.append(worker)
+        worker.start()
+    
+    def _show_work_status_dialog(self, username: str, data: dict):
+        """작업 상태 다이얼로그 표시"""
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"'{username}' 작업 상태")
+        dialog.setFixedSize(450, 480)
+        dialog.setStyleSheet(f"background-color: {DARK['card']};")
+        
+        title_lbl = QLabel(f"'{username}' 상세 정보 및 상태", dialog)
+        title_lbl.setGeometry(30, 25, 390, 25)
+        title_lbl.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {DARK['text']};")
+        
+        # 작업 횟수 정보
+        work_count = data.get("work_count", -1)
+        work_used = data.get("work_used", 0)
+        
+        if work_count == -1:
+            work_status = "무제한"
+            remaining = "무제한"
+            color = DARK["success"]
+        else:
+            remaining = max(0, work_count - work_used)
+            work_status = f"{remaining} / {work_count}"
+            color = DARK["warning"] if remaining <= 10 else DARK["success"]
+        
+        # 정보 표시
+        y_pos = 70
+        items = [
+            ("실제 이름:", data.get("name") or "-"),
+            ("이메일 주소:", data.get("email") or "-"),
+            ("휴대폰 번호:", data.get("phone") or "-"),
+            ("-" * 30, ""), # Separator
+            ("작업 유형:", "구독자" if work_count == -1 else "제한형"),
+            ("총 작업 횟수:", "무제한" if work_count == -1 else str(work_count)),
+            ("사용한 작업:", str(work_used)),
+            ("남은 작업:", str(remaining) if work_count != -1 else "무제한"),
+            ("구독 만료:", self._convert_to_kst(data.get("subscription_expires_at"))),
+            ("사용자 유형:", data.get("user_type", "trial")),
+            ("현재 작업:", data.get("current_task") or "-"),
+        ]
+        
+        for label, value in items:
+            if label == "-" * 30:
+                sep = QFrame(dialog)
+                sep.setFrameShape(QFrame.Shape.HLine)
+                sep.setFrameShadow(QFrame.Shadow.Sunken)
+                sep.setGeometry(30, y_pos + 10, 390, 1)
+                sep.setStyleSheet(f"background-color: {DARK['border']};")
+                y_pos += 25
+                continue
+
+            lbl = QLabel(label, dialog)
+            lbl.setGeometry(30, y_pos, 120, 25)
+            lbl.setFont(QFont(FONT_FAMILY, 11))
+            lbl.setStyleSheet(f"color: {DARK['text_dim']};")
+            
+            val_lbl = QLabel(value, dialog)
+            val_lbl.setGeometry(160, y_pos, 260, 25)
+            val_lbl.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
+            val_lbl.setStyleSheet(f"color: {color if '남은 작업' in label else DARK['text']};")
+            
+            y_pos += 35
+        
+        # 닫기 버튼
+        close_btn = QPushButton("닫기", dialog)
+        close_btn.setGeometry(320, 420, 100, 35)
+        close_btn.setFont(QFont(FONT_FAMILY, 11))
+        close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {DARK["bg"]};
+                color: {DARK["text"]};
+                border: 1px solid {DARK["border"]};
+                border-radius: 6px;
+            }}
+            QPushButton:hover {{
+                background-color: {DARK["border"]};
+            }}
+        """)
+        close_btn.clicked.connect(dialog.accept)
+        
+        dialog.exec()
 
     def _show_login_history(self, user_id, username):
         """로그인 이력 보기"""

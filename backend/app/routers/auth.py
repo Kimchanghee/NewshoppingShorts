@@ -41,7 +41,15 @@ def _get_trusted_proxies() -> List[str]:
     env_proxies = os.environ.get("TRUSTED_PROXIES", "")
     if env_proxies:
         return [p.strip() for p in env_proxies.split(",") if p.strip()]
-    return _DEFAULT_TRUSTED_PROXIES
+    
+    # Cloud Run / GCP Load Balancer often use these ranges
+    # 사설 IP 대역을 기본적으로 신뢰하여 X-Forwarded-For 사용 가능하게 함
+    return _DEFAULT_TRUSTED_PROXIES + [
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+    ]
 
 
 def _is_trusted_proxy(ip: str) -> bool:
@@ -180,7 +188,7 @@ async def check_session(
     client_ip = get_client_ip(request)
     service = AuthService(db)
     return await service.check_session(
-        user_id=data.id, token=data.key, ip_address=client_ip
+        user_id=data.id, token=data.key, ip_address=client_ip, current_task=data.current_task
     )
 
 
@@ -193,42 +201,59 @@ async def check_username(
     Check if username is available for registration.
     아이디 사용 가능 여부 확인
     """
-    # Redundant imports removed
-    username = username.lower()
+    # Normalize username
+    username_clean = username.lower().strip()
+    client_ip = get_client_ip(request)
+
+    logger.info(f"[CheckUsername] Request for: {username_clean} from IP: {client_ip}")
 
     try:
         # 유효성 검사
-        if not username or len(username) < 4 or len(username) > 50:
-            return {"available": False, "message": "아이디는 4~50자여야 합니다."}
+        if not username_clean or len(username_clean) < 4:
+            return {"available": False, "message": "아이디는 4자 이상이어야 합니다."}
+        
+        if len(username_clean) > 50:
+            return {"available": False, "message": "아이디가 너무 깁니다 (최대 50자)."}
 
-        if not re.match(r"^[a-zA-Z0-9_]+$", username):
+        if not re.match(r"^[a-z0-9_]+$", username_clean):
             return {
                 "available": False,
-                "message": "아이디는 영문, 숫자, 밑줄(_)만 사용 가능합니다.",
+                "message": "아이디는 영문 소문자, 숫자, 밑줄(_)만 사용 가능합니다.",
             }
 
-        # 기존 사용자 확인
-        existing_user = db.query(User).filter(User.username == username).first()
+        # 1. 기존 활성 사용자 확인
+        existing_user = db.query(User).filter(User.username == username_clean).first()
         if existing_user:
+            logger.info(f"[CheckUsername] Forbidden: Username exists in User table: {username_clean}")
             return {"available": False, "message": "이미 사용 중인 아이디입니다."}
 
-        # 대기 중인 가입 요청 확인
-        pending_request = (
+        # 2. 대기 중인 가입 요청 또는 자동 승인된 요청 기록 확인 (RegistrationRequest unique constraint 때문)
+        # RegistrationRequest에도 동일한 아이디가 있으면 (상태 불문) 충돌 가능성이 있음
+        existing_reg = (
             db.query(RegistrationRequest)
-            .filter(
-                RegistrationRequest.username == username,
-                RegistrationRequest.status == RequestStatus.PENDING,
-            )
+            .filter(RegistrationRequest.username == username_clean)
             .first()
         )
-        if pending_request:
-            return {"available": False, "message": "승인 대기 중인 아이디입니다."}
+        
+        if existing_reg:
+            if existing_reg.status == RequestStatus.PENDING:
+                logger.info(f"[CheckUsername] Forbidden: Pending request exists: {username_clean}")
+                return {"available": False, "message": "승인 대기 중인 아이디입니다."}
+            elif existing_reg.status == RequestStatus.APPROVED:
+                # 이미 승인되었는데 User 테이블에 없으면 (데이터 불일치 혹은 삭제)
+                # 이 경우 available: True를 주되, 나중에 registration에서 삭제 후 재등록하도록 처리됨
+                logger.warning(f"[CheckUsername] Warning: Approved request without User record: {username_clean}")
+                # return {"available": True, "message": "사용 가능한 아이디입니다."} 
+                # (보수적으로 가기 위해 일단 APPROVED도 사용 불가로 처리할 수도 있지만, 
+                # registration.py에서 삭제 로직이 있으므로 True 반환 가능)
+                pass
 
+        logger.info(f"[CheckUsername] Success: Username {username_clean} is available")
         return {"available": True, "message": "사용 가능한 아이디입니다."}
     except Exception as e:
-        logger.error(f"Error checking username: {e}", exc_info=True)
-        # DEBUG: Return actual error to client
-        return {"available": False, "message": f"서버 오류: {str(e)}"}
+        logger.error(f"[CheckUsername] Error checking username '{username_clean}': {e}", exc_info=True)
+        # Error details for debugging
+        return {"available": False, "message": f"서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요. [{str(e)[:50]}]"}
 
 
 @router.post("/work/check", response_model=CheckWorkResponse)

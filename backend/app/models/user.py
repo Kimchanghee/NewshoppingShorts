@@ -4,7 +4,7 @@ import enum
 from app.database import Base
 
 
-class UserType(enum.Enum):
+class UserType(str, enum.Enum):
     """User type enumeration"""
     TRIAL = "trial"
     SUBSCRIBER = "subscriber"
@@ -43,3 +43,4 @@ class User(Base):
     # Admin purpose fields
     last_heartbeat = Column(TIMESTAMP, nullable=True)    # For precise online status
     is_online = Column(Boolean, default=False, nullable=False) # Direct online status tracking
+    current_task = Column(String(255), nullable=True)    # Current working task description

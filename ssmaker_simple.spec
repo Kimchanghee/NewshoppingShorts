@@ -47,11 +47,7 @@ try:
 except:
     print("[Build WARNING] RapidOCR not installed")
 
-try:
-    datas += collect_data_files('onnxruntime')
-    print(f"[Build] ONNX Runtime data: included")
-except:
-    print("[Build WARNING] ONNX Runtime not installed")
+
 
 try:
     datas += collect_data_files('faster_whisper')
@@ -65,17 +61,9 @@ try:
 except:
     print("[Build WARNING] CTranslate2 not installed")
 
-try:
-    datas += collect_data_files('cv2')
-    print(f"[Build] OpenCV data: included")
-except:
-    print("[Build WARNING] OpenCV not installed")
 
-try:
-    datas += collect_data_files('PIL')
-    print(f"[Build] PIL/Pillow data: included")
-except:
-    print("[Build WARNING] PIL not installed")
+
+
 
 # =============================================================================
 # Binaries
@@ -180,11 +168,11 @@ hiddenimports = [
     'app.login_handler',
     
     # External packages
-    'PyQt5',
-    'PyQt5.QtCore',
-    'PyQt5.QtWidgets',
-    'PyQt5.QtGui',
-    'PyQt5.sip',
+    'PyQt6',
+    'PyQt6.QtCore',
+    'PyQt6.QtWidgets',
+    'PyQt6.QtGui',
+    'PyQt6.sip',
     'cv2',
     'numpy',
     'PIL',
@@ -267,9 +255,11 @@ for pkg in ['google.genai', 'anthropic', 'httpx', 'httpcore', 'moviepy', 'cv2', 
     except:
         pass
 
-# Remove duplicates
+# Deduplicate lists to prevent "multiple copies" errors
+datas = list(set(datas))
+binaries = list(set(binaries))
 hiddenimports = list(set(hiddenimports))
-print(f"[Build] Total hiddenimports: {len(hiddenimports)}")
+print(f"[Build] Unique properties: {len(datas)} datas, {len(binaries)} binaries, {len(hiddenimports)} imports")
 
 # =============================================================================
 # Analysis
@@ -283,7 +273,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=['PyQt5', 'PyQt5.QtCore', 'PyQt5.QtGui', 'PyQt5.QtWidgets', 'PyQt5.sip'],
     noarchive=False,
 )
 
