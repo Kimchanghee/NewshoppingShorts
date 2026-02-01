@@ -22,6 +22,7 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QFrame,
     QStackedWidget,
+    QSizePolicy,
 )
 
 import config
@@ -97,7 +98,7 @@ class VideoAnalyzerGUI(QMainWindow):
     # ---------------- UI -----------------
     def init_ui(self):
         d = self.design
-        self.setWindowTitle("쇼핑 쇼츠 메이커 - Studio")
+        self.setWindowTitle("쇼핑 숏폼 메이커 - 스튜디오")
         icon_path = os.path.join(os.path.dirname(__file__), "resource", "mainTrayIcon.png")
         if os.path.exists(icon_path):
             self.setWindowIcon(QIcon(icon_path))
@@ -113,19 +114,38 @@ class VideoAnalyzerGUI(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
-        # 1. Sidebar (StepNav)
+        # 1. Sidebar (StepNav) - Removed progress and subscription
         steps = [
             ("source", "소스 입력", "🧲"),
             ("style", "스타일", "🎨"),
             ("voice", "음성/TTS", "🎤"),
             ("queue", "대기/진행", "📋"),
-            ("progress", "결과/로그", "📈"),
-            ("subscription", "구독/결제", "💳"),
         ]
         self.step_nav = StepNav(steps)
         main_layout.addWidget(self.step_nav)
 
-        # 2. Main Content Area (Right Side)
+        # 2. Main Content Area (Right Side) with Splitter
+        right_container = QWidget()
+        right_container.setObjectName("RightContainer")
+        right_container.setStyleSheet(f"#RightContainer {{ background-color: {d.colors.bg_main}; }}")
+        
+        right_layout = QVBoxLayout(right_container)
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(0)
+
+        # 2-1. Top Bar
+        right_layout.addWidget(self._build_topbar())
+
+        # 2-2. Content + Log Splitter
+        content_splitter = QSplitter(Qt.Orientation.Horizontal)
+        content_splitter.setHandleWidth(1)
+        content_splitter.setStyleSheet(f"""
+            QSplitter::handle {{
+                background-color: {d.colors.border_light};
+            }}
+        """)
+
+        # Main content area (stacked pages)
         content_container = QWidget()
         content_container.setObjectName("ContentContainer")
         content_container.setStyleSheet(f"#ContentContainer {{ background-color: {d.colors.bg_main}; }}")
@@ -134,10 +154,7 @@ class VideoAnalyzerGUI(QMainWindow):
         content_layout.setContentsMargins(0, 0, 0, 0)
         content_layout.setSpacing(0)
 
-        # 2-1. Top Bar
-        content_layout.addWidget(self._build_topbar())
-
-        # 2-2. Stacked Pages
+        # Stacked Pages
         self.stack = QStackedWidget()
         
         # Add padding around the stack for better visual balance
@@ -147,14 +164,28 @@ class VideoAnalyzerGUI(QMainWindow):
         stack_layout.addWidget(self.stack)
         
         content_layout.addWidget(stack_wrapper)
-        main_layout.addWidget(content_container)
+        content_splitter.addWidget(content_container)
 
-        # Build pages as cards
+        # Log Panel (ProgressPanel) - Bottom left, small width
+        self.progress_panel = ProgressPanel(self, self, theme_manager=self.theme_manager)
+        self.progress_panel.setMinimumWidth(280)
+        self.progress_panel.setMaximumWidth(350)
+        self.progress_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        content_splitter.addWidget(self.progress_panel)
+        
+        # Set sizes: main content gets most space, log panel gets fixed smaller width
+        content_splitter.setSizes([1000, 300])
+        content_splitter.setStretchFactor(0, 1)
+        content_splitter.setStretchFactor(1, 0)
+
+        right_layout.addWidget(content_splitter)
+        main_layout.addWidget(right_container)
+
+        # Build pages as cards (progress and subscription removed from stack, shown separately)
         self.url_input_panel = URLInputPanel(self.stack, self, theme_manager=self.theme_manager)
         self.style_tab = StyleTab(self.stack, self, theme_manager=self.theme_manager)
         self.voice_panel = VoicePanel(self.stack, self, theme_manager=self.theme_manager)
         self.queue_panel = QueuePanel(self.stack, self, theme_manager=self.theme_manager)
-        self.progress_panel = ProgressPanel(self.stack, self, theme_manager=self.theme_manager)
         self.subscription_panel = SubscriptionPanel(self.stack, self)
 
         pages = [
@@ -162,8 +193,6 @@ class VideoAnalyzerGUI(QMainWindow):
             ("style", "스타일", "자막, 배경음악, 폰트 등 영상 스타일을 설정합니다.", self.style_tab),
             ("voice", "음성/TTS", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", self.voice_panel),
             ("queue", "대기/진행", "작업 대기열 및 진행 상황을 관리합니다.", self.queue_panel),
-            ("progress", "결과/로그", "변환 결과물과 시스템 로그를 확인합니다.", self.progress_panel),
-            ("subscription", "구독/결제", "요금제 관리 및 결제 내역을 확인합니다.", self.subscription_panel),
         ]
 
         self.page_index = {}
@@ -176,9 +205,9 @@ class VideoAnalyzerGUI(QMainWindow):
         self._on_step_selected("source")
 
         # Status bar is separate at main window level or can be added to bottom of content
-        # Adding to content layout to keep sidebar full height
+        # Adding to right layout to keep sidebar full height
         self.status_bar = StatusBar(self, self)
-        content_layout.addWidget(self.status_bar)
+        right_layout.addWidget(self.status_bar)
 
     # ------------- URL helpers -------------
     def add_url_from_entry(self):
@@ -260,11 +289,11 @@ class VideoAnalyzerGUI(QMainWindow):
         title_box = QVBoxLayout()
         title_box.setSpacing(4)
         
-        app_title = QLabel("Shopping Shorts Maker")
+        app_title = QLabel("쇼핑 숏폼 메이커")
         app_title.setFont(QFont(d.typography.font_family_heading, 14, QFont.Weight.Bold))
         app_title.setStyleSheet(f"color: {c.text_primary};")
         
-        project_sub = QLabel("Project: New Video")
+        project_sub = QLabel("프로젝트: 새 영상")
         project_sub.setFont(QFont(d.typography.font_family_body, 12))
         project_sub.setStyleSheet(f"color: {c.text_secondary};")
         
@@ -282,17 +311,25 @@ class VideoAnalyzerGUI(QMainWindow):
         self.credits_label.setStyleSheet(f"color: {c.text_secondary}; margin-right: 10px;")
         layout.addWidget(self.credits_label)
 
-        # Subscription Badge
-        self.sub_badge = QLabel("Guest")
+        # Subscription Badge (Clickable)
+        self.sub_badge = QPushButton("게스트")
+        self.sub_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sub_badge.setToolTip("구독/결제 페이지로 이동")
         self.sub_badge.setFont(QFont(d.typography.font_family_body, 10, QFont.Weight.Bold))
-        self.sub_badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.sub_badge.setStyleSheet(f"""
-            background-color: {c.bg_card};
-            color: {c.text_secondary};
-            padding: 6px 12px;
-            border-radius: 6px;
-            border: 1px solid {c.border_light};
+            QPushButton {{
+                background-color: {c.bg_card};
+                color: {c.text_secondary};
+                padding: 6px 12px;
+                border-radius: 6px;
+                border: 1px solid {c.border_light};
+            }}
+            QPushButton:hover {{
+                background-color: {c.bg_hover};
+                color: {c.text_primary};
+            }}
         """)
+        self.sub_badge.clicked.connect(self._show_subscription_panel)
         layout.addWidget(self.sub_badge)
 
         # Refresh User Status Button
@@ -316,7 +353,7 @@ class VideoAnalyzerGUI(QMainWindow):
         layout.addWidget(refresh_btn)
 
         # Settings Button
-        settings_btn = QPushButton("Preferences")
+        settings_btn = QPushButton("설정")
         settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         settings_btn.setFont(QFont(d.typography.font_family_body, 11))
         settings_btn.setStyleSheet(f"""
@@ -340,7 +377,7 @@ class VideoAnalyzerGUI(QMainWindow):
     def refresh_user_status(self):
         """Update user subscription status and credits from server"""
         if not self.login_data:
-            self.sub_badge.setText("Guest")
+            self.sub_badge.setText("게스트")
             return
 
         try:
@@ -369,7 +406,7 @@ class VideoAnalyzerGUI(QMainWindow):
                 # 'available' means user can still work
                 is_available = info.get("available", False)
                 
-                self.credits_label.setText(f"Credits: {remaining}/{total}")
+                self.credits_label.setText(f"크레딧: {remaining}/{total}")
                 
                 # Update Badge based on logic
                 # You might want to get actual user_type if available from another API, 
@@ -385,26 +422,33 @@ class VideoAnalyzerGUI(QMainWindow):
                 badge_color = c.text_secondary
                 
                 if user_type == "subscriber":
-                    badge_text = "PRO PLAN"
+                    badge_text = "프로 플랜"
                     badge_bg = c.primary_light
                     badge_color = c.primary
                 elif user_type == "admin":
-                    badge_text = "ADMIN"
+                    badge_text = "관리자"
                     badge_bg = "#374151"  # Dark gray
                     badge_color = "#FFFFFF"
                 else: # trial
-                    badge_text = "TRIAL"
+                    badge_text = "체험판"
                     if remaining <= 0:
                         badge_bg = "#FEF2F2" # Red tint
                         badge_color = "#EF4444" # Red
                 
                 self.sub_badge.setText(badge_text)
                 self.sub_badge.setStyleSheet(f"""
-                    background-color: {badge_bg};
-                    color: {badge_color};
-                    padding: 6px 12px;
-                    border-radius: 6px;
-                    font-weight: bold;
+                    QPushButton {{
+                        background-color: {badge_bg};
+                        color: {badge_color};
+                        padding: 6px 12px;
+                        border-radius: 6px;
+                        font-weight: bold;
+                        border: 1px solid {c.border_light};
+                    }}
+                    QPushButton:hover {{
+                        background-color: {c.bg_hover};
+                        opacity: 0.9;
+                    }}
                 """)
                 
                 logger.info(f"User status refreshed: {user_id} | {user_type} | {remaining}/{total}")
