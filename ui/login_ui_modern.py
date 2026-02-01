@@ -226,6 +226,33 @@ class ModernLoginUi:
             QLineEdit:focus { border: 2px solid #e31639; background-color: #ffffff; }
         """)
 
+        # 로그인 정보 저장 체크박스
+        self.rememberCheckbox = QCheckBox(self.rightFrame)
+        self.rememberCheckbox.setGeometry(QtCore.QRect(50, 335, 200, 25))
+        self.rememberCheckbox.setFont(QFont(FONT_FAMILY, 10))
+        self.rememberCheckbox.setText("아이디/비밀번호 저장")
+        self.rememberCheckbox.setStyleSheet("""
+            QCheckBox {
+                color: #374151;
+                background: transparent;
+            }
+            QCheckBox::indicator {
+                width: 18px;
+                height: 18px;
+                border: 2px solid #D1D5DB;
+                border-radius: 4px;
+                background: #ffffff;
+            }
+            QCheckBox::indicator:checked {
+                background-color: #e31639;
+                border-color: #e31639;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #e31639;
+            }
+        """)
+        self.rememberCheckbox.setCursor(Qt.CursorShape.PointingHandCursor)
+
         self.loginButton = QPushButton(self.rightFrame)
         self.loginButton.setGeometry(QtCore.QRect(50, 375, 300, 45))
         self.loginButton.setFont(QFont(FONT_FAMILY, 12, QFont.Weight.Bold))
