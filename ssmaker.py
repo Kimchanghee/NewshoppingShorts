@@ -11,6 +11,13 @@ from PyQt6.QtWidgets import QApplication
 # Environmental settings for HighDPI
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv might not be installed yet
+
 # Logging setup for EXE environment
 def setup_logging():
     log_dir = os.path.join(os.path.expanduser('~'), '.ssmaker', 'logs')
