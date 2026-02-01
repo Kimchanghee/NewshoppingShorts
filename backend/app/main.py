@@ -1,6 +1,8 @@
 import logging
 import sys
+import os
 from fastapi import FastAPI, Request
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -40,35 +42,51 @@ from sqlalchemy import text
 from app.database import engine
 
 def run_auto_migration():
-    """Temporary auto-migration for production"""
-    try:
-        with engine.connect() as conn:
-            # Check user_type column
-            result = conn.execute(text("SHOW COLUMNS FROM users LIKE 'user_type'"))
-            if not result.fetchone():
-                logger.info("Migrating: Adding user_type to users table...")
-                conn.execute(text("ALTER TABLE users ADD COLUMN user_type ENUM('trial', 'subscriber', 'admin') DEFAULT 'trial'"))
-                conn.commit()
-                logger.info("Migration successful: user_type added")
-            else:
-                logger.info("Schema check: user_type column exists")
-    except Exception as e:
-        logger.error(f"Auto-migration error: {e}")
+    """Directly attempt to add missing columns and ignore if already exists (1060)"""
+    logger.info("Starting schema auto-migration...")
+    
+    with engine.connect() as conn:
+        # Tables and columns to ensure
+        migrations = {
+            "users": [
+                ("user_type", "ENUM('trial', 'subscriber', 'admin') DEFAULT 'trial'"),
+                ("current_task", "VARCHAR(255) NULL"),
+                ("is_online", "BOOLEAN DEFAULT FALSE"),
+                ("last_heartbeat", "TIMESTAMP NULL")
+            ],
+            "registration_requests": [
+                ("email", "VARCHAR(255) NULL")
+            ]
+        }
+        
+        for table, columns in migrations.items():
+            for col, type_def in columns:
+                try:
+                    # Direct ALTER TABLE attempt
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {type_def}"))
+                    logger.info(f"Successfully added column {table}.{col}")
+                except Exception as e:
+                    # Ignore "Duplicate column name" error (1060)
+                    if "1060" in str(e) or "Duplicate column" in str(e):
+                        logger.info(f"Column {table}.{col} already exists, skipping.")
+                    else:
+                        logger.warning(f"Failed to add column {table}.{col}: {e}")
+        conn.commit()
+    logger.info("Schema auto-migration finished.")
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize database tables on startup"""
-    logger.info("Starting application...")
+    """Initialize database tables and run migrations on startup"""
+    logger.info("Initializing SSMaker Auth API...")
     
-    # Force init_db and migration in production to ensure schema is correct
     try:
+        # 1. First ensure tables exist
         init_db()
-        logger.info("Database tables initialized successfully")
         
-        # Run column migration
+        # 2. Then ensure columns exist (migrations)
         run_auto_migration()
     except Exception as e:
-        logger.warning(f"Database init/migration warning: {e}")
+        logger.error(f"Startup error during DB init/migration: {e}", exc_info=True)
 
 
 # Register rate limiter with app state
@@ -139,36 +157,37 @@ app.add_middleware(
     ],
 )
 
-# Include routers
-app.include_router(auth.router)
-app.include_router(registration.router)
-app.include_router(admin.router)
-app.include_router(subscription.router)
+# Ensure static directory exists before mounting
+static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
+if not os.path.exists(static_dir):
+    os.makedirs(static_dir, exist_ok=True)
+    logger.info(f"Created missing static directory at {static_dir}")
 
+app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "SSMaker Auth API"}
 
 
+# Include routers
+app.include_router(auth.router)
+app.include_router(registration.router)
+app.include_router(admin.router)
+app.include_router(subscription.router)
+
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
 
-
-@app.get("/free/lately")
-async def get_version(item: int = 22):
-    """Version check endpoint (legacy compatibility)"""
-    return {"version": "1.0.0", "item": item}
-
-
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 APP_VERSION_INFO = {
-    "version": "1.0.0",
+    "version": "1.0.1", # Bumped for testing
     "min_required_version": "1.0.0",
-    "download_url": None,  # 배포 시 설정: "https://example.com/ssmaker_v1.0.1.exe"
-    "release_notes": "Initial release",
+    "download_url": "http://127.0.0.1:8000/static/ssmaker_setup.exe", # Local test URL
+    # "download_url": "https://storage.googleapis.com/your-bucket/ssmaker_setup.exe", # Production GCS URL
+    "release_notes": "버전 1.0.1 업데이트: 자동 업데이트 기능이 추가되었습니다.",
     "is_mandatory": False,
     "update_channel": "stable",
 }

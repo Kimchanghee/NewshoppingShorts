@@ -1,16 +1,13 @@
-﻿# -*- mode: python ; coding: utf-8 -*-
-import sys
-import os
-from PyInstaller.utils.hooks import collect_submodules, collect_data_files
+# -*- mode: python ; coding: utf-8 -*-
 
 block_cipher = None
 
 a = Analysis(
-    ['ssmaker.py'],
-    pathex=['.'],
+    ['updater.py'],
+    pathex=[],
     binaries=[],
-    datas=[('resource', 'resource'), ('version.json', '.')] + collect_data_files('vertexai') + collect_data_files('google.cloud.aiplatform'),
-    hiddenimports=collect_submodules('vertexai') + collect_submodules('google.cloud.aiplatform') + collect_submodules('google.api_core') + collect_submodules('grpc'),
+    datas=[],
+    hiddenimports=[],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
@@ -21,6 +18,7 @@ a = Analysis(
     noarchive=False,
 )
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
 exe = EXE(
     pyz,
     a.scripts,
@@ -28,12 +26,14 @@ exe = EXE(
     a.zipfiles,
     a.datas,
     [],
-    name='ssmaker',
+    name='updater',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    console=True,
+    upx_exclude=[],
+    runtime_tmpdir=None,
+    console=True, # Keep console for debugging if needed, or False to hide
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,

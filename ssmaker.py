@@ -39,14 +39,41 @@ class StartupWorker(QtCore.QThread):
     status = QtCore.pyqtSignal(str)
     finished = QtCore.pyqtSignal()
     error = QtCore.pyqtSignal(str)
+    update_detected = QtCore.pyqtSignal(dict) # Signals to main thread to show prompt
 
     def run(self):
         try:
             import time
+            import requests
 
-            # Stage 1: Initialize (10%)
+            # Stage 0: Check for updates (5%)
+            self.status.emit("업데이트 확인 중...")
+            self.progress.emit(5)
+            try:
+                # We can't import AppController here yet, let's just do a direct check
+                # or read from version.json
+                base_url = "https://ssmaker-auth-api-1049571775048.us-central1.run.app" # Use same as AppController
+                
+                # Get current version
+                curr_ver = "1.0.0"
+                v_path = "version.json"
+                if os.path.exists(v_path):
+                    import json
+                    with open(v_path, 'r') as f:
+                        curr_ver = json.load(f).get("version", "1.0.0")
+                
+                response = requests.get(f"{base_url}/app/version/check", params={"current_version": curr_ver}, timeout=3)
+                if response.status_code == 200:
+                    data = response.json()
+                    if data.get("update_available"):
+                        self.update_detected.emit(data)
+                        # We don't stop here, but main thread might interrupt us
+            except Exception as e:
+                logging.warning(f"Update check failed during splash: {e}")
+
+            # Stage 1: Initialize (15%)
             self.status.emit("초기화 중...")
-            self.progress.emit(10)
+            self.progress.emit(15)
             time.sleep(0.1)
 
             # Stage 2: Load configuration (25%)
@@ -125,10 +152,21 @@ if __name__ == "__main__":
                 f"로그 파일: {log_file}")
             sys.exit(1)
 
+    def on_update_detected(data):
+        # We need to show the prompt. But splash is on.
+        # Let's hide splash temporarily or show dialog over it.
+        # AppController has the logic, but it's not instantiated yet.
+        # We'll just instantiate a temporary AppController to use its methods
+        # or just duplicate the prompt logic here for simplicity in this entry point.
+        from startup.app_controller import AppController
+        tmp_controller = AppController(app)
+        tmp_controller.handle_update_available(data)
+
     worker.progress.connect(splash.set_progress)
     worker.status.connect(splash.set_status)
     worker.finished.connect(on_finished)
     worker.error.connect(on_error)  # Connect error signal
+    worker.update_detected.connect(on_update_detected)
     
     worker.start()
 

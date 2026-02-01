@@ -443,6 +443,7 @@ def loginCheck(**data) -> Dict[str, Any]:
         "id": user_id,
         "key": stored_token or data.get("key", ""),
         "ip": ip_address,
+        "current_task": data.get("current_task")
     }
 
     try:

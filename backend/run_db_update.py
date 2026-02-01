@@ -50,7 +50,8 @@ def update_schema():
         columns = [
             ("email", "VARCHAR(255) NULL"),
             ("phone", "VARCHAR(50) NULL"),
-            ("name", "VARCHAR(100) NULL")
+            ("name", "VARCHAR(100) NULL"),
+            ("current_task", "VARCHAR(255) NULL")
         ]
         
         logger.info("Updating users table...")

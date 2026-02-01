@@ -90,9 +90,19 @@ REM Step 6: Build with PyInstaller
 echo [6/6] Building with PyInstaller...
 echo      This may take 10-20 minutes...
 echo.
+
+echo      Building Updater...
+%VENV_PYINSTALLER% --clean -y updater.spec
+if errorlevel 1 (
+    echo      ERROR: Updater build failed
+    pause
+    exit /b 1
+)
+
+echo      Building Main Application...
 %VENV_PYINSTALLER% --clean -y ssmaker.spec
 if errorlevel 1 (
-    echo      ERROR: Build failed
+    echo      ERROR: Main Application build failed
     pause
     exit /b 1
 )

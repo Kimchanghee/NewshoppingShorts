@@ -1,0 +1,11 @@
+.git
+.gitignore
+__pycache__
+*.pyc
+tests
+venv
+.env
+import_test.log
+error_msg.txt
+error_msg_2.txt
+startup_error.log

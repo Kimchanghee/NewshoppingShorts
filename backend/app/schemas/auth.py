@@ -60,6 +60,7 @@ class CheckRequest(BaseModel):
     id: str = Field(..., min_length=1, max_length=50, description="User ID")
     key: str = Field(..., min_length=10, max_length=1024, description="JWT token")
     ip: str = Field(..., max_length=45, description="Client IP (legacy)")
+    current_task: Optional[str] = Field(None, max_length=200, description="Current task status")
 
 
 class UseWorkRequest(BaseModel):

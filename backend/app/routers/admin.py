@@ -16,13 +16,14 @@ from fastapi import APIRouter, Depends, Request, Query, HTTPException
 from slowapi import Limiter
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.user import User
 from app.models.login_attempt import LoginAttempt
 from app.utils.subscription_utils import calculate_subscription_expiry
+from app.services.auth_service import AuthService
 
 
 logger = logging.getLogger(__name__)
@@ -44,7 +45,7 @@ class UserResponse(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     name: Optional[str] = None
-    hashed_password: Optional[str] = None  # 관리자용 - 해시된 비밀번호
+    hashed_password: Optional[str] = Field(None, alias="password_hash", serialization_alias="hashed_password", validation_alias="password_hash")  # 관리자용 - 해시된 비밀번호
     created_at: Optional[datetime] = None
     subscription_expires_at: Optional[datetime] = None
     is_active: bool
@@ -57,6 +58,7 @@ class UserResponse(BaseModel):
 
     is_online: bool = False
     last_heartbeat: Optional[datetime] = None
+    current_task: Optional[str] = None
 
     class Config:
         from_attributes = True

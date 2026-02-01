@@ -42,6 +42,16 @@ def update_schema():
             else:
                 logger.error(f"Error adding name to users: {e}")
 
+        try:
+            logger.info("Adding current_task to users...")
+            conn.execute(text("ALTER TABLE users ADD COLUMN current_task VARCHAR(255) NULL"))
+            logger.info("Added current_task column to users")
+        except Exception as e:
+            if "Duplicate column" in str(e) or "1060" in str(e):
+                logger.info("current_task column already exists in users")
+            else:
+                logger.error(f"Error adding current_task to users: {e}")
+
         # 2. Update registration_requests table
         try:
             logger.info("Updating registration_requests table...")
