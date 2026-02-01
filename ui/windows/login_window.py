@@ -87,7 +87,15 @@ class Login(QMainWindow, Ui_LoginWindow):
         app = QApplication.instance()
         if app:
             app.login_data = res
-        self.close()
+        
+        # Notify controller to proceed to next screen
+        if hasattr(self, 'controller') and self.controller:
+            logger.info("Login success, notifying controller")
+            self.controller.on_login_success(res)
+            # Controller will handle hiding/closing logic
+        else:
+            logger.warning("No controller found, closing login window")
+            self.close()
 
     def _openRegistrationDialog(self):
         from ui.login_ui_modern import RegistrationRequestDialog
