@@ -164,9 +164,14 @@ class AdminDashboard(QMainWindow):
         super().__init__()
         self.api_base_url = api_base_url.rstrip("/")
 
-        # Security: Load API key from environment variable if not provided
-        # ADMIN_API_KEY environment variable should contain the admin API key
-        self.admin_api_key = admin_api_key or os.getenv("ADMIN_API_KEY", "")
+        # Environment variable fallback chain: SSMAKER_ADMIN_KEY (preferred) -> ADMIN_API_KEY -> None
+        self.admin_api_key = (
+            admin_api_key 
+            or os.getenv("SSMAKER_ADMIN_KEY") 
+            or os.getenv("ADMIN_API_KEY", "")
+        )
+
+
 
         if not self.admin_api_key:
             logger.error("[Admin UI] ADMIN_API_KEY not set - dashboard will not work")
@@ -1636,7 +1641,7 @@ if __name__ == "__main__":
 
     # Get configuration from env or use defaults
     API_URL = os.getenv("API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app")
-    API_KEY = os.getenv("ADMIN_API_KEY", "ssmaker_admin_key_2024")
+    API_KEY = os.getenv("SSMAKER_ADMIN_KEY") or os.getenv("ADMIN_API_KEY", "ssmaker_admin_key_2024")
 
     app = QApplication(sys.argv)
     
