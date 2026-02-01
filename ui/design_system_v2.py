@@ -247,18 +247,18 @@ class Shadow:
     CSS box-shadow 값을 문자열로 제공합니다.
     
     Attributes:
-        shadow_*: 다양한 깊이의 그림자 값
+        none, xs, sm, base, md, lg, xl, 2xl: 다양한 깊이의 그림자 값
     """
-    shadow_none: str = "none"
-    shadow_xs: str = "0 1px 2px 0 rgba(0, 0, 0, 0.05)"
-    shadow_sm: str = "0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)"
-    shadow_base: str = "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)"
-    shadow_md: str = "0 6px 8px -1px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)"
-    shadow_lg: str = "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)"
-    shadow_xl: str = "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)"
-    shadow_2xl: str = "0 25px 50px -12px rgba(0, 0, 0, 0.25)"
-    shadow_inner: str = "inset 0 2px 4px 0 rgba(0, 0, 0, 0.05)"
-    shadow_focus: str = "0 0 0 3px rgba(227, 22, 57, 0.3)"
+    none: str = "none"
+    xs: str = "0 1px 2px 0 rgba(0, 0, 0, 0.05)"
+    sm: str = "0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1)"
+    base: str = "0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -2px rgba(0, 0, 0, 0.1)"
+    md: str = "0 6px 8px -1px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)"
+    lg: str = "0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -4px rgba(0, 0, 0, 0.1)"
+    xl: str = "0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1)"
+    xxl: str = "0 25px 50px -12px rgba(0, 0, 0, 0.25)"
+    inner: str = "inset 0 2px 4px 0 rgba(0, 0, 0, 0.05)"
+    focus: str = "0 0 0 3px rgba(227, 22, 57, 0.3)"
 
 
 @dataclass(frozen=True)
