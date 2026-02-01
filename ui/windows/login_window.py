@@ -114,13 +114,22 @@ class Login(QMainWindow, Ui_LoginWindow):
         msg.setText(message)
         msg.exec()
 
-    def _on_registration_requested(self, name, username, password, contact):
+    def _on_registration_requested(self, name, username, password, contact, email):
         logger.info(
-            "[UI] Registration submitted | name=%s username=%s contact=%s",
+            "[UI] Registration submitted | name=%s username=%s contact=%s email=%s",
             name,
             username,
             contact,
+            email
         )
+        # Auto-fill login fields
+        self.idEdit.setText(username)
+        self.pwEdit.setText(password)
+        
+        # Optional: Auto-focus login button
+        self.loginButton.setFocus()
+        
+        self.showCustomMessageBox("가입 완료", "회원가입이 완료되었습니다.\n로그인 버튼을 눌러주세요.")
 
     def _closeWindow(self):
         if self.serverSocket: self.serverSocket.close()
