@@ -33,7 +33,7 @@ class SettingsButton(QPushButton):
             }}
             QPushButton:hover {{
                 background-color: {surface_variant};
-                border-radius: {self.ds.border_radius.radius_full}px;
+                border-radius: {self.ds.radius.full}px;
                 color: {text_primary};
             }}
         """)

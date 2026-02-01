@@ -62,8 +62,8 @@ class TutorialOverlay(QWidget):
         painter.setBrush(QBrush(QColor(get_color('surface'))))
         painter.drawRoundedRect(
             card_x, card_y, card_w, card_h,
-            self.ds.border_radius.radius_md,
-            self.ds.border_radius.radius_md
+            self.ds.radius.md,
+            self.ds.radius.md
         )
         
         step = self.STEPS[self.current_step]

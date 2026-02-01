@@ -66,7 +66,7 @@ class SidebarMenuItem(QFrame):
         circle_bg = primary if self._active or self._completed else border_light
         circle_text = get_color('surface') if self._active or self._completed else text_secondary
         
-        self.setStyleSheet(f"background-color: {bg}; border-radius: {self.ds.border_radius.radius_base}px;")
+        self.setStyleSheet(f"background-color: {bg}; border-radius: {self.ds.radius.base}px;")
         self.title_label.setStyleSheet(f"color: {text_color}; background: transparent;")
         self.circle_label.setStyleSheet(f"background-color: {circle_bg}; color: {circle_text}; border-radius: 14px; font-weight: bold;")
         

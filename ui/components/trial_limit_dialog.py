@@ -80,7 +80,7 @@ class TrialLimitDialog(QDialog):
             QFrame {{
                 background-color: {bg_card};
                 border: 1px solid {border_light};
-                border-radius: {self.ds.border_radius.radius_md}px;
+                border-radius: {self.ds.radius.md}px;
                 margin: 2px;
             }}
         """)
@@ -106,7 +106,7 @@ class TrialLimitDialog(QDialog):
             QLabel {{
                 background-color: {error};
                 color: white;
-                border-radius: {self.ds.border_radius.radius_full}px;
+                border-radius: {self.ds.radius.full}px;
                 font-weight: bold;
                 font-size: {self.ds.typography.size_md}px;
                 font-family: {self.ds.typography.font_family_primary};
@@ -136,7 +136,7 @@ class TrialLimitDialog(QDialog):
             QFrame {{
                 background-color: {get_color('surface_variant')};
                 border: 1px solid {error};
-                border-radius: {self.ds.border_radius.radius_base}px;
+                border-radius: {self.ds.radius.base}px;
                 padding: {self.ds.spacing.space_4}px;
             }}
         """)
@@ -205,7 +205,7 @@ class TrialLimitDialog(QDialog):
                 background-color: {get_color('surface_variant')};
                 color: {text_primary};
                 border: 1px solid {border_light};
-                border-radius: {self.ds.border_radius.radius_base}px;
+                border-radius: {self.ds.radius.base}px;
                 padding: {self.ds.spacing.space_3}px {self.ds.spacing.space_5}px;
                 font-size: {self.ds.typography.size_sm}px;
                 font-weight: bold;
@@ -233,7 +233,7 @@ class TrialLimitDialog(QDialog):
                 background-color: {primary};
                 color: white;
                 border: none;
-                border-radius: {self.ds.border_radius.radius_base}px;
+                border-radius: {self.ds.radius.base}px;
                 padding: {self.ds.spacing.space_3}px {self.ds.spacing.space_6}px;
                 font-size: {self.ds.typography.size_sm}px;
                 font-weight: bold;

@@ -38,7 +38,7 @@ class ThemeToggle(QPushButton):
             QPushButton {{
                 background-color: {surface_variant};
                 border: 1px solid {get_color('border_light')};
-                border-radius: {self.ds.border_radius.radius_full}px;
+                border-radius: {self.ds.radius.full}px;
                 padding: {self.ds.spacing.space_2}px;
                 font-size: {self.ds.typography.size_base}px;
                 color: {text_color};

@@ -188,16 +188,16 @@ class BorderRadius:
     0부터 완전한 원형(9999px)까지 다양한 옵션을 제공합니다.
     
     Attributes:
-        radius_*: 다양한 반경 값 (0px ~ 9999px)
+        none, sm, base, md, lg, xl, xxl, full: 다양한 반경 값 (0px ~ 9999px)
     """
-    radius_none: int = 0
-    radius_sm: int = 4
-    radius_base: int = 8
-    radius_md: int = 12
-    radius_lg: int = 16
-    radius_xl: int = 20
-    radius_2xl: int = 24
-    radius_full: int = 9999
+    none: int = 0
+    sm: int = 4
+    base: int = 8
+    md: int = 12
+    lg: int = 16
+    xl: int = 20
+    xxl: int = 24
+    full: int = 9999
 
 
 @dataclass(frozen=True)
@@ -387,6 +387,21 @@ class DesignSystem:
             bool: 다크 모드가 활성화되어 있으면 True
         """
         return self._is_dark_mode
+    
+    @property
+    def radius(self) -> BorderRadius:
+        """
+        테두리 반경 시스템에 대한 단축 접근자입니다.
+        
+        Returns:
+            BorderRadius: 테두리 반경 정의
+        
+        사용 예시:
+            >>> ds = get_design_system()
+            >>> ds.radius.md  # 12
+            >>> ds.radius.xl  # 16
+        """
+        return self.border_radius
     
     @property
     def button_sizes(self) -> Dict[str, ButtonSize]:

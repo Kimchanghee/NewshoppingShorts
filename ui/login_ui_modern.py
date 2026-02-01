@@ -112,7 +112,7 @@ class ModernLoginUi:
         self.logoIcon.setStyleSheet(f"""
             color: white;
             background: rgba(255,255,255,0.15);
-            border-radius: {ds.border_radius.radius_xl}px;
+            border-radius: {ds.radius.xl}px;
         """)
         self.logoIcon.setText("SS")
 
@@ -123,7 +123,7 @@ class ModernLoginUi:
         self.logoBadge.setStyleSheet(f"""
             color: {get_color('primary')};
             background: white;
-            border-radius: {ds.border_radius.radius_full}px;
+            border-radius: {ds.radius.full}px;
             padding: {ds.spacing.space_1}px;
         """)
         self.logoBadge.setText("SHORTS MAKER")
@@ -169,7 +169,7 @@ class ModernLoginUi:
             QPushButton {{
                 background-color: {get_color('surface_variant')};
                 border: none;
-                border-radius: {ds.border_radius.radius_md}px;
+                border-radius: {ds.radius.md}px;
             }}
             QPushButton:hover {{ background-color: {get_color('border')}; }}
         """)
@@ -184,7 +184,7 @@ class ModernLoginUi:
             QPushButton {{
                 background-color: {get_color('surface_variant')};
                 border: none;
-                border-radius: {ds.border_radius.radius_md}px;
+                border-radius: {ds.radius.md}px;
             }}
             QPushButton:hover {{ background-color: {get_color('border')}; }}
         """)
@@ -208,7 +208,7 @@ class ModernLoginUi:
             QLineEdit {{
                 background-color: {get_color('background')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_md}px;
+                border-radius: {ds.radius.md}px;
                 padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
             }}
             QLineEdit:focus {{ border: 2px solid {get_color('primary')}; background-color: {get_color('surface')}; }}
@@ -226,7 +226,7 @@ class ModernLoginUi:
             QLineEdit {{
                 background-color: {get_color('background')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_md}px;
+                border-radius: {ds.radius.md}px;
                 padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
             }}
             QLineEdit:focus {{ border: 2px solid {get_color('primary')}; background-color: {get_color('surface')}; }}
@@ -246,7 +246,7 @@ class ModernLoginUi:
                 width: 18px;
                 height: 18px;
                 border: 2px solid {get_color('text_muted')};
-                border-radius: {ds.border_radius.radius_sm}px;
+                border-radius: {ds.radius.sm}px;
                 background: {get_color('surface')};
             }}
             QCheckBox::indicator:checked {{
@@ -268,7 +268,7 @@ class ModernLoginUi:
                 color: {get_color('surface')};
                 background-color: {get_color('primary')};
                 border: none;
-                border-radius: {ds.border_radius.radius_md}px;
+                border-radius: {ds.radius.md}px;
             }}
             QPushButton:hover {{ background-color: {get_color('secondary')}; }}
         """)
@@ -282,7 +282,7 @@ class ModernLoginUi:
             QPushButton {{
                 color: {get_color('primary')};
                 border: 2px solid {get_color('primary')};
-                border-radius: {ds.border_radius.radius_md}px;
+                border-radius: {ds.radius.md}px;
             }}
             QPushButton:hover {{ background-color: rgba(227, 22, 57, 0.05); }}
         """)
@@ -318,7 +318,7 @@ class RegistrationRequestDialog(QWidget):
             QPushButton {{
                 background-color: {get_color('surface_variant')};
                 border: none;
-                border-radius: {ds.border_radius.radius_full}px;
+                border-radius: {ds.radius.full}px;
                 color: {get_color('text_secondary')};
             }}
             QPushButton:hover {{ background-color: {get_color('border')}; }}
@@ -389,7 +389,7 @@ class RegistrationRequestDialog(QWidget):
                 background-color: {get_color('text_muted')};
                 color: white;
                 border: none;
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{ background-color: {get_color('text_secondary')}; }}
             QPushButton:disabled {{
@@ -463,7 +463,7 @@ class RegistrationRequestDialog(QWidget):
                 color: {get_color('surface')};
                 background-color: {get_color('primary')};
                 border: none;
-                border-radius: {ds.border_radius.radius_md}px;
+                border-radius: {ds.radius.md}px;
             }}
             QPushButton:hover {{ background-color: {get_color('secondary')}; }}
             QPushButton:pressed {{ background-color: {get_color('primary')}; }}
@@ -477,7 +477,7 @@ class RegistrationRequestDialog(QWidget):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_2}px {ds.spacing.space_3}px;
             }}
             QLineEdit:focus {{

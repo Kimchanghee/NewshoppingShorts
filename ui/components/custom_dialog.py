@@ -38,7 +38,7 @@ class CustomDialog(QDialog):
         
         # Container frame
         container = QFrame()
-        container.setStyleSheet(f"background-color: {self.card_bg}; margin: 2px; border-radius: {self.ds.border_radius.radius_base}px;")
+        container.setStyleSheet(f"background-color: {self.card_bg}; margin: 2px; border-radius: {self.ds.radius.base}px;")
         container_layout = QVBoxLayout(container)
         container_layout.setContentsMargins(self.ds.spacing.space_6, self.ds.spacing.space_6, self.ds.spacing.space_6, self.ds.spacing.space_6)
         container_layout.setSpacing(self.ds.spacing.space_4)
@@ -101,7 +101,7 @@ class CustomDialog(QDialog):
                     QPushButton {{
                         background-color: {self.accent_color};
                         color: white;
-                        border-radius: {self.ds.border_radius.radius_sm}px;
+                        border-radius: {self.ds.radius.sm}px;
                         padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_5}px;
                         font-weight: bold;
                     }}
@@ -114,7 +114,7 @@ class CustomDialog(QDialog):
                     QPushButton {{
                         background-color: {get_color('surface_variant')};
                         color: {self.text_color};
-                        border-radius: {self.ds.border_radius.radius_sm}px;
+                        border-radius: {self.ds.radius.sm}px;
                         padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_5}px;
                     }}
                     QPushButton:hover {{
