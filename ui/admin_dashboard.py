@@ -85,11 +85,10 @@ def _styled_msg_box(parent, title: str, message: str, icon_type: str = "info"):
             background-color: {DARK["card"]};
             color: {DARK["text"]};
         }}
-        QMessageBox QLabel {{
+        QMessageBox QLabel {
             color: {DARK["text"]};
-            font-size: 12px;
-            min-width: 300px;
-        }}
+            font-size: 13px;
+        }
         QPushButton {{
             background-color: {DARK["primary"]};
             color: white;
