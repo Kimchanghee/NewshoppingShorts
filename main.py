@@ -114,6 +114,14 @@ class VideoAnalyzerGUI(QMainWindow):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
 
+        # Left Container (Sidebar + Log Panel) - Vertical Split
+        left_container = QWidget()
+        left_container.setObjectName("LeftContainer")
+        left_container.setStyleSheet(f"#LeftContainer {{ background-color: {d.colors.bg_main}; }}")
+        left_layout = QVBoxLayout(left_container)
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(0)
+        
         # 1. Sidebar (StepNav) - Removed progress and subscription
         steps = [
             ("source", "소스 입력", "🧲"),
@@ -122,9 +130,18 @@ class VideoAnalyzerGUI(QMainWindow):
             ("queue", "대기/진행", "📋"),
         ]
         self.step_nav = StepNav(steps)
-        main_layout.addWidget(self.step_nav)
+        left_layout.addWidget(self.step_nav, stretch=1)
+        
+        # 2. Log Panel (ProgressPanel) - Bottom left, fixed height
+        self.progress_panel = ProgressPanel(self, self, theme_manager=self.theme_manager)
+        self.progress_panel.setMinimumHeight(200)
+        self.progress_panel.setMaximumHeight(280)
+        self.progress_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        left_layout.addWidget(self.progress_panel)
+        
+        main_layout.addWidget(left_container)
 
-        # 2. Main Content Area (Right Side) with Splitter
+        # 3. Main Content Area (Right Side)
         right_container = QWidget()
         right_container.setObjectName("RightContainer")
         right_container.setStyleSheet(f"#RightContainer {{ background-color: {d.colors.bg_main}; }}")
@@ -133,19 +150,10 @@ class VideoAnalyzerGUI(QMainWindow):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(0)
 
-        # 2-1. Top Bar
+        # 3-1. Top Bar
         right_layout.addWidget(self._build_topbar())
 
-        # 2-2. Content + Log Splitter
-        content_splitter = QSplitter(Qt.Orientation.Horizontal)
-        content_splitter.setHandleWidth(1)
-        content_splitter.setStyleSheet(f"""
-            QSplitter::handle {{
-                background-color: {d.colors.border_light};
-            }}
-        """)
-
-        # Main content area (stacked pages)
+        # 3-2. Main content area (stacked pages)
         content_container = QWidget()
         content_container.setObjectName("ContentContainer")
         content_container.setStyleSheet(f"#ContentContainer {{ background-color: {d.colors.bg_main}; }}")
@@ -164,22 +172,8 @@ class VideoAnalyzerGUI(QMainWindow):
         stack_layout.addWidget(self.stack)
         
         content_layout.addWidget(stack_wrapper)
-        content_splitter.addWidget(content_container)
-
-        # Log Panel (ProgressPanel) - Bottom left, small width
-        self.progress_panel = ProgressPanel(self, self, theme_manager=self.theme_manager)
-        self.progress_panel.setMinimumWidth(280)
-        self.progress_panel.setMaximumWidth(350)
-        self.progress_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        content_splitter.addWidget(self.progress_panel)
-        
-        # Set sizes: main content gets most space, log panel gets fixed smaller width
-        content_splitter.setSizes([1000, 300])
-        content_splitter.setStretchFactor(0, 1)
-        content_splitter.setStretchFactor(1, 0)
-
-        right_layout.addWidget(content_splitter)
-        main_layout.addWidget(right_container)
+        right_layout.addWidget(content_container)
+        main_layout.addWidget(right_container, stretch=1)
 
         # Build pages as cards (progress and subscription removed from stack, shown separately)
         self.url_input_panel = URLInputPanel(self.stack, self, theme_manager=self.theme_manager)
