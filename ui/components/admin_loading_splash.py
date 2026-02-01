@@ -153,7 +153,7 @@ class AdminLoadingSplash(QWidget):
             QWidget {{
                 background-color: {bg_color};
                 border: 2px solid {border_color};
-                border-radius: {self.ds.border_radius.radius_lg}px;
+                border-radius: {self.ds.radius.lg}px;
             }}
         """)
 
@@ -165,8 +165,8 @@ class AdminLoadingSplash(QWidget):
                 stop:0 {primary_color},
                 stop:0.5 {secondary_color},
                 stop:1 {primary_color});
-            border-top-left-radius: {self.ds.border_radius.radius_lg}px;
-            border-top-right-radius: {self.ds.border_radius.radius_lg}px;
+            border-top-left-radius: {self.ds.radius.lg}px;
+            border-top-right-radius: {self.ds.radius.lg}px;
         """)
 
         # Logo/Icon area (geometric design)
@@ -175,7 +175,7 @@ class AdminLoadingSplash(QWidget):
         logo_container.setStyleSheet(f"""
             background-color: {surface_color};
             border: 3px solid {border_color};
-            border-radius: {self.ds.border_radius.radius_full}px;
+            border-radius: {self.ds.radius.full}px;
         """)
 
         # Inner logo circle

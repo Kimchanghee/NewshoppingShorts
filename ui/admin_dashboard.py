@@ -101,7 +101,7 @@ def _styled_msg_box(parent, title: str, message: str, icon_type: str = "info"):
             background-color: {get_color('primary')};
             color: white;
             border: none;
-            border-radius: {ds.border_radius.radius_base}px;
+            border-radius: {ds.radius.base}px;
             padding: {ds.spacing.space_2}px {ds.spacing.space_5}px;
             font-weight: bold;
             min-width: 80px;
@@ -260,7 +260,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('surface')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: {get_color('border')};
@@ -321,7 +321,7 @@ class AdminDashboard(QMainWindow):
         card.setGeometry(x, y, w, h)
         card.setStyleSheet(f"""
             background-color: {get_color('surface')};
-            border-radius: {ds.border_radius.radius_md}px;
+            border-radius: {ds.radius.md}px;
             border-left: 4px solid {color};
         """)
 
@@ -362,7 +362,7 @@ class AdminDashboard(QMainWindow):
                 color: {get_color('primary')};
                 border: none;
                 border-bottom: 2px solid {get_color('primary')};
-                border-radius: {ds.border_radius.radius_none}px;
+                border-radius: {ds.radius.none}px;
                 font-weight: bold;
             }}
         """
@@ -372,7 +372,7 @@ class AdminDashboard(QMainWindow):
                 color: {get_color('text_muted')};
                 border: none;
                 border-bottom: 2px solid transparent;
-                border-radius: {ds.border_radius.radius_none}px;
+                border-radius: {ds.radius.none}px;
             }}
             QPushButton:hover {{
                 color: {get_color('text_primary')};
@@ -410,7 +410,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('surface')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: 5px {ds.spacing.space_4}px;
             }}
             QLineEdit::placeholder {{
@@ -435,7 +435,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('surface')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: 5px {ds.spacing.space_4}px;
             }}
             QComboBox::drop-down {{
@@ -508,7 +508,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('surface')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_sm}px;
+                border-radius: {ds.radius.sm}px;
                 gridline-color: {get_color('border')};
                 selection-background-color: {get_color('primary')};
                 selection-color: {get_color('text_primary')};
@@ -738,7 +738,7 @@ class AdminDashboard(QMainWindow):
         # Gray theme
         c_norm = get_color("text_muted")
         c_hov = get_color("border")
-        pw_btn.setStyleSheet(base_style % (c_norm, ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_hov))
+        pw_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_hov))
         pw_btn.clicked.connect(lambda: self._show_password_info(username, hashed_password))
 
         # 2. Extension (Green/Success)
@@ -746,7 +746,7 @@ class AdminDashboard(QMainWindow):
         ext_btn.setGeometry(45, 5, 50, 30)
         ext_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("info") # Blue
-        ext_btn.setStyleSheet(base_style % (c_norm, ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_norm))
+        ext_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_norm))
         ext_btn.clicked.connect(lambda: self._extend_subscription(user_id, username))
         
         # 3. Status (Yellow/Warning)
@@ -754,7 +754,7 @@ class AdminDashboard(QMainWindow):
         stat_btn.setGeometry(100, 5, 50, 30)
         stat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("warning")
-        stat_btn.setStyleSheet(base_style % (c_norm, ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_norm))
+        stat_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_norm))
         stat_btn.clicked.connect(lambda: self._check_work_status(user_id, username))
 
         # 4. History (Gray/Info)
@@ -763,7 +763,7 @@ class AdminDashboard(QMainWindow):
         hist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("text_primary")
         c_hov = get_color("surface_variant")
-        hist_btn.setStyleSheet(base_style % (get_color("border"), ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_hov))
+        hist_btn.setStyleSheet(base_style % (get_color("border"), ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_hov))
         hist_btn.clicked.connect(lambda: self._show_login_history(user_id, username))
 
         # 5. Delete (Red/Danger)
@@ -771,7 +771,7 @@ class AdminDashboard(QMainWindow):
         del_btn.setGeometry(210, 5, 50, 30)
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("error")
-        del_btn.setStyleSheet(base_style % (c_norm, ds.border_radius.radius_sm, ds.typography.size_2xs // 2, c_norm, c_norm))
+        del_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_norm))
         del_btn.clicked.connect(lambda: self._delete_user(user_id, username))
 
         return widget
@@ -825,7 +825,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_2}px;
             }}
         """)
@@ -855,7 +855,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: {get_color('border')};
@@ -978,7 +978,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('success')};
                 color: white;
                 border: none;
-                border-radius: {ds.border_radius.radius_sm}px;
+                border-radius: {ds.radius.sm}px;
             }}
             QPushButton:hover {{
                 background-color: #00e676;
@@ -995,7 +995,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('error')};
                 color: white;
                 border: none;
-                border-radius: {ds.border_radius.radius_sm}px;
+                border-radius: {ds.radius.sm}px;
             }}
             QPushButton:hover {{
                 background-color: #ff8a80;
@@ -1163,7 +1163,7 @@ class AdminDashboard(QMainWindow):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: {get_color('border')};
@@ -1293,7 +1293,7 @@ class ApproveDialog(QDialog):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_2}px;
             }}
         """)
@@ -1319,7 +1319,7 @@ class ApproveDialog(QDialog):
                 background-color: {get_color('success')};
                 color: white;
                 border: none;
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:checked {{
                 background-color: {get_color('success')};
@@ -1343,7 +1343,7 @@ class ApproveDialog(QDialog):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_2}px;
             }}
             QSpinBox:disabled {{
@@ -1365,7 +1365,7 @@ class ApproveDialog(QDialog):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: {get_color('border')};
@@ -1381,7 +1381,7 @@ class ApproveDialog(QDialog):
                 background-color: {get_color('success')};
                 color: white;
                 border: none;
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: #00e676;
@@ -1428,7 +1428,7 @@ class RejectDialog(QDialog):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_3}px;
             }}
         """)
@@ -1441,7 +1441,7 @@ class RejectDialog(QDialog):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: {get_color('border')};
@@ -1457,7 +1457,7 @@ class RejectDialog(QDialog):
                 background-color: {get_color('error')};
                 color: white;
                 border: none;
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: #ff8a80;
@@ -1496,7 +1496,7 @@ class ExtendDialog(QDialog):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_2}px;
             }}
         """)
@@ -1514,7 +1514,7 @@ class ExtendDialog(QDialog):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: {get_color('border')};
@@ -1530,7 +1530,7 @@ class ExtendDialog(QDialog):
                 background-color: {get_color('info')};
                 color: white;
                 border: none;
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: #82b1ff;
@@ -1582,7 +1582,7 @@ class LoginHistoryDialog(QDialog):
                 background-color: {get_color('surface')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 gridline-color: {get_color('border')};
             }}
             QTableWidget::item {{
@@ -1609,7 +1609,7 @@ class LoginHistoryDialog(QDialog):
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
             QPushButton:hover {{
                 background-color: {get_color('border')};

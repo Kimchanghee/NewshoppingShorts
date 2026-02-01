@@ -70,7 +70,7 @@ class RoundedButton(QPushButton, ThemedMixin):
                 QPushButton {{
                     background-color: {primary};
                     color: white;
-                    border-radius: {self.ds.border_radius.radius_base}px;
+                    border-radius: {self.ds.radius.base}px;
                     padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
                     font-weight: bold;
                     border: none;
@@ -88,7 +88,7 @@ class RoundedButton(QPushButton, ThemedMixin):
                 QPushButton {{
                     background-color: {surface_variant};
                     color: {text_primary};
-                    border-radius: {self.ds.border_radius.radius_base}px;
+                    border-radius: {self.ds.radius.base}px;
                     padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
                     border: 1px solid {border_light};
                     font-size: {self.ds.typography.size_sm}px;
@@ -103,7 +103,7 @@ class RoundedButton(QPushButton, ThemedMixin):
                     background-color: transparent;
                     color: {primary};
                     border: 1px solid {primary};
-                    border-radius: {self.ds.border_radius.radius_base}px;
+                    border-radius: {self.ds.radius.base}px;
                     padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
                     font-size: {self.ds.typography.size_sm}px;
                 }}
@@ -117,7 +117,7 @@ class RoundedButton(QPushButton, ThemedMixin):
                     background-color: {get_color('background')};
                     color: {error};
                     border: 1px solid {error};
-                    border-radius: {self.ds.border_radius.radius_base}px;
+                    border-radius: {self.ds.radius.base}px;
                     padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
                     font-size: {self.ds.typography.size_sm}px;
                 }}
@@ -142,7 +142,7 @@ class RoundedFrame(QFrame, ThemedMixin):
         super().__init__(parent)
         self.ds = get_design_system()
         # Use design system radius if not specified
-        self.radius = radius if radius is not None else self.ds.border_radius.radius_lg
+        self.radius = radius if radius is not None else self.ds.radius.lg
         self._bg_key = bg_key
         self.__init_themed__(theme_manager)
         self.apply_theme()
@@ -179,7 +179,7 @@ class RoundedEntry(QLineEdit, ThemedMixin):
                 background-color: {bg};
                 color: {fg};
                 border: 1px solid {border};
-                border-radius: {self.ds.border_radius.radius_base}px;
+                border-radius: {self.ds.radius.base}px;
                 padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_3}px;
                 font-size: {self.ds.typography.size_sm}px;
             }}

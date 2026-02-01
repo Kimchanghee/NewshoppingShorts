@@ -57,7 +57,7 @@ class VoiceCard(QFrame, ThemedMixin):
                 background-color: {icon_color};
                 color: white;
                 border: none;
-                border-radius: {ds.border_radius.radius_sm}px;
+                border-radius: {ds.radius.sm}px;
             }}
         """)
         top_row.addWidget(self.play_btn)
@@ -84,7 +84,7 @@ class VoiceCard(QFrame, ThemedMixin):
             VoiceCard {{
                 background-color: {bg};
                 border: {thickness}px solid {border};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
         """)
         
@@ -93,7 +93,7 @@ class VoiceCard(QFrame, ThemedMixin):
         self.check_label.setStyleSheet(f"""
             background-color: {check_bg};
             color: {check_fg};
-            border-radius: {ds.border_radius.radius_sm}px;
+            border-radius: {ds.radius.sm}px;
         """)
         
         text_primary = get_color('text_primary')
@@ -129,7 +129,7 @@ class VoicePanel(QFrame, ThemedMixin):
             background-color: {get_color('primary')};
             color: white;
             padding: {ds.spacing.space_1}px {ds.spacing.space_3}px;
-            border-radius: {ds.border_radius.radius_sm}px;
+            border-radius: {ds.radius.sm}px;
             font-weight: {ds.typography.weight_bold};
             font-size: {ds.typography.size_xs}px;
         """)
@@ -223,7 +223,7 @@ class VoicePanel(QFrame, ThemedMixin):
             QPushButton {{
                 background-color: {get_color('surface_variant')};
                 color: {text_secondary};
-                border-radius: {ds.border_radius.radius_sm}px;
+                border-radius: {ds.radius.sm}px;
                 padding: 6px {ds.spacing.space_4}px;
                 border: none;
                 font-size: {ds.typography.size_sm}px;

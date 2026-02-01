@@ -16,12 +16,12 @@ class AnimatedProgressBar(QProgressBar):
         self.setStyleSheet(f"""
             QProgressBar {{
                 border: 1px solid {get_color('border_light')};
-                border-radius: {self.ds.border_radius.radius_sm}px;
+                border-radius: {self.ds.radius.sm}px;
                 text-align: center;
                 background-color: {get_color('surface_variant')};
             }}
             QProgressBar::chunk {{
                 background-color: {get_color('primary')};
-                border-radius: {self.ds.border_radius.radius_sm}px;
+                border-radius: {self.ds.radius.sm}px;
             }}
         """)

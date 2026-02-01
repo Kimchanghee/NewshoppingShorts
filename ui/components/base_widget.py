@@ -106,7 +106,7 @@ class ThemedFrame(QFrame, ThemedMixin):
             QFrame {{
                 background-color: {bg_color};
                 border: none;
-                border-radius: {self.ds.border_radius.radius_base}px;
+                border-radius: {self.ds.radius.base}px;
             }}
         """)
 
@@ -161,7 +161,7 @@ class ThemedButton(QPushButton, ThemedMixin):
                 QPushButton {{
                     background-color: {primary};
                     color: {primary_text};
-                    border-radius: {self.ds.border_radius.radius_base}px;
+                    border-radius: {self.ds.radius.base}px;
                     padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
                     font-weight: bold;
                     font-size: {self.ds.typography.size_sm}px;
@@ -175,7 +175,7 @@ class ThemedButton(QPushButton, ThemedMixin):
                 QPushButton {{
                     background-color: {bg_secondary};
                     color: {text_primary};
-                    border-radius: {self.ds.border_radius.radius_base}px;
+                    border-radius: {self.ds.radius.base}px;
                     padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
                     font-size: {self.ds.typography.size_sm}px;
                 }}
@@ -188,7 +188,7 @@ class ThemedButton(QPushButton, ThemedMixin):
                 QPushButton {{
                     background-color: transparent;
                     color: {primary};
-                    border-radius: {self.ds.border_radius.radius_base}px;
+                    border-radius: {self.ds.radius.base}px;
                     padding: {self.ds.spacing.space_2}px {self.ds.spacing.space_4}px;
                     font-size: {self.ds.typography.size_sm}px;
                 }}

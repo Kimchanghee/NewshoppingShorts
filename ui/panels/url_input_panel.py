@@ -99,7 +99,7 @@ class URLInputPanel(QWidget):
             color: {get_color('text_secondary')}; 
             background: {get_color('surface_variant')}; 
             padding: {ds.spacing.space_1}px {ds.spacing.space_2}px; 
-            border-radius: {ds.border_radius.radius_sm}px;
+            border-radius: {ds.radius.sm}px;
         """)
         # Link to gui for updates
         self.gui.output_folder_label = self.folder_path_lbl 
@@ -130,7 +130,7 @@ class URLInputPanel(QWidget):
                 background-color: {get_color('surface_variant')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border')};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_2}px;
                 font-family: {ds.typography.font_family_primary};
                 font-size: {ds.typography.size_sm}px;
@@ -166,7 +166,7 @@ class URLInputPanel(QWidget):
                 background-color: {bg_color};
                 color: {text_color};
                 border: none;
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
                 padding: 0 {btn_size.padding_x}px;
                 height: {btn_size.height}px;
                 font-family: {ds.typography.font_family_primary};

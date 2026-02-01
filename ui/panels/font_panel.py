@@ -79,7 +79,7 @@ class FontCard(QFrame, ThemedMixin):
             FontCard {{
                 background-color: {bg};
                 border: {thickness}px solid {border};
-                border-radius: {ds.border_radius.radius_base}px;
+                border-radius: {ds.radius.base}px;
             }}
         """)
         
@@ -118,7 +118,7 @@ class FontPanel(QFrame, ThemedMixin):
             background-color: {get_color('primary')};
             color: white;
             padding: {ds.spacing.space_1}px {ds.spacing.space_3}px;
-            border-radius: {ds.border_radius.radius_sm}px;
+            border-radius: {ds.radius.sm}px;
             font-weight: {ds.typography.weight_bold};
             font-size: {ds.typography.size_xs}px;
         """)

@@ -52,7 +52,7 @@ class SubscriptionStatusWidget(QWidget):
             QPushButton {{
                 background-color: {get_color('primary')};
                 color: {get_color('surface')};
-                border-radius: {self.ds.border_radius.radius_sm}px;
+                border-radius: {self.ds.radius.sm}px;
                 padding: {self.ds.spacing.space_1}px {self.ds.spacing.space_3}px;
                 font-size: {self.ds.typography.size_xs}px;
                 font-weight: bold;

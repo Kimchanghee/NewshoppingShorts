@@ -27,12 +27,12 @@ class ProgressPanel(QFrame, ThemedMixin):
         
         # Current Task Display
         self.status_container = QFrame()
-        self.status_container.setStyleSheet(f"background-color: {get_color('error')}; border-radius: {ds.border_radius.radius_sm}px; padding: 2px;")
+        self.status_container.setStyleSheet(f"background-color: {get_color('error')}; border-radius: {ds.radius.sm}px; padding: 2px;")
         status_layout = QVBoxLayout(self.status_container)
         
         self.status_inner = QFrame()
         inner_bg = get_color('surface_variant') if is_dark_mode() else "#FEF2F2"
-        self.status_inner.setStyleSheet(f"background-color: {inner_bg}; border-radius: {ds.border_radius.radius_sm - 2}px;")
+        self.status_inner.setStyleSheet(f"background-color: {inner_bg}; border-radius: {ds.radius.sm - 2}px;")
         inner_layout = QVBoxLayout(self.status_inner)
         
         task_fg = get_color('error') if is_dark_mode() else "#DC2626"
@@ -132,7 +132,7 @@ class ProgressPanel(QFrame, ThemedMixin):
         
         if status == 'active':
             indicator['title_label'].setStyleSheet(f"color: {color}; font-size: {ds.typography.size_xs}px; font-weight: {ds.typography.weight_bold};")
-            indicator['row_frame'].setStyleSheet(f"background-color: {get_color('surface_variant')}; border-radius: {ds.border_radius.radius_sm}px;")
+            indicator['row_frame'].setStyleSheet(f"background-color: {get_color('surface_variant')}; border-radius: {ds.radius.sm}px;")
         else:
             indicator['title_label'].setStyleSheet(f"color: {get_color('text_primary')}; font-size: {ds.typography.size_xs}px;")
             indicator['row_frame'].setStyleSheet("background-color: transparent;")
@@ -155,7 +155,7 @@ class ProgressPanel(QFrame, ThemedMixin):
         text_primary = get_color('text_primary')
         text_secondary = get_color('text_secondary')
         
-        self.setStyleSheet(f"background-color: {bg}; border: 1px solid {border}; border-radius: {ds.border_radius.radius_base}px;")
+        self.setStyleSheet(f"background-color: {bg}; border: 1px solid {border}; border-radius: {ds.radius.base}px;")
         self.title_label.setStyleSheet(f"color: {text_primary}; font-weight: {ds.typography.weight_bold}; border: none; font-size: {ds.typography.size_xl}px;")
         self.overall_title.setStyleSheet(f"color: {text_primary}; border: none; font-weight: {ds.typography.weight_bold};")
         self.gui.overall_numeric_label.setStyleSheet(f"color: {get_color('primary')}; border: none; font-size: {ds.typography.size_lg}px; font-weight: {ds.typography.weight_bold};")
@@ -164,6 +164,6 @@ class ProgressPanel(QFrame, ThemedMixin):
         # Current Task Highlight
         inner_bg = "#1F2937" if is_dark_mode() else "#FEF2F2"
         task_fg = get_color('error') if is_dark_mode() else "#DC2626"
-        self.status_inner.setStyleSheet(f"background-color: {inner_bg}; border-radius: {ds.border_radius.radius_sm - 2}px; border: none;")
+        self.status_inner.setStyleSheet(f"background-color: {inner_bg}; border-radius: {ds.radius.sm - 2}px; border: none;")
         self.gui.current_task_label.setStyleSheet(f"color: {task_fg}; font-size: {ds.typography.size_sm}px; font-weight: {ds.typography.weight_bold}; padding: {ds.spacing.space_2}px; border: none;")
-        self.status_container.setStyleSheet(f"background-color: {get_color('error')}; border-radius: {ds.border_radius.radius_sm}px; padding: 2px; border: none;")
+        self.status_container.setStyleSheet(f"background-color: {get_color('error')}; border-radius: {ds.radius.sm}px; padding: 2px; border: none;")
