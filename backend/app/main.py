@@ -185,7 +185,7 @@ async def health():
 APP_VERSION_INFO = {
     "version": "1.0.1", # Bumped for testing
     "min_required_version": "1.0.0",
-    "download_url": "http://127.0.0.1:8000/static/ssmaker_setup.exe", # Local test URL
+    "download_url": "https://ssmaker-auth-api-1049571775048.us-central1.run.app/static/ssmaker_setup.exe", # Production URL
     # "download_url": "https://storage.googleapis.com/your-bucket/ssmaker_setup.exe", # Production GCS URL
     "release_notes": "버전 1.0.1 업데이트: 자동 업데이트 기능이 추가되었습니다.",
     "is_mandatory": False,
