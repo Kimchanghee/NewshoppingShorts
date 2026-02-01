@@ -170,7 +170,13 @@ def _friendly_login_message(login_object: Dict[str, Any]) -> str:
     Convert server/login status codes into user-friendly Korean messages.
     """
     status = login_object.get("status")
-    message = str(login_object.get("message") or "").strip()
+    # Clean up the message, removing status codes if they are prepended
+    raw_message = str(login_object.get("message") or "").strip()
+    
+    # If the server returned a clear Korean message (not just an error code), use it.
+    # We check if it contains Hangul or is long enough to be a real message.
+    if raw_message and raw_message not in ["EU001", "EU002", "EU003", "EU004", "EU005"] and len(raw_message) > 10:
+         return raw_message
 
     # Map known/likely status codes from the backend
     if status in ("EU001", "BAD_REQUEST", "MISSING_FIELDS"):
@@ -189,13 +195,6 @@ def _friendly_login_message(login_object: Dict[str, Any]) -> str:
     if status in ("EU429", 429):
         # 서버의 로그인 시도 제한 안내를 숨기고 일반 오류로 처리
         return "아이디 또는 비밀번호가 올바르지 않습니다."
-
-    # If server already sent a readable message, keep it
-    if message:
-        if "Too many login attempts" in message:
-            # 사용자에게 노출하지 않고 일반 오류로 통일
-            return "아이디 또는 비밀번호가 올바르지 않습니다."
-        return message
 
     # Fallback generic message
     return "로그인에 실패했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요."
