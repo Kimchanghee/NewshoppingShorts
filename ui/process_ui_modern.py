@@ -73,7 +73,7 @@ class ChecklistItem(QFrame):
         
         self.setStyleSheet(
             f"background-color: {get_color('surface_variant')}; "
-            f"border-radius: {ds.radius.radius_base}px;"
+            f"border-radius: {ds.radius.base}px;"
         )
 
     def update_status(self, status, message=None):
@@ -118,7 +118,7 @@ class ModernProcessUi:
         self.frame.setGeometry(QtCore.QRect(10, 10, 600, 540))
         self.frame.setStyleSheet(
             f"background-color: {get_color('background')}; "
-            f"border-radius: {ds.radius.radius_xl}px;"
+            f"border-radius: {ds.radius.xl}px;"
         )
 
         shadow = QGraphicsDropShadowEffect()
@@ -131,7 +131,7 @@ class ModernProcessUi:
         self.headerFrame.setStyleSheet(
             f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
             f"stop:0 {get_color('primary')}, stop:1 {get_color('secondary')}); "
-            f"border-radius: {ds.radius.radius_xl}px;"
+            f"border-radius: {ds.radius.xl}px;"
         )
 
         self.statusLabel = QLabel("시스템 점검 중...", self.headerFrame)
@@ -168,12 +168,12 @@ class ModernProcessUi:
         self.progressBar.setStyleSheet(f"""
             QProgressBar {{
                 background-color: {get_color('surface_variant')};
-                border-radius: {ds.radius.radius_sm}px;
+                border-radius: {ds.radius.sm}px;
                 text-align: center;
             }}
             QProgressBar::chunk {{
                 background-color: {get_color('primary')};
-                border-radius: {ds.radius.radius_sm}px;
+                border-radius: {ds.radius.sm}px;
             }}
         """)
         
