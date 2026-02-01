@@ -17,9 +17,9 @@ AdminDashboard는 다음과 같이 서버와 동기화됩니다:
 
 import sys
 import os
-from PyQt5.QtWidgets import QApplication
-from PyQt5.QtGui import QFont
-from PyQt5.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtGui import QFont
+from PyQt6.QtCore import QTimer
 from ui.components.admin_loading_splash import AdminLoadingSplash
 
 # Load environment variables from .env file
@@ -109,7 +109,7 @@ def main():
     # Load dashboard after 100ms to allow splash to render first
     QTimer.singleShot(100, load_dashboard)
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())
 
 
 if __name__ == "__main__":

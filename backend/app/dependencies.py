@@ -6,7 +6,7 @@ API 인증 및 권한 검사를 위한 의존성 함수들
 """
 import secrets
 from fastapi import Header, HTTPException, status
-from app.config import get_settings
+from app.configuration import get_settings
 
 settings = get_settings()
 

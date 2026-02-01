@@ -9,7 +9,7 @@ from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
 from app.utils.password import verify_password, get_dummy_hash
 from app.utils.jwt_handler import create_access_token, decode_access_token
-from app.config import get_settings
+from app.configuration import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()

@@ -24,8 +24,8 @@ secrets_manager = get_secrets_manager()
 # ???????? ?  (?? ? ? ?)
 _ERROR_MESSAGES = {
     "timeout": "요청 시간이 초과되었습니다. 잠시 후 다시 시도해주세요.",
-    "connection": "서버에 연결하지 못했습니다. 네트워크를 확인해주세요.",
-    "network": "네트워크 오류가 발생했습니다.",
+    "connection": "서버 접속이 불안정 합니다. 고객센터에 문의 해주세요",
+    "network": "서버 접속이 불안정 합니다. 고객센터에 문의 해주세요",
     "parse": "서버 응답을 처리하지 못했습니다.",
     "unexpected": "알 수 없는 오류가 발생했습니다.",
     "invalid_input": "입력값이 올바르지 않습니다.",
@@ -182,9 +182,9 @@ def _friendly_login_message(login_object: Dict[str, Any]) -> str:
     if status in ("EU001", "BAD_REQUEST", "MISSING_FIELDS"):
         return "필수 정보가 누락되었거나 형식이 잘못되었습니다. 아이디/비밀번호를 확인하세요."
     if status in (False, "EU004", "AUTH_FAIL", "INVALID_CREDENTIALS"):
-        return "아이디 또는 비밀번호가 올바르지 않습니다."
+        return "아이디 또는 비밀번호가 틀렸습니다."
     if status in ("EU003", "USER_NOT_FOUND", "NOT_FOUND"):
-        return "해당 계정을 찾을 수 없습니다."
+        return "회원 정보가 없습니다. 회원가입 진행해주세요"
     if status in ("EU002", "LOCKED", "BLOCKED"):
         return "계정이 잠겨 있거나 비활성화되었습니다. 관리자에게 문의하세요."
 
@@ -510,7 +510,7 @@ def getVersion() -> str:
 
 
 def submitRegistrationRequest(
-    name: str, username: str, password: str, contact: str
+    name: str, username: str, password: str, contact: str, email: str
 ) -> Dict[str, Any]:
     """
     Submit a registration request to the server.
@@ -520,6 +520,7 @@ def submitRegistrationRequest(
         name: ?
  ?        username: ??????        password: ?
         contact: ??
+        email: ???
     Returns:
         Response dict with 'success' boolean and optional 'message'
     """
@@ -546,11 +547,19 @@ def submitRegistrationRequest(
             "message": "연락처는 숫자/하이픈 10자리 이상 입력해주세요.",
         }
 
+    # Email validation (simple check)
+    if not email or "@" not in email or "." not in email:
+        return {
+            "success": False,
+            "message": "올바른 이메일 주소를 입력해주세요.",
+        }
+
     body = {
         "name": name.strip(),
         "username": username.strip().lower(),
         "password": password,
         "contact": cleaned_contact,
+        "email": email.strip()
     }
 
     try:

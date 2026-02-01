@@ -262,7 +262,8 @@ class RegistrationRequestDialog(QWidget):
     회원가입 요청 다이얼로그 (좌표 기반, 모던 스타일)
     """
 
-    registrationRequested = pyqtSignal(str, str, str, str)
+    registrationRequested = pyqtSignal(str, str, str, str, str)  # name, username, password, contact, email
+
     backRequested = pyqtSignal()
 
     def __init__(self, parent=None):
@@ -271,7 +272,7 @@ class RegistrationRequestDialog(QWidget):
         self._setup_ui()
 
     def _setup_ui(self):
-        self.setFixedSize(400, 650)
+        self.setFixedSize(400, 720)  # Height increased for Email field
         self.setStyleSheet("background-color: #ffffff;")
 
         # 뒤로가기 버튼
@@ -318,22 +319,35 @@ class RegistrationRequestDialog(QWidget):
         self.nameEdit.setPlaceholderText("이름을 입력하세요")
         self._apply_input_style(self.nameEdit)
 
-        # 아이디 + 중복확인
+        # 이메일
+        self.emailLabel = QLabel(self)
+        self.emailLabel.setGeometry(QtCore.QRect(30, 225, 100, 25))
+        self.emailLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
+        self.emailLabel.setStyleSheet("color: #374151; background: transparent;")
+        self.emailLabel.setText("이메일")
+
+        self.emailEdit = QLineEdit(self)
+        self.emailEdit.setGeometry(QtCore.QRect(30, 250, 340, 42))
+        self.emailEdit.setFont(QFont(FONT_FAMILY, 11))
+        self.emailEdit.setPlaceholderText("example@email.com")
+        self._apply_input_style(self.emailEdit)
+
+        # 아이디 + 중복확인 (Shifted down +75)
         self.usernameLabel = QLabel(self)
-        self.usernameLabel.setGeometry(QtCore.QRect(30, 225, 100, 25))
+        self.usernameLabel.setGeometry(QtCore.QRect(30, 300, 100, 25))
         self.usernameLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         self.usernameLabel.setStyleSheet("color: #374151; background: transparent;")
         self.usernameLabel.setText("아이디")
 
         self.usernameEdit = QLineEdit(self)
-        self.usernameEdit.setGeometry(QtCore.QRect(30, 250, 240, 42))
+        self.usernameEdit.setGeometry(QtCore.QRect(30, 325, 240, 42))
         self.usernameEdit.setFont(QFont(FONT_FAMILY, 11))
         self.usernameEdit.setPlaceholderText("영문, 숫자, 밑줄(_)만 사용")
         self._apply_input_style(self.usernameEdit)
         self.usernameEdit.textChanged.connect(self._on_username_changed)
 
         self.checkUsernameBtn = QPushButton(self)
-        self.checkUsernameBtn.setGeometry(QtCore.QRect(280, 250, 90, 42))
+        self.checkUsernameBtn.setGeometry(QtCore.QRect(280, 325, 90, 42))
         self.checkUsernameBtn.setFont(QFont(FONT_FAMILY, 10))
         self.checkUsernameBtn.setText("중복확인")
         self.checkUsernameBtn.setStyleSheet("""
@@ -353,61 +367,61 @@ class RegistrationRequestDialog(QWidget):
         self.checkUsernameBtn.clicked.connect(self._check_username)
 
         self.usernameStatusLabel = QLabel(self)
-        self.usernameStatusLabel.setGeometry(QtCore.QRect(30, 294, 340, 18))
+        self.usernameStatusLabel.setGeometry(QtCore.QRect(30, 369, 340, 18))
         self.usernameStatusLabel.setFont(QFont(FONT_FAMILY, 9))
         self.usernameStatusLabel.setStyleSheet("color: #6B7280; background: transparent;")
         self.usernameStatusLabel.setText("")
 
-        # 비밀번호
+        # 비밀번호 (Shifted down +75)
         self.passwordLabel = QLabel(self)
-        self.passwordLabel.setGeometry(QtCore.QRect(30, 320, 100, 25))
+        self.passwordLabel.setGeometry(QtCore.QRect(30, 395, 100, 25))
         self.passwordLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         self.passwordLabel.setStyleSheet("color: #374151; background: transparent;")
         self.passwordLabel.setText("비밀번호")
 
         self.passwordEdit = QLineEdit(self)
-        self.passwordEdit.setGeometry(QtCore.QRect(30, 345, 340, 42))
+        self.passwordEdit.setGeometry(QtCore.QRect(30, 420, 340, 42))
         self.passwordEdit.setFont(QFont(FONT_FAMILY, 11))
         self.passwordEdit.setPlaceholderText("6자 이상 입력")
         self.passwordEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.passwordEdit)
 
         self.passwordHintLabel = QLabel(self)
-        self.passwordHintLabel.setGeometry(QtCore.QRect(30, 389, 340, 18))
+        self.passwordHintLabel.setGeometry(QtCore.QRect(30, 464, 340, 18))
         self.passwordHintLabel.setFont(QFont(FONT_FAMILY, 9))
         self.passwordHintLabel.setStyleSheet("color: #9CA3AF; background: transparent;")
         self.passwordHintLabel.setText("※ 영문, 숫자 포함 6자 이상 권장")
 
-        # 비밀번호 확인
+        # 비밀번호 확인 (Shifted down +75)
         self.passwordConfirmLabel = QLabel(self)
-        self.passwordConfirmLabel.setGeometry(QtCore.QRect(30, 410, 120, 25))
+        self.passwordConfirmLabel.setGeometry(QtCore.QRect(30, 485, 120, 25))
         self.passwordConfirmLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         self.passwordConfirmLabel.setStyleSheet("color: #374151; background: transparent;")
         self.passwordConfirmLabel.setText("비밀번호 확인")
 
         self.passwordConfirmEdit = QLineEdit(self)
-        self.passwordConfirmEdit.setGeometry(QtCore.QRect(30, 435, 340, 42))
+        self.passwordConfirmEdit.setGeometry(QtCore.QRect(30, 510, 340, 42))
         self.passwordConfirmEdit.setFont(QFont(FONT_FAMILY, 11))
         self.passwordConfirmEdit.setPlaceholderText("비밀번호를 다시 입력")
         self.passwordConfirmEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.passwordConfirmEdit)
 
-        # 연락처
+        # 연락처 (Shifted down +75)
         self.contactLabel = QLabel(self)
-        self.contactLabel.setGeometry(QtCore.QRect(30, 485, 100, 25))
+        self.contactLabel.setGeometry(QtCore.QRect(30, 560, 100, 25))
         self.contactLabel.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         self.contactLabel.setStyleSheet("color: #374151; background: transparent;")
         self.contactLabel.setText("연락처")
 
         self.contactEdit = QLineEdit(self)
-        self.contactEdit.setGeometry(QtCore.QRect(30, 510, 340, 42))
+        self.contactEdit.setGeometry(QtCore.QRect(30, 585, 340, 42))
         self.contactEdit.setFont(QFont(FONT_FAMILY, 11))
         self.contactEdit.setPlaceholderText("010-1234-5678")
         self._apply_input_style(self.contactEdit)
 
-        # 제출 버튼
+        # 제출 버튼 (Shifted down +75)
         self.submitButton = QPushButton(self)
-        self.submitButton.setGeometry(QtCore.QRect(30, 565, 340, 45))
+        self.submitButton.setGeometry(QtCore.QRect(30, 640, 340, 45))
         self.submitButton.setFont(QFont(FONT_FAMILY, 12, QFont.Weight.Bold))
         self.submitButton.setText("회원가입")
         self.submitButton.setStyleSheet("""
@@ -506,9 +520,13 @@ class RegistrationRequestDialog(QWidget):
         password_confirm = self.passwordConfirmEdit.text()
         contact_raw = self.contactEdit.text().strip()
         contact = re.sub(r"[^0-9]", "", contact_raw)
+        email = self.emailEdit.text().strip()
 
         if not name or len(name) < 2:
             self._show_error("가입자 명은 2자 이상 입력해주세요.")
+            return
+        if not email or "@" not in email or "." not in email:
+            self._show_error("올바른 이메일 주소를 입력해주세요.")
             return
         if not username or len(username) < 4:
             self._show_error("아이디는 4자 이상이어야 합니다.")
@@ -523,7 +541,9 @@ class RegistrationRequestDialog(QWidget):
             self._show_error("비밀번호는 6자 이상이어야 합니다.")
             return
         if password != password_confirm:
-            self._show_error("비밀번호가 일치하지 않습니다.")
+            self._show_error("비밀번호가 일치하지않습니다")
+            self.passwordEdit.clear()
+            self.passwordConfirmEdit.clear()
             return
         if len(contact) < 10:
             self._show_error("올바른 연락처를 입력해주세요.")
@@ -531,21 +551,23 @@ class RegistrationRequestDialog(QWidget):
 
         try:
             logger.info(
-                "[UI] Registration API call | name=%s username=%s contact=%s",
+                "[UI] Registration API call | name=%s username=%s contact=%s email=%s",
                 name,
                 username,
                 contact,
+                email
             )
             result = rest.submitRegistrationRequest(
                 name=name,
                 username=username,
                 password=password,
                 contact=contact,
+                email=email
             )
             if result.get("success"):
                 QMessageBox.information(self, "완료", "회원가입이 완료되었습니다! 바로 로그인해주세요.")
                 logger.info("[UI] Registration success | username=%s", username)
-                self.registrationRequested.emit(name, username, password, contact)
+                self.registrationRequested.emit(name, username, password, contact, email)
                 self.close()
             else:
                 logger.warning(
@@ -568,6 +590,7 @@ class RegistrationRequestDialog(QWidget):
 
     def clear_fields(self):
         self.nameEdit.clear()
+        self.emailEdit.clear()
         self.usernameEdit.clear()
         self.passwordEdit.clear()
         self.passwordConfirmEdit.clear()

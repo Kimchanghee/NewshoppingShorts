@@ -27,32 +27,7 @@ from app.utils.subscription_utils import calculate_subscription_expiry
 logger = logging.getLogger(__name__)
 
 
-def get_client_ip(request: Request) -> str:
-    """
-    Extract client IP from request with security validation.
-    Prioritizes Cloudflare-Connecting-IP for production environments.
-
-    Security: Prevents X-Forwarded-For spoofing by validating trusted proxies.
-    """
-    # Trust Cloudflare IP in production (most secure)
-    cf_ip = request.headers.get("CF-Connecting-IP")
-    if cf_ip:
-        return cf_ip.strip()
-
-    # Fallback to request.client (direct connection)
-    if request.client:
-        return request.client.host
-
-    # Last resort: X-Forwarded-For (validate first IP only)
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        # Take only the first IP (client IP), ignore proxy chain
-        client_ip = forwarded_for.split(",")[0].strip()
-        # Additional validation could go here
-        return client_ip
-
-    return "unknown"
-
+from app.utils.ip_utils import get_client_ip
 
 limiter = Limiter(key_func=get_client_ip)
 
@@ -65,6 +40,9 @@ class UserResponse(BaseModel):
     """사용자 응답 스키마 Status: Beta"""
     id: int
     username: str
+    email: Optional[str] = None
+    phone: Optional[str] = None
+    name: Optional[str] = None
     hashed_password: Optional[str] = None  # 관리자용 - 해시된 비밀번호
     created_at: Optional[datetime] = None
     subscription_expires_at: Optional[datetime] = None
@@ -121,9 +99,17 @@ async def list_users(
     """
     query = db.query(User)
 
-    # Search by username
+    # Search by username, name, email, or phone
     if search:
-        query = query.filter(User.username.ilike(f"%{search}%"))
+        from sqlalchemy import or_
+        query = query.filter(
+            or_(
+                User.username.ilike(f"%{search}%"),
+                User.name.ilike(f"%{search}%"),
+                User.email.ilike(f"%{search}%"),
+                User.phone.ilike(f"%{search}%")
+            )
+        )
 
     # Get total count
     total = query.count()

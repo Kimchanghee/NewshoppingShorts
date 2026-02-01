@@ -250,16 +250,23 @@ async def list_subscription_requests(
 
     # Pagination with user info
     offset = (page - 1) * page_size
-    requests = query.order_by(SubscriptionRequest.created_at.desc()).offset(offset).limit(page_size).all()
+    # Join with User to get username efficiently
+    results = (
+        query.join(User, SubscriptionRequest.user_id == User.id)
+        .order_by(SubscriptionRequest.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .with_entities(SubscriptionRequest, User.username)
+        .all()
+    )
 
-    # Build response with username
+    # Build response
     response_list = []
-    for req in requests:
-        user = db.query(User).filter(User.id == req.user_id).first()
+    for req, username in results:
         response_list.append(SubscriptionRequestResponse(
             id=req.id,
             user_id=req.user_id,
-            username=user.username if user else "Unknown",
+            username=username if username else "Unknown",
             status=SubscriptionRequestStatusEnum(req.status.value),
             requested_work_count=req.requested_work_count,
             message=req.message,

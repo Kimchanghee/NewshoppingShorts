@@ -5,9 +5,9 @@ A visually striking loading screen for the admin dashboard with dark theme,
 animated spinner, and smooth fade transitions.
 """
 
-from PyQt5.QtWidgets import QWidget, QLabel, QProgressBar
-from PyQt5.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, pyqtProperty
-from PyQt5.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QPainterPath, QRadialGradient
+from PyQt6.QtWidgets import QWidget, QLabel, QProgressBar, QApplication
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, pyqtProperty
+from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QPainterPath, QRadialGradient
 
 # Dark color scheme matching admin_dashboard.py
 DARK = {
@@ -59,7 +59,7 @@ class SpinningLoader(QWidget):
         gradient.setColorAt(1.0, QColor(DARK["primary"]))
 
         # Draw spinning arc segments
-        pen = QPen(gradient, 4, Qt.SolidLine, Qt.RoundCap)
+        pen = QPen(gradient, 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
 
         # Draw 3 arcs with gaps for spinning effect
@@ -78,7 +78,7 @@ class SpinningLoader(QWidget):
         glow_gradient.setColorAt(1.0, QColor(DARK["primary"] + "00"))
 
         painter.setBrush(glow_gradient)
-        painter.setPen(Qt.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(center, 25, 25)
 
 
@@ -118,7 +118,7 @@ class PulsingDot(QWidget):
         color.setAlphaF(self._opacity)
 
         painter.setBrush(color)
-        painter.setPen(Qt.NoPen)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(0, 0, 12, 12)
 
 
@@ -135,8 +135,8 @@ class AdminLoadingSplash(QWidget):
 
     def _setup_ui(self):
         # Frameless window with dark background
-        self.setWindowFlags(Qt.WindowStaysOnTopHint | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.WindowType.WindowStaysOnTopHint | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         # Fixed size
         self.setFixedSize(500, 400)
@@ -192,7 +192,7 @@ class AdminLoadingSplash(QWidget):
         # Title
         title = QLabel("관리자 대시보드", self.container)
         title.setGeometry(0, 310, 500, 35)
-        title.setAlignment(Qt.AlignCenter)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title.setFont(QFont(FONT_FAMILY, 18, QFont.Bold))
         title.setStyleSheet(f"""
             color: {DARK["text"]};
@@ -203,7 +203,7 @@ class AdminLoadingSplash(QWidget):
         # Subtitle
         self.subtitle = QLabel("로딩 중", self.container)
         self.subtitle.setGeometry(0, 350, 500, 25)
-        self.subtitle.setAlignment(Qt.AlignCenter)
+        self.subtitle.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.subtitle.setFont(QFont(FONT_FAMILY, 11))
         self.subtitle.setStyleSheet(f"""
             color: {DARK["text_dim"]};
@@ -225,8 +225,8 @@ class AdminLoadingSplash(QWidget):
 
     def _center_on_screen(self):
         """Center the splash screen on the primary screen"""
-        from PyQt5.QtWidgets import QApplication, QDesktopWidget
-        screen = QDesktopWidget().screenGeometry()
+        from PyQt6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen().geometry()
         size = self.geometry()
         self.move(
             (screen.width() - size.width()) // 2,
@@ -271,7 +271,7 @@ class AdminLoadingSplash(QWidget):
 # Standalone test
 if __name__ == "__main__":
     import sys
-    from PyQt5.QtWidgets import QApplication
+    from PyQt6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
 
@@ -297,4 +297,4 @@ if __name__ == "__main__":
     # Auto close after 5 seconds
     QTimer.singleShot(5000, splash.close_splash)
 
-    sys.exit(app.exec_())
+    sys.exit(app.exec())

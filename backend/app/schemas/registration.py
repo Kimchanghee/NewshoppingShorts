@@ -20,10 +20,10 @@ class RequestStatusEnum(str, Enum):
 
 class RegistrationRequestCreate(BaseModel):
     """회원가입 요청 생성 스키마"""
-    name: str = Field(..., min_length=2, max_length=100, description="가입자 명")
-    username: str = Field(..., min_length=4, max_length=50, description="사용할 아이디")
-    password: str = Field(..., min_length=6, max_length=100, description="비밀번호")
-    contact: str = Field(..., min_length=10, max_length=50, description="연락처")
+    name = Column(String(100), nullable=False)  # 가입자 명
+    username = Column(String(50), unique=True, nullable=False, index=True)  # 요청 아이디
+    password_hash = Column(String(255), nullable=False)  # 해시된 비밀번호
+    contact = Column(String(50), nullable=False)  # 연락처
 
     @field_validator('name')
     @classmethod
@@ -63,6 +63,7 @@ class RegistrationRequestResponse(BaseModel):
     id: int
     name: str
     username: str
+    email: Optional[str] = None
     contact: str
     status: RequestStatusEnum
     created_at: datetime
