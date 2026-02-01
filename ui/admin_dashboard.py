@@ -33,23 +33,25 @@ FONT_FAMILY = "맑은 고딕"
 logger = logging.getLogger(__name__)
 
 # 다크모드 색상
+# Professional Slate Theme
 DARK = {
-    "bg": "#1a1a2e",
-    "card": "#16213e",
-    "primary": "#e31639",
-    "primary_hover": "#ff1744",
-    "success": "#00c853",
-    "warning": "#ffc107",
-    "danger": "#ff5252",
-    "info": "#448aff",
-    "text": "#ffffff",
-    "text_dim": "#8892b0",
-    "border": "#2d3748",
-    "table_bg": "#0f0f23",
-    "table_alt": "#1a1a35",
-    "table_header": "#252550",
-    "online": "#00e676",
-    "offline": "#757575",
+    "bg": "#0f172a",          # slate-950
+    "card": "#1e293b",        # slate-800
+    "primary": "#3b82f6",     # blue-500
+    "primary_hover": "#2563eb", # blue-600
+    "brand": "#e11d48",       # rose-600
+    "success": "#10b981",     # emerald-500
+    "warning": "#f59e0b",     # amber-500
+    "danger": "#ef4444",      # red-500
+    "info": "#0ea5e9",        # sky-500
+    "text": "#f1f5f9",        # slate-100
+    "text_dim": "#94a3b8",    # slate-400
+    "border": "#334155",      # slate-700
+    "table_bg": "#1e293b",    # slate-800
+    "table_alt": "#334155",   # slate-700 (distinct alternate)
+    "table_header": "#0f172a", # slate-950
+    "online": "#22c55e",      # green-500
+    "offline": "#64748b",     # slate-500
 }
 
 # Constants
@@ -248,13 +250,14 @@ class AdminDashboard(QMainWindow):
         refresh_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         refresh_btn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {DARK["primary"]};
-                color: white;
-                border: none;
-                border-radius: 8px;
+                background-color: {DARK["card"]};
+                color: {DARK["text"]};
+                border: 1px solid {DARK["border"]};
+                border-radius: 6px;
             }}
             QPushButton:hover {{
-                background-color: {DARK["primary_hover"]};
+                background-color: {DARK["border"]};
+                border: 1px solid {DARK["text_dim"]};
             }}
         """)
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -279,83 +282,31 @@ class AdminDashboard(QMainWindow):
         self._create_tables()
 
     def _create_stat_cards(self):
-        """통계 카드 생성 - 절대 좌표"""
+        """통계 카드 생성 - 균형 잡힌 레이아웃"""
         card_y = 75
-        card_h = 85
-        card_w = 240
-        gap = 20
+        card_h = 80
+        # 6개 카드를 균등 배치
+        total_w = 1520
+        gap = 16
+        card_w = (total_w - (gap * 5)) // 6
         start_x = 40
 
-        # 구독요청 대기 중
-        self._create_card(
-            start_x, card_y, card_w, card_h, "구독요청 대기", DARK["warning"]
-        )
-        self.pending_label = self._get_value_label(start_x, card_y, card_w, card_h)
+        # Create 6 cards
+        items = [
+            ("구독요청 대기", DARK["warning"], "pending_label"),
+            ("구독요청 승인", DARK["success"], "approved_label"),
+            ("구독요청 거부", DARK["danger"], "rejected_label"),
+            ("전체 사용자", DARK["primary"], "users_label"),
+            ("온라인 사용자", DARK["online"], "online_label"),
+            ("활성 구독자", DARK["brand"], "active_sub_label")
+        ]
 
-        # 구독요청 승인됨
-        self._create_card(
-            start_x + (card_w + gap),
-            card_y,
-            card_w,
-            card_h,
-            "구독요청 승인",
-            DARK["success"],
-        )
-        self.approved_label = self._get_value_label(
-            start_x + (card_w + gap), card_y, card_w, card_h
-        )
-
-        # 구독요청 거부됨
-        self._create_card(
-            start_x + (card_w + gap) * 2,
-            card_y,
-            card_w,
-            card_h,
-            "구독요청 거부",
-            DARK["danger"],
-        )
-        self.rejected_label = self._get_value_label(
-            start_x + (card_w + gap) * 2, card_y, card_w, card_h
-        )
-
-        # 전체 사용자
-        self._create_card(
-            start_x + (card_w + gap) * 3,
-            card_y,
-            card_w,
-            card_h,
-            "전체 사용자",
-            DARK["info"],
-        )
-        self.users_label = self._get_value_label(
-            start_x + (card_w + gap) * 3, card_y, card_w, card_h
-        )
-
-        # 온라인 사용자
-        self._create_card(
-            start_x + (card_w + gap) * 4,
-            card_y,
-            card_w,
-            card_h,
-            "온라인 사용자",
-            DARK["online"],
-        )
-        self.online_label = self._get_value_label(
-            start_x + (card_w + gap) * 4, card_y, card_w, card_h
-        )
-
-        # 활성 구독자
-        self._create_card(
-            start_x + (card_w + gap) * 5,
-            card_y,
-            card_w,
-            card_h,
-            "활성 구독자",
-            DARK["primary"],
-        )
-        self.active_sub_label = self._get_value_label(
-            start_x + (card_w + gap) * 5, card_y, card_w, card_h
-        )
+        for i, (title, color, attr_name) in enumerate(items):
+            x = start_x + i * (card_w + gap)
+            self._create_card(x, card_y, card_w, card_h, title, color)
+            # Create label
+            lbl = self._get_value_label(x, card_y, card_w, card_h)
+            setattr(self, attr_name, lbl)
 
     def _create_card(self, x, y, w, h, title, color):
         """카드 생성"""
@@ -397,14 +348,15 @@ class AdminDashboard(QMainWindow):
         self._update_tab_styles()
 
     def _update_tab_styles(self):
-        """탭 스타일 업데이트 (2개 탭: 사용자 관리, 구독 요청)"""
+        """탭 스타일 업데이트"""
         active = f"""
             QPushButton {{
-                background-color: {DARK["card"]};
+                background-color: transparent;
                 color: {DARK["primary"]};
                 border: none;
-                border-bottom: 3px solid {DARK["primary"]};
+                border-bottom: 2px solid {DARK["primary"]};
                 border-radius: 0px;
+                font-weight: bold;
             }}
         """
         inactive = f"""
@@ -412,7 +364,7 @@ class AdminDashboard(QMainWindow):
                 background-color: transparent;
                 color: {DARK["text_dim"]};
                 border: none;
-                border-bottom: 3px solid transparent;
+                border-bottom: 2px solid transparent;
                 border-radius: 0px;
             }}
             QPushButton:hover {{
@@ -420,19 +372,7 @@ class AdminDashboard(QMainWindow):
             }}
         """
         self.tab_users.setStyleSheet(active if self.current_tab == 0 else inactive)
-        self.tab_subscriptions.setStyleSheet(
-            active if self.current_tab == 1 else inactive
-        )
-        self.tab_users.setFont(
-            QFont(
-                FONT_FAMILY, 12, QFont.Weight.Bold if self.current_tab == 0 else QFont.Weight.Normal
-            )
-        )
-        self.tab_subscriptions.setFont(
-            QFont(
-                FONT_FAMILY, 12, QFont.Weight.Bold if self.current_tab == 1 else QFont.Weight.Normal
-            )
-        )
+        self.tab_subscriptions.setStyleSheet(active if self.current_tab == 1 else inactive)
 
     def _switch_tab(self, tab_index):
         """탭 전환 (0: 사용자 관리, 1: 구독 요청)"""
@@ -552,40 +492,41 @@ class AdminDashboard(QMainWindow):
         """테이블 스타일"""
         table.setFont(QFont(FONT_FAMILY, 10))
         table.setStyleSheet(f"""
-            QTableWidget {{
+            QTableWidget {
                 background-color: {DARK["table_bg"]};
                 color: {DARK["text"]};
                 border: 1px solid {DARK["border"]};
-                border-radius: 8px;
+                border-radius: 4px;
                 gridline-color: {DARK["border"]};
-            }}
-            QTableWidget::item {{
-                padding: 5px;
+                selection-background-color: {DARK["primary"]};
+                selection-color: {DARK["text"]};
+            }
+            QTableWidget::item {
+                padding: 4px 8px;
                 border-bottom: 1px solid {DARK["border"]};
-                color: {DARK["text"]};
-            }}
-            QTableWidget::item:selected {{
-                background-color: {DARK["primary"]};
-                color: {DARK["text"]};
-            }}
-            QHeaderView::section {{
+            }
+            QHeaderView::section {
                 background-color: {DARK["table_header"]};
-                color: {DARK["text"]};
+                color: {DARK["text_dim"]};
                 font-weight: bold;
-                padding: 10px 5px;
+                padding: 8px;
                 border: none;
-                border-bottom: 2px solid {DARK["primary"]};
-            }}
-            QScrollBar:vertical {{
+                border-bottom: 1px solid {DARK["border"]};
+                text-transform: uppercase;
+            }
+            QScrollBar:vertical {
                 background-color: {DARK["bg"]};
-                width: 12px;
-                border-radius: 6px;
-            }}
-            QScrollBar::handle:vertical {{
+                width: 10px;
+                margin: 0px;
+            }
+            QScrollBar::handle:vertical {
                 background-color: {DARK["border"]};
-                border-radius: 6px;
-                min-height: 30px;
-            }}
+                min-height: 20px;
+                border-radius: 5px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {
+                height: 0px;
+            }
         """)
         # 기본 교차 색상 비활성화 (직접 행 배경색 설정)
         table.setAlternatingRowColors(False)
@@ -750,53 +691,77 @@ class AdminDashboard(QMainWindow):
     def _create_user_actions(
         self, user_id, username, row: int = 0, hashed_password: str = None
     ) -> QWidget:
-        """사용자 작업 버튼 - 절대 좌표로 정확히 배치"""
+        """사용자 작업 버튼 - 미니멀 디자인"""
         widget = QWidget()
-        widget.setMinimumSize(350, 50)  # 버튼 추가로 넓힘
-        bg_color = DARK["table_alt"] if row % 2 == 1 else DARK["table_bg"]
-        widget.setStyleSheet(f"background-color: {bg_color};")
+        widget.setMinimumSize(300, 40)
+        # 투명 배경 (테이블 행 색상 통과)
+        widget.setStyleSheet("background-color: transparent;")
 
-        btn_y = 10
-        btn_h = 30
-        btn_w = 55
+        layout =  QWidget(widget)
+        layout.setGeometry(0, 0, 300, 40)
 
-        # 비밀번호 보기
+        # Style definition for action buttons
+        # Base style: Transparent with border and colored text on hover
+        base_style = """
+            QPushButton {
+                background-color: transparent;
+                border: 1px solid %s;
+                border-radius: 4px;
+                color: %s;
+                font-family: "Segoe UI", "맑은 고딕";
+                font-size: 11px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: %s;
+                color: #ffffff;
+            }
+        """
+
+        # 1. PW Check (Button)
         pw_btn = QPushButton("PW", widget)
-        pw_btn.setGeometry(5, btn_y, 40, btn_h)
-        pw_btn.setFont(QFont(FONT_FAMILY, 9))
-        pw_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK["text_dim"]};
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: #a0a8b8;
-            }}
-        """)
+        pw_btn.setGeometry(0, 5, 40, 30)
         pw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        pw_btn.clicked.connect(
-            lambda: self._show_password_info(username, hashed_password)
-        )
+        # Gray theme
+        c_norm = DARK["text_dim"]
+        c_hov = DARK["border"]
+        pw_btn.setStyleSheet(base_style % (c_norm, c_norm, c_hov))
+        pw_btn.clicked.connect(lambda: self._show_password_info(username, hashed_password))
 
-        # 구독 연장
-        extend_btn = QPushButton("연장", widget)
-        extend_btn.setGeometry(50, btn_y, btn_w, btn_h)
-        extend_btn.setFont(QFont(FONT_FAMILY, 9))
-        extend_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {DARK["info"]};
-                color: white;
-                border: none;
-                border-radius: 4px;
-            }}
-            QPushButton:hover {{
-                background-color: #82b1ff;
-            }}
-        """)
-        extend_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        extend_btn.clicked.connect(lambda: self._extend_subscription(user_id, username))
+        # 2. Extension (Green/Success)
+        ext_btn = QPushButton("연장", widget)
+        ext_btn.setGeometry(45, 5, 50, 30)
+        ext_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        c_norm = DARK["info"] # Blue
+        ext_btn.setStyleSheet(base_style % (c_norm, c_norm, c_norm))
+        ext_btn.clicked.connect(lambda: self._extend_subscription(user_id, username))
+        
+        # 3. Status (Yellow/Warning)
+        stat_btn = QPushButton("상태", widget)
+        stat_btn.setGeometry(100, 5, 50, 30)
+        stat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        c_norm = DARK["warning"]
+        stat_btn.setStyleSheet(base_style % (c_norm, c_norm, c_norm))
+        stat_btn.clicked.connect(lambda: self._check_work_status(user_id, username))
+
+        # 4. History (Gray/Info)
+        hist_btn = QPushButton("이력", widget)
+        hist_btn.setGeometry(155, 5, 50, 30)
+        hist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        c_norm = DARK["text"]
+        c_hov = DARK["table_alt"]
+        hist_btn.setStyleSheet(base_style % (DARK["border"], c_norm, c_hov))
+        hist_btn.clicked.connect(lambda: self._show_login_history(user_id, username))
+
+        # 5. Delete (Red/Danger)
+        del_btn = QPushButton("삭제", widget)
+        del_btn.setGeometry(210, 5, 50, 30)
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        c_norm = DARK["danger"]
+        del_btn.setStyleSheet(base_style % (c_norm, c_norm, c_norm))
+        del_btn.clicked.connect(lambda: self._delete_user(user_id, username))
+
+        return widget
 
         # 상태 변경
         toggle_btn = QPushButton("상태", widget)
