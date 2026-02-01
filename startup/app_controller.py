@@ -33,7 +33,6 @@ class AppController:
 
     def get_current_version(self) -> str:
         """Read version from version.json"""
-        import os
         import json
         try:
             # Handle both dev (src root) and frozen (MEIPASS) paths
@@ -55,9 +54,12 @@ class AppController:
         """Check server for new version"""
         import requests
         
+        # 개발 환경에서는 업데이트 체크 건너뛰기 (무한 재시작 방지)
+        if not getattr(sys, 'frozen', False):
+            logger.info("Development mode: Skipping update check")
+            return
+        
         # URL Configuration
-        # In production, this should be https://your-backend.run.app
-        # For local testing, we use localhost
         base_url = "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
         
         current_version = self.get_current_version()
@@ -89,34 +91,6 @@ class AppController:
                                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
             if reply == QMessageBox.StandardButton.Yes:
                 self.perform_update(download_url)
-
-class DownloadWorker(QtCore.QThread):
-    progress = QtCore.pyqtSignal(int)
-    finished = QtCore.pyqtSignal(bool, str) # success, file_path_or_error
-
-    def __init__(self, url, dest_path):
-        super().__init__()
-        self.url = url
-        self.dest_path = dest_path
-
-    def run(self):
-        import requests
-        try:
-            with requests.get(self.url, stream=True, timeout=10) as r:
-                r.raise_for_status()
-                total_size = int(r.headers.get('content-length', 0))
-                downloaded = 0
-                with open(self.dest_path, 'wb') as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
-                            if total_size > 0:
-                                prog = int((downloaded / total_size) * 100)
-                                self.progress.emit(prog)
-            self.finished.emit(True, self.dest_path)
-        except Exception as e:
-            self.finished.emit(False, str(e))
 
     def perform_update(self, download_url: str) -> None:
         """Download and run updater with progress UI"""
@@ -153,39 +127,48 @@ class DownloadWorker(QtCore.QThread):
     def _run_updater(self, new_exe_path: str) -> None:
         """Launch the separate updater process and exit"""
         import subprocess
+        import shutil
+        
         try:
-            # 2. Locate updater
             if getattr(sys, 'frozen', False):
+                # EXE 환경: updater.exe 사용
                 base_dir = os.path.dirname(sys.executable)
                 current_exe = sys.executable
                 updater_exe = os.path.join(base_dir, "updater.exe")
-            else:
-                # Dev mode
-                base_dir = os.getcwd()
-                current_exe = os.path.join(base_dir, "ssmaker.py")
-                # Try to find built updater in dist
-                updater_exe = os.path.join(base_dir, "dist", "updater", "updater.exe")
                 
                 if not os.path.exists(updater_exe):
-                    QMessageBox.information(None, "개발 모드", "업데이트가 완료되었습니다. (개발 환경이므로 수동 교체가 필요합니다.)")
+                    QMessageBox.critical(None, "오류", "updater.exe를 찾을 수 없습니다. 다시 설치해 주세요.")
                     return
 
-            if not os.path.exists(updater_exe):
-                QMessageBox.critical(None, "오류", "updater.exe를 찾을 수 없습니다. 다시 설치해 주세요.")
-                return
-
-            # 4. Run updater: updater.exe <source> <dest> <restart> <pid>
-            args = [
-                updater_exe,
-                new_exe_path,
-                current_exe,
-                current_exe,
-                str(os.getpid())
-            ]
-            
-            logger.info(f"Launching updater: {args}")
-            subprocess.Popen(args)
-            sys.exit(0)
+                args = [
+                    updater_exe,
+                    new_exe_path,
+                    current_exe,
+                    current_exe,
+                    str(os.getpid())
+                ]
+                
+                logger.info(f"Launching updater: {args}")
+                subprocess.Popen(args)
+                sys.exit(0)
+            else:
+                # 개발 환경: Python 프로세스 직접 재시작
+                base_dir = os.getcwd()
+                
+                # 다운로드된 파일이 있으면 version.json 업데이트가 필요할 수 있음
+                # 개발 환경에서는 소스코드가 이미 최신이므로 바로 재시작
+                logger.info("Development mode: Restarting application...")
+                
+                # 현재 앱 종료 후 재시작
+                python_exe = sys.executable
+                script_path = os.path.join(base_dir, "ssmaker.py")
+                
+                # 새 프로세스로 앱 실행
+                subprocess.Popen([python_exe, script_path], cwd=base_dir)
+                
+                # 현재 프로세스 종료
+                logger.info("Exiting current process for restart...")
+                sys.exit(0)
 
         except Exception as e:
             logger.error(f"Update launch failed: {e}", exc_info=True)
@@ -194,6 +177,10 @@ class DownloadWorker(QtCore.QThread):
     def on_login_success(self, login_data: Dict[str, Any]) -> None:
         from ui.windows.process_window import ProcessWindow
         self.login_data = login_data
+        
+        # Check for updates after successful login
+        self.check_for_updates()
+        
         self.loading_window = ProcessWindow()
         self.login_window.hide()
         self.loading_window.show()
@@ -222,3 +209,31 @@ class DownloadWorker(QtCore.QThread):
         from main import VideoAnalyzerGUI
         self.main_gui = VideoAnalyzerGUI(login_data=self.login_data, preloaded_ocr=self.ocr_reader)
         self.main_gui.show()
+
+class DownloadWorker(QtCore.QThread):
+    progress = QtCore.pyqtSignal(int)
+    finished = QtCore.pyqtSignal(bool, str) # success, file_path_or_error
+
+    def __init__(self, url, dest_path):
+        super().__init__()
+        self.url = url
+        self.dest_path = dest_path
+
+    def run(self):
+        import requests
+        try:
+            with requests.get(self.url, stream=True, timeout=10) as r:
+                r.raise_for_status()
+                total_size = int(r.headers.get('content-length', 0))
+                downloaded = 0
+                with open(self.dest_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
+                            downloaded += len(chunk)
+                            if total_size > 0:
+                                prog = int((downloaded / total_size) * 100)
+                                self.progress.emit(prog)
+            self.finished.emit(True, self.dest_path)
+        except Exception as e:
+            self.finished.emit(False, str(e))
