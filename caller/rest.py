@@ -99,6 +99,9 @@ def _check_token_expiration(token: str) -> bool:
     """
     try:
         # Decode without verification to check expiration
+        # NOTE: WE DO NOT VERIFY SIGNATURE HERE because client does not possess the secret key.
+        # This check is only for client-side expiration handling.
+        # Server verifies signature on every API call.
         payload = jwt.decode(token, options={"verify_signature": False})
         exp = payload.get("exp")
         if exp:
