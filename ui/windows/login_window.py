@@ -96,6 +96,20 @@ class Login(QMainWindow, Ui_LoginWindow):
             self.showCustomMessageBox("오류", f"로그인 처리 중 오류가 발생했습니다.\n{str(e)}")
 
     def _handle_login_success(self, res):
+        # 로그인 정보 저장 처리
+        remember = False
+        if hasattr(self, 'rememberCheckbox'):
+            remember = self.rememberCheckbox.isChecked()
+        elif hasattr(self, 'idpw_checkbox'):
+            remember = self.idpw_checkbox.isChecked()
+        
+        ui_controller.userSaveInfo(
+            self,
+            checkState=remember,
+            loginid=self.idEdit.text(),
+            loginpw=self.pwEdit.text()
+        )
+        
         # Notify controller or app
         app = QApplication.instance()
         if app:

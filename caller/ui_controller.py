@@ -20,6 +20,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 def userLoadInfo(self):
+    """저장된 로그인 정보 불러오기"""
     config = configparser.ConfigParser(interpolation=None)
     try:
         if os.path.exists('./info.on'):
@@ -28,18 +29,28 @@ def userLoadInfo(self):
             if config.get('User', 'save', fallback='f') == 't':
                 self.idEdit.setText(config.get('User', 'id', fallback=''))
                 self.pwEdit.setText(config.get('User', 'pw', fallback=''))
-                if hasattr(self, 'idpw_checkbox'):
+                # 모던 UI의 rememberCheckbox 또는 레거시 idpw_checkbox 체크
+                if hasattr(self, 'rememberCheckbox'):
+                    self.rememberCheckbox.setChecked(True)
+                elif hasattr(self, 'idpw_checkbox'):
                     self.idpw_checkbox.setChecked(True)
     except Exception as e:
         logger.warning("Failed to load user info: %s", e)
 
-# Remaining functions simplified but keeping original logic structure
-def userSaveInfo(self, checkState, loginid, loginpw, version):
+def userSaveInfo(self, checkState, loginid, loginpw, version='1.0.0'):
+    """로그인 정보 저장"""
     config = configparser.ConfigParser(interpolation=None)
-    config['User'] = {'id': loginid, 'pw': loginpw, 'save': 't' if checkState else 'f'}
+    if checkState:
+        config['User'] = {'id': loginid, 'pw': loginpw, 'save': 't'}
+    else:
+        config['User'] = {'id': '', 'pw': '', 'save': 'f'}
     config['Config'] = {'version': version}
-    with open('./info.on', 'w', encoding='utf-8') as f:
-        config.write(f)
+    try:
+        with open('./info.on', 'w', encoding='utf-8') as f:
+            config.write(f)
+        logger.info("User info saved: remember=%s", checkState)
+    except Exception as e:
+        logger.warning("Failed to save user info: %s", e)
     return loginid, loginpw
 
 def accountLoadInfo(self):
