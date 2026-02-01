@@ -21,6 +21,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.user import User
+from app.models.login_attempt import LoginAttempt
 from app.utils.subscription_utils import calculate_subscription_expiry
 
 
@@ -79,6 +80,22 @@ class AdminActionResponse(BaseModel):
     data: Optional[dict] = None
 
 
+class LoginHistoryItem(BaseModel):
+    """로그인 이력 아이템"""
+    id: int
+    username: str
+    ip_address: str
+    attempted_at: datetime
+    success: bool
+
+    class Config:
+        from_attributes = True
+
+class LoginHistoryResponse(BaseModel):
+    """로그인 이력 응답"""
+    history: List[LoginHistoryItem]
+
+
 # ===== Endpoints =====
 
 @router.get("/users", response_model=UserListResponse)
@@ -97,6 +114,9 @@ async def list_users(
 
     Requires X-Admin-API-Key header.
     """
+    # 자동 오프라인 처리 (2분 이상 활동 없음)
+    await AuthService(db).cleanup_offline_users()
+    
     query = db.query(User)
 
     # Search by username, name, email, or phone
@@ -144,6 +164,31 @@ async def get_user(
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
     return UserResponse.model_validate(user)
+
+
+@router.get("/users/{user_id}/history", response_model=LoginHistoryResponse)
+@limiter.limit("50/hour")
+async def get_user_login_history(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db),
+    _admin: bool = Depends(verify_admin_api_key)
+):
+    """
+    사용자 로그인 이력 조회 (관리자용)
+    Get user login history (for admin)
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
+
+    history = db.query(LoginAttempt).filter(
+        LoginAttempt.username == user.username
+    ).order_by(LoginAttempt.attempted_at.desc()).limit(100).all()
+
+    return LoginHistoryResponse(
+        history=[LoginHistoryItem.model_validate(h) for h in history]
+    )
 
 
 @router.post("/users/{user_id}/extend", response_model=AdminActionResponse)

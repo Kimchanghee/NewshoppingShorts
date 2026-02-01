@@ -489,3 +489,28 @@ class AuthService:
                 "remaining": None,
                 "used": None,
             }
+    async def cleanup_offline_users(self):
+        """
+        Mark users as offline if they haven't sent a heartbeat for more than 2 minutes.
+        동작이 2분 이상 없는 사용자를 오프라인으로 표시.
+        """
+        try:
+            from datetime import timedelta
+            threshold = datetime.utcnow() - timedelta(minutes=2)
+            
+            # Find users who are marked online but haven't sent heartbeat in 2 mins
+            db_users = self.db.query(User).filter(
+                User.is_online == True,
+                User.last_heartbeat < threshold
+            ).all()
+            
+            for user in db_users:
+                user.is_online = False
+                logger.info(f"Marked user offline due to inactivity: {user.username}")
+                
+            if db_users:
+                self.db.commit()
+                
+        except Exception as e:
+            logger.error(f"Error cleaning up offline users: {e}")
+            self.db.rollback()
