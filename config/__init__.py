@@ -35,18 +35,14 @@ FONTSIZE = 25
 DAESA_GILI = 1.1
 ENABLE_SHEET_SYNC = False
 
-# Vertex AI (primary) - with default credentials
-# Default credential path
-_config_dir = Path(__file__).parent
-DEFAULT_VERTEX_JSON_PATH = _config_dir / "vertex-credentials.json"
-
+# Vertex AI (primary) - environment variables only for security
 VERTEX_PROJECT_ID = os.getenv("VERTEX_PROJECT_ID", "alien-baton-484113-g4")
 VERTEX_LOCATION = os.getenv("VERTEX_LOCATION", "us-central1")
 VERTEX_MODEL_ID = os.getenv("VERTEX_MODEL_ID", "gemini-1.5-flash-002")
-VERTEX_JSON_KEY_PATH = os.getenv(
-    "VERTEX_JSON_KEY_PATH",
-    str(DEFAULT_VERTEX_JSON_PATH) if DEFAULT_VERTEX_JSON_PATH.exists() else ""
-)
+
+# Do not fallback to local file paths in production/EXE builds
+# Use GOOGLE_APPLICATION_CREDENTIALS environment variable instead
+VERTEX_JSON_KEY_PATH = os.getenv("VERTEX_JSON_KEY_PATH", "")
 
 # Warn if using default project ID
 if VERTEX_PROJECT_ID == "alien-baton-484113-g4" and not os.getenv("VERTEX_PROJECT_ID"):
