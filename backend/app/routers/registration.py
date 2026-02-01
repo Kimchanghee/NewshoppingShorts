@@ -49,15 +49,7 @@ logger = logging.getLogger(__name__)
 
 
 
-def get_client_ip(request: Request) -> str:
-    """Extract client IP from request"""
-    if request.client:
-        return request.client.host
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return "unknown"
-
+from app.utils.ip_utils import get_client_ip
 
 # Rate limiter
 limiter = Limiter(key_func=get_client_ip)
@@ -78,7 +70,7 @@ async def submit_registration_request(
     """
     # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
     logger.info(
-        f"[Register Request] Filename: registration.py, Username: {data.username}, Name: {data.name}, Contact: {data.contact}"
+        f"[Register Request] Filename: registration.py, Username: {data.username}, Name: {data.name}, Email: {data.email}, Contact: {data.contact}"
     )
     try:
         # Check if username already exists in users table
@@ -120,6 +112,9 @@ async def submit_registration_request(
             work_count=FREE_TRIAL_WORK_COUNT,  # 체험판 5회
             work_used=0,
             user_type=UserType.TRIAL,
+            email=data.email,
+            phone=data.contact,
+            name=data.name,
         )
 
         db.add(new_user)
@@ -144,6 +139,7 @@ async def submit_registration_request(
             username=data.username,
             password_hash=password_hash,
             contact=data.contact,
+            email=data.email,
             status=RequestStatus.APPROVED,
             reviewed_at=datetime.utcnow(),
         )
@@ -290,6 +286,9 @@ async def approve_registration(
             is_active=True,
             work_count=data.work_count,  # -1 = 무제한
             work_used=0,
+            email=reg_request.email,
+            phone=reg_request.contact,
+            name=reg_request.name,
         )
 
         db.add(new_user)

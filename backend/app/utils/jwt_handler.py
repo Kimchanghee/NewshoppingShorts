@@ -1,7 +1,7 @@
 import jwt
 import uuid
 from datetime import datetime, timedelta
-from app.config import get_settings
+from app.configuration import get_settings
 
 settings = get_settings()
 

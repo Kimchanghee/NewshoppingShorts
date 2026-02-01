@@ -7,7 +7,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from app.routers import auth, registration, admin, subscription
 from app.routers.auth import limiter, rate_limit_exceeded_handler
-from app.config import get_settings
+from app.configuration import get_settings
 from app.database import init_db
 
 # 로깅 설정 - 모든 로그를 터미널에 출력

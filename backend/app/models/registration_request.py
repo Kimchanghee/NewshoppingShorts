@@ -24,6 +24,7 @@ class RegistrationRequest(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String(100), nullable=False)  # 가입자 명
     username = Column(String(50), unique=True, nullable=False, index=True)  # 요청 아이디
+    email = Column(String(255), nullable=True)  # 이메일
     password_hash = Column(String(255), nullable=False)  # 해시된 비밀번호
     contact = Column(String(50), nullable=False)  # 연락처
     status = Column(

@@ -16,6 +16,9 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
+    email = Column(String(255), nullable=True)
+    phone = Column(String(50), nullable=True)
+    name = Column(String(100), nullable=True)
     password_hash = Column(String(255), nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(
