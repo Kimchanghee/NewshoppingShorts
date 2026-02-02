@@ -25,27 +25,45 @@ class OCRThresholds:
     """OCR detection and filtering thresholds"""
 
     # Confidence thresholds
-    CONFIDENCE_MIN: float = 0.98  # Minimum OCR confidence to accept detection
+    CONFIDENCE_MIN: float = 0.3  # Minimum OCR confidence (lowered for better detection)
     TEXT_SIMILARITY: float = 0.001  # Edge change threshold (0.1%)
 
     # SSIM (Structural Similarity Index) for frame comparison
-    SSIM_THRESHOLD: float = 0.98  # 98% similarity to skip frame
-    MIN_CONSECUTIVE_SIMILAR: int = 2  # Frames must be similar for N frames to skip
+    # ★ SSIM 스킵 완전 비활성화: 자막 전환을 놓치지 않도록
+    SSIM_THRESHOLD: float = 1.0  # 100% = 사실상 비활성화 (절대 스킵 안함)
+    MIN_CONSECUTIVE_SIMILAR: int = 999  # 사실상 비활성화
+    SSIM_SKIP_ENABLED: bool = False  # SSIM 기반 프레임 스킵 활성화 여부
 
     # Canny edge detection
-    EDGE_CHANGE_THRESHOLD: float = 0.001  # 0.1% change threshold
-    CANNY_FAST_THRESHOLD: float = 15.0  # Fast threshold for change detection
+    EDGE_CHANGE_THRESHOLD: float = 0.0005  # 0.05% change threshold (더 민감하게)
+    CANNY_FAST_THRESHOLD: float = 10.0  # Fast threshold for change detection (민감하게)
 
     # Hybrid detector confirmation
-    HYBRID_CONFIRM_THRESHOLD: float = 0.80  # Multi-frame similarity threshold
+    HYBRID_CONFIRM_THRESHOLD: float = 0.85  # Multi-frame similarity threshold
 
     # IoU (Intersection over Union) for region merging
-    IOU_OVERLAP_THRESHOLD: float = 0.3  # Minimum overlap to merge regions
-    IOU_STRICT_THRESHOLD: float = 0.4  # Strict overlap threshold
+    # ★ IoU 임계값 낮춤: 별도 자막이 병합되지 않도록
+    IOU_CLUSTER_THRESHOLD: float = 0.15  # 클러스터링용 (낮춤: 0.3 -> 0.15)
+    IOU_MERGE_THRESHOLD: float = 0.25  # 병합용 (낮춤: 0.4 -> 0.25)
+    IOU_OVERLAP_THRESHOLD: float = 0.15  # Minimum overlap to merge regions
+    IOU_STRICT_THRESHOLD: float = 0.25  # Strict overlap threshold
 
     # Area ratio thresholds
     AREA_RATIO_MIN: float = 0.35  # Minimum area ratio for region validation
-    AREA_RATIO_MAX: float = 0.45  # Maximum area ratio
+    AREA_RATIO_MAX: float = 0.50  # Maximum area ratio (증가: 0.45 -> 0.50)
+
+    # ROI (Region of Interest) settings
+    # ★ ROI 전체 화면 스캔: 상단 자막도 감지하도록
+    ROI_BOTTOM_PERCENT: float = 100.0  # 100% = 전체 화면 스캔 (기존 50%)
+    ROI_MIN_PERCENT: float = 70.0  # 최소 70% 스캔 보장
+
+    # Minimum bbox size (pixels)
+    MIN_BBOX_WIDTH: int = 15  # 최소 박스 너비 (낮춤: 20 -> 15)
+    MIN_BBOX_HEIGHT: int = 6  # 최소 박스 높이 (낮춤: 8 -> 6)
+
+    # Time buffer for blur application (seconds)
+    TIME_BUFFER_BEFORE: float = 0.5  # 자막 시작 전 버퍼
+    TIME_BUFFER_AFTER: float = 0.8  # 자막 종료 후 버퍼
 
 
 @dataclass(frozen=True)

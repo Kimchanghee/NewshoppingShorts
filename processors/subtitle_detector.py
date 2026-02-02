@@ -323,7 +323,8 @@ class SubtitleDetector:
                         for cluster in clusters:
                             representative = cluster[0]
                             iou = self._calculate_iou(region, representative)
-                            if iou > 0.3:  # 공간적으로 겹치는 영역
+                            # ★ IoU 임계값 낮춤: 별도 자막이 병합되지 않도록 (0.3 -> 0.15)
+                            if iou > OCRThresholds.IOU_CLUSTER_THRESHOLD:
                                 cluster.append(region)
                                 added_to_cluster = True
                                 break
@@ -492,15 +493,22 @@ class SubtitleDetector:
             # 위치 관계없이 중국어가 감지되면 블러 적용
             logger.debug(f"  -> Chinese text blur target: y={y_pct:.1f}%")
 
+            # ★★★ Fallback 영역 조건 완화: OCR이 위치는 맞췄지만 텍스트 인식 실패 시에도 블러 적용 ★★★
             # source 타입 안전성 확보
             source = str(entry.get('source') or '')
-            if source.startswith('fallback_region') and not any(
-                '\u4e00' <= ch <= '\u9fff'
-                for ch in str(entry.get('sample_text', '') or '')
-            ):
-                logger.debug("  -> Excluded: Fallback region without Chinese text")
-                self.gui.add_log("[Blur] Excluding fallback region without Chinese text.")
-                continue
+            # fallback_region이라도 OCR 소스에서 감지된 것이면 블러 적용
+            # (sample_text에 중국어가 없어도 위치 정보가 있으면 적용)
+            if source.startswith('fallback_region'):
+                sample_text = str(entry.get('sample_text', '') or '')
+                has_chinese = any('\u4e00' <= ch <= '\u9fff' for ch in sample_text)
+                # 중국어가 있거나, 텍스트가 비어있어도 위치 정보가 유효하면 통과
+                # (OCR이 위치는 맞췄지만 텍스트 인식에 실패한 경우도 블러 적용)
+                if not has_chinese and sample_text.strip():
+                    # 중국어가 아닌 다른 텍스트가 있으면 제외 (영어 등)
+                    logger.debug(f"  -> Excluded: Fallback region with non-Chinese text: '{sample_text[:20]}'")
+                    continue
+                # sample_text가 비어있으면 통과 (위치 정보만 있는 경우)
+                logger.debug(f"  -> Fallback region accepted: sample_text='{sample_text[:20] if sample_text else '(empty)'}'")
 
             logger.debug("  -> Final pass OK")
             safe_filtered.append(entry)
@@ -644,9 +652,10 @@ class SubtitleDetector:
                         width = x_max - x_min
                         height = y_max - y_min
 
-                        if width < 20 or height < 8:
+                        # ★ 최소 bbox 크기 검증 (constants.py에서 설정)
+                        if width < OCRThresholds.MIN_BBOX_WIDTH or height < OCRThresholds.MIN_BBOX_HEIGHT:
                             continue
-                        if width > W * 0.98 or height > H * 0.4:
+                        if width > W * 0.98 or height > H * 0.5:  # 높이 제한 완화 (0.4 -> 0.5)
                             continue
 
                         regions.append({
@@ -736,8 +745,8 @@ class SubtitleDetector:
                         representative = cluster[0]
                         iou = self._calculate_iou(region, representative)
 
-                        # IoU > 0.3이면 같은 자막으로 간주 (공간적으로 겹침)
-                        if iou > 0.3:
+                        # ★ IoU 임계값 낮춤: 별도 자막이 병합되지 않도록 (0.3 -> 0.15)
+                        if iou > OCRThresholds.IOU_CLUSTER_THRESHOLD:
                             cluster.append(region)
                             added_to_cluster = True
                             break
@@ -777,12 +786,12 @@ class SubtitleDetector:
 
                     sample_text = next((r.get('text', '') for r in cluster if r.get('text')), '')
 
-                    # 시간 범위 조정
-                    if time_key <= 0.5:
+                    # ★★★ 100% 감지 모드: 일관된 시간 버퍼 적용 (constants.py에서 설정) ★★★
+                    if time_key <= OCRThresholds.TIME_BUFFER_BEFORE:
                         start_time = 0
                     else:
-                        start_time = max(0, time_key - 0.5)
-                    end_time = time_key + 1.0
+                        start_time = max(0, time_key - OCRThresholds.TIME_BUFFER_BEFORE)
+                    end_time = time_key + OCRThresholds.TIME_BUFFER_AFTER
 
                     source_name = 'opencv_ocr_gpu' if GPU_ACCEL_AVAILABLE else 'opencv_ocr_numpy'
                     reliable_regions.append({
@@ -810,9 +819,9 @@ class SubtitleDetector:
                     # IoU 계산 (공간적 유사성)
                     iou = self._calculate_iou(existing, region)
 
-                    # 같은 트랙 조건: IoU > 0.4 AND 시간이 연속됨
+                    # ★ 같은 트랙 조건: IoU 임계값 낮춤 (0.4 -> 0.25)
                     # 공간적으로 분리된 자막은 IoU가 낮아 병합되지 않음
-                    if (iou > 0.4 and existing['end_time'] >= region['start_time'] - 1.0):
+                    if (iou > OCRThresholds.IOU_MERGE_THRESHOLD and existing['end_time'] >= region['start_time'] - 1.0):
                         # 시간 범위 확장 (공간은 평균으로 갱신)
                         total_freq = existing['frequency'] + region['frequency']
                         existing['x'] = int((existing['x'] * existing['frequency'] + region['x'] * region['frequency']) / total_freq)
@@ -1137,6 +1146,7 @@ class SubtitleDetector:
         Returns:
             Dictionary with analysis results or None
         """
+        cap = None  # ★ try/finally를 위해 미리 선언
         try:
             import cv2
             import numpy as np
@@ -1281,87 +1291,58 @@ class SubtitleDetector:
                 except Exception:
                     scale = 1.0
 
-                # ★★★ 개선: ROI 영역 확대 (하단 45% → 50%) ★★★
-                # 자막이 화면 중앙~하단에 위치할 수 있으므로 더 넓은 영역 스캔
+                # ★★★ 100% 감지 모드: 전체 화면 스캔 ★★★
+                # 상단/중앙/하단 어디에 있는 자막도 놓치지 않도록 전체 화면 스캔
                 attempts = []
                 roi_frame = None
                 try:
                     h_resized, w_resized = frame.shape[:2]
-                    if optimizer:
-                        ocr_params = optimizer.get_optimized_ocr_params()
-                        roi_percent = ocr_params['roi_bottom_percent'] / 100.0
-                        # 최소 50% 보장
-                        roi_percent = max(0.5, roi_percent)
-                        roi_start = int(h_resized * (1 - roi_percent))
-                    else:
-                        roi_start = int(h_resized * 0.50)  # 0.55 → 0.50 (하단 50%)
+                    # 전체 화면을 ROI로 사용 (100%)
+                    roi_percent = OCRThresholds.ROI_BOTTOM_PERCENT / 100.0  # 100% 전체 화면
+                    roi_percent = max(OCRThresholds.ROI_MIN_PERCENT / 100.0, roi_percent)  # 최소 70%
+                    roi_start = int(h_resized * (1 - roi_percent))
                     if roi_start < h_resized - 8:
                         roi_frame = frame[roi_start:, :]
-                        attempts.append(("roi_bottom", roi_frame, roi_start))
+                        attempts.append(("roi_full", roi_frame, roi_start))
                 except Exception:
                     pass
+                # 항상 전체 프레임도 시도 (fallback)
                 attempts.append(("full", frame, 0))
 
-                # ★★★ 안전한 SSIM 기반 중복 프레임 스킵 ★★★
-                skip_by_ssim = False
+                # ★★★ 100% 감지 모드: SSIM 스킵 완전 비활성화 ★★★
+                # 모든 프레임을 OCR 검사하여 자막 전환을 절대 놓치지 않음
+                skip_by_ssim = False  # 항상 False (스킵 안함)
 
-                # ★ 안전장치 1: 0~5초 구간은 SSIM 스킵 비활성화 (초반 자막 100% 보장) ★
-                critical_period = 5.0  # 0~5초는 모든 프레임 검사
-                is_critical_period = (time_sec <= critical_period)
+                # SSIM 스킵 비활성화 (constants.py에서 설정)
+                if not OCRThresholds.SSIM_SKIP_ENABLED:
+                    # 모든 프레임 검사 - 스킵 없음
+                    pass
+                else:
+                    # SSIM 스킵이 활성화된 경우 (기본값 False이므로 실행 안됨)
+                    # 이 코드는 향후 성능 최적화 시 사용 가능
+                    if prev_frame_roi is not None and roi_frame is not None:
+                        try:
+                            ssim_score = self._calculate_ssim(prev_frame_roi, roi_frame)
+                            edge_change = self._detect_text_edge_changes(prev_frame_roi, roi_frame)
+                            is_similar = (ssim_score >= ssim_threshold and edge_change < edge_change_threshold)
 
-                if not is_critical_period and prev_frame_roi is not None and roi_frame is not None:
-                    # ROI 영역만 비교 (자막 영역)
-                    try:
-                        # SSIM 계산
-                        ssim_score = self._calculate_ssim(prev_frame_roi, roi_frame)
-
-                        # ★ 안전장치 2: Edge detection으로 텍스트 변화 감지 ★
-                        edge_change = self._detect_text_edge_changes(prev_frame_roi, roi_frame)
-
-                        # ★★★ 유사도 판정 ★★★
-                        is_similar = (ssim_score >= ssim_threshold and edge_change < edge_change_threshold)
-
-                        if is_similar:
-                            # 연속 유사 프레임 카운트 증가
-                            consecutive_similar_count += 1
-
-                            # ★★★ 안전장치 3: 연속 N프레임 이상 동일해야 스킵 ★★★
-                            # 자막 전환 순간을 놓치지 않기 위함
-                            if consecutive_similar_count >= min_consecutive_similar:
-                                skip_by_ssim = True
-                                ssim_skip_count += 1
-                                if i % 100 == 0:  # 로그 스팸 방지
-                                    logger.debug(f"[Ultra-safe skip] Frame {i+1}: SSIM={ssim_score:.3f}, Edge={edge_change:.5f}, consecutive={consecutive_similar_count} (total {ssim_skip_count})")
+                            if is_similar:
+                                consecutive_similar_count += 1
+                                if consecutive_similar_count >= min_consecutive_similar:
+                                    skip_by_ssim = True
+                                    ssim_skip_count += 1
                             else:
-                                # 첫 번째 유사 프레임은 스킵하지 않음 (전환 감지)
-                                if i % 100 == 0:
-                                    logger.debug(f"[Transition detection] Frame {i+1}: Similar but OCR executed (consecutive={consecutive_similar_count}/{min_consecutive_similar})")
-                        else:
-                            # 유사하지 않음 - 연속 카운터 리셋
+                                consecutive_similar_count = 0
+                                if edge_change >= edge_change_threshold:
+                                    edge_detected_count += 1
+                        except Exception:
                             consecutive_similar_count = 0
 
-                            if edge_change >= edge_change_threshold:
-                                # Edge 변화가 감지되면 SSIM이 높아도 OCR 수행
-                                edge_detected_count += 1
-                                if i % 100 == 0:
-                                    logger.debug(f"[Edge detection] Frame {i+1}: Text change detected ({edge_change:.5f}) - OCR executed")
-
-                    except Exception as ssim_err:
-                        consecutive_similar_count = 0  # 오류 시 리셋
-                        pass  # SSIM/Edge 계산 실패 시 스킵하지 않음 (안전)
-                else:
-                    # critical period이거나 이전 프레임 없음
-                    consecutive_similar_count = 0
-
-                    if is_critical_period and i % 50 == 0:
-                        # 0~5초 구간 로그
-                        logger.debug(f"[Early section] Frame {i+1} ({time_sec:.2f}s): SSIM skip disabled (ensuring subtitle capture)")
-
-                # SSIM으로 스킵된 프레임은 OCR하지 않음
+                # SSIM으로 스킵된 프레임은 OCR하지 않음 (현재는 항상 False)
                 if skip_by_ssim:
                     continue
 
-                # ROI 프레임 저장 (다음 비교용)
+                # ROI 프레임 저장 (다음 비교용 - SSIM 활성화 시 사용)
                 if roi_frame is not None:
                     prev_frame_roi = roi_frame.copy()
 
@@ -1483,8 +1464,6 @@ class SubtitleDetector:
                         current_positions.add(key)
                     position_history.append(current_positions)
 
-            cap.release()
-
             # Clear frame cache to prevent memory leak
             # 프레임 캐시 정리 (메모리 누수 방지)
             if 'prev_frame_roi' in locals():
@@ -1503,11 +1482,9 @@ class SubtitleDetector:
             logger.info(f"  Edge detection: {edge_detected_count} (OCR despite high SSIM)")
             logger.info(f"  Actual processed: {actual_processed} frames")
             logger.info(f"  OCR calls: {ocr_call_count}")
-            logger.debug(f"  [Ultra-safe mode]:")
-            logger.debug(f"    - 0-5s section: SSIM skip completely disabled")
-            logger.debug(f"    - SSIM threshold: 98% (nearly pixel identical)")
-            logger.debug(f"    - Edge threshold: 0.1% (single character change detection)")
-            logger.debug(f"    - Consecutive check: {min_consecutive_similar}+ frames must match to skip")
+            logger.debug(f"  [100% Detection mode]:")
+            logger.debug(f"    - SSIM skip: DISABLED (all frames scanned)")
+            logger.debug(f"    - ROI: Full screen (100%)")
 
             # 하이브리드 감지기 통계 출력
             if use_hybrid and hybrid_detector:
@@ -1533,3 +1510,10 @@ class SubtitleDetector:
             logger.error(f"[OCR {segment_name}] Error: {e}")
             logger.exception("OCR segment analysis failed")
             return None
+        finally:
+            # ★★★ 리소스 누수 방지: 예외 발생 시에도 VideoCapture 해제 ★★★
+            if cap is not None:
+                try:
+                    cap.release()
+                except Exception:
+                    pass
