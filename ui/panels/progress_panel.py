@@ -1,7 +1,7 @@
 """
-Progress Panel for PyQt6
+Progress Panel for PyQt6 - Dark Mode Design
 """
-from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame, QWidget
+from PyQt6.QtWidgets import QVBoxLayout, QHBoxLayout, QLabel, QFrame, QWidget, QScrollArea
 from PyQt6.QtCore import Qt, QTimer
 from ui.components.base_widget import ThemedMixin
 from ui.design_system_v2 import get_design_system, get_color, is_dark_mode
@@ -18,84 +18,164 @@ class ProgressPanel(QFrame, ThemedMixin):
     def create_widgets(self):
         ds = self.ds
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(ds.spacing.space_3, ds.spacing.space_4, ds.spacing.space_3, ds.spacing.space_4)
+        self.main_layout.setContentsMargins(12, 12, 12, 12)
+        self.main_layout.setSpacing(8)
         
         # Header
-        self.title_label = QLabel("제작 진행")
-        self.title_label.setStyleSheet(f"font-size: {ds.typography.size_xl}px; font-weight: {ds.typography.weight_bold};")
+        self.title_label = QLabel("📋 제작 진행")
+        self.title_label.setStyleSheet("""
+            font-size: 15px;
+            font-weight: bold;
+            color: #FFFFFF;
+            padding-bottom: 2px;
+        """)
         self.main_layout.addWidget(self.title_label)
         
-        # Current Task Display
+        # Current Task Display - Clean Style (no background)
         self.status_container = QFrame()
-        self.status_container.setStyleSheet(f"background-color: {get_color('error')}; border-radius: {ds.radius.sm}px; padding: 2px;")
+        self.status_container.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+            }
+        """)
         status_layout = QVBoxLayout(self.status_container)
+        status_layout.setContentsMargins(10, 8, 10, 8)
+        status_layout.setSpacing(2)
         
-        self.status_inner = QFrame()
-        inner_bg = get_color('surface_variant') if is_dark_mode() else "#FEF2F2"
-        self.status_inner.setStyleSheet(f"background-color: {inner_bg}; border-radius: {ds.radius.sm - 2}px;")
-        inner_layout = QVBoxLayout(self.status_inner)
+        # Status indicator row
+        status_header = QHBoxLayout()
+        self.status_icon = QLabel("⏳")
+        self.status_icon.setStyleSheet("font-size: 15px; color: #FACC15;")
+        status_header.addWidget(self.status_icon)
         
-        task_fg = get_color('error') if is_dark_mode() else "#DC2626"
+        self.status_title = QLabel("현재 작업")
+        self.status_title.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: bold;")
+        status_header.addWidget(self.status_title)
+        status_header.addStretch()
+        status_layout.addLayout(status_header)
+        
+        # Task label
         self.gui.current_task_label = QLabel("대기 중...")
-        self.gui.current_task_label.setStyleSheet(f"color: {task_fg}; font-size: {ds.typography.size_sm}px; font-weight: {ds.typography.weight_bold}; padding: {ds.spacing.space_2}px;")
+        self.gui.current_task_label.setStyleSheet("""
+            font-size: 13px;
+            font-weight: bold;
+            color: #F1F5F9;
+            padding: 2px 0;
+        """)
         self.gui.current_task_label.setWordWrap(True)
-        inner_layout.addWidget(self.gui.current_task_label)
-        status_layout.addWidget(self.status_inner)
+        status_layout.addWidget(self.gui.current_task_label)
+        
         self.main_layout.addWidget(self.status_container)
         
-        # Overall Progress
-        self.overall_title = QLabel("📊 현재 영상 진행률")
-        self.overall_title.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; margin-top: {ds.spacing.space_2}px;")
-        self.main_layout.addWidget(self.overall_title)
+        # Overall Progress Section
+        progress_section = QFrame()
+        progress_section.setStyleSheet("""
+            QFrame {
+                background-color: transparent;
+                border: none;
+                border-radius: 6px;
+            }
+        """)
+        progress_layout = QVBoxLayout(progress_section)
+        progress_layout.setContentsMargins(10, 8, 10, 8)
+        progress_layout.setSpacing(4)
         
+        # Progress header
+        self.overall_title = QLabel("📊 영상 진행률")
+        self.overall_title.setStyleSheet("font-size: 12px; font-weight: bold; color: #94A3B8;")
+        progress_layout.addWidget(self.overall_title)
+
+        # Progress value
         self.gui.overall_numeric_label = QLabel("0/0 (0%)")
-        self.gui.overall_numeric_label.setStyleSheet(f"font-size: {ds.typography.size_lg}px; font-weight: {ds.typography.weight_bold};")
-        self.main_layout.addWidget(self.gui.overall_numeric_label)
+        self.gui.overall_numeric_label.setStyleSheet("""
+            font-size: 13px;
+            font-weight: bold;
+            color: #22C55E;
+            padding: 0;
+        """)
+        progress_layout.addWidget(self.gui.overall_numeric_label)
         
-        self.gui.overall_witty_label = QLabel("큐를 채우면 신나는 제작 퍼레이드가 시작됩니다!")
-        self.gui.overall_witty_label.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
+        # Witty message
+        self.gui.overall_witty_label = QLabel("큐를 채우면 제작이 시작됩니다")
+        self.gui.overall_witty_label.setStyleSheet("font-size: 10px; color: #64748B;")
         self.gui.overall_witty_label.setWordWrap(True)
-        self.main_layout.addWidget(self.gui.overall_witty_label)
+        progress_layout.addWidget(self.gui.overall_witty_label)
         
-        # Steps Grid
-        self.steps_container = QFrame()
+        self.main_layout.addWidget(progress_section)
+        
+        # Steps Container with Scroll
+        self.steps_scroll = QScrollArea()
+        self.steps_scroll.setWidgetResizable(True)
+        self.steps_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.steps_scroll.setStyleSheet("""
+            QScrollArea {
+                background: transparent;
+                border: none;
+            }
+            QScrollBar:vertical {
+                background: #1E293B;
+                width: 6px;
+                border-radius: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: #475569;
+                border-radius: 3px;
+            }
+        """)
+        
+        self.steps_container = QWidget()
+        self.steps_container.setStyleSheet("background: transparent;")
         steps_layout = QVBoxLayout(self.steps_container)
-        steps_layout.setSpacing(0)
-        steps_layout.setContentsMargins(0, ds.spacing.space_2, 0, 0)
+        steps_layout.setSpacing(1)
+        steps_layout.setContentsMargins(0, 4, 0, 0)
         
         step_definitions = [
-            ("📥 다운로드", 'download'),
-            ("🤖 AI 분석", 'analysis'),
-            ("🔍 자막 분석", 'ocr_analysis'),
-            ("🌐 번역", 'translation'),
-            ("🎤 TTS", 'tts'),
-            ("🎨 블러", 'subtitle'),
-            ("🔊 싱크", 'audio_analysis'),
-            ("📝 자막", 'subtitle_overlay'),
-            ("🎵 합성", 'video'),
-            ("✨ 완료", 'finalize'),
+            ("다운로드", 'download', "⬇"),
+            ("AI 분석", 'analysis', "🤖"),
+            ("자막 분석", 'ocr_analysis', "📝"),
+            ("번역", 'translation', "🌐"),
+            ("TTS 생성", 'tts', "🔊"),
+            ("블러 처리", 'subtitle', "🔲"),
+            ("오디오 싱크", 'audio_analysis', "🎵"),
+            ("자막 오버레이", 'subtitle_overlay', "💬"),
+            ("영상 합성", 'video', "🎬"),
+            ("완료 처리", 'finalize', "✅"),
         ]
         
         self.gui.step_indicators = {}
         self.gui.step_titles = {}
         
-        for idx, (title, key) in enumerate(step_definitions):
+        for idx, (title, key, icon) in enumerate(step_definitions):
             row = QFrame()
+            row.setStyleSheet("""
+                QFrame {
+                    background-color: transparent;
+                    border-radius: 4px;
+                    padding: 2px;
+                }
+            """)
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(ds.spacing.space_3, ds.spacing.space_1, ds.spacing.space_3, ds.spacing.space_1)
-            
-            status_ico = QLabel("⏸")
-            status_ico.setFixedWidth(24)
+            row_layout.setContentsMargins(6, 2, 6, 2)
+            row_layout.setSpacing(6)
+
+            # Status indicator
+            status_ico = QLabel("○")
+            status_ico.setFixedWidth(14)
+            status_ico.setStyleSheet("font-size: 10px; color: #475569;")
             row_layout.addWidget(status_ico)
-            
+
+            # Step title
             title_lbl = QLabel(title)
-            title_lbl.setStyleSheet(f"font-size: {ds.typography.size_xs}px;")
+            title_lbl.setStyleSheet("font-size: 11px; color: #94A3B8;")
             row_layout.addWidget(title_lbl)
-            
+
             row_layout.addStretch()
-            
+
+            # Progress label
             prog_lbl = QLabel("")
-            prog_lbl.setStyleSheet(f"font-weight: {ds.typography.weight_bold};")
+            prog_lbl.setStyleSheet("font-size: 10px; font-weight: bold; color: #475569;")
             row_layout.addWidget(prog_lbl)
             
             steps_layout.addWidget(row)
@@ -108,62 +188,77 @@ class ProgressPanel(QFrame, ThemedMixin):
                 'title_label': title_lbl,
                 'index': idx
             }
-            
-        self.main_layout.addWidget(self.steps_container)
-        self.main_layout.addStretch()
+        
+        steps_layout.addStretch()
+        self.steps_scroll.setWidget(self.steps_container)
+        self.main_layout.addWidget(self.steps_scroll, stretch=1)
 
     def update_step_status(self, step_key, status, progress=None):
-        ds = self.ds
         if step_key not in self.gui.step_indicators:
             return
             
         indicator = self.gui.step_indicators[step_key]
-        icons = {'pending': '⏸', 'active': '🔄', 'completed': '✅', 'error': '❌'}
-        colors = {
-            'pending': get_color('text_muted'), 
-            'active': get_color('error'), 
-            'completed': get_color('success'), 
-            'error': get_color('error')
+        
+        # Status icons and colors
+        status_config = {
+            'pending': ('○', '#475569', '#94A3B8', 'transparent'),
+            'active': ('●', '#FACC15', '#FFFFFF', 'transparent'),
+            'completed': ('✓', '#22C55E', '#22C55E', 'transparent'),
+            'error': ('✗', '#EF4444', '#EF4444', 'transparent')
         }
         
-        color = colors.get(status, colors['pending'])
-        indicator['status_label'].setText(icons.get(status, '⏸'))
-        indicator['status_label'].setStyleSheet(f"color: {color}; font-weight: {ds.typography.weight_bold};")
+        icon, icon_color, text_color, bg_color = status_config.get(status, status_config['pending'])
         
-        if status == 'active':
-            indicator['title_label'].setStyleSheet(f"color: {color}; font-size: {ds.typography.size_xs}px; font-weight: {ds.typography.weight_bold};")
-            indicator['row_frame'].setStyleSheet(f"background-color: {get_color('surface_variant')}; border-radius: {ds.radius.sm}px;")
-        else:
-            indicator['title_label'].setStyleSheet(f"color: {get_color('text_primary')}; font-size: {ds.typography.size_xs}px;")
-            indicator['row_frame'].setStyleSheet("background-color: transparent;")
+        indicator['status_label'].setText(icon)
+        indicator['status_label'].setStyleSheet(f"font-size: 11px; color: {icon_color}; font-weight: bold;")
+        indicator['title_label'].setStyleSheet(f"font-size: 12px; color: {text_color};")
+        indicator['row_frame'].setStyleSheet(f"""
+            QFrame {{
+                background-color: {bg_color};
+                border-radius: 4px;
+            }}
+        """)
 
         if progress is not None:
             indicator['progress_label'].setText(f"{progress}%")
+            indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
         elif status == 'completed':
             indicator['progress_label'].setText("완료")
+            indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
         elif status == 'active':
             indicator['progress_label'].setText("진행중")
+            indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
         else:
             indicator['progress_label'].setText("")
+
+    def set_current_task(self, task_text, status='active'):
+        """Update current task display"""
+        self.gui.current_task_label.setText(task_text)
         
-        indicator['progress_label'].setStyleSheet(f"color: {color};")
+        if status == 'active':
+            self.status_icon.setText("⏳")
+            self.status_icon.setStyleSheet("font-size: 14px; color: #FACC15;")
+            self.status_title.setText("진행 중")
+        elif status == 'completed':
+            self.status_icon.setText("✅")
+            self.status_icon.setStyleSheet("font-size: 14px; color: #22C55E;")
+            self.status_title.setText("완료")
+        elif status == 'error':
+            self.status_icon.setText("❌")
+            self.status_icon.setStyleSheet("font-size: 14px; color: #EF4444;")
+            self.status_title.setText("오류")
+        else:
+            self.status_icon.setText("⏸")
+            self.status_icon.setStyleSheet("font-size: 14px; color: #64748B;")
+            self.status_title.setText("대기 중")
 
     def apply_theme(self):
-        ds = self.ds
-        bg = get_color('surface')
-        border = get_color('border_light')
-        text_primary = get_color('text_primary')
-        text_secondary = get_color('text_secondary')
-        
-        self.setStyleSheet(f"background-color: {bg}; border: 1px solid {border}; border-radius: {ds.radius.base}px;")
-        self.title_label.setStyleSheet(f"color: {text_primary}; font-weight: {ds.typography.weight_bold}; border: none; font-size: {ds.typography.size_xl}px;")
-        self.overall_title.setStyleSheet(f"color: {text_primary}; border: none; font-weight: {ds.typography.weight_bold};")
-        self.gui.overall_numeric_label.setStyleSheet(f"color: {get_color('primary')}; border: none; font-size: {ds.typography.size_lg}px; font-weight: {ds.typography.weight_bold};")
-        self.gui.overall_witty_label.setStyleSheet(f"color: {text_secondary}; border: none; font-size: {ds.typography.size_2xs}px;")
-        
-        # Current Task Highlight
-        inner_bg = "#1F2937" if is_dark_mode() else "#FEF2F2"
-        task_fg = get_color('error') if is_dark_mode() else "#DC2626"
-        self.status_inner.setStyleSheet(f"background-color: {inner_bg}; border-radius: {ds.radius.sm - 2}px; border: none;")
-        self.gui.current_task_label.setStyleSheet(f"color: {task_fg}; font-size: {ds.typography.size_sm}px; font-weight: {ds.typography.weight_bold}; padding: {ds.spacing.space_2}px; border: none;")
-        self.status_container.setStyleSheet(f"background-color: {get_color('error')}; border-radius: {ds.radius.sm}px; padding: 2px; border: none;")
+        # Use UI background color for seamless integration
+        bg_color = get_color('surface')
+        self.setStyleSheet(f"""
+            ProgressPanel {{
+                background-color: {bg_color};
+                border: none;
+                border-radius: 8px;
+            }}
+        """)

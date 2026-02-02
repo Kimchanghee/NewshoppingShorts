@@ -41,7 +41,7 @@ from ui.panels.settings_tab import SettingsTab
 from ui.components.status_bar import StatusBar
 from ui.components.custom_dialog import show_info, show_warning
 from ui.theme_manager import get_theme_manager
-from ui.design_system_enhanced import get_design_system
+from ui.design_system_v2 import get_design_system
 from utils.logging_config import get_logger
 from utils.error_handlers import global_exception_handler
 from core.providers import VertexGeminiProvider
@@ -164,6 +164,7 @@ class VideoAnalyzerGUI(QMainWindow):
         left_container = QWidget()
         left_container.setObjectName("LeftContainer")
         left_container.setStyleSheet(f"#LeftContainer {{ background-color: {d.colors.bg_main}; }}")
+        left_container.setMaximumWidth(280)
         left_layout = QVBoxLayout(left_container)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(0)
@@ -179,14 +180,17 @@ class VideoAnalyzerGUI(QMainWindow):
             ("settings", "설정", "settings"),
         ]
         self.step_nav = StepNav(steps)
-        left_layout.addWidget(self.step_nav, stretch=1)
-        
-        # 2. Log Panel (ProgressPanel) - Bottom left
+        left_layout.addWidget(self.step_nav, stretch=0)
+
+        # 2. Minimal spacer
+        left_layout.addSpacing(4)  # 8px -> 4px (tight fit)
+
+        # 3. Log Panel (ProgressPanel) - Bottom left, takes remaining space
         self.progress_panel = ProgressPanel(self, self, theme_manager=self.theme_manager)
-        self.progress_panel.setMinimumHeight(200)
-        self.progress_panel.setMaximumHeight(280)
-        self.progress_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        left_layout.addWidget(self.progress_panel)
+        self.progress_panel.setMinimumHeight(360) # Increased to avoid scroll
+        self.progress_panel.setMaximumHeight(600)  # Allow growth
+        self.progress_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        left_layout.addWidget(self.progress_panel, stretch=1)
         
         main_layout.addWidget(left_container)
 
@@ -316,67 +320,83 @@ class VideoAnalyzerGUI(QMainWindow):
             logger.info("[Vertex] 서비스 계정 키 경로가 비어 있습니다. ADC 또는 기본 자격 증명 사용을 시도합니다.")
 
     def _build_topbar(self) -> QWidget:
+        """상단 헤더바 - STITCH 디자인 적용"""
         d = self.design
         c = d.colors
-        
+
         bar = QFrame()
         bar.setObjectName("TopBar")
+        bar.setFixedHeight(68)  # STITCH: 68px 고정 높이
         bar.setStyleSheet(f"""
             #TopBar {{
                 background-color: {c.bg_header};
                 border-bottom: 1px solid {c.border_light};
             }}
         """)
-        
-        layout = QHBoxLayout(bar)
-        layout.setContentsMargins(24, 12, 24, 12)
-        layout.setSpacing(20)
 
-        # Title
-        app_title = QLabel("쇼핑 숏폼 메이커")
-        app_title.setFont(QFont(d.typography.font_family_heading, 15, QFont.Weight.Bold))
-        app_title.setStyleSheet(f"color: {c.text_primary};")
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(24, 12, 24, 12)  # STITCH: 24px 패딩 유지
+        layout.setSpacing(16)  # STITCH: 20px → 16px (더 compact)
+
+        # Title - Reduced font size
+        app_title = QLabel("쇼핑 숏폼 메이커 - 스튜디오")
+        app_title.setFont(QFont(
+            d.typography.font_family_heading,  # Outfit
+            d.typography.size_sm,              # 14px (reduced from 18px)
+            QFont.Weight.Bold
+        ))
+        app_title.setStyleSheet(f"color: {c.text_primary}; letter-spacing: -0.5px;")
         layout.addWidget(app_title)
 
         layout.addStretch()
 
-        # Credits (Simple text, no box)
-        self.credits_label = QLabel("")
-        self.credits_label.setFont(QFont(d.typography.font_family_body, 11, QFont.Weight.Bold))
-        self.credits_label.setStyleSheet(f"color: {c.primary};")
-        layout.addWidget(self.credits_label)
-        
-        # Divider
-        div1 = QLabel("|")
-        div1.setStyleSheet(f"color: {c.border_medium};")
-        layout.addWidget(div1)
-        
-        # Username (Simple text)
-        self.username_label = QLabel("사용자")
-        self.username_label.setFont(QFont(d.typography.font_family_body, 11))
-        self.username_label.setStyleSheet(f"color: {c.text_primary};")
-        layout.addWidget(self.username_label)
-        
-        # Last login (Simple text)
-        self.last_login_label = QLabel("")
-        self.last_login_label.setFont(QFont(d.typography.font_family_body, 10))
-        self.last_login_label.setStyleSheet(f"color: {c.text_secondary};")
-        layout.addWidget(self.last_login_label)
-
-        # Subscription Badge (Compact)
-        self.sub_badge = QPushButton("게스트")
-        self.sub_badge.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sub_badge.setFont(QFont(d.typography.font_family_body, 10, QFont.Weight.Bold))
-        self.sub_badge.setStyleSheet(f"""
+        # Credits Button - STITCH: Primary 버튼 스타일
+        self.credits_label = QPushButton("")
+        self.credits_label.setFont(QFont(d.typography.font_family_body, d.typography.size_xs, QFont.Weight.Bold))
+        self.credits_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.credits_label.setStyleSheet(f"""
             QPushButton {{
                 background-color: {c.primary};
-                color: {c.text_on_primary};
-                padding: 6px 12px;
-                border-radius: 4px;
+                color: white;
+                padding: 8px 16px;
+                border-radius: {d.radius.md}px;
                 border: none;
+                font-weight: bold;
             }}
             QPushButton:hover {{
                 background-color: {c.primary_hover};
+            }}
+        """)
+        self.credits_label.clicked.connect(self._show_subscription_panel)
+        layout.addWidget(self.credits_label)
+
+        # Username - STITCH: 폰트 크기 증가
+        self.username_label = QLabel("사용자")
+        self.username_label.setFont(QFont(d.typography.font_family_body, d.typography.size_xs))  # 11px → 12px
+        self.username_label.setStyleSheet(f"color: {c.text_secondary};")
+        layout.addWidget(self.username_label)
+
+        # Last login - STITCH: 폰트 크기 유지
+        self.last_login_label = QLabel("")
+        self.last_login_label.setFont(QFont(d.typography.font_family_body, d.typography.size_2xs))  # 10px
+        self.last_login_label.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(self.last_login_label)
+
+        # Subscription Badge - STITCH: 스타일 개선
+        self.sub_badge = QPushButton("게스트")
+        self.sub_badge.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sub_badge.setFont(QFont(d.typography.font_family_body, d.typography.size_2xs, QFont.Weight.Bold))
+        self.sub_badge.setStyleSheet(f"""
+            QPushButton {{
+                background-color: rgba(255, 255, 255, 0.05);
+                color: {c.text_secondary};
+                padding: 6px 12px;
+                border-radius: {d.radius.base}px;
+                border: 1px solid {c.border_light};
+            }}
+            QPushButton:hover {{
+                background-color: rgba(255, 255, 255, 0.1);
+                border-color: {c.primary};
             }}
         """)
         self.sub_badge.clicked.connect(self._show_subscription_panel)
@@ -493,34 +513,48 @@ class VideoAnalyzerGUI(QMainWindow):
             logger.error(f"Failed to refresh user status: {e}")
 
     def _wrap_card(self, widget: QWidget, title: str, subtitle: str) -> QWidget:
+        """컨텐츠 카드 래퍼 - STITCH 디자인 적용"""
         d = self.design
-        
-        # We wrap the content in a container that provides the "Card" look
+
+        # Card container - STITCH: 다크 배경, 미묘한 테두리
         card = QFrame()
         card.setObjectName("ContentCard")
         card.setStyleSheet(f"""
             #ContentCard {{
-                background-color: {d.colors.bg_card};
-                border: 1px solid {d.colors.border_card};
-                border-radius: 16px;
+                background-color: {d.colors.surface};
+                border: 1px solid {d.colors.border_light};
+                border-radius: {d.radius.xl}px;
             }}
         """)
-        
+
+        # STITCH: 카드 패딩 조정 (40px → 32px, 더 compact)
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(40, 40, 40, 40)
-        card_layout.setSpacing(24)
+        card_layout.setContentsMargins(32, 32, 32, 32)
+        card_layout.setSpacing(d.spacing.section)  # 32px
 
         # Header Area
         header_layout = QVBoxLayout()
-        header_layout.setSpacing(8)
-        
+        header_layout.setSpacing(d.spacing.space_2)  # 8px
+
+        # Title - Reduced font size
         title_lbl = QLabel(title)
-        title_lbl.setFont(QFont(d.typography.font_family_heading, 24, QFont.Weight.Bold))
-        title_lbl.setStyleSheet(f"color: {d.colors.text_primary};")
-        
+        title_lbl.setFont(QFont(
+            d.typography.font_family_heading,  # Outfit
+            d.typography.size_lg,              # 20px (reduced from 32px)
+            QFont.Weight.Bold
+        ))
+        title_lbl.setStyleSheet(f"""
+            color: {d.colors.text_primary};
+            letter-spacing: -0.5px;
+        """)
+
+        # Subtitle - Reduced font size
         sub_lbl = QLabel(subtitle)
-        sub_lbl.setFont(QFont(d.typography.font_family_body, 13))
-        sub_lbl.setStyleSheet(f"color: {d.colors.text_secondary};")
+        sub_lbl.setFont(QFont(
+            d.typography.font_family_body,  # Manrope
+            d.typography.size_sm            # 14px (reduced from 16px)
+        ))
+        sub_lbl.setStyleSheet(f"color: {d.colors.text_secondary}; line-height: 1.5;")
         
         header_layout.addWidget(title_lbl)
         header_layout.addWidget(sub_lbl)
