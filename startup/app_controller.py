@@ -75,27 +75,32 @@ class AppController:
             logger.warning(f"Update server unreachable: {e}")
 
     def handle_update_available(self, update_data: Dict[str, Any]) -> None:
-        """Prompt user and start update process"""
-        latest_version = update_data.get("latest_version")
+        """Prompt user and start update process with modern UI"""
+        from ui.windows.update_dialog import UpdateConfirmDialog
+
+        latest_version = update_data.get("latest_version", "")
         download_url = update_data.get("download_url")
-        is_mandatory = update_data.get("is_mandatory")
+        is_mandatory = update_data.get("is_mandatory", False)
         release_notes = update_data.get("release_notes", "")
-        
-        msg = f"새로운 버전({latest_version})이 있습니다.\n\n{release_notes}\n\n지금 업데이트 하시겠습니까?"
-        
-        if is_mandatory:
-            QMessageBox.warning(None, "필수 업데이트", "중요한 업데이트가 있어 프로그램을 업데이트해야 합니다.")
-            self.perform_update(download_url)
-        else:
-            reply = QMessageBox.question(None, "업데이트 확인", msg, 
-                                       QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-            if reply == QMessageBox.StandardButton.Yes:
-                self.perform_update(download_url)
+
+        # Store download URL for later use
+        self._pending_download_url = download_url
+
+        # Show modern update confirmation dialog
+        self.update_confirm_dialog = UpdateConfirmDialog(
+            version=latest_version,
+            release_notes=release_notes,
+            is_mandatory=is_mandatory
+        )
+        self.update_confirm_dialog.update_accepted.connect(
+            lambda: self.perform_update(self._pending_download_url)
+        )
+        self.update_confirm_dialog.show()
 
     def perform_update(self, download_url: str) -> None:
-        """Download and run updater with progress UI"""
-        from PyQt6.QtWidgets import QProgressDialog
-        
+        """Download and run updater with modern progress UI"""
+        from ui.windows.update_dialog import UpdateProgressDialog
+
         if not download_url:
             QMessageBox.critical(None, "오류", "업데이트 파일 경로가 잘못되었습니다.")
             return
@@ -103,23 +108,26 @@ class AppController:
         import tempfile
         temp_dir = tempfile.gettempdir()
         new_exe_path = os.path.join(temp_dir, "new_ssmaker.exe")
-        
-        # Create progress dialog
-        self.progress_dialog = QProgressDialog("업데이트 다운로드 중...", "취소", 0, 100)
-        self.progress_dialog.setWindowTitle("실시간 업데이트")
-        self.progress_dialog.setWindowModality(QtCore.Qt.WindowModality.ApplicationModal)
-        self.progress_dialog.setAutoClose(True)
-        self.progress_dialog.show()
+
+        # Create modern progress dialog
+        self.update_progress_dialog = UpdateProgressDialog()
+        self.update_progress_dialog.show()
 
         self.download_worker = DownloadWorker(download_url, new_exe_path)
-        self.download_worker.progress.connect(self.progress_dialog.setValue)
-        
+        self.download_worker.progress.connect(self.update_progress_dialog.set_progress)
+
         def on_download_finished(success, result):
             if success:
-                self._run_updater(result)
+                self.update_progress_dialog.set_status("설치 준비 중...")
+                self.update_progress_dialog.set_progress(100)
+                # Small delay to show completion before running updater
+                QtCore.QTimer.singleShot(500, lambda: self._run_updater(result))
             else:
-                QMessageBox.critical(None, "다운로드 실패", f"업데이트 파일 다운로드 중 오류가 발생했습니다:\n{result}")
-                self.progress_dialog.close()
+                self.update_progress_dialog.close()
+                QMessageBox.critical(
+                    None, "다운로드 실패",
+                    f"업데이트 파일 다운로드 중 오류가 발생했습니다:\n{result}"
+                )
 
         self.download_worker.finished.connect(on_download_finished)
         self.download_worker.start()
