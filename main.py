@@ -36,8 +36,8 @@ from app.api_handler import APIHandler
 from managers.queue_manager import QueueManager
 from managers.voice_manager import VoiceManager
 from managers.output_manager import OutputManager
-from ui.panels import HeaderPanel, URLInputPanel, VoicePanel, QueuePanel, ProgressPanel, SubscriptionPanel
-from ui.panels.style_tab import StyleTab
+from ui.panels import HeaderPanel, URLInputPanel, VoicePanel, QueuePanel, ProgressPanel, SubscriptionPanel, FontPanel, CTAPanel
+from ui.panels.settings_tab import SettingsTab
 from ui.components.status_bar import StatusBar
 from ui.components.custom_dialog import show_info, show_warning
 from ui.theme_manager import get_theme_manager
@@ -46,6 +46,7 @@ from utils.logging_config import get_logger
 from utils.error_handlers import global_exception_handler
 from core.providers import VertexGeminiProvider
 from ui.components.step_nav import StepNav
+from ui.components.tutorial_manager import TutorialManager, show_guided_tutorial
 from caller import rest
 
 logger = get_logger(__name__)
@@ -90,10 +91,55 @@ class VideoAnalyzerGUI(QMainWindow):
         self.api_handler = APIHandler(self)
         self.model_provider = VertexGeminiProvider()
         self._warn_if_vertex_unset()
+        
+        # Tutorial flag
+        self._tutorial_shown = False
+        self._check_first_run()
 
         self.init_ui()
         self.api_handler.load_saved_api_keys()
         self.refresh_user_status()
+    
+    def _check_first_run(self):
+        """Check if this is the first run to show tutorial"""
+        import os
+        config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
+        tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
+        
+        if not os.path.exists(config_dir):
+            os.makedirs(config_dir)
+        
+        self._should_show_tutorial = not os.path.exists(tutorial_flag)
+    
+    def _mark_tutorial_complete(self):
+        """Mark tutorial as completed"""
+        import os
+        config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
+        tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
+        
+        with open(tutorial_flag, 'w') as f:
+            f.write("1")
+    
+    def showEvent(self, event):
+        """Show tutorial on first launch"""
+        super().showEvent(event)
+        
+        if hasattr(self, '_should_show_tutorial') and self._should_show_tutorial and not self._tutorial_shown:
+            self._tutorial_shown = True
+            # Delay to let UI fully render
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(500, self._show_tutorial)
+    
+    def _show_tutorial(self):
+        """Display guided tutorial with spotlight effect"""
+        self._tutorial_manager = show_guided_tutorial(self)
+
+    def show_tutorial_manual(self):
+        """Manually show tutorial (from settings or help menu)"""
+        # 기존 튜토리얼이 실행 중이면 중지
+        if hasattr(self, '_tutorial_manager') and self._tutorial_manager and self._tutorial_manager.is_running:
+            self._tutorial_manager.stop()
+        self._tutorial_manager = show_guided_tutorial(self)
 
     # ---------------- UI -----------------
     def init_ui(self):
@@ -123,16 +169,19 @@ class VideoAnalyzerGUI(QMainWindow):
         left_layout.setSpacing(0)
         
         # 1. Sidebar (StepNav) - Removed progress and subscription
+        # Updated menu structure with clean icons (no emojis)
         steps = [
-            ("source", "소스 입력", "🧲"),
-            ("style", "스타일", "🎨"),
-            ("voice", "음성/TTS", "🎤"),
-            ("queue", "대기/진행", "📋"),
+            ("source", "소스 입력", "source"),
+            ("voice", "음성 선택", "voice"),
+            ("cta", "CTA 선택", "cta"),
+            ("font", "폰트 선택", "font"),
+            ("queue", "대기/진행", "queue"),
+            ("settings", "설정", "settings"),
         ]
         self.step_nav = StepNav(steps)
         left_layout.addWidget(self.step_nav, stretch=1)
         
-        # 2. Log Panel (ProgressPanel) - Bottom left, fixed height
+        # 2. Log Panel (ProgressPanel) - Bottom left
         self.progress_panel = ProgressPanel(self, self, theme_manager=self.theme_manager)
         self.progress_panel.setMinimumHeight(200)
         self.progress_panel.setMaximumHeight(280)
@@ -168,25 +217,29 @@ class VideoAnalyzerGUI(QMainWindow):
         # Add padding around the stack for better visual balance
         stack_wrapper = QWidget()
         stack_layout = QVBoxLayout(stack_wrapper)
-        stack_layout.setContentsMargins(40, 30, 40, 30)  # Generous padding
+        stack_layout.setContentsMargins(20, 16, 20, 16)  # Compact padding
         stack_layout.addWidget(self.stack)
         
         content_layout.addWidget(stack_wrapper)
         right_layout.addWidget(content_container)
         main_layout.addWidget(right_container, stretch=1)
 
-        # Build pages as cards (progress and subscription removed from stack, shown separately)
+        # Build pages as cards - separated Voice, CTA, Font panels
         self.url_input_panel = URLInputPanel(self.stack, self, theme_manager=self.theme_manager)
-        self.style_tab = StyleTab(self.stack, self, theme_manager=self.theme_manager)
         self.voice_panel = VoicePanel(self.stack, self, theme_manager=self.theme_manager)
+        self.cta_panel = CTAPanel(self.stack, self, theme_manager=self.theme_manager)
+        self.font_panel = FontPanel(self.stack, self, theme_manager=self.theme_manager)
         self.queue_panel = QueuePanel(self.stack, self, theme_manager=self.theme_manager)
+        self.settings_tab = SettingsTab(self.stack, self, theme_manager=self.theme_manager)
         self.subscription_panel = SubscriptionPanel(self.stack, self)
 
         pages = [
             ("source", "소스 입력", "숏폼으로 변환할 쇼핑몰 링크나 영상을 추가하세요.", self.url_input_panel),
-            ("style", "스타일", "자막, 배경음악, 폰트 등 영상 스타일을 설정합니다.", self.style_tab),
-            ("voice", "음성/TTS", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", self.voice_panel),
+            ("voice", "음성 선택", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", self.voice_panel),
+            ("cta", "CTA 선택", "영상 마지막 클릭 유도 멘트를 선택하세요.", self.cta_panel),
+            ("font", "폰트 선택", "자막에 사용할 폰트를 선택하세요.", self.font_panel),
             ("queue", "대기/진행", "작업 대기열 및 진행 상황을 관리합니다.", self.queue_panel),
+            ("settings", "설정", "앱 설정 및 API 키를 관리합니다.", self.settings_tab),
         ]
 
         self.page_index = {}
@@ -276,117 +329,105 @@ class VideoAnalyzerGUI(QMainWindow):
         """)
         
         layout = QHBoxLayout(bar)
-        layout.setContentsMargins(40, 20, 40, 20)
+        layout.setContentsMargins(24, 12, 24, 12)
         layout.setSpacing(20)
 
-        # Breadcrumbs / Title
-        title_box = QVBoxLayout()
-        title_box.setSpacing(4)
-        
+        # Title
         app_title = QLabel("쇼핑 숏폼 메이커")
-        app_title.setFont(QFont(d.typography.font_family_heading, 14, QFont.Weight.Bold))
+        app_title.setFont(QFont(d.typography.font_family_heading, 15, QFont.Weight.Bold))
         app_title.setStyleSheet(f"color: {c.text_primary};")
-        
-        project_sub = QLabel("프로젝트: 새 영상")
-        project_sub.setFont(QFont(d.typography.font_family_body, 12))
-        project_sub.setStyleSheet(f"color: {c.text_secondary};")
-        
-        title_box.addWidget(app_title)
-        title_box.addWidget(project_sub)
-        layout.addLayout(title_box)
+        layout.addWidget(app_title)
 
         layout.addStretch()
 
-        # Right side actions
-        
-        # User Credits Label
+        # Credits (Simple text, no box)
         self.credits_label = QLabel("")
-        self.credits_label.setFont(QFont(d.typography.font_family_body, 11))
-        self.credits_label.setStyleSheet(f"color: {c.text_secondary}; margin-right: 10px;")
+        self.credits_label.setFont(QFont(d.typography.font_family_body, 11, QFont.Weight.Bold))
+        self.credits_label.setStyleSheet(f"color: {c.primary};")
         layout.addWidget(self.credits_label)
+        
+        # Divider
+        div1 = QLabel("|")
+        div1.setStyleSheet(f"color: {c.border_medium};")
+        layout.addWidget(div1)
+        
+        # Username (Simple text)
+        self.username_label = QLabel("사용자")
+        self.username_label.setFont(QFont(d.typography.font_family_body, 11))
+        self.username_label.setStyleSheet(f"color: {c.text_primary};")
+        layout.addWidget(self.username_label)
+        
+        # Last login (Simple text)
+        self.last_login_label = QLabel("")
+        self.last_login_label.setFont(QFont(d.typography.font_family_body, 10))
+        self.last_login_label.setStyleSheet(f"color: {c.text_secondary};")
+        layout.addWidget(self.last_login_label)
 
-        # Subscription Badge (Clickable)
+        # Subscription Badge (Compact)
         self.sub_badge = QPushButton("게스트")
         self.sub_badge.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sub_badge.setToolTip("구독/결제 페이지로 이동")
         self.sub_badge.setFont(QFont(d.typography.font_family_body, 10, QFont.Weight.Bold))
         self.sub_badge.setStyleSheet(f"""
             QPushButton {{
-                background-color: {c.bg_card};
-                color: {c.text_secondary};
+                background-color: {c.primary};
+                color: {c.text_on_primary};
                 padding: 6px 12px;
-                border-radius: 6px;
-                border: 1px solid {c.border_light};
+                border-radius: 4px;
+                border: none;
             }}
             QPushButton:hover {{
-                background-color: {c.bg_hover};
-                color: {c.text_primary};
+                background-color: {c.primary_hover};
             }}
         """)
         self.sub_badge.clicked.connect(self._show_subscription_panel)
         layout.addWidget(self.sub_badge)
 
-        # Refresh User Status Button
-        refresh_btn = QPushButton("↻")
-        refresh_btn.setToolTip("상태 새로고침")
-        refresh_btn.setFixedSize(30, 30)
-        refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        refresh_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {c.text_secondary};
-                border: 1px solid {c.border_light};
-                border-radius: 15px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.bg_hover};
-                color: {c.text_primary};
-            }}
-        """)
-        refresh_btn.clicked.connect(self.refresh_user_status)
-        layout.addWidget(refresh_btn)
-
-        # Settings Button
-        settings_btn = QPushButton("설정")
-        settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        settings_btn.setFont(QFont(d.typography.font_family_body, 11))
-        settings_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {c.text_secondary};
-                border: 1px solid {c.border_light};
-                border-radius: 8px;
-                padding: 8px 16px;
-            }}
-            QPushButton:hover {{
-                background-color: {c.bg_hover};
-                color: {c.text_primary};
-            }}
-        """)
-        settings_btn.clicked.connect(self.show_api_status)
-        layout.addWidget(settings_btn)
-
         return bar
 
     def refresh_user_status(self):
-        """Update user subscription status and credits from server"""
+        """Update user subscription status, credits, and user info from server"""
         if not self.login_data:
             self.sub_badge.setText("게스트")
+            self.username_label.setText("게스트")
+            self.last_login_label.setText("최근 로그인: -")
             return
 
         try:
-            # Extract user ID safely
+            # Extract user ID and username safely
             # Structure: {'data': {'data': {'id': ...}}}
             data_part = self.login_data.get("data", {})
             if isinstance(data_part, dict):
                 inner_data = data_part.get("data", {})
                 user_id = inner_data.get("id")
+                # Username might be in login_data top level or in inner data
+                username = inner_data.get("username") or data_part.get("username") or "사용자"
+                # Backend returns 'last_login_at' not 'last_login'
+                last_login = inner_data.get("last_login_at", None)
             else:
                 user_id = None
+                username = "사용자"
+                last_login = None
             
             if not user_id:
                 # Fallback if structure is different
                 user_id = self.login_data.get("userId")
+
+            # Update username and last login labels
+            self.username_label.setText(username or "사용자")
+            if last_login:
+                # Format last login date if it's a timestamp or ISO string
+                try:
+                    from datetime import datetime
+                    if isinstance(last_login, str):
+                        dt = datetime.fromisoformat(last_login.replace("Z", "+00:00"))
+                        formatted = dt.strftime("%Y-%m-%d %H:%M")
+                    else:
+                        formatted = str(last_login)[:16]
+                    self.last_login_label.setText(f"최근 로그인: {formatted}")
+                except:
+                    self.last_login_label.setText(f"최근 로그인: {str(last_login)[:10]}")
+            else:
+                self.last_login_label.setText("최근 로그인: 오늘")
 
             if user_id:
                 # Call API
