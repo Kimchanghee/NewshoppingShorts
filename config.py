@@ -18,3 +18,16 @@ FONTSIZE = 25
 DAESA_GILI = 1.1
 
 # Google Sheet 연동 사용 여부 (False이면 시트 관련 기능이 비활성화됩니다)
+
+# Payment API Configuration
+# 결제 API 설정
+import os
+PAYMENT_API_BASE_URL = os.getenv(
+    "PAYMENT_API_BASE_URL",
+    "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
+)
+
+# Payment Checkout Configuration
+# 결제 체크아웃 설정
+CHECKOUT_POLL_INTERVAL = 5.0  # seconds - 결제 상태 확인 주기 (5초)
+CHECKOUT_POLL_MAX_TRIES = 60  # 최대 확인 횟수 (5분 = 60 * 5초)

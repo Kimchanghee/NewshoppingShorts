@@ -1,0 +1,246 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>결제 테스트 페이지</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            padding: 40px;
+            max-width: 500px;
+            width: 100%;
+        }
+
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+            font-size: 28px;
+        }
+
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+            font-size: 14px;
+        }
+
+        .info-box {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 30px;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 12px;
+            font-size: 14px;
+        }
+
+        .info-row:last-child {
+            margin-bottom: 0;
+            padding-top: 12px;
+            border-top: 1px solid #dee2e6;
+            font-weight: bold;
+            font-size: 18px;
+        }
+
+        .label {
+            color: #666;
+        }
+
+        .value {
+            color: #333;
+            font-weight: 500;
+        }
+
+        .buttons {
+            display: flex;
+            gap: 12px;
+        }
+
+        button {
+            flex: 1;
+            padding: 16px;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-success:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-cancel {
+            background: #f8f9fa;
+            color: #666;
+        }
+
+        .btn-cancel:hover {
+            background: #e9ecef;
+        }
+
+        .loading {
+            display: none;
+            text-align: center;
+            margin-top: 20px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛒 테스트 결제</h1>
+        <p class="subtitle">이것은 개발 환경 전용 Mock 결제 페이지입니다.</p>
+
+        <div class="info-box">
+            <div class="info-row">
+                <span class="label">결제 ID</span>
+                <span class="value" id="payment-id">-</span>
+            </div>
+            <div class="info-row">
+                <span class="label">플랜</span>
+                <span class="value" id="plan-name">-</span>
+            </div>
+            <div class="info-row">
+                <span class="label">금액</span>
+                <span class="value" id="amount">-</span>
+            </div>
+        </div>
+
+        <div class="buttons">
+            <button class="btn-success" onclick="completePayment()">✓ 결제 완료</button>
+            <button class="btn-cancel" onclick="cancelPayment()">✕ 결제 취소</button>
+        </div>
+
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <p>처리 중...</p>
+        </div>
+    </div>
+
+    <script>
+        // Get URL parameters
+        const urlParams = new URLSearchParams(window.location.search);
+        const paymentId = urlParams.get('payment_id');
+        const planId = urlParams.get('plan');
+
+        // Plan information
+        const plans = {
+            'trial': { name: '체험판', price: '무료' },
+            'monthly': { name: '베이직 월간', price: '9,900원' },
+            'yearly': { name: '프로 연간', price: '86,400원' }
+        };
+
+        // Update UI
+        document.getElementById('payment-id').textContent = paymentId || '-';
+        const plan = plans[planId] || { name: planId, price: '-' };
+        document.getElementById('plan-name').textContent = plan.name;
+        document.getElementById('amount').textContent = plan.price;
+
+        async function completePayment() {
+            if (!paymentId) {
+                alert('결제 ID가 없습니다.');
+                return;
+            }
+
+            showLoading(true);
+
+            try {
+                const response = await fetch(`/payments/mock/complete/${paymentId}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    alert('✅ 결제가 완료되었습니다!\n\n잠시 후 앱에서 자동으로 업데이트됩니다.');
+                    window.close();
+                } else {
+                    alert('❌ 결제 처리 실패: ' + (data.message || '알 수 없는 오류'));
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('❌ 결제 처리 중 오류가 발생했습니다.');
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        async function cancelPayment() {
+            if (!paymentId) {
+                window.close();
+                return;
+            }
+
+            showLoading(true);
+
+            try {
+                const response = await fetch(`/payments/mock/cancel/${paymentId}`, {
+                    method: 'POST'
+                });
+
+                const data = await response.json();
+                alert('ℹ️ 결제가 취소되었습니다.');
+                window.close();
+            } catch (error) {
+                console.error('Error:', error);
+                window.close();
+            } finally {
+                showLoading(false);
+            }
+        }
+
+        function showLoading(show) {
+            document.getElementById('loading').style.display = show ? 'block' : 'none';
+            document.querySelectorAll('button').forEach(btn => {
+                btn.disabled = show;
+                btn.style.opacity = show ? '0.5' : '1';
+            });
+        }
+    </script>
+</body>
+</html>
