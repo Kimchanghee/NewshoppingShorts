@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
-from app.routers import auth, registration, admin, subscription
+from app.routers import auth, registration, admin, subscription, payment
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
 from app.database import init_db
@@ -175,6 +175,7 @@ app.include_router(auth.router)
 app.include_router(registration.router)
 app.include_router(admin.router)
 app.include_router(subscription.router)
+app.include_router(payment.router)
 
 @app.get("/health")
 async def health():
