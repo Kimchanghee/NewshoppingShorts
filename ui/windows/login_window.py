@@ -9,7 +9,7 @@ import threading
 from typing import Optional, Any, Dict
 
 from PyQt6 import QtCore, QtWidgets, QtGui
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, pyqtSignal
 from PyQt6.QtWidgets import QMainWindow, QApplication
 from PyQt6.QtGui import QIcon
 
@@ -22,6 +22,9 @@ logger = get_logger(__name__)
 
 class Login(QMainWindow, Ui_LoginWindow):
     """Login window with authentication functionality for PyQt6"""
+
+    # Signal emitted when window is fully displayed
+    window_ready = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -174,3 +177,9 @@ class Login(QMainWindow, Ui_LoginWindow):
 
     def mouseReleaseEvent(self, event):
         self.oldPos = None
+
+    def showEvent(self, event):
+        """Emit window_ready signal when window is shown"""
+        super().showEvent(event)
+        # Use QTimer to ensure window is fully rendered before emitting
+        QtCore.QTimer.singleShot(50, self.window_ready.emit)
