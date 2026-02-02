@@ -112,10 +112,12 @@ def _check_token_expiration(token: str) -> bool:
         return True
     except jwt.exceptions.DecodeError as e:
         logger.warning(f"Failed to decode JWT token for expiration check: {e}")
-        return True  # Allow storage if we can't decode (might be different format)
+        # Security: Reject invalid tokens (fail secure)
+        return False
     except Exception as e:
         logger.warning(f"Unexpected error checking token expiration: {e}")
-        return True
+        # Security: Reject on error (fail secure)
+        return False
 
 
 def _create_secure_session() -> requests.Session:

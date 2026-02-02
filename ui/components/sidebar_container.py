@@ -114,7 +114,7 @@ class SidebarProgressMini(QFrame):
         
         self.progress_label = QLabel("0%")
         self.progress_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.progress_label.setStyleSheet(f"font-size: {self.ds.typography.size_lg}px; font-weight: bold; color: {get_color('primary')};")
+        self.progress_label.setStyleSheet(f"font-size: {self.ds.typography.size_sm}px; font-weight: bold; color: {get_color('primary')};")
         layout.addWidget(self.progress_label)
 
     def update_status(self, status: str):
@@ -160,9 +160,10 @@ class SidebarContainer(QWidget):
         self.menu_layout.setContentsMargins(0, 0, 0, 0)
         self.menu_layout.setSpacing(self.ds.spacing.space_1)
         sidebar_layout.addWidget(self.menu_container)
-        
-        sidebar_layout.addStretch()
-        
+
+        # Reduced stretch to move progress panel higher
+        sidebar_layout.addSpacing(self.ds.spacing.space_6)  # 32px spacing instead of stretch
+
         self.progress_mini = SidebarProgressMini()
         sidebar_layout.addWidget(self.progress_mini)
         

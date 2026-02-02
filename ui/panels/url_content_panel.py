@@ -34,7 +34,7 @@ class URLContentPanel(TabContent):
         title = QLabel("URL 입력")
         title.setStyleSheet(f"""
             color: {self.get_color("text_primary")};
-            font-size: 24px;
+            font-size: 18px;
             font-weight: bold;
         """)
         header_layout.addWidget(title)
@@ -55,7 +55,7 @@ class URLContentPanel(TabContent):
         card_layout.setContentsMargins(20, 20, 20, 20)
         
         card_title = QLabel("TikTok / Douyin URL을 입력하세요")
-        card_title.setStyleSheet(f"color: {self.get_color('text_primary')}; font-size: 16px; font-weight: bold; border: none;")
+        card_title.setStyleSheet(f"color: {self.get_color('text_primary')}; font-size: 14px; font-weight: bold; border: none;")
         card_layout.addWidget(card_title)
         
         card_subtitle = QLabel("여러 개의 URL을 한 번에 붙여넣을 수 있습니다. (최대 30개)")

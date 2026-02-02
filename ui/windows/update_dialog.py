@@ -6,10 +6,10 @@ Modern Update Dialog for PyQt6
 import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
-    QPushButton, QApplication, QGraphicsDropShadowEffect
+    QPushButton, QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
-from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QPen, QFontDatabase
+from PyQt6.QtGui import QFont
 
 from ui.theme_manager import get_theme_manager
 
@@ -64,11 +64,7 @@ class UpdateConfirmDialog(QWidget):
             }}
         """)
 
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 60))
-        shadow.setOffset(0, 8)
-        self.container.setGraphicsEffect(shadow)
+        # Shadow removed for cleaner UI
 
         layout = QVBoxLayout(self.container)
         layout.setContentsMargins(32, 28, 32, 28)
@@ -252,11 +248,7 @@ class UpdateProgressDialog(QWidget):
             }}
         """)
 
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 60))
-        shadow.setOffset(0, 8)
-        self.container.setGraphicsEffect(shadow)
+        # Shadow removed for cleaner UI
 
         layout = QVBoxLayout(self.container)
         layout.setContentsMargins(32, 28, 32, 28)

@@ -37,14 +37,9 @@ from app.services.auth_service import AuthService
 logger = logging.getLogger(__name__)
 
 
-def get_client_ip(request: Request) -> str:
-    """Extract client IP from request"""
-    if request.client:
-        return request.client.host
-    forwarded_for = request.headers.get("X-Forwarded-For")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
-    return "unknown"
+# Use the secure get_client_ip from ip_utils for consistent IP extraction
+# 보안: IP 스푸핑 방지를 위해 통일된 get_client_ip 사용
+from app.utils.ip_utils import get_client_ip
 
 
 # Rate limiter

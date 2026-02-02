@@ -24,38 +24,42 @@ STEP_ICONS = {
 
 
 class StepButton(QPushButton):
-    """Custom styled navigation button with clean design"""
+    """Custom styled navigation button - STITCH 디자인 적용"""
     def __init__(self, step_id, label, icon_key, parent=None):
         super().__init__(parent)
         self.step_id = step_id
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(48)
-        
+        self.setFixedHeight(48)  # STITCH: 48px 유지
+
         # Design System
         self.ds = get_design_system()
-        
-        # Layout
+
+        # Layout - STITCH: 간격 최적화
         layout = QHBoxLayout(self)
         layout.setContentsMargins(
-            self.ds.spacing.space_5,
-            0,
-            self.ds.spacing.space_5,
-            0
+            self.ds.spacing.space_4,  # 16px (STITCH 디자인)
+            self.ds.spacing.space_3,  # 12px
+            self.ds.spacing.space_4,  # 16px
+            self.ds.spacing.space_3   # 12px
         )
-        layout.setSpacing(self.ds.spacing.space_4)
-        
-        # Icon - now using clean Unicode symbols
+        layout.setSpacing(self.ds.spacing.space_3)  # 12px 간격
+
+        # Icon - STITCH: 크기 증가
         icon_char = STEP_ICONS.get(icon_key, "•")
         self.icon_label = QLabel(icon_char)
-        self.icon_label.setFont(QFont("Segoe UI Symbol", 14))
+        self.icon_label.setFont(QFont("Segoe UI Symbol", 16))  # 14 → 16 (STITCH)
         self.icon_label.setStyleSheet("background: transparent; border: none;")
         self.icon_label.setFixedWidth(24)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
-        # Text
+
+        # Text - STITCH: 폰트 크기 증가
         self.text_label = QLabel(label)
-        self.text_label.setFont(QFont(self.ds.typography.font_family_primary, 13, QFont.Weight.Medium))
+        self.text_label.setFont(QFont(
+            self.ds.typography.font_family_body,  # Manrope 사용
+            self.ds.typography.size_sm,           # 14px (STITCH)
+            QFont.Weight.Medium
+        ))
         self.text_label.setStyleSheet("background: transparent; border: none;")
         
         layout.addWidget(self.icon_label)
@@ -70,29 +74,35 @@ class StepButton(QPushButton):
         self.update_style(checked)
 
     def update_style(self, checked):
+        """STITCH 디자인 스타일 적용"""
         if checked:
-            bg = get_color('surface_variant')
-            text_color = get_color('primary')
-            icon_color = get_color('primary')
-            border = f"3px solid {get_color('primary')}"
+            # Active state - STITCH: 배경 + 왼쪽 보더 + Primary 색상
+            bg = f"rgba(227, 22, 57, 0.1)"  # primary with 10% opacity
+            text_color = get_color('text_primary')  # White text
+            icon_color = get_color('primary')  # Red icon
+            border = f"4px solid {get_color('primary')}"  # 3px → 4px (STITCH)
             font_weight = QFont.Weight.Bold
+            border_radius = self.ds.radius.md  # 8px rounded (STITCH)
         else:
+            # Inactive state - STITCH: 투명 배경, 회색 텍스트
             bg = "transparent"
-            text_color = get_color('text_secondary')
-            icon_color = get_color('text_muted')
-            border = "3px solid transparent"
+            text_color = get_color('text_secondary')  # #A0A0A0
+            icon_color = get_color('text_muted')      # #6B7280
+            border = "4px solid transparent"
             font_weight = QFont.Weight.Medium
+            border_radius = self.ds.radius.md
 
         self.setStyleSheet(f"""
             StepButton {{
                 background-color: {bg};
                 border: none;
                 border-left: {border};
-                border-radius: 0px;
+                border-radius: {border_radius}px;
                 text-align: left;
+                padding-left: 0px;
             }}
             StepButton:hover {{
-                background-color: {get_color('border_light')};
+                background-color: rgba(255, 255, 255, 0.03);
             }}
         """)
         
@@ -105,17 +115,17 @@ class StepButton(QPushButton):
 
 
 class StepNav(QFrame):
-    """Left sidebar navigation with clean icon design"""
+    """Left sidebar navigation - STITCH 디자인 적용"""
     step_selected = pyqtSignal(str)
 
     def __init__(self, steps, parent=None):
         super().__init__(parent)
         self.ds = get_design_system()
         self._buttons = {}
-        
+
         self.setObjectName("StepNav")
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-        self.setFixedWidth(240)  # Slightly narrower for cleaner look
+        self.setFixedWidth(280)  # STITCH: 280px (240px → 280px)
         
         # Main Layout
         layout = QVBoxLayout(self)

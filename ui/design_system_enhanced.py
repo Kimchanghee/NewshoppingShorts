@@ -101,78 +101,78 @@ class ColorPalette:
 @dataclass(frozen=True)
 class DarkColorPalette(ColorPalette):
     """
-    Dark Mode Palette - Content Creator's Studio (Night Edition)
-    Deep charcoal with glowing accents
+    기본 다크 테마 - 짙고 전문적인 색상 (모든 UI에 적용)
+    순수 검정 배경, 높은 대비, 선명한 액센트
     """
 
-    # Primary Colors - GLOWING RED in dark
-    primary: str = "#ff4d6a"           # Brighter red for dark backgrounds
-    primary_hover: str = "#ff6b84"     # Even brighter on hover
-    primary_light: str = "#3d1a1e"     # Very dark red background
-    primary_dark: str = "#e31639"      # Original red for contrast
+    # Primary Colors - 강렬한 빨강
+    primary: str = "#E63946"           # 선명한 레드
+    primary_hover: str = "#FF4757"     # 밝은 호버
+    primary_light: str = "#2A1215"     # 매우 어두운 레드 배경
+    primary_dark: str = "#C41E3A"      # 깊은 레드
 
-    # Accent Colors
-    accent: str = "#ff8599"            # Lighter coral for visibility
-    accent_light: str = "#4d2a2e"      # Dark coral background
-    accent_hover: str = "#FFA3C1"      # Bright coral hover
+    # Accent Colors - 코랄 핑크
+    accent: str = "#FF6B6B"            # 밝은 코랄
+    accent_light: str = "#2A1A1A"      # 어두운 코랄 배경
+    accent_hover: str = "#FF8787"      # 밝은 코랄 호버
 
-    # Background Colors - DEEP CHARCOAL STUDIO
-    bg_main: str = "#211113"           # Deep black (not pure black)
-    bg_card: str = "#2d1a1c"           # Charcoal cards
-    bg_sidebar: str = "#1a0d0e"        # Slightly darker sidebar
-    bg_input: str = "#3d2426"          # Input backgrounds
-    bg_hover: str = "#3d2426"          # Hover state
-    bg_selected: str = "#4d2a2e"       # Selected with red tint
-    bg_secondary: str = "#2d1a1c"      # Secondary backgrounds
-    bg_header: str = "#1a0d0e"         # Dark header
+    # Background Colors - 순수 검정 계열
+    bg_main: str = "#0A0A0A"           # 거의 순수 검정
+    bg_card: str = "#141414"           # 짙은 회색 카드
+    bg_sidebar: str = "#0D0D0D"        # 사이드바
+    bg_input: str = "#1A1A1A"          # 입력 필드
+    bg_hover: str = "#1F1F1F"          # 호버 상태
+    bg_selected: str = "#2A1215"       # 선택됨 (빨간 틴트)
+    bg_secondary: str = "#141414"      # 보조 배경
+    bg_header: str = "#0D0D0D"         # 헤더
 
-    # Text Colors - SOFT FOR DARK MODE
-    text_primary: str = "#F9FAFB"      # Soft white
-    text_secondary: str = "#a0a0a0"    # Gray-400
-    text_tertiary: str = "#666666"     # Gray-500
-    text_disabled: str = "#4B5563"     # Gray-600
-    text_on_primary: str = "#FFFFFF"   # Pure white
-    text_on_dark: str = "#F9FAFB"      # Soft white
+    # Text Colors - 고대비
+    text_primary: str = "#FFFFFF"      # 순백
+    text_secondary: str = "#A0A0A0"    # 밝은 회색
+    text_tertiary: str = "#707070"     # 중간 회색
+    text_disabled: str = "#404040"     # 비활성
+    text_on_primary: str = "#FFFFFF"   # 빨간 배경 위
+    text_on_dark: str = "#FFFFFF"      # 어두운 배경 위
 
-    # Border Colors
-    border_light: str = "#3d2426"      # Subtle dark borders
-    border_medium: str = "#4d2a2e"     # Visible dark borders
-    border_focus: str = "#ff4d6a"      # Bright red focus
-    border_card: str = "#3d2426"       # Card borders
+    # Border Colors - 뚜렷한 경계
+    border_light: str = "#2A2A2A"      # 기본 테두리
+    border_medium: str = "#3D3D3D"     # 강조 테두리
+    border_focus: str = "#E63946"      # 포커스 (빨강)
+    border_card: str = "#1F1F1F"       # 카드 테두리
 
-    # Status Colors - BRIGHTER for visibility
-    success: str = "#34D399"           # Emerald-400
-    success_light: str = "#1A2E1A"     # Dark green background
-    success_border: str = "#059669"    # Green border
+    # Status Colors - 선명함
+    success: str = "#2ED573"           # 선명한 초록
+    success_light: str = "#152A1A"     # 어두운 초록 배경
+    success_border: str = "#1ABC9C"    # 초록 테두리
 
-    error: str = "#F87171"             # Red-400
-    error_light: str = "#2E1A1A"       # Dark red background
-    error_border: str = "#DC2626"      # Red border
+    error: str = "#FF4757"             # 선명한 빨강
+    error_light: str = "#2A1215"       # 어두운 빨강 배경
+    error_border: str = "#E63946"      # 빨강 테두리
 
-    warning: str = "#FBBF24"           # Amber-400
-    warning_light: str = "#2E2A1A"     # Dark amber background
-    warning_border: str = "#D97706"    # Amber border
+    warning: str = "#FFA502"           # 선명한 주황
+    warning_light: str = "#2A2015"     # 어두운 주황 배경
+    warning_border: str = "#E8A000"    # 주황 테두리
 
-    info: str = "#60A5FA"              # Blue-400
-    info_light: str = "#1E3A5F"        # Dark blue background
-    info_border: str = "#2563EB"       # Blue border
+    info: str = "#3742FA"              # 선명한 파랑
+    info_light: str = "#15182A"        # 어두운 파랑 배경
+    info_border: str = "#2563EB"       # 파랑 테두리
 
     # Gradient Colors
-    gradient_start: str = "#e31639"
-    gradient_mid: str = "#ff4d6a"
-    gradient_end: str = "#ff8599"
+    gradient_start: str = "#E63946"
+    gradient_mid: str = "#FF4757"
+    gradient_end: str = "#FF6B6B"
 
     # Special Effects
-    overlay_light: str = "rgba(255, 255, 255, 0.05)"    # Subtle light overlay
-    overlay_dark: str = "rgba(0, 0, 0, 0.6)"            # Strong dark overlay
-    shadow_color: str = "rgba(227, 22, 57, 0.2)"        # Darker shadows
-    glow_primary: str = "rgba(255, 77, 106, 0.6)"       # Stronger red glow
-    glow_accent: str = "rgba(255, 133, 153, 0.5)"       # Stronger coral glow
+    overlay_light: str = "rgba(255, 255, 255, 0.03)"
+    overlay_dark: str = "rgba(0, 0, 0, 0.8)"
+    shadow_color: str = "rgba(0, 0, 0, 0.5)"
+    glow_primary: str = "rgba(230, 57, 70, 0.5)"
+    glow_accent: str = "rgba(255, 107, 107, 0.4)"
 
     # Scrollbar Colors
-    scrollbar_bg: str = "#2d1a1c"
-    scrollbar_thumb: str = "#4d2a2e"
-    scrollbar_hover: str = "#ff4d6a"   # Glowing red on hover
+    scrollbar_bg: str = "#141414"
+    scrollbar_thumb: str = "#3D3D3D"
+    scrollbar_hover: str = "#E63946"
 
 
 @dataclass
@@ -341,7 +341,7 @@ class DesignSystem:
         if self._initialized:
             return
 
-        self._color_mode = ColorMode.LIGHT
+        self._color_mode = ColorMode.DARK  # 다크 모드가 기본값
         self._colors = ColorPalette()
         self._dark_colors = DarkColorPalette()
         self.typography = Typography()
@@ -432,7 +432,6 @@ class DesignSystem:
                 }}
                 QPushButton:hover {{
                     background: {c.primary_hover};
-                    box-shadow: {self.shadow.glow_primary};
                 }}
                 QPushButton:pressed {{
                     background: {c.primary_dark};
@@ -447,7 +446,6 @@ class DesignSystem:
                 }}
                 QPushButton:hover {{
                     background-color: {c.accent_hover};
-                    box-shadow: {self.shadow.glow_accent};
                 }}
             """
 
@@ -522,7 +520,6 @@ class DesignSystem:
             QLineEdit:focus, QTextEdit:focus {{
                 border-color: {c.primary};
                 background-color: {c.bg_card};
-                box-shadow: 0 0 0 3px {c.primary_light};
             }}
             QLineEdit:hover, QTextEdit:hover {{
                 border-color: {c.border_medium};

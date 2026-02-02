@@ -1304,6 +1304,7 @@ def _create_final_video_for_batch(
                         "  [Video] 프레임 추출 실패, 원본에서 재시도: %s",
                         str(frame_err)[:40],
                     )
+                    source_video_clip = None
                     try:
                         source_video_clip = VideoFileClip(source_video)
                         frame_time = max(
@@ -1316,7 +1317,6 @@ def _create_final_video_for_batch(
                         tail_frame = ImageClip(last_frame_array, duration=extend_dur)
                         tail_frame.fps = original_fps
                         video = concatenate_videoclips([video, tail_frame])
-                        source_video_clip.close()
                         logger.debug(
                             "  [Video] Extended (from source): %.3fs -> %.3fs",
                             original_duration,
@@ -1327,6 +1327,13 @@ def _create_final_video_for_batch(
                         logger.debug(
                             "  [Video] 연장 실패, 현재 길이 유지: %.3fs", video.duration
                         )
+                    finally:
+                        # Resource cleanup: ensure VideoFileClip is closed
+                        if source_video_clip is not None:
+                            try:
+                                source_video_clip.close()
+                            except Exception:
+                                pass
         elif video.duration > target_video_duration + eps:
             video = video.subclip(0, target_video_duration)
             logger.debug(

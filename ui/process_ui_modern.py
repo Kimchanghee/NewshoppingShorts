@@ -6,9 +6,9 @@ from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
-    QLabel, QProgressBar, QGraphicsDropShadowEffect
+    QLabel, QProgressBar
 )
-from PyQt6.QtGui import QFont, QColor
+from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color
 
@@ -121,10 +121,7 @@ class ModernProcessUi:
             f"border-radius: {ds.radius.xl}px;"
         )
 
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 50))
-        self.frame.setGraphicsEffect(shadow)
+        # Shadow removed for cleaner UI
 
         self.headerFrame = QFrame(self.frame)
         self.headerFrame.setGeometry(QtCore.QRect(0, 0, 600, 90))

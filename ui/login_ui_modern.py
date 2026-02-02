@@ -23,10 +23,17 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QFont, QIcon, QPixmap
 
-from ui.design_system_v2 import get_design_system, get_color
+from ui.design_system_v2 import get_design_system, ColorPalette
 
-# Initialize design system
+# Initialize design system and ALWAYS use light palette for login
 ds = get_design_system()
+# Use light colors for login screen regardless of app-wide dark mode
+light_colors = ColorPalette()
+
+def login_color(key: str) -> str:
+    """Get color from light palette for login UI"""
+    return getattr(light_colors, key, "#000000")
+
 FONT_FAMILY = "맑은 고딕"
 logger = logging.getLogger(__name__)
 
@@ -98,8 +105,8 @@ class ModernLoginUi:
             QFrame {{
                 background: qlineargradient(
                     x1:0, y1:0, x2:1, y2:1,
-                    stop:0 {get_color('primary')},
-                    stop:1 {get_color('secondary')}
+                    stop:0 {login_color('primary')},
+                    stop:1 {login_color('secondary')}
                 );
             }}
         """)
@@ -121,7 +128,7 @@ class ModernLoginUi:
         self.logoBadge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.logoBadge.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs, QFont.Weight.Bold))
         self.logoBadge.setStyleSheet(f"""
-            color: {get_color('primary')};
+            color: {login_color('primary')};
             background: white;
             border-radius: {ds.radius.full}px;
             padding: {ds.spacing.space_1}px;
@@ -159,7 +166,7 @@ class ModernLoginUi:
         # 오른쪽 패널
         self.rightFrame = QFrame(self.centralwidget)
         self.rightFrame.setGeometry(QtCore.QRect(300, 0, 400, 500))
-        self.rightFrame.setStyleSheet(f"background-color: {get_color('surface')};")
+        self.rightFrame.setStyleSheet(f"background-color: {login_color('surface')};")
         self.rightFrame.setFrameShape(QFrame.Shape.StyledPanel)
 
         self.minimumButton = QPushButton(self.rightFrame)
@@ -167,11 +174,11 @@ class ModernLoginUi:
         self.minimumButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.minimumButton.setStyleSheet(f"""
             QPushButton {{
-                background-color: {get_color('surface_variant')};
+                background-color: {login_color('surface_variant')};
                 border: none;
                 border-radius: {ds.radius.md}px;
             }}
-            QPushButton:hover {{ background-color: {get_color('border')}; }}
+            QPushButton:hover {{ background-color: {login_color('border')}; }}
         """)
         icon_min = QIcon()
         icon_min.addPixmap(QPixmap("resource/Minimize_icon.png"), QIcon.Mode.Normal, QIcon.State.On)
@@ -182,11 +189,11 @@ class ModernLoginUi:
         self.exitButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.exitButton.setStyleSheet(f"""
             QPushButton {{
-                background-color: {get_color('surface_variant')};
+                background-color: {login_color('surface_variant')};
                 border: none;
                 border-radius: {ds.radius.md}px;
             }}
-            QPushButton:hover {{ background-color: {get_color('border')}; }}
+            QPushButton:hover {{ background-color: {login_color('border')}; }}
         """)
         icon_close = QIcon()
         icon_close.addPixmap(QPixmap("resource/Close_icon.png"), QIcon.Mode.Normal, QIcon.State.On)
@@ -206,12 +213,12 @@ class ModernLoginUi:
         self.idEdit.setGeometry(QtCore.QRect(50, 190, 300, ds.button_sizes['md'].height))
         self.idEdit.setStyleSheet(f"""
             QLineEdit {{
-                background-color: {get_color('background')};
-                border: 1px solid {get_color('border')};
+                background-color: {login_color('background')};
+                border: 1px solid {login_color('border')};
                 border-radius: {ds.radius.md}px;
                 padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
             }}
-            QLineEdit:focus {{ border: 2px solid {get_color('primary')}; background-color: {get_color('surface')}; }}
+            QLineEdit:focus {{ border: 2px solid {login_color('primary')}; background-color: {login_color('surface')}; }}
         """)
 
         self.label_pw = QLabel(self.rightFrame)
@@ -224,12 +231,12 @@ class ModernLoginUi:
         self.pwEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self.pwEdit.setStyleSheet(f"""
             QLineEdit {{
-                background-color: {get_color('background')};
-                border: 1px solid {get_color('border')};
+                background-color: {login_color('background')};
+                border: 1px solid {login_color('border')};
                 border-radius: {ds.radius.md}px;
                 padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
             }}
-            QLineEdit:focus {{ border: 2px solid {get_color('primary')}; background-color: {get_color('surface')}; }}
+            QLineEdit:focus {{ border: 2px solid {login_color('primary')}; background-color: {login_color('surface')}; }}
         """)
 
         # 로그인 정보 저장 체크박스
@@ -239,22 +246,22 @@ class ModernLoginUi:
         self.rememberCheckbox.setText("아이디/비밀번호 저장")
         self.rememberCheckbox.setStyleSheet(f"""
             QCheckBox {{
-                color: {get_color('text_secondary')};
+                color: {login_color('text_secondary')};
                 background: transparent;
             }}
             QCheckBox::indicator {{
                 width: 18px;
                 height: 18px;
-                border: 2px solid {get_color('text_muted')};
+                border: 2px solid {login_color('text_muted')};
                 border-radius: {ds.radius.sm}px;
-                background: {get_color('surface')};
+                background: {login_color('surface')};
             }}
             QCheckBox::indicator:checked {{
-                background-color: {get_color('primary')};
-                border-color: {get_color('primary')};
+                background-color: {login_color('primary')};
+                border-color: {login_color('primary')};
             }}
             QCheckBox::indicator:hover {{
-                border-color: {get_color('primary')};
+                border-color: {login_color('primary')};
             }}
         """)
         self.rememberCheckbox.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -265,12 +272,12 @@ class ModernLoginUi:
         self.loginButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.loginButton.setStyleSheet(f"""
             QPushButton {{
-                color: {get_color('surface')};
-                background-color: {get_color('primary')};
+                color: {login_color('surface')};
+                background-color: {login_color('primary')};
                 border: none;
                 border-radius: {ds.radius.md}px;
             }}
-            QPushButton:hover {{ background-color: {get_color('secondary')}; }}
+            QPushButton:hover {{ background-color: {login_color('secondary')}; }}
         """)
         self.loginButton.setText("로그인")
 
@@ -280,8 +287,8 @@ class ModernLoginUi:
         self.registerRequestButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.registerRequestButton.setStyleSheet(f"""
             QPushButton {{
-                color: {get_color('primary')};
-                border: 2px solid {get_color('primary')};
+                color: {login_color('primary')};
+                border: 2px solid {login_color('primary')};
                 border-radius: {ds.radius.md}px;
             }}
             QPushButton:hover {{ background-color: rgba(227, 22, 57, 0.05); }}
@@ -307,7 +314,7 @@ class RegistrationRequestDialog(QWidget):
 
     def _setup_ui(self):
         self.setFixedSize(400, 720)  # Height increased for Email field
-        self.setStyleSheet(f"background-color: {get_color('surface')};")
+        self.setStyleSheet(f"background-color: {login_color('surface')};")
 
         # 뒤로가기 버튼
         self.backButton = QPushButton(self)
@@ -316,12 +323,12 @@ class RegistrationRequestDialog(QWidget):
         self.backButton.setText("←")
         self.backButton.setStyleSheet(f"""
             QPushButton {{
-                background-color: {get_color('surface_variant')};
+                background-color: {login_color('surface_variant')};
                 border: none;
                 border-radius: {ds.radius.full}px;
-                color: {get_color('text_secondary')};
+                color: {login_color('text_secondary')};
             }}
-            QPushButton:hover {{ background-color: {get_color('border')}; }}
+            QPushButton:hover {{ background-color: {login_color('border')}; }}
         """)
         self.backButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.backButton.clicked.connect(self._on_back)
@@ -330,21 +337,21 @@ class RegistrationRequestDialog(QWidget):
         self.titleLabel = QLabel(self)
         self.titleLabel.setGeometry(QtCore.QRect(30, 65, 340, 35))
         self.titleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_lg, QFont.Weight.Bold))
-        self.titleLabel.setStyleSheet(f"color: {get_color('text_primary')}; background: transparent;")
+        self.titleLabel.setStyleSheet(f"color: {login_color('text_primary')}; background: transparent;")
         self.titleLabel.setText("회원가입")
 
         # 서브타이틀
         self.subtitleLabel = QLabel(self)
         self.subtitleLabel.setGeometry(QtCore.QRect(30, 100, 340, 40))
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.subtitleLabel.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
+        self.subtitleLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
         self.subtitleLabel.setText("가입 정보를 입력해주세요.\n가입 후 바로 로그인 가능합니다. (체험판 5회)")
 
         # 가입자 명
         self.nameLabel = QLabel(self)
         self.nameLabel.setGeometry(QtCore.QRect(30, 150, 100, 25))
         self.nameLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.nameLabel.setStyleSheet(f"color: {get_color('text_secondary')}; background: transparent;")
+        self.nameLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.nameLabel.setText("가입자 명")
 
         self.nameEdit = QLineEdit(self)
@@ -357,7 +364,7 @@ class RegistrationRequestDialog(QWidget):
         self.emailLabel = QLabel(self)
         self.emailLabel.setGeometry(QtCore.QRect(30, 225, 100, 25))
         self.emailLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.emailLabel.setStyleSheet(f"color: {get_color('text_secondary')}; background: transparent;")
+        self.emailLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.emailLabel.setText("이메일")
 
         self.emailEdit = QLineEdit(self)
@@ -370,7 +377,7 @@ class RegistrationRequestDialog(QWidget):
         self.usernameLabel = QLabel(self)
         self.usernameLabel.setGeometry(QtCore.QRect(30, 300, 100, 25))
         self.usernameLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.usernameLabel.setStyleSheet(f"color: {get_color('text_secondary')}; background: transparent;")
+        self.usernameLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.usernameLabel.setText("아이디")
 
         self.usernameEdit = QLineEdit(self)
@@ -386,15 +393,15 @@ class RegistrationRequestDialog(QWidget):
         self.checkUsernameBtn.setText("중복확인")
         self.checkUsernameBtn.setStyleSheet(f"""
             QPushButton {{
-                background-color: {get_color('text_muted')};
+                background-color: {login_color('text_muted')};
                 color: white;
                 border: none;
                 border-radius: {ds.radius.base}px;
             }}
-            QPushButton:hover {{ background-color: {get_color('text_secondary')}; }}
+            QPushButton:hover {{ background-color: {login_color('text_secondary')}; }}
             QPushButton:disabled {{
-                background-color: {get_color('border')};
-                color: {get_color('text_muted')};
+                background-color: {login_color('border')};
+                color: {login_color('text_muted')};
             }}
         """)
         self.checkUsernameBtn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -403,14 +410,14 @@ class RegistrationRequestDialog(QWidget):
         self.usernameStatusLabel = QLabel(self)
         self.usernameStatusLabel.setGeometry(QtCore.QRect(30, 369, 340, 18))
         self.usernameStatusLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.usernameStatusLabel.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
         self.usernameStatusLabel.setText("")
 
         # 비밀번호 (Shifted down +75)
         self.passwordLabel = QLabel(self)
         self.passwordLabel.setGeometry(QtCore.QRect(30, 395, 100, 25))
         self.passwordLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.passwordLabel.setStyleSheet(f"color: {get_color('text_secondary')}; background: transparent;")
+        self.passwordLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.passwordLabel.setText("비밀번호")
 
         self.passwordEdit = QLineEdit(self)
@@ -423,14 +430,14 @@ class RegistrationRequestDialog(QWidget):
         self.passwordHintLabel = QLabel(self)
         self.passwordHintLabel.setGeometry(QtCore.QRect(30, 464, 340, 18))
         self.passwordHintLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.passwordHintLabel.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
+        self.passwordHintLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
         self.passwordHintLabel.setText("※ 영문, 숫자 포함 6자 이상 권장")
 
         # 비밀번호 확인 (Shifted down +75)
         self.passwordConfirmLabel = QLabel(self)
         self.passwordConfirmLabel.setGeometry(QtCore.QRect(30, 485, 120, 25))
         self.passwordConfirmLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.passwordConfirmLabel.setStyleSheet(f"color: {get_color('text_secondary')}; background: transparent;")
+        self.passwordConfirmLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.passwordConfirmLabel.setText("비밀번호 확인")
 
         self.passwordConfirmEdit = QLineEdit(self)
@@ -444,7 +451,7 @@ class RegistrationRequestDialog(QWidget):
         self.contactLabel = QLabel(self)
         self.contactLabel.setGeometry(QtCore.QRect(30, 560, 100, 25))
         self.contactLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.contactLabel.setStyleSheet(f"color: {get_color('text_secondary')}; background: transparent;")
+        self.contactLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.contactLabel.setText("연락처")
 
         self.contactEdit = QLineEdit(self)
@@ -460,13 +467,13 @@ class RegistrationRequestDialog(QWidget):
         self.submitButton.setText("회원가입")
         self.submitButton.setStyleSheet(f"""
             QPushButton {{
-                color: {get_color('surface')};
-                background-color: {get_color('primary')};
+                color: {login_color('surface')};
+                background-color: {login_color('primary')};
                 border: none;
                 border-radius: {ds.radius.md}px;
             }}
-            QPushButton:hover {{ background-color: {get_color('secondary')}; }}
-            QPushButton:pressed {{ background-color: {get_color('primary')}; }}
+            QPushButton:hover {{ background-color: {login_color('secondary')}; }}
+            QPushButton:pressed {{ background-color: {login_color('primary')}; }}
         """)
         self.submitButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.submitButton.clicked.connect(self._on_submit)
@@ -474,17 +481,17 @@ class RegistrationRequestDialog(QWidget):
     def _apply_input_style(self, widget):
         widget.setStyleSheet(f"""
             QLineEdit {{
-                background-color: {get_color('background')};
-                color: {get_color('text_primary')};
-                border: 1px solid {get_color('border')};
+                background-color: {login_color('background')};
+                color: {login_color('text_primary')};
+                border: 1px solid {login_color('border')};
                 border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_2}px {ds.spacing.space_3}px;
             }}
             QLineEdit:focus {{
-                border: 2px solid {get_color('primary')};
-                background-color: {get_color('surface')};
+                border: 2px solid {login_color('primary')};
+                background-color: {login_color('surface')};
             }}
-            QLineEdit::placeholder {{ color: {get_color('text_muted')}; }}
+            QLineEdit::placeholder {{ color: {login_color('text_muted')}; }}
         """)
 
     def _on_back(self):
@@ -494,7 +501,7 @@ class RegistrationRequestDialog(QWidget):
     def _on_username_changed(self, text):
         self._username_available = False
         self.usernameStatusLabel.setText("")
-        self.usernameStatusLabel.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
 
     def _check_username(self):
         import re
@@ -516,7 +523,7 @@ class RegistrationRequestDialog(QWidget):
         self.checkUsernameBtn.setEnabled(False)
         self.checkUsernameBtn.setText("확인중...")
         self.usernameStatusLabel.setText("확인 중...")
-        self.usernameStatusLabel.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
 
         self._username_worker = UsernameCheckWorker(username)
         self._username_worker.finished.connect(self._on_username_check_done)
@@ -529,16 +536,16 @@ class RegistrationRequestDialog(QWidget):
         if available:
             self._username_available = True
             self.usernameStatusLabel.setText("✓ 사용 가능한 아이디입니다")
-            self.usernameStatusLabel.setStyleSheet(f"color: {get_color('success')}; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('success')}; background: transparent;")
         elif "네트워크" in message or "실패" in message:
             self._username_available = False
             self.usernameStatusLabel.setText(message)
-            self.usernameStatusLabel.setStyleSheet(f"color: {get_color('warning')}; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('warning')}; background: transparent;")
         else:
             self._username_available = False
             # Show the actual message from the server (e.g. "Pending approval", "Server error", etc.)
             self.usernameStatusLabel.setText(f"✗ {message}")
-            self.usernameStatusLabel.setStyleSheet(f"color: {get_color('error')}; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('error')}; background: transparent;")
         logger.info(
             "[UI] Username check result | available=%s message=%s",
             available,

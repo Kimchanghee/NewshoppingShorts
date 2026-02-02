@@ -17,6 +17,8 @@ class FontCard(QFrame, ThemedMixin):
 
     def __init__(self, option, is_selected=False, theme_manager=None):
         super().__init__()
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setFrameShadow(QFrame.Shadow.Plain)  # Remove shadow
         self.option = option
         self.is_selected = is_selected
         self.ds = get_design_system()
@@ -38,11 +40,11 @@ class FontCard(QFrame, ThemedMixin):
         # Info area
         info_layout = QVBoxLayout()
         self.name_label = QLabel(self.option["name"])
-        self.name_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_sm}px;")
+        self.name_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: 14px; color: #FFFFFF;")
         info_layout.addWidget(self.name_label)
         
         self.desc_label = QLabel(self.option["description"])
-        self.desc_label.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
+        self.desc_label.setStyleSheet(f"font-size: 12px; color: #B8B8B8;")
         info_layout.addWidget(self.desc_label)
         layout.addLayout(info_layout)
         
@@ -85,8 +87,8 @@ class FontCard(QFrame, ThemedMixin):
         
         text_primary = get_color('text_primary')
         text_secondary = get_color('text_secondary')
-        self.name_label.setStyleSheet(f"color: {text_primary}; border: none; font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_sm}px;")
-        self.desc_label.setStyleSheet(f"color: {text_secondary}; border: none; font-size: {ds.typography.size_2xs}px;")
+        self.name_label.setStyleSheet(f"color: #FFFFFF; border: none; font-weight: {ds.typography.weight_bold}; font-size: 14px;")
+        self.desc_label.setStyleSheet(f"color: #B8B8B8; border: none; font-size: 12px;")
         self.radio_label.setStyleSheet(f"color: {get_color('primary') if self.is_selected else text_secondary}; border: none;")
         self.preview_label.setStyleSheet(f"color: {text_primary}; border: none;")
 
@@ -108,7 +110,7 @@ class FontPanel(QFrame, ThemedMixin):
         # Header
         header = QHBoxLayout()
         title = QLabel("폰트 선택")
-        title.setStyleSheet(f"font-size: {ds.typography.size_xl}px; font-weight: {ds.typography.weight_bold};")
+        title.setStyleSheet(f"font-size: 16px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
         header.addWidget(title)
         
         header.addStretch()
