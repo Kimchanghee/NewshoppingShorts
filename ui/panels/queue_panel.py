@@ -23,7 +23,7 @@ class QueuePanel(QFrame, ThemedMixin):
         
         # Header
         self.title_label = QLabel("제작 대기열")
-        self.title_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+        self.title_label.setStyleSheet("font-size: 14px; font-weight: bold;")
         self.main_layout.addWidget(self.title_label)
         
         self.subtitle_label = QLabel("대기 | 완료 | 실패 건수를 자동으로 추적합니다.")

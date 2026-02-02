@@ -165,6 +165,8 @@ class AuthService:
             "data": {
                 "data": {
                     "id": str(user.id),
+                    "username": user.username,
+                    "user_type": user.user_type or "trial",
                     "subscription_expires_at": user.subscription_expires_at.isoformat()
                     if user.subscription_expires_at
                     else None,

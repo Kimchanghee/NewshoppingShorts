@@ -28,6 +28,8 @@ class CTACard(QFrame, ThemedMixin):
 
     def __init__(self, option, is_selected=False, theme_manager=None):
         super().__init__()
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setFrameShadow(QFrame.Shadow.Plain)  # Remove shadow
         self.option = option
         self.is_selected = is_selected
         self.ds = get_design_system()
@@ -44,7 +46,7 @@ class CTACard(QFrame, ThemedMixin):
         header = QHBoxLayout()
         icon_text = "📍" if self.option["id"] == "default" else "📝" if self.option["id"] == "option1" else "🔥"
         self.title_label = QLabel(f"{icon_text} {self.option['name']}")
-        self.title_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_xs}px;")
+        self.title_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: 14px; color: #FFFFFF;")
         header.addWidget(self.title_label)
         header.addStretch()
         layout.addLayout(header)
@@ -57,14 +59,14 @@ class CTACard(QFrame, ThemedMixin):
         
         for line in self.option["lines"]:
             lbl = QLabel(line)
-            lbl.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
+            lbl.setStyleSheet(f"font-size: 12px; color: #FFFFFF;")
             preview_layout.addWidget(lbl)
             
         layout.addWidget(self.preview_box)
         
         # Description
         self.desc_label = QLabel(self.option["description"])
-        self.desc_label.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
+        self.desc_label.setStyleSheet(f"font-size: 12px; color: #B8B8B8;")
         self.desc_label.setWordWrap(True)
         layout.addWidget(self.desc_label)
 
@@ -86,21 +88,21 @@ class CTACard(QFrame, ThemedMixin):
             }}
         """)
         
+        # No background on preview box - transparent
         self.preview_box.setStyleSheet(f"""
             QFrame {{
-                background-color: {get_color('surface_variant')};
-                border-radius: {ds.radius.sm}px;
+                background-color: transparent;
                 border: none;
             }}
             QLabel {{
-                color: {get_color('text_secondary')};
+                color: #FFFFFF;
             }}
         """)
         
         primary_color = get_color('primary')
         text_primary = get_color('text_primary')
-        self.title_label.setStyleSheet(f"color: {primary_color if self.is_selected else text_primary}; border: none; font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_xs}px;")
-        self.desc_label.setStyleSheet(f"color: {get_color('text_secondary')}; border: none; font-size: {ds.typography.size_2xs}px;")
+        self.title_label.setStyleSheet(f"color: {primary_color if self.is_selected else '#FFFFFF'}; border: none; font-weight: {ds.typography.weight_bold}; font-size: 14px;")
+        self.desc_label.setStyleSheet(f"color: #B8B8B8; border: none; font-size: 12px;")
 
 class CTAPanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):
@@ -120,7 +122,7 @@ class CTAPanel(QFrame, ThemedMixin):
         # Header
         header = QHBoxLayout()
         title = QLabel("CTA 선택")
-        title.setStyleSheet(f"font-size: {ds.typography.size_xl}px; font-weight: {ds.typography.weight_bold};")
+        title.setStyleSheet(f"font-size: 16px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
         header.addWidget(title)
         
         header.addStretch()

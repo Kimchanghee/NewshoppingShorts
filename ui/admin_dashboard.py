@@ -37,7 +37,7 @@ from ui.design_system_v2 import get_design_system, get_color, set_dark_mode
 ds = get_design_system()
 set_dark_mode(True)
 
-FONT_FAMILY = "맑은 고딕"
+FONT_FAMILY = "Noto Sans KR"
 logger = logging.getLogger(__name__)
 
 # 색상 매핑 - DarkColorPalette 사용

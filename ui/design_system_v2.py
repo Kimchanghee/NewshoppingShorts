@@ -19,142 +19,173 @@ import sys
 @dataclass(frozen=True)
 class ColorPalette:
     """
-    라이트 모드 색상 팔레트
-    
+    라이트 모드 색상 팔레트 - 전문적이고 선명한 색상
+
     쇼핑 숏츠 메이커의 브랜드 아이덴티티를 반영한 색상 체계입니다.
     빨간색 계열의 프라이머리 컬러는 에너지와 활력을 나타냅니다.
-    
+
     Attributes:
-        primary: 주요 브랜드 색상 (빨간색)
-        secondary: 보조 브랜드 색상 (코랄)
-        background: 배경색
-        surface: 표면 색상 (카드, 판넬 등)
-        text_primary: 주요 텍스트 색상
-        text_secondary: 보조 텍스트 색상
+        primary: 주요 브랜드 색상 (진한 빨간색)
+        secondary: 보조 브랜드 색상 (코랄 핑크)
+        background: 배경색 (밝은 회백색)
+        surface: 표면 색상 (순백)
+        text_primary: 주요 텍스트 색상 (진한 검정)
+        text_secondary: 보조 텍스트 색상 (짙은 회색)
         text_muted: 비활성/힌트 텍스트 색상
-        border: 경계선 색상
-        error: 오류 상태 색상
-        success: 성공 상태 색상
-        warning: 경고 상태 색상
-        info: 정보 상태 색상
+        border: 경계선 색상 (선명한 테두리)
     """
-    primary: str = "#E31639"
-    secondary: str = "#FF4D6A"
-    background: str = "#FAFAFA"
-    surface: str = "#FFFFFF"
-    surface_variant: str = "#F5F5F5"
-    text_primary: str = "#1A1A1A"
-    text_secondary: str = "#4A4A4A"
-    text_muted: str = "#9A9A9A"
-    border: str = "#E5E5E5"
-    border_light: str = "#F0F0F0"
-    error: str = "#DC2626"
-    success: str = "#16A34A"
-    warning: str = "#F59E0B"
-    info: str = "#3B82F6"
-    overlay: str = "rgba(0, 0, 0, 0.5)"
-    overlay_light: str = "rgba(0, 0, 0, 0.25)"
+    # Primary - 진하고 선명한 빨간색
+    primary: str = "#D41B3C"           # 더 진한 레드
+    primary_hover: str = "#B8142F"     # Hover 상태
+    primary_light: str = "#FCE8EB"     # 밝은 배경용
+    primary_dark: str = "#9D0F23"      # Pressed 상태
+    secondary: str = "#E8365C"         # 코랄 핑크
+
+    # Backgrounds - 대비가 있는 배경
+    background: str = "#F2F3F5"        # 약간 푸른 빛이 도는 밝은 배경
+    bg_main: str = "#F2F3F5"           # 메인 배경 (alias)
+    bg_card: str = "#FFFFFF"           # 카드 배경 (alias)
+    bg_header: str = "#FFFFFF"         # 헤더 배경
+    surface: str = "#FFFFFF"           # 순백 카드
+    surface_variant: str = "#EAECEF"   # 더 진한 서브 배경
+
+    # Text - 가독성 높은 텍스트
+    text_primary: str = "#111827"      # 거의 검정 (더 진함)
+    text_secondary: str = "#374151"    # 진한 회색 (더 선명)
+    text_muted: str = "#6B7280"        # 중간 회색 (더 진함)
+    text_on_primary: str = "#FFFFFF"   # Primary 색상 위의 텍스트
+
+    # Borders - 선명한 경계선
+    border: str = "#D1D5DB"            # 진한 테두리
+    border_light: str = "#E5E7EB"      # 밝은 테두리
+    border_medium: str = "#C4C9CF"     # 중간 테두리
+    border_card: str = "#F0F0F0"       # 카드 테두리
+    
+    # Status - 생생한 상태 색상
+    error: str = "#DC2626"             # 선명한 빨강
+    success: str = "#059669"           # 진한 초록
+    warning: str = "#D97706"           # 진한 주황
+    info: str = "#2563EB"              # 진한 파랑
+    
+    # Overlays
+    overlay: str = "rgba(0, 0, 0, 0.6)"
+    overlay_light: str = "rgba(0, 0, 0, 0.3)"
 
 
 @dataclass(frozen=True)
 class DarkColorPalette:
     """
-    다크 모드 색상 팔레트
-    
-    어두운 환경에서의 사용성을 최적화한 색상 체계입니다.
-    대비 비율을 유지하여 가독성을 보장합니다.
-    
-    Attributes:
-        primary: 주요 브랜드 색상 (라이트 모드와 동일)
-        secondary: 보조 브랜드 색상 (라이트 모드와 동일)
-        background: 어두운 배경색
-        surface: 어두운 표면 색상
-        text_primary: 밝은 주요 텍스트 색상
-        text_secondary: 밝은 보조 텍스트 색상
-        text_muted: 어두운 환경의 비활성 텍스트
-        border: 어두운 테마의 경계선
-        error: 오류 색상 (약간 밝게 조정)
-        success: 성공 색상 (약간 밝게 조정)
-        warning: 경고 색상 (약간 밝게 조정)
-        info: 정보 색상 (약간 밝게 조정)
+    기본 다크 테마 - 짙고 전문적인 색상
+
+    모든 UI에 적용되는 단일 테마입니다.
+    높은 대비와 선명한 색상으로 전문성을 강조합니다.
+    STITCH 디자인 시스템 적용: 더 깊은 배경, 더 높은 대비
     """
-    primary: str = "#E31639"
-    secondary: str = "#FF4D6A"
-    background: str = "#1A1A1A"
-    surface: str = "#2A2A2A"
-    surface_variant: str = "#3A3A3A"
-    text_primary: str = "#FFFFFF"
-    text_secondary: str = "#E0E0E0"
-    text_muted: str = "#888888"
-    border: str = "#404040"
-    border_light: str = "#505050"
-    error: str = "#EF4444"
-    success: str = "#22C55E"
-    warning: str = "#FBBF24"
-    info: str = "#60A5FA"
-    overlay: str = "rgba(0, 0, 0, 0.7)"
-    overlay_light: str = "rgba(0, 0, 0, 0.4)"
+    # Primary - 강렬한 빨강 (STITCH 디자인 적용)
+    primary: str = "#e31639"           # 브랜드 레드
+    primary_hover: str = "#c41231"     # Hover 상태
+    primary_light: str = "#2A1215"     # 밝은 배경용
+    primary_dark: str = "#a01028"      # Pressed 상태
+    secondary: str = "#ff4d6a"         # 코랄 핑크
+
+    # Backgrounds - 더 깊은 다크 (STITCH 디자인 적용)
+    background: str = "#0A0A0A"        # 순수 검정에 가까움
+    bg_main: str = "#0A0A0A"           # 메인 배경 (alias)
+    bg_card: str = "#141414"           # 카드 배경 (alias)
+    bg_header: str = "#0D0D0D"         # 헤더 배경
+    bg_hover: str = "#1F1F1F"          # Hover 상태 배경
+    surface: str = "#141414"           # 다크 회색 카드
+    surface_variant: str = "#1A1A1A"   # 약간 밝은 표면
+
+    # Text - 고대비 텍스트 (가독성 향상)
+    text_primary: str = "#FFFFFF"      # 순백
+    text_secondary: str = "#A0A0A0"    # 밝은 회색
+    text_muted: str = "#6B7280"        # 중간 회색
+    text_on_primary: str = "#FFFFFF"   # Primary 색상 위의 텍스트
+
+    # Borders - 더 섬세한 경계선 (STITCH 디자인 적용)
+    border: str = "#2A2A2A"            # 미묘한 테두리
+    border_light: str = "rgba(255,255,255,0.05)"  # 투명 테두리 (STITCH 스타일)
+    border_medium: str = "#3D3D3D"     # 중간 테두리
+    border_card: str = "#1F1F1F"       # 카드 테두리
+    
+    # Status - 선명한 상태 색상
+    error: str = "#FF4757"             # 선명한 빨강
+    success: str = "#2ED573"           # 선명한 초록
+    warning: str = "#FFA502"           # 선명한 주황
+    info: str = "#3742FA"              # 선명한 파랑
+    
+    # Overlays
+    overlay: str = "rgba(0, 0, 0, 0.85)"
+    overlay_light: str = "rgba(0, 0, 0, 0.6)"
 
 
 @dataclass(frozen=True)
 class Typography:
     """
-    타이포그래피 시스템
-    
+    타이포그래피 시스템 - STITCH 디자인 적용
+
     일관된 텍스트 스타일을 위한 폰트 크기, 두께, 줄 높이를 정의합니다.
     8px 그리드 시스템을 기반으로 하며, 픽셀 퍼펙트 디자인을 지원합니다.
-    
+
+    STITCH 개선사항: 폰트 크기 확대로 가독성 향상
+
     Attributes:
-        size_*: 다양한 크기의 폰트 (10px ~ 40px)
-        weight_*: 폰트 두께 (normal ~ bold)
+        size_*: 다양한 크기의 폰트 (10px ~ 48px)
+        weight_*: 폰트 두께 (normal ~ black)
         line_height_*: 줄 높이 배율 (tight ~ relaxed)
         letter_spacing_*: 자간 조정값
-        font_family_primary: 주요 폰트 패밀리
-        font_family_mono: 고정폭 폰트 패밀리
+        font_family_*: 폰트 패밀리 (heading, body, mono)
     """
-    # Font sizes (px)
-    size_2xs: int = 10
-    size_xs: int = 12
-    size_sm: int = 14
-    size_base: int = 16
-    size_md: int = 18
-    size_lg: int = 20
-    size_xl: int = 24
-    size_2xl: int = 32
-    size_3xl: int = 40
+    # Font sizes (px) - STITCH 디자인 적용: 전반적으로 확대
+    size_2xs: int = 10     # 작은 라벨
+    size_xs: int = 12      # 힌트, 캡션
+    size_sm: int = 14      # 네비게이션, 버튼
+    size_base: int = 16    # 본문 텍스트
+    size_md: int = 18      # 강조 텍스트
+    size_lg: int = 20      # 섹션 제목
+    size_xl: int = 24      # 페이지 제목
+    size_2xl: int = 32     # 큰 제목
+    size_3xl: int = 40     # 히어로 제목 (STITCH: 40px)
+    size_4xl: int = 48     # 초대형 제목 추가
     
-    # Font weights
+    # Font weights - STITCH 디자인: black 추가
     weight_normal: int = 400
     weight_medium: int = 500
     weight_semibold: int = 600
     weight_bold: int = 700
     weight_extrabold: int = 800
-    
+    weight_black: int = 900          # 초굵게 (STITCH에서 사용)
+
     # Line heights (multiplier)
     line_height_tight: float = 1.25
     line_height_normal: float = 1.5
     line_height_relaxed: float = 1.75
     line_height_loose: float = 2.0
-    
-    # Letter spacing
+
+    # Letter spacing - STITCH 디자인: 타이트한 자간
     letter_spacing_tight: str = "-0.025em"
     letter_spacing_normal: str = "0"
     letter_spacing_wide: str = "0.025em"
     letter_spacing_wider: str = "0.05em"
-    
-    # Font families
-    font_family_primary: str = "'Pretendard', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-    font_family_mono: str = "'JetBrains Mono', 'Fira Code', 'Consolas', monospace"
+
+    # Font families - STITCH 디자인 적용
+    font_family_heading: str = "'Outfit', 'Malgun Gothic', sans-serif"  # 헤딩용 (geometric)
+    font_family_body: str = "'Manrope', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif"  # 본문용 (friendly)
+    font_family_primary: str = "'Manrope', 'Pretendard', 'Malgun Gothic', sans-serif"  # 기본
+    font_family_mono: str = "'JetBrains Mono', 'Fira Code', 'Consolas', monospace"  # 모노스페이스
 
 
 @dataclass(frozen=True)
 class Spacing:
     """
-    여백 시스템
-    
+    여백 시스템 - STITCH 디자인 적용
+
     8px 기반 그리드 시스템으로 일관된 레이아웃 간격을 제공합니다.
     모든 간격 값은 4의 배수로 구성되어 있습니다.
-    
+
+    STITCH 개선사항: 카드 패딩 증가 (16px → 24px), 섹션 간격 최적화
+
     Attributes:
         space_*: 다양한 크기의 여백 값 (4px ~ 128px)
         gutter: 그리드 거터 간격
@@ -171,12 +202,12 @@ class Spacing:
     space_8: int = 64
     space_9: int = 96
     space_10: int = 128
-    
-    # Common spacing aliases
-    gutter: int = 24
-    section: int = 48
-    container_padding: int = 24
-    card_padding: int = 16
+
+    # Common spacing aliases - STITCH 디자인 적용
+    gutter: int = 24           # 그리드 간격 유지
+    section: int = 32          # 섹션 간격 최적화 (48px → 32px)
+    container_padding: int = 24  # 컨테이너 패딩 유지
+    card_padding: int = 24     # 카드 패딩 증가 (16px → 24px)
 
 
 @dataclass(frozen=True)
@@ -342,7 +373,7 @@ class DesignSystem:
     transition: Transition = field(default_factory=Transition)
     z_index: ZIndex = field(default_factory=ZIndex)
     
-    _is_dark_mode: bool = False
+    _is_dark_mode: bool = True  # 다크 모드가 기본값
     
     def __post_init__(self):
         """초기화 후 버튼 사이즈 딕셔너리를 생성합니다."""

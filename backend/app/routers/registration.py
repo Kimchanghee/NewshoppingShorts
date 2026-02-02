@@ -58,6 +58,7 @@ router = APIRouter(prefix="/user", tags=["registration"])
 
 
 @router.post("/register/request", response_model=RegistrationResponse)
+@limiter.limit("5/hour")  # Rate limit to prevent abuse
 async def submit_registration_request(
     request: Request, data: RegistrationRequestCreate, db: Session = Depends(get_db)
 ):
@@ -180,15 +181,16 @@ async def submit_registration_request(
     except SQLAlchemyError as e:
         db.rollback()
         logger.error(f"Database error during registration: {e}", exc_info=True)
-        error_hint = str(e)[:200] if str(e) else "Unknown DB error"
+        # Security: Do not expose internal error details to users
         return RegistrationResponse(
-            success=False, message=f"서버 오류가 발생했습니다. [{error_hint}]"
+            success=False, message="서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
         )
     except Exception as e:
         db.rollback()
         logger.error(f"Unexpected error during registration: {e}", exc_info=True)
+        # Security: Do not expose internal error details to users
         return RegistrationResponse(
-            success=False, message=f"예기치 않은 오류가 발생했습니다. [{str(e)[:100]}]"
+            success=False, message="예기치 않은 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
         )
 
 
@@ -332,14 +334,16 @@ async def approve_registration(
     except SQLAlchemyError as e:
         db.rollback()
         logger.error(f"Database error during approval: {e}", exc_info=True)
+        # Security: Do not expose internal error details to users
         return RegistrationResponse(
-            success=False, message=f"승인 처리 중 오류가 발생했습니다: {str(e)[:100]}"
+            success=False, message="승인 처리 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요."
         )
     except Exception as e:
         db.rollback()
         logger.error(f"Unexpected error during approval: {e}", exc_info=True)
+        # Security: Do not expose internal error details to users
         return RegistrationResponse(
-            success=False, message=f"승인 처리 중 예기치 않은 오류: {str(e)[:100]}"
+            success=False, message="승인 처리 중 예기치 않은 오류가 발생했습니다."
         )
 
 

@@ -5,7 +5,7 @@ Uses the design system v2 for consistent styling.
 import logging
 from typing import Optional, Callable
 from PyQt6.QtWidgets import (
-    QPushButton, QFrame, QLineEdit, QGraphicsDropShadowEffect,
+    QPushButton, QFrame, QLineEdit,
     QHBoxLayout, QVBoxLayout, QLabel, QWidget
 )
 from PyQt6.QtCore import Qt, QSize, pyqtSignal

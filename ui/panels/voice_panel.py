@@ -19,6 +19,8 @@ class VoiceCard(QFrame, ThemedMixin):
 
     def __init__(self, profile, is_selected=False, theme_manager=None):
         super().__init__()
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self.setFrameShadow(QFrame.Shadow.Plain)  # Remove shadow
         self.profile = profile
         self.is_selected = is_selected
         self.ds = get_design_system()
@@ -43,7 +45,7 @@ class VoiceCard(QFrame, ThemedMixin):
         gender_icon = "♀" if self.profile.get("gender") == "female" else "♂"
         icon_color = "#FF6B81" if self.profile.get("gender") == "female" else "#5B9BD5"
         self.name_label = QLabel(f"{gender_icon} {self.profile['label']}")
-        self.name_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: {ds.typography.size_sm}px; color: {icon_color};")
+        self.name_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: 14px; color: {icon_color};")
         top_row.addWidget(self.name_label)
         
         top_row.addStretch()
@@ -67,7 +69,7 @@ class VoiceCard(QFrame, ThemedMixin):
         # Description
         self.desc_label = QLabel(self.profile["description"])
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet(f"font-size: {ds.typography.size_2xs}px;")
+        self.desc_label.setStyleSheet(f"font-size: 12px; color: #FFFFFF;")
         layout.addWidget(self.desc_label)
 
     def mousePressEvent(self, event):
@@ -98,7 +100,7 @@ class VoiceCard(QFrame, ThemedMixin):
         
         text_primary = get_color('text_primary')
         text_secondary = get_color('text_secondary')
-        self.desc_label.setStyleSheet(f"color: {text_secondary}; border: none; font-size: {ds.typography.size_2xs}px;")
+        self.desc_label.setStyleSheet(f"color: #FFFFFF; border: none; font-size: 12px;")
 
 class VoicePanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):
@@ -119,7 +121,7 @@ class VoicePanel(QFrame, ThemedMixin):
         # Header
         header = QHBoxLayout()
         title = QLabel("음성 선택")
-        title.setStyleSheet(f"font-size: {ds.typography.size_xl}px; font-weight: {ds.typography.weight_bold};")
+        title.setStyleSheet(f"font-size: 16px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
         header.addWidget(title)
         
         header.addStretch()
@@ -148,6 +150,12 @@ class VoicePanel(QFrame, ThemedMixin):
             tab_layout.addWidget(btn)
         
         self.tab_all.setChecked(True)
+        
+        # Connect filter buttons
+        self.tab_all.clicked.connect(lambda: self._set_gender_filter("all"))
+        self.tab_female.clicked.connect(lambda: self._set_gender_filter("female"))
+        self.tab_male.clicked.connect(lambda: self._set_gender_filter("male"))
+        
         self.main_layout.addLayout(tab_layout)
         
         # Grid Area - Scrollable
@@ -207,6 +215,22 @@ class VoicePanel(QFrame, ThemedMixin):
             if card:
                 card.is_selected = not card.is_selected
                 card.apply_theme()
+
+    def _set_gender_filter(self, gender: str):
+        """Set gender filter and rebuild grid"""
+        self.gender_filter = gender
+        
+        # Update button states
+        self.tab_all.setChecked(gender == "all")
+        self.tab_female.setChecked(gender == "female")
+        self.tab_male.setChecked(gender == "male")
+        
+        # Rebuild the grid with filtered profiles
+        self.rebuild_grid()
+        
+        # Update count badge
+        count = len(self.voice_cards)
+        self.count_badge.setText(f"{count}개 음성")
 
     def apply_theme(self):
         ds = self.ds

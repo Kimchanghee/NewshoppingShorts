@@ -244,7 +244,6 @@ class PlanCard(QFrame):
             }}
             #plan_card:hover {{
                 border-color: {primary_color};
-                box-shadow: {ds.shadow.lg};
             }}
             
             #popular_badge {{

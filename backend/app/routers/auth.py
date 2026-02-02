@@ -252,8 +252,8 @@ async def check_username(
         return {"available": True, "message": "사용 가능한 아이디입니다."}
     except Exception as e:
         logger.error(f"[CheckUsername] Error checking username '{username_clean}': {e}", exc_info=True)
-        # Error details for debugging
-        return {"available": False, "message": f"서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요. [{str(e)[:50]}]"}
+        # Security: Do not expose internal error details to users
+        return {"available": False, "message": "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요."}
 
 
 @router.post("/work/check", response_model=CheckWorkResponse)

@@ -13,7 +13,7 @@ import logging
 from typing import Optional, Callable
 from PyQt6.QtWidgets import (
     QWidget, QFrame, QLabel, QPushButton, QLineEdit,
-    QTextEdit, QCheckBox, QRadioButton, QGraphicsDropShadowEffect
+    QTextEdit, QCheckBox, QRadioButton
 )
 from PyQt6.QtCore import (
     pyqtSignal, QPropertyAnimation, QEasingCurve,
@@ -133,9 +133,7 @@ class EnhancedButton(QPushButton, ThemedMixin):
         style_sheet = self.ds.get_button_style(self._style, self._size)
         self.setStyleSheet(style_sheet)
 
-        # Add subtle shadow for elevation
-        if self._style == "primary":
-            self.add_drop_shadow(self, blur_radius=12, offset=(0, 4))
+        # Shadow removed for cleaner UI
 
     def enterEvent(self, event):
         """Hover enter - subtle scale up"""
@@ -263,15 +261,8 @@ class EnhancedCard(QFrame, ThemedMixin):
         style = self.ds.get_card_style(self._elevation)
         self.setStyleSheet(style)
 
-        # Add shadow based on elevation
-        shadow_map = {
-            "sm": 8,
-            "md": 12,
-            "lg": 16,
-            "xl": 24,
-        }
-        blur_radius = shadow_map.get(self._elevation, 12)
-        self.add_drop_shadow(self, blur_radius=blur_radius, offset=(0, blur_radius // 3))
+        # Shadow removed for cleaner UI
+        pass
 
     def enterEvent(self, event):
         """Hover effect for hoverable cards"""

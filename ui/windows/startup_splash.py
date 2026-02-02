@@ -5,8 +5,7 @@ Startup splash screen for PyQt6 - Enhanced Modern Edition
 import json
 import os
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QProgressBar, QApplication,
-    QGraphicsDropShadowEffect, QGraphicsOpacityEffect
+    QWidget, QVBoxLayout, QLabel, QProgressBar, QApplication
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QPoint
 from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QPen, QFontDatabase
@@ -36,12 +35,7 @@ class AnimatedLogo(QLabel):
         self.pulse_timer.timeout.connect(self._animate_pulse)
         self.pulse_timer.start(50)
 
-        # Glow effect
-        self.glow = QGraphicsDropShadowEffect()
-        self.glow.setBlurRadius(25)
-        self.glow.setColor(QColor(227, 22, 57, 100))
-        self.glow.setOffset(0, 0)
-        self.setGraphicsEffect(self.glow)
+        # Glow effect removed for cleaner UI
 
     def _animate_rotation(self):
         self.rotation_angle = (self.rotation_angle + 1) % 360
@@ -55,9 +49,7 @@ class AnimatedLogo(QLabel):
         elif self.scale_factor <= 0.95:
             self.pulse_direction = 1
 
-        # Update glow intensity
-        glow_intensity = int(80 + (self.scale_factor - 1.0) * 200)
-        self.glow.setColor(QColor(227, 22, 57, glow_intensity))
+        # Glow effect removed
         self.update()
 
 class GradientWidget(QWidget):
@@ -149,12 +141,7 @@ class StartupSplash(QWidget):
         self.container = GradientWidget(self)
         self.container.setGeometry(10, 10, 430, 300)
 
-        # Outer shadow
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(30)
-        shadow.setColor(QColor(0, 0, 0, 60))
-        shadow.setOffset(0, 8)
-        self.container.setGraphicsEffect(shadow)
+        # Outer shadow removed for cleaner UI
 
         layout = QVBoxLayout(self.container)
         layout.setContentsMargins(40, 35, 40, 35)
@@ -178,12 +165,7 @@ class StartupSplash(QWidget):
         """)
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Title shadow for depth
-        title_shadow = QGraphicsDropShadowEffect()
-        title_shadow.setBlurRadius(8)
-        title_shadow.setColor(QColor(227, 22, 57, 50))
-        title_shadow.setOffset(0, 2)
-        title.setGraphicsEffect(title_shadow)
+        # Title shadow removed for cleaner UI
 
         layout.addWidget(title)
 

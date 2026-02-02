@@ -257,7 +257,6 @@ class EnhancedURLInputPanel(QFrame, ThemedMixin):
             QTextEdit:focus {{
                 border-color: {c.primary};
                 background-color: {c.bg_card};
-                box-shadow: 0 0 0 3px {c.primary_light};
             }}
             QTextEdit:hover {{
                 border-color: {c.border_medium};

@@ -106,6 +106,8 @@ def list_users():
 
 def update_password(username: str, new_password: str):
     """사용자 비밀번호를 업데이트합니다."""
+    from app.models.session import SessionModel
+
     db = SessionLocal()
     try:
         user = db.query(User).filter(User.username == username).first()
@@ -115,6 +117,20 @@ def update_password(username: str, new_password: str):
 
         user.password_hash = hash_password(new_password)
         user.updated_at = datetime.utcnow()
+
+        # Security: Invalidate all active sessions on password change
+        # 보안: 비밀번호 변경 시 모든 활성 세션 무효화
+        try:
+            invalidated = db.query(SessionModel).filter(
+                SessionModel.user_id == user.id,
+                SessionModel.is_active == True
+            ).update({"is_active": False})
+            if invalidated > 0:
+                print(f"   ℹ️  {invalidated}개의 활성 세션이 무효화되었습니다.")
+        except Exception as session_err:
+            # Session invalidation failure should not block password update
+            print(f"   ⚠️  세션 무효화 중 오류 (비밀번호는 변경됨): {session_err}")
+
         db.commit()
 
         print(f"✅ 사용자 '{username}'의 비밀번호가 업데이트되었습니다.")

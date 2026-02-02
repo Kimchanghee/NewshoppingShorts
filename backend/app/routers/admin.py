@@ -16,7 +16,7 @@ from fastapi import APIRouter, Depends, Request, Query, HTTPException
 from slowapi import Limiter
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
@@ -45,7 +45,9 @@ class UserResponse(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     name: Optional[str] = None
-    hashed_password: Optional[str] = Field(None, alias="password_hash", serialization_alias="hashed_password", validation_alias="password_hash")  # 관리자용 - 해시된 비밀번호
+    # Security: hashed_password removed from API response to prevent exposure
+    # 보안: 해시된 비밀번호를 API 응답에서 제거하여 노출 방지
+    has_password: bool = True  # 비밀번호 설정 여부만 표시
     created_at: Optional[datetime] = None
     subscription_expires_at: Optional[datetime] = None
     is_active: bool
@@ -122,14 +124,17 @@ async def list_users(
     query = db.query(User)
 
     # Search by username, name, email, or phone
+    # Security: Escape LIKE wildcards to prevent unexpected query behavior
     if search:
         from sqlalchemy import or_
+        # Escape special LIKE characters
+        safe_search = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
         query = query.filter(
             or_(
-                User.username.ilike(f"%{search}%"),
-                User.name.ilike(f"%{search}%"),
-                User.email.ilike(f"%{search}%"),
-                User.phone.ilike(f"%{search}%")
+                User.username.ilike(f"%{safe_search}%", escape='\\'),
+                User.name.ilike(f"%{safe_search}%", escape='\\'),
+                User.email.ilike(f"%{safe_search}%", escape='\\'),
+                User.phone.ilike(f"%{safe_search}%", escape='\\')
             )
         )
 
