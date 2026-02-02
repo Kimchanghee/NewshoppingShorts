@@ -9,6 +9,9 @@ from typing import Any, Dict, List, Optional, Iterable
 # Logging configuration
 from utils.logging_config import get_logger
 
+# Constants for consistent time buffer calculations
+from config.constants import OCRThresholds
+
 logger = get_logger(__name__)
 
 try:
@@ -290,15 +293,15 @@ class SubtitleProcessor:
             start_time = pos.get("start_time", 0)
             end_time = pos.get("end_time", video.duration)
 
-            # ★★★ 개선: 시간 범위 여유 증가 (샘플링 간격의 2배) ★★★
-            # 0~3초 구간은 0.1초 샘플링, 그 외는 0.3초 샘플링
-            # 따라서 앞뒤로 0.6초 버퍼 적용 (충분한 여유)
+            # ★★★ 100% 감지 모드: 일관된 시간 버퍼 적용 (constants.py에서 설정) ★★★
+            # TIME_BUFFER_BEFORE: 자막 시작 전 버퍼 (0.5초)
+            # TIME_BUFFER_AFTER: 자막 종료 후 버퍼 (0.8초)
             if start_time == 0:
                 # 영상 시작 즉시 블러 적용
                 start_time = 0
             else:
-                start_time = max(0, start_time - 0.6)  # 0.2초 → 0.6초
-            end_time = min(video.duration, end_time + 0.6)  # 0.3초 → 0.6초
+                start_time = max(0, start_time - OCRThresholds.TIME_BUFFER_BEFORE)
+            end_time = min(video.duration, end_time + OCRThresholds.TIME_BUFFER_AFTER)
 
             final_box = [
                 max(0, x1 - pad_x - extra_side_pad),  # 좌측 패딩 + 추가 확장
