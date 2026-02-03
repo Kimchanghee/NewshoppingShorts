@@ -442,9 +442,20 @@ async def check_registration_status(
             success=False, message="해당 정보와 일치하는 가입 요청이 없습니다."
         )
 
-    # Verify contact (last 4 digits)
-    stored_contact = reg_request.contact.replace("-", "").replace(" ", "")
-    input_contact = contact.replace("-", "").replace(" ", "")
+    # Verify contact (last 4 digits) - with input validation
+    if not contact or len(contact.strip()) < 4:
+        return RegistrationResponse(
+            success=False, message="해당 정보와 일치하는 가입 요청이 없습니다."
+        )
+
+    stored_contact = reg_request.contact.replace("-", "").replace(" ", "").strip()
+    input_contact = contact.replace("-", "").replace(" ", "").strip()
+
+    # Ensure input_contact has at least 4 characters for slicing
+    if len(input_contact) < 4:
+        return RegistrationResponse(
+            success=False, message="해당 정보와 일치하는 가입 요청이 없습니다."
+        )
 
     if not stored_contact.endswith(input_contact[-4:]):
         # Return same message to prevent enumeration

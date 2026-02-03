@@ -4,9 +4,11 @@ import os
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from app.errors import AppError
 from app.routers import auth, registration, admin, subscription, payment
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
@@ -92,6 +94,27 @@ async def startup_event():
 # Register rate limiter with app state
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, rate_limit_exceeded_handler)
+
+
+# Global AppError handler
+@app.exception_handler(AppError)
+async def app_error_handler(request: Request, exc: AppError):
+    """
+    Global error handler for AppError exceptions.
+    Provides consistent error response format.
+    """
+    is_production = settings.ENVIRONMENT == "production"
+
+    # Log error with details (internal only)
+    logger.error(
+        f"AppError: code={exc.code} status={exc.status} "
+        f"request_id={exc.request_id} details={exc.details}"
+    )
+
+    return JSONResponse(
+        status_code=exc.status,
+        content=exc.to_dict(is_production=is_production),
+    )
 
 
 class RequestLoggingMiddleware(BaseHTTPMiddleware):

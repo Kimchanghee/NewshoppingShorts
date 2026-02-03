@@ -148,10 +148,12 @@ class VideoAnalyzerGUI(QMainWindow):
                     # 즉시 업데이트
                     self._update_countdown_display()
                 else:
-                    # 구독 없음 - 타이머 중지 및 레이블 숨김
+                    # 구독 없음 - 체험계정으로 표시
                     self._subscription_expires_at = None
                     self._countdown_timer.stop()
-                    self.subscription_time_label.hide()
+                    self.subscription_time_label.setText("체험계정")
+                    self.subscription_time_label.setStyleSheet(f"color: {self.design.colors.text_muted}; font-weight: normal;")
+                    self.subscription_time_label.show()
 
                 # 크레딧 및 배지 업데이트
                 remaining = status.get("remaining", 0)
@@ -166,7 +168,10 @@ class VideoAnalyzerGUI(QMainWindow):
     def _update_countdown_display(self):
         """구독 남은 시간 카운트다운 업데이트 (1초마다 호출)"""
         if not self._subscription_expires_at:
-            self.subscription_time_label.hide()
+            # 구독 없음 - 체험계정 표시
+            self.subscription_time_label.setText("체험계정")
+            self.subscription_time_label.setStyleSheet(f"color: {self.design.colors.text_muted}; font-weight: normal;")
+            self.subscription_time_label.show()
             return
 
         try:
@@ -634,7 +639,7 @@ class VideoAnalyzerGUI(QMainWindow):
                     badge_bg = "#374151"  # Dark gray
                     badge_color = "#FFFFFF"
                 else: # trial
-                    badge_text = "체험판"
+                    badge_text = "체험계정"
                     if remaining <= 0:
                         badge_bg = "#FEF2F2" # Red tint
                         badge_color = "#EF4444" # Red

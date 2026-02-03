@@ -33,7 +33,7 @@ class SubscriptionStatusWidget(QWidget):
             self.ds.spacing.space_2
         )
         
-        self.type_label = QLabel("체험판")
+        self.type_label = QLabel("체험계정")
         self.type_label.setStyleSheet(f"font-weight: bold; color: {get_color('warning')};")
         layout.addWidget(self.type_label)
         
@@ -94,7 +94,7 @@ class SubscriptionStatusWidget(QWidget):
             self.pending_label.hide()
             self._stop_pulse_animation()
         else:
-            self.type_label.setText("체험판")
+            self.type_label.setText("체험계정")
             self.type_label.setStyleSheet(f"font-weight: bold; color: {get_color('warning')};")
             remaining = max(0, self._work_count - self._work_used)
             self.count_value.setText(f"{remaining}/{self._work_count}")
