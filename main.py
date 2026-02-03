@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QIcon, QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -99,7 +99,149 @@ class VideoAnalyzerGUI(QMainWindow):
         self.init_ui()
         self.api_handler.load_saved_api_keys()
         self.refresh_user_status()
-    
+
+        # 구독 상태 자동 갱신 타이머 (60초마다)
+        self._subscription_timer = QTimer(self)
+        self._subscription_timer.timeout.connect(self._auto_refresh_subscription)
+        self._subscription_timer.start(60000)  # 60초 = 60000ms
+
+        # 구독 만료 시간 카운트다운 타이머 (1초마다)
+        self._countdown_timer = QTimer(self)
+        self._countdown_timer.timeout.connect(self._update_countdown_display)
+        self._subscription_expires_at = None  # ISO format datetime string
+
+        # 초기 구독 상태 로드
+        self._auto_refresh_subscription()
+
+    def _auto_refresh_subscription(self):
+        """서버에서 구독 상태를 자동으로 갱신 (60초마다 호출)"""
+        if not self.login_data:
+            return
+
+        try:
+            # Extract user ID
+            data_part = self.login_data.get("data", {})
+            if isinstance(data_part, dict):
+                inner_data = data_part.get("data", {})
+                user_id = inner_data.get("id")
+            else:
+                user_id = None
+
+            if not user_id:
+                user_id = self.login_data.get("userId")
+
+            if not user_id:
+                return
+
+            # API 호출
+            status = rest.getSubscriptionStatus(user_id)
+
+            if status.get("success", True):  # API 성공 시
+                # 구독 만료 시간 저장
+                expires_at = status.get("subscription_expires_at")
+
+                if expires_at:
+                    self._subscription_expires_at = expires_at
+                    # 카운트다운 타이머 시작
+                    if not self._countdown_timer.isActive():
+                        self._countdown_timer.start(1000)  # 1초마다
+                    # 즉시 업데이트
+                    self._update_countdown_display()
+                else:
+                    # 구독 없음 - 타이머 중지 및 레이블 숨김
+                    self._subscription_expires_at = None
+                    self._countdown_timer.stop()
+                    self.subscription_time_label.hide()
+
+                # 크레딧 및 배지 업데이트
+                remaining = status.get("remaining", 0)
+                total = status.get("work_count", 0)
+                self.credits_label.setText(f"크레딧: {remaining}/{total}")
+
+                logger.debug(f"[Subscription] Auto-refresh: expires_at={expires_at}, remaining={remaining}/{total}")
+
+        except Exception as e:
+            logger.error(f"[Subscription] Auto-refresh failed: {e}")
+
+    def _update_countdown_display(self):
+        """구독 남은 시간 카운트다운 업데이트 (1초마다 호출)"""
+        if not self._subscription_expires_at:
+            self.subscription_time_label.hide()
+            return
+
+        try:
+            from datetime import datetime, timezone
+
+            # ISO 형식 파싱
+            expires_str = self._subscription_expires_at
+            if expires_str.endswith("Z"):
+                expires_str = expires_str[:-1] + "+00:00"
+
+            expires_dt = datetime.fromisoformat(expires_str)
+
+            # UTC로 변환 후 현재 시간과 비교
+            if expires_dt.tzinfo is None:
+                expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+
+            now = datetime.now(timezone.utc)
+            diff = expires_dt - now
+
+            total_seconds = int(diff.total_seconds())
+
+            if total_seconds <= 0:
+                # 구독 만료됨
+                self.subscription_time_label.setText("구독 만료됨")
+                self.subscription_time_label.setStyleSheet(f"color: #EF4444; font-weight: bold;")
+                self.subscription_time_label.show()
+                self._countdown_timer.stop()
+                return
+
+            # 년-월-일-시간-분-초 계산
+            years = total_seconds // (365 * 24 * 3600)
+            remaining = total_seconds % (365 * 24 * 3600)
+
+            months = remaining // (30 * 24 * 3600)
+            remaining = remaining % (30 * 24 * 3600)
+
+            days = remaining // (24 * 3600)
+            remaining = remaining % (24 * 3600)
+
+            hours = remaining // 3600
+            remaining = remaining % 3600
+
+            minutes = remaining // 60
+            seconds = remaining % 60
+
+            # 포맷 생성 (0인 단위는 생략)
+            parts = []
+            if years > 0:
+                parts.append(f"{years}년")
+            if months > 0:
+                parts.append(f"{months}월")
+            if days > 0:
+                parts.append(f"{days}일")
+            if hours > 0:
+                parts.append(f"{hours}시간")
+            if minutes > 0:
+                parts.append(f"{minutes}분")
+            parts.append(f"{seconds}초")
+
+            time_str = " ".join(parts)
+            self.subscription_time_label.setText(f"구독 남은 시간: {time_str}")
+
+            # 색상 설정 (7일 미만이면 경고색)
+            d = self.design
+            if total_seconds < 7 * 24 * 3600:
+                self.subscription_time_label.setStyleSheet(f"color: #F59E0B; font-weight: bold;")  # 주황색 경고
+            else:
+                self.subscription_time_label.setStyleSheet(f"color: {d.colors.success}; font-weight: bold;")
+
+            self.subscription_time_label.show()
+
+        except Exception as e:
+            logger.error(f"[Subscription] Countdown update failed: {e}")
+            self.subscription_time_label.hide()
+
     def _check_first_run(self):
         """Check if this is the first run to show tutorial"""
         import os
@@ -401,6 +543,13 @@ class VideoAnalyzerGUI(QMainWindow):
         """)
         self.sub_badge.clicked.connect(self._show_subscription_panel)
         layout.addWidget(self.sub_badge)
+
+        # 구독 남은 시간 표시 레이블
+        self.subscription_time_label = QLabel("")
+        self.subscription_time_label.setFont(QFont(d.typography.font_family_body, d.typography.size_2xs))
+        self.subscription_time_label.setStyleSheet(f"color: {c.success}; font-weight: bold;")
+        self.subscription_time_label.hide()  # 초기에는 숨김 (구독자만 표시)
+        layout.addWidget(self.subscription_time_label)
 
         return bar
 
