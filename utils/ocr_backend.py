@@ -1,6 +1,11 @@
 """
 OCR Backend Wrapper
 
+엔진 우선순위:
+1. GLM-OCR API (Z.ai) - 가장 높은 정확도, 온라인 필요
+2. RapidOCR (Python 3.13 미만) - 로컬 대안
+3. Tesseract - 최종 폴백
+
 Python 3.14+ 호환: pytesseract(Tesseract) 전용 인터페이스
 Python 3.13 미만: RapidOCR 우선, Tesseract 폴백
 """
@@ -14,9 +19,18 @@ from typing import List, Tuple, Any, Optional
 
 # Logging and error handling
 from utils.logging_config import get_logger
-from utils.error_handlers import OCRInitializationError
+from utils.error_handlers import OCRInitializationError, GLMOCROfflineError
 
 logger = get_logger(__name__)
+
+# GLM-OCR 사용 가능 여부 플래그
+GLM_OCR_AVAILABLE = False
+try:
+    from utils.glm_ocr_client import GLMOCRClient, check_glm_ocr_availability
+    GLM_OCR_AVAILABLE = True
+except ImportError:
+    GLMOCRClient = None
+    check_glm_ocr_availability = None
 
 
 def _safe_print(msg: str) -> None:
@@ -53,8 +67,13 @@ class OCRBackend:
 
     def _init_backend(self):
         """
-        OCR 엔진 초기화 - Python 버전에 따라 다른 전략
-        OCR 엔진 초기화 - Python version-based strategy
+        OCR 엔진 초기화 - 우선순위에 따라 다른 전략
+        OCR 엔진 초기화 - Priority-based strategy
+
+        Priority:
+        1. GLM-OCR API (Z.ai) - highest accuracy, requires internet
+        2. RapidOCR (Python < 3.13) - local alternative
+        3. Tesseract - final fallback
 
         Raises:
             OCRInitializationError: If all OCR engines fail to initialize
@@ -62,9 +81,15 @@ class OCRBackend:
         max_retries = 3
         engines = []
 
-        # Build engine priority list based on Python version
+        # Priority 1: GLM-OCR API (online, highest accuracy)
+        if GLM_OCR_AVAILABLE and not os.getenv("GLM_OCR_DISABLED"):
+            engines.append(("glm_ocr", self._init_glm_ocr))
+
+        # Priority 2: RapidOCR (Python < 3.13 only)
         if sys.version_info < (3, 13):
             engines.append(("rapidocr", self._init_rapidocr))
+
+        # Priority 3: Tesseract (final fallback)
         engines.append(("tesseract", self._init_tesseract))
 
         # Try each engine with retries
@@ -94,6 +119,40 @@ class OCRBackend:
             message=msg,
             recovery_hint="Install Tesseract OCR:\nWindows: winget install UB-Mannheim.TesseractOCR\nmacOS: brew install tesseract tesseract-lang\nLinux: sudo apt install tesseract-ocr tesseract-ocr-kor tesseract-ocr-chi-sim"
         )
+
+    def _init_glm_ocr(self):
+        """Initialize GLM-OCR API client"""
+        if not GLM_OCR_AVAILABLE:
+            raise ImportError("GLM-OCR client not available")
+
+        try:
+            self._glm_client = GLMOCRClient()
+
+            # Check if API is available
+            if not self._glm_client.is_available():
+                raise GLMOCROfflineError("GLM-OCR API not available")
+
+            self.reader = "glm_ocr"
+            logger.info("[OCR] GLM-OCR API initialized successfully")
+
+        except Exception as e:
+            raise RuntimeError(f"GLM-OCR initialization failed: {e!r}")
+
+    def _read_with_glm_ocr(self, image) -> List[Tuple[List[List[float]], str, float]]:
+        """GLM-OCR API text recognition"""
+        if not hasattr(self, '_glm_client') or self._glm_client is None:
+            return []
+
+        try:
+            results = self._glm_client.recognize_single(image)
+            return results
+        except GLMOCROfflineError:
+            # API went offline - trigger fallback
+            logger.warning("[OCR] GLM-OCR went offline, results may be incomplete")
+            return []
+        except Exception as e:
+            logger.warning(f"[OCR] GLM-OCR read error: {e}")
+            return []
 
     def _print_tesseract_install_guide(self):
         """Tesseract 설치 가이드 출력"""
@@ -308,7 +367,9 @@ class OCRBackend:
             return []
 
         try:
-            if self.engine_name == "tesseract":
+            if self.engine_name == "glm_ocr":
+                return self._read_with_glm_ocr(image)
+            elif self.engine_name == "tesseract":
                 return self._read_with_tesseract(image)
             elif self.engine_name == "rapidocr":
                 return self._read_with_rapidocr(image)
@@ -317,6 +378,38 @@ class OCRBackend:
         except Exception as e:
             _safe_print(f"[OCR] Text read failed: {e}")
             return []
+
+    def readtext_batch(
+        self,
+        images: List,
+        **kwargs
+    ) -> List[List[Tuple[List[List[float]], str, float]]]:
+        """
+        배치 이미지에서 텍스트 읽기 (GLM-OCR 전용 최적화)
+
+        Args:
+            images: List of numpy arrays, file paths, or bytes
+            **kwargs: 호환성을 위해 유지 (무시됨)
+
+        Returns:
+            List of results for each image
+        """
+        if self.reader is None:
+            return [[] for _ in images]
+
+        # GLM-OCR: 배치 처리 지원
+        if self.engine_name == "glm_ocr" and hasattr(self, '_glm_client'):
+            try:
+                return self._glm_client.recognize_batch(images)
+            except Exception as e:
+                logger.warning(f"[OCR] Batch read failed, falling back to sequential: {e}")
+
+        # 다른 엔진: 순차 처리
+        return [self.readtext(img, **kwargs) for img in images]
+
+    def supports_batch(self) -> bool:
+        """Check if current engine supports batch processing"""
+        return self.engine_name == "glm_ocr"
 
     def _read_with_tesseract(self, image) -> List[Tuple[List[List[float]], str, float]]:
         """Tesseract로 텍스트 읽기"""
@@ -417,18 +510,29 @@ def create_ocr_reader() -> Optional[OCRBackend]:
 def check_ocr_availability() -> dict:
     """
     OCR 가용성 체크
-    
+
     Returns:
         dict with availability info
     """
     info = {
         "python_version": f"{sys.version_info.major}.{sys.version_info.minor}",
+        "glm_ocr_available": False,
+        "glm_ocr_api_key": False,
         "rapidocr_available": False,
         "tesseract_available": False,
         "tesseract_path": None,
         "recommended_engine": None,
     }
-    
+
+    # GLM-OCR 체크
+    if GLM_OCR_AVAILABLE and check_glm_ocr_availability:
+        try:
+            glm_info = check_glm_ocr_availability()
+            info["glm_ocr_available"] = glm_info.get("available", False)
+            info["glm_ocr_api_key"] = glm_info.get("api_key_configured", False)
+        except Exception:
+            pass
+
     # RapidOCR 체크 (Python 3.13 미만)
     if sys.version_info < (3, 13):
         try:
@@ -436,7 +540,7 @@ def check_ocr_availability() -> dict:
             info["rapidocr_available"] = True
         except ImportError:
             pass
-    
+
     # Tesseract 체크
     try:
         import pytesseract
@@ -452,9 +556,11 @@ def check_ocr_availability() -> dict:
             info["tesseract_path"] = cmd
     except ImportError:
         pass
-    
-    # 추천 엔진
-    if sys.version_info >= (3, 13):
+
+    # 추천 엔진 (우선순위: GLM-OCR > RapidOCR > Tesseract)
+    if info["glm_ocr_available"]:
+        info["recommended_engine"] = "glm_ocr"
+    elif sys.version_info >= (3, 13):
         info["recommended_engine"] = "tesseract"
     elif info["rapidocr_available"]:
         info["recommended_engine"] = "rapidocr"
@@ -462,5 +568,5 @@ def check_ocr_availability() -> dict:
         info["recommended_engine"] = "tesseract"
     else:
         info["recommended_engine"] = None
-    
+
     return info

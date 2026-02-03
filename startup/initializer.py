@@ -30,6 +30,13 @@ class Initializer(QtCore.QObject):
     def run(self) -> None:
         emit_finished = True
         try:
+            # 0. Initialize secure environment (API keys from encrypted config)
+            try:
+                from utils.secure_config import init_secure_environment
+                init_secure_environment()
+            except Exception as e:
+                logger.debug(f"[Init] Secure config initialization skipped: {e}")
+
             init_issues = []
             # 1. System requirements (0-10%)
             self.checkItemChanged.emit("system", "checking", "")
