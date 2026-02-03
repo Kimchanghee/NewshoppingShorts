@@ -6,6 +6,10 @@ Admin Dashboard for Shopping Shorts Maker
 
 import logging
 import os
+import sys
+
+# 프로젝트 루트 경로 추가 (단독 실행 시 필요)
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
 from PyQt6.QtWidgets import (
@@ -241,20 +245,20 @@ class AdminDashboard(QMainWindow):
         # 타이틀
         title = QLabel("관리자 대시보드", self.central)
         title.setGeometry(40, 20, 400, 40)
-        title.setFont(QFont(FONT_FAMILY, ds.typography.size_2xl // 2, QFont.Weight.Bold))  # 32 -> 16pt
+        title.setFont(QFont(FONT_FAMILY, ds.typography.size_2xl , QFont.Weight.Bold))  # 32 -> 24pt
         title.setStyleSheet(f"color: {get_color('text_primary')};")
 
         # 마지막 업데이트 시간 라벨
         self.last_update_label = QLabel("마지막 업데이트: -", self.central)
         self.last_update_label.setGeometry(900, 25, 300, 30)
-        self.last_update_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))  # 10 -> 5pt
+        self.last_update_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
         self.last_update_label.setStyleSheet(f"color: {get_color('text_muted')};")
         self.last_update_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         # 새로고침 버튼
         refresh_btn = QPushButton("새로고침", self.central)
         refresh_btn.setGeometry(1220, 20, 120, 40)
-        refresh_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))  # 14 -> 7pt
+        refresh_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm , QFont.Weight.Bold))  # 14 -> 10pt
         refresh_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color('surface')};
@@ -273,7 +277,7 @@ class AdminDashboard(QMainWindow):
         # 연결 상태 표시
         self.connection_label = QLabel("", self.central)
         self.connection_label.setGeometry(1360, 25, 200, 30)
-        self.connection_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))  # 10 -> 5pt
+        self.connection_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
         self.connection_label.setStyleSheet(f"color: {get_color('success')};")
 
         # 통계 카드들 (Y: 75)
@@ -327,14 +331,14 @@ class AdminDashboard(QMainWindow):
 
         title_lbl = QLabel(title, card)
         title_lbl.setGeometry(15, 10, w - 30, 20)
-        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))  # 10 -> 5pt
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
         title_lbl.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
 
     def _get_value_label(self, x, y, w, h) -> QLabel:
         """값 라벨 생성 및 반환"""
         lbl = QLabel("0", self.central)
         lbl.setGeometry(x + 15, y + 35, w - 30, 40)
-        lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_xl // 2, QFont.Weight.Bold))  # 24 -> 12pt
+        lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_xl , QFont.Weight.Bold))  # 24 -> 18pt
         lbl.setStyleSheet(f"color: {get_color('text_primary')}; background: transparent;")
         return lbl
 
@@ -342,13 +346,13 @@ class AdminDashboard(QMainWindow):
         """탭 버튼 생성 (회원가입 요청 탭 제거 - 자동 승인됨)"""
         self.tab_users = QPushButton("사용자 관리", self.central)
         self.tab_users.setGeometry(40, 180, 130, 42)
-        self.tab_users.setFont(QFont(FONT_FAMILY, ds.typography.size_base // 2, QFont.Weight.Bold))  # 16 -> 8pt
+        self.tab_users.setFont(QFont(FONT_FAMILY, ds.typography.size_base , QFont.Weight.Bold))  # 16 -> 12pt
         self.tab_users.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tab_users.clicked.connect(lambda: self._switch_tab(0))
 
         self.tab_subscriptions = QPushButton("구독 요청", self.central)
         self.tab_subscriptions.setGeometry(180, 180, 130, 42)
-        self.tab_subscriptions.setFont(QFont(FONT_FAMILY, ds.typography.size_base // 2))  # 16 -> 8pt
+        self.tab_subscriptions.setFont(QFont(FONT_FAMILY, ds.typography.size_base ))  # 16 -> 12pt
         self.tab_subscriptions.setCursor(Qt.CursorShape.PointingHandCursor)
         self.tab_subscriptions.clicked.connect(lambda: self._switch_tab(1))
 
@@ -398,12 +402,12 @@ class AdminDashboard(QMainWindow):
         # 사용자 검색 (기본 표시)
         self.search_label = QLabel("아이디 검색:", self.central)
         self.search_label.setGeometry(40, 245, 90, 30)
-        self.search_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))  # 14 -> 7pt
+        self.search_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
         self.search_label.setStyleSheet(f"color: {get_color('text_primary')};")
 
         self.search_edit = QLineEdit(self.central)
         self.search_edit.setGeometry(135, 242, 200, 36)
-        self.search_edit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))  # 14 -> 7pt
+        self.search_edit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
         self.search_edit.setPlaceholderText("검색어 입력...")
         self.search_edit.setStyleSheet(f"""
             QLineEdit {{
@@ -422,13 +426,13 @@ class AdminDashboard(QMainWindow):
         # 구독 요청 필터
         self.sub_filter_label = QLabel("상태 필터:", self.central)
         self.sub_filter_label.setGeometry(40, 245, 80, 30)
-        self.sub_filter_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))  # 14 -> 7pt
+        self.sub_filter_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
         self.sub_filter_label.setStyleSheet(f"color: {get_color('text_primary')};")
         self.sub_filter_label.setVisible(False)
 
         self.sub_filter_combo = QComboBox(self.central)
         self.sub_filter_combo.setGeometry(125, 242, 140, 36)
-        self.sub_filter_combo.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))  # 14 -> 7pt
+        self.sub_filter_combo.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
         self.sub_filter_combo.addItems(["대기 중", "승인됨", "거부됨", "전체"])
         self.sub_filter_combo.setStyleSheet(f"""
             QComboBox {{
@@ -502,7 +506,7 @@ class AdminDashboard(QMainWindow):
 
     def _style_table(self, table: QTableWidget, widths: list):
         """테이블 스타일"""
-        table.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))  # 10 -> 5pt
+        table.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
         table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: {get_color('surface')};
@@ -738,7 +742,7 @@ class AdminDashboard(QMainWindow):
         # Gray theme
         c_norm = get_color("text_muted")
         c_hov = get_color("border")
-        pw_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_hov))
+        pw_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_hov))
         pw_btn.clicked.connect(lambda: self._show_password_info(username, hashed_password))
 
         # 2. Extension (Green/Success)
@@ -746,7 +750,7 @@ class AdminDashboard(QMainWindow):
         ext_btn.setGeometry(45, 5, 50, 30)
         ext_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("info") # Blue
-        ext_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_norm))
+        ext_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
         ext_btn.clicked.connect(lambda: self._extend_subscription(user_id, username))
         
         # 3. Status (Yellow/Warning)
@@ -754,7 +758,7 @@ class AdminDashboard(QMainWindow):
         stat_btn.setGeometry(100, 5, 50, 30)
         stat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("warning")
-        stat_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_norm))
+        stat_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
         stat_btn.clicked.connect(lambda: self._check_work_status(user_id, username))
 
         # 4. History (Gray/Info)
@@ -763,7 +767,7 @@ class AdminDashboard(QMainWindow):
         hist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("text_primary")
         c_hov = get_color("surface_variant")
-        hist_btn.setStyleSheet(base_style % (get_color("border"), ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_hov))
+        hist_btn.setStyleSheet(base_style % (get_color("border"), ds.radius.sm, c_norm, ds.typography.size_2xs , c_hov))
         hist_btn.clicked.connect(lambda: self._show_login_history(user_id, username))
 
         # 5. Delete (Red/Danger)
@@ -771,7 +775,7 @@ class AdminDashboard(QMainWindow):
         del_btn.setGeometry(210, 5, 50, 30)
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("error")
-        del_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, ds.typography.size_2xs // 2, c_norm, c_norm))
+        del_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
         del_btn.clicked.connect(lambda: self._delete_user(user_id, username))
 
         return widget

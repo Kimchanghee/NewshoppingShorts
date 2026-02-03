@@ -16,7 +16,7 @@ logger = get_logger(__name__)
 
 # Import constants
 # 상수 임포트
-from config.constants import OCRThresholds, VideoSettings
+from config.constants import OCRThresholds, VideoSettings, GLMOCRSettings
 
 try:
     import cv2
@@ -1043,6 +1043,168 @@ class SubtitleDetector:
             logger.debug(f"[OCR preprocessing] Error: {e}")
             return frame
 
+    def _analyze_segment_batch_mode(
+        self, cap, sample_frames, segment_name, W, H, fps, optimizer
+    ):
+        """
+        GLM-OCR 배치 모드로 세그먼트 분석 (최적화된 API 호출)
+
+        Args:
+            cap: VideoCapture object
+            sample_frames: List of frame positions to analyze
+            segment_name: Segment name for logging
+            W, H: Video dimensions
+            fps: Video FPS
+            optimizer: System optimizer instance
+
+        Returns:
+            Dictionary with analysis results
+        """
+        import cv2
+        import numpy as np
+
+        ocr_reader = getattr(self.gui, 'ocr_reader', None)
+        if ocr_reader is None:
+            return None
+
+        batch_size = GLMOCRSettings.OPTIMAL_BATCH_SIZE
+        all_regions = []
+        frames_with_chinese = 0
+        ocr_call_count = 0
+
+        # 프레임 수집 및 배치 처리
+        frame_data = []  # (frame_pos, frame, scale)
+
+        logger.info(f"[OCR {segment_name}] Batch mode: collecting {len(sample_frames)} frames")
+
+        # 1단계: 모든 프레임 수집 및 전처리
+        for frame_pos in sample_frames:
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
+            ret, frame = cap.read()
+            if not ret:
+                continue
+
+            # Downscale frame
+            scale = 1.0
+            try:
+                h, w = frame.shape[:2]
+                if optimizer:
+                    ocr_params = optimizer.get_optimized_ocr_params()
+                    target_w = ocr_params.get('downscale_target', 1440)
+                else:
+                    target_w = 1440 if w > 1920 else w
+
+                if w > target_w:
+                    scale = target_w / float(w)
+                    new_h = max(1, int(h * scale))
+                    frame = cv2.resize(frame, (target_w, new_h), interpolation=cv2.INTER_AREA)
+            except Exception:
+                scale = 1.0
+
+            frame_data.append((frame_pos, frame, scale))
+
+        if not frame_data:
+            return None
+
+        # 2단계: 배치 단위로 OCR 수행
+        total_batches = (len(frame_data) + batch_size - 1) // batch_size
+        logger.info(f"[OCR {segment_name}] Processing {len(frame_data)} frames in {total_batches} batches")
+
+        for batch_idx in range(0, len(frame_data), batch_size):
+            batch = frame_data[batch_idx:batch_idx + batch_size]
+            frames_only = [f[1] for f in batch]
+
+            try:
+                # 배치 OCR 호출
+                batch_results = ocr_reader.readtext_batch(frames_only)
+                ocr_call_count += 1  # 배치는 1회 호출로 카운트
+
+                # 각 프레임별 결과 처리
+                for i, (frame_pos, frame, scale) in enumerate(batch):
+                    if i >= len(batch_results):
+                        continue
+
+                    results = batch_results[i]
+                    time_sec = frame_pos / fps
+                    frame_has_chinese = False
+
+                    for result in results:
+                        if len(result) == 3:
+                            bbox, text, prob = result
+                        elif len(result) == 2:
+                            bbox, text = result
+                            prob = 1.0
+                        else:
+                            continue
+
+                        if prob < OCRThresholds.CONFIDENCE_MIN:
+                            continue
+
+                        # 중국어 문자 확인
+                        chinese_chars = sum(1 for c in text if '\u4e00' <= c <= '\u9fff')
+                        if chinese_chars < 1:
+                            continue
+
+                        frame_has_chinese = True
+
+                        # Bbox 스케일 조정
+                        try:
+                            if scale != 1.0:
+                                adjusted_bbox = [(x / scale, y / scale) for x, y in bbox]
+                            else:
+                                adjusted_bbox = bbox
+                        except Exception:
+                            adjusted_bbox = bbox
+
+                        # Region 정보 생성
+                        region_info = self._gpu_process_bbox_batch([adjusted_bbox], W, H)
+                        if region_info:
+                            region = {
+                                'x': region_info[0]['x'],
+                                'y': region_info[0]['y'],
+                                'width': region_info[0]['width'],
+                                'height': region_info[0]['height'],
+                                'confidence': prob,
+                                'time': time_sec,
+                                'text': text,
+                                'language': 'chinese',
+                                'source': 'glm_ocr_batch',
+                            }
+                            all_regions.append(region)
+
+                    if frame_has_chinese:
+                        frames_with_chinese += 1
+
+            except Exception as e:
+                logger.warning(f"[OCR {segment_name}] Batch {batch_idx // batch_size + 1} error: {e}")
+                # 배치 실패 시 개별 처리로 폴백
+                for frame_pos, frame, scale in batch:
+                    try:
+                        results = ocr_reader.readtext(frame)
+                        ocr_call_count += 1
+                        # 결과 처리 (간소화)
+                        for result in results:
+                            if len(result) >= 2:
+                                text = result[1]
+                                if any('\u4e00' <= c <= '\u9fff' for c in text):
+                                    frames_with_chinese += 1
+                                    break
+                    except Exception:
+                        pass
+
+        logger.info(
+            f"[OCR {segment_name}] Batch complete: "
+            f"{frames_with_chinese}/{len(frame_data)} frames with Chinese, "
+            f"{ocr_call_count} API calls"
+        )
+
+        return {
+            'regions': all_regions,
+            'frames_with_chinese': frames_with_chinese,
+            'total_frames_checked': len(frame_data),
+            'ocr_calls': ocr_call_count
+        }
+
     def _perform_ocr_with_retry(self, target_frame, segment_name, frame_idx, attempt_name):
         """
         Perform OCR with retry logic using preprocessing.
@@ -1192,6 +1354,17 @@ class SubtitleDetector:
             else:
                 logger.debug(f"[OCR {segment_name}] Default sampling mode ({sample_interval_sec}s interval)")
 
+            # GLM-OCR 배치 모드 확인
+            ocr_reader = getattr(self.gui, 'ocr_reader', None)
+            use_batch_mode = (
+                ocr_reader is not None and
+                hasattr(ocr_reader, 'supports_batch') and
+                ocr_reader.supports_batch() and
+                ocr_reader.engine_name == 'glm_ocr'
+            )
+            if use_batch_mode:
+                logger.info(f"[OCR {segment_name}] GLM-OCR batch mode enabled")
+
             # ★★★ 개선: 0~3초 구간 집중 샘플링 (0.1초 간격) ★★★
             # 영상 시작부 자막을 확실히 포착하기 위한 전략
             sample_frames = []
@@ -1246,6 +1419,14 @@ class SubtitleDetector:
                 return None
 
             logger.debug(f"[OCR {segment_name}] {len(sample_frames)} frames scheduled for scan")
+
+            # ★★★ GLM-OCR 배치 처리 모드 ★★★
+            if use_batch_mode:
+                result = self._analyze_segment_batch_mode(
+                    cap, sample_frames, segment_name, W, H, fps, optimizer
+                )
+                cap.release()
+                return result
 
             all_regions = []
             frames_with_chinese = 0

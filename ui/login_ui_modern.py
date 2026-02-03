@@ -311,6 +311,7 @@ class RegistrationRequestDialog(QWidget):
         super().__init__(parent)
         self._username_available = False
         self._setup_ui()
+        self._connect_validation_signals()
 
     def _setup_ui(self):
         self.setFixedSize(400, 720)  # Height increased for Email field
@@ -474,9 +475,14 @@ class RegistrationRequestDialog(QWidget):
             }}
             QPushButton:hover {{ background-color: {login_color('secondary')}; }}
             QPushButton:pressed {{ background-color: {login_color('primary')}; }}
+            QPushButton:disabled {{
+                background-color: {login_color('border')};
+                color: {login_color('text_muted')};
+            }}
         """)
         self.submitButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.submitButton.clicked.connect(self._on_submit)
+        self.submitButton.setEnabled(False)  # 초기에는 비활성화
 
     def _apply_input_style(self, widget):
         widget.setStyleSheet(f"""
@@ -494,6 +500,68 @@ class RegistrationRequestDialog(QWidget):
             QLineEdit::placeholder {{ color: {login_color('text_muted')}; }}
         """)
 
+    def _connect_validation_signals(self):
+        """모든 입력 필드에 실시간 검증 연결"""
+        self.nameEdit.textChanged.connect(self._validate_form)
+        self.emailEdit.textChanged.connect(self._validate_form)
+        self.usernameEdit.textChanged.connect(self._validate_form)
+        self.passwordEdit.textChanged.connect(self._validate_form)
+        self.passwordConfirmEdit.textChanged.connect(self._validate_form)
+        self.contactEdit.textChanged.connect(self._validate_form)
+
+    def _validate_form(self):
+        """
+        모든 필드 검증하여 회원가입 버튼 활성화/비활성화
+
+        필수 조건:
+        - 가입자 명: 2자 이상
+        - 이메일: 유효한 이메일 형식
+        - 아이디: 4자 이상, 영문/숫자/밑줄만, 중복확인 완료
+        - 비밀번호: 6자 이상
+        - 비밀번호 확인: 비밀번호와 일치
+        - 연락처: 숫자 10자 이상
+        """
+        import re
+
+        is_valid = True
+
+        # 가입자 명 검증
+        name = self.nameEdit.text().strip()
+        if len(name) < 2:
+            is_valid = False
+
+        # 이메일 검증
+        email = self.emailEdit.text().strip()
+        if not email or "@" not in email or "." not in email:
+            is_valid = False
+
+        # 아이디 검증
+        username = self.usernameEdit.text().strip().lower()
+        if len(username) < 4:
+            is_valid = False
+        elif not re.match(r"^[a-z0-9_]+$", username):
+            is_valid = False
+        elif not self._username_available:
+            is_valid = False
+
+        # 비밀번호 검증
+        password = self.passwordEdit.text()
+        if len(password) < 6:
+            is_valid = False
+
+        # 비밀번호 확인 검증
+        password_confirm = self.passwordConfirmEdit.text()
+        if password != password_confirm:
+            is_valid = False
+
+        # 연락처 검증
+        contact_raw = self.contactEdit.text().strip()
+        contact = re.sub(r"[^0-9]", "", contact_raw)
+        if len(contact) < 10:
+            is_valid = False
+
+        self.submitButton.setEnabled(is_valid)
+
     def _on_back(self):
         self.backRequested.emit()
         self.close()
@@ -502,6 +570,8 @@ class RegistrationRequestDialog(QWidget):
         self._username_available = False
         self.usernameStatusLabel.setText("")
         self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        # 아이디 변경 시 폼 재검증 (중복확인 필요 상태로 변경됨)
+        self._validate_form()
 
     def _check_username(self):
         import re
@@ -551,6 +621,8 @@ class RegistrationRequestDialog(QWidget):
             available,
             message,
         )
+        # 중복확인 결과에 따라 폼 검증 재실행
+        self._validate_form()
 
     def _on_submit(self):
         import re
@@ -637,6 +709,9 @@ class RegistrationRequestDialog(QWidget):
         self.passwordEdit.clear()
         self.passwordConfirmEdit.clear()
         self.contactEdit.clear()
+        self._username_available = False
+        self.usernameStatusLabel.setText("")
+        self.submitButton.setEnabled(False)
 
 
 Ui_LoginWindow = ModernLoginUi

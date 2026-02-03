@@ -10,14 +10,24 @@ from functools import wraps
 logger = logging.getLogger(__name__)
 F = TypeVar('F', bound=Callable[..., Any])
 
-# Exception classes (placeholders to satisfy imports)
+# Exception classes with proper initialization
 class AppException(Exception):
-    pass
+    """Base exception for application errors"""
+    def __init__(self, message: str = "", details: Optional[Any] = None):
+        super().__init__(message)
+        self.message = message
+        self.details = details
+
 
 class OCRInitializationError(AppException):
-    pass
+    """OCR engine initialization failed"""
+    def __init__(self, message: str = "", recovery_hint: str = "", details: Optional[Any] = None):
+        super().__init__(message, details)
+        self.recovery_hint = recovery_hint
+
 
 class OCRProcessingError(AppException):
+    """OCR processing failed"""
     pass
 
 class VideoProcessingError(AppException):
@@ -34,6 +44,25 @@ class APIKeyMissingError(AppException):
 
 class ConfigurationError(AppException):
     pass
+
+
+class GLMOCRError(AppException):
+    """GLM-OCR API specific errors"""
+    def __init__(self, message: str = "", details: Optional[Any] = None):
+        super().__init__(message, details)
+
+
+class GLMOCRRateLimitError(GLMOCRError):
+    """Rate limit exceeded"""
+    def __init__(self, message: str = "Rate limit exceeded", retry_after: int = 60):
+        super().__init__(message, {"retry_after": retry_after})
+        self.retry_after = retry_after
+
+
+class GLMOCROfflineError(GLMOCRError):
+    """API unavailable, fallback to local OCR"""
+    def __init__(self, message: str = "GLM-OCR API unavailable"):
+        super().__init__(message)
 
 class DependencyError(AppException):
     pass
@@ -95,4 +124,7 @@ __all__ = [
     "ConfigurationError",
     "DependencyError",
     "TrialLimitExceededError",
+    "GLMOCRError",
+    "GLMOCRRateLimitError",
+    "GLMOCROfflineError",
 ]

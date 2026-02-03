@@ -256,6 +256,40 @@ class GPUSettings:
     GPU_MEMORY_FRACTION: float = 0.8  # Use 80% of GPU memory
 
 
+@dataclass(frozen=True)
+class GLMOCRSettings:
+    """GLM-OCR API settings (Z.ai)"""
+
+    # API Configuration
+    ENDPOINT: str = "https://api.z.ai/v1/chat/completions"
+    MODEL: str = "glm-ocr"
+
+    # Request settings
+    TIMEOUT_SECONDS: int = 30
+    MAX_RETRIES: int = 3
+    BACKOFF_FACTOR: float = 1.0
+
+    # Batch processing
+    MAX_BATCH_SIZE: int = 20  # Maximum images per API request
+    OPTIMAL_BATCH_SIZE: int = 10  # Default batch size for efficiency
+
+    # Image compression
+    TARGET_WIDTH: int = 1280  # Resize larger images
+    JPEG_QUALITY: int = 85  # Balance quality/size
+    MAX_IMAGE_SIZE_KB: int = 500  # Max size per image
+
+    # Cost optimization
+    MIN_CONFIDENCE: float = 0.3  # Filter low-confidence results
+
+    # Fallback settings
+    OFFLINE_MODE: bool = False  # Force local OCR
+    API_FAILURE_THRESHOLD: int = 3  # Switch to local after N failures
+
+    # Rate limiting
+    REQUEST_DELAY_MS: int = 50  # Delay between batch requests (ms)
+    RATE_LIMIT_WAIT_SECONDS: float = 1.0  # Wait time when rate limited
+
+
 # === Convenience accessors ===
 
 

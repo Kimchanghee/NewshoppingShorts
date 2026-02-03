@@ -20,6 +20,10 @@ credentials.json
 *_keys.txt
 *_keys.json
 
+# Encrypted config (contains API keys)
+.secure_config.enc
+*.secure_config.enc
+
 # Vertex AI credentials (security-sensitive)
 config/vertex-credentials.json
 config/*-vertex.json
