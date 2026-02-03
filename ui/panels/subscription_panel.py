@@ -30,7 +30,7 @@ logger = get_logger(__name__)
 PLANS = {
     "trial": {
         "id": "trial",
-        "name": "체험판",
+        "name": "체험계정",
         "price": 0,
         "price_text": "묶음",
         "period": "",
@@ -364,14 +364,14 @@ class CurrentPlanCard(QFrame):
         
         header_layout.addStretch()
         
-        self.status_badge = QLabel("체험판")
+        self.status_badge = QLabel("체험계정")
         self.status_badge.setObjectName("status_badge")
         header_layout.addWidget(self.status_badge)
-        
+
         layout.addLayout(header_layout)
-        
+
         # Plan name (large)
-        self.plan_name = QLabel("체험판")
+        self.plan_name = QLabel("체험계정")
         self.plan_name.setObjectName("current_plan_name")
         layout.addWidget(self.plan_name)
         

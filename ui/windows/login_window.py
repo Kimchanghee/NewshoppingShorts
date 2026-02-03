@@ -50,14 +50,21 @@ class Login(QMainWindow, Ui_LoginWindow):
             sys.exit()
 
     def setPort(self) -> bool:
-        port = int(os.getenv("SSMAKER_PORT", str(DEFAULT_PROCESS_PORT)))
+        try:
+            port = int(os.getenv("SSMAKER_PORT", str(DEFAULT_PROCESS_PORT)))
+        except ValueError as e:
+            logger.error(f"Invalid SSMAKER_PORT value: {e}")
+            return False
+
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             sock.bind(("localhost", port))
             sock.listen(1)
             self.serverSocket = sock
+            logger.info(f"Server socket bound to port {port}")
             return True
-        except:
+        except OSError as e:
+            logger.warning(f"Failed to bind socket to port {port}: {e}")
             return False
 
     def _preload_ip(self):
@@ -67,9 +74,13 @@ class Login(QMainWindow, Ui_LoginWindow):
         threading.Thread(target=rest.getVersion, daemon=True).start()
 
     def _get_local_ip(self) -> str:
-        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
-            return s.getsockname()[0]
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                s.connect(("8.8.8.8", 80))
+                return s.getsockname()[0]
+        except (OSError, socket.error) as e:
+            logger.warning(f"Failed to get local IP: {e}")
+            return "127.0.0.1"  # Fallback IP
 
     def _loginCheck(self, force: bool = False):
         user_id = self.idEdit.text()

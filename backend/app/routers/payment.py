@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 """
 Payment Router
 결제 라우터
@@ -6,7 +7,7 @@ Payment Router
 
 Security:
 - Rate limiting on all endpoints
-- User authentication required
+- User authentication required for mock endpoints
 """
 import logging
 import secrets
@@ -20,6 +21,8 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.utils.ip_utils import get_client_ip
+from app.dependencies import verify_admin_api_key
+from app.models.payment_session import PaymentSession, PaymentStatus
 
 logger = logging.getLogger(__name__)
 
@@ -28,10 +31,12 @@ limiter = Limiter(key_func=get_client_ip)
 
 router = APIRouter(prefix="/payments", tags=["payment"])
 
-
-# In-memory storage for payment sessions (production should use DB)
-# 결제 세션 메모리 저장소 (운영 환경에서는 DB 사용 필요)
-_payment_sessions = {}
+# Plan pricing (KRW)
+PLAN_PRICES = {
+    "trial": 0,
+    "monthly": 9900,
+    "yearly": 86400,
+}
 
 
 class CreatePaymentRequest(BaseModel):
@@ -57,6 +62,11 @@ class PaymentStatusResponse(BaseModel):
     updated_at: str
 
 
+def _get_payment_session(db: Session, payment_id: str) -> Optional[PaymentSession]:
+    """Retrieve payment session from database."""
+    return db.query(PaymentSession).filter(PaymentSession.payment_id == payment_id).first()
+
+
 @router.post("/create", response_model=CreatePaymentResponse)
 @limiter.limit("10/minute")
 async def create_payment(
@@ -75,30 +85,31 @@ async def create_payment(
     """
     logger.info(f"[Payment] Create request: plan={data.plan_id}, user={data.user_id}")
 
-    # Generate payment ID
+    # Generate unique payment ID
     payment_id = secrets.token_urlsafe(32)
 
-    # Create payment session
-    session_data = {
-        "payment_id": payment_id,
-        "plan_id": data.plan_id,
-        "user_id": data.user_id,
-        "status": "pending",
-        "created_at": datetime.utcnow(),
-        "updated_at": datetime.utcnow(),
-    }
+    # Calculate expiration (30 minutes)
+    expires_at = datetime.utcnow() + timedelta(minutes=30)
 
-    _payment_sessions[payment_id] = session_data
+    # Get plan price
+    amount = PLAN_PRICES.get(data.plan_id, 0)
+
+    # Create payment session in database
+    session = PaymentSession(
+        payment_id=payment_id,
+        plan_id=data.plan_id,
+        user_id=data.user_id,
+        status=PaymentStatus.PENDING,
+        amount=amount,
+        expires_at=expires_at,
+    )
+    db.add(session)
+    db.commit()
+    db.refresh(session)
 
     # Generate checkout URL (mock - should be real payment gateway URL)
     # 실제 결제 게이트웨이 URL로 교체 필요 (예: 토스페이먼츠, 카카오페이 등)
-    checkout_url = f"https://payment.example.com/checkout?session={payment_id}"
-
-    # Mock: For testing, you can use a local mock page
-    # 테스트용 mock 페이지 (실제로는 결제 게이트웨이 URL 사용)
     checkout_url = f"http://localhost:8000/static/mock_payment.html?payment_id={payment_id}&plan={data.plan_id}"
-
-    expires_at = datetime.utcnow() + timedelta(minutes=30)
 
     logger.info(f"[Payment] Session created: {payment_id}")
 
@@ -122,15 +133,16 @@ async def get_payment_status(
 
     Status values:
     - pending: 대기 중
-    - paid/success/succeeded: 결제 완료
+    - succeeded: 결제 완료
     - failed: 결제 실패
-    - canceled/cancelled: 결제 취소
+    - cancelled: 결제 취소
+    - expired: 만료됨
     """
     logger.info(f"[Payment] Status check: {payment_id}")
 
-    session_data = _payment_sessions.get(payment_id)
+    session = _get_payment_session(db, payment_id)
 
-    if not session_data:
+    if not session:
         logger.warning(f"[Payment] Session not found: {payment_id}")
         # Return a default response for unknown payment
         return PaymentStatusResponse(
@@ -140,13 +152,19 @@ async def get_payment_status(
             updated_at=datetime.utcnow().isoformat()
         )
 
+    # Check if session has expired
+    if session.status == PaymentStatus.PENDING and session.expires_at:
+        if datetime.utcnow() > session.expires_at:
+            session.status = PaymentStatus.EXPIRED
+            db.commit()
+
     return PaymentStatusResponse(
-        payment_id=session_data["payment_id"],
-        status=session_data["status"],
-        plan_id=session_data.get("plan_id"),
-        user_id=session_data.get("user_id"),
-        created_at=session_data["created_at"].isoformat(),
-        updated_at=session_data["updated_at"].isoformat()
+        payment_id=session.payment_id,
+        status=session.status.value,
+        plan_id=session.plan_id,
+        user_id=session.user_id,
+        created_at=session.created_at.isoformat() if session.created_at else datetime.utcnow().isoformat(),
+        updated_at=session.updated_at.isoformat() if session.updated_at else datetime.utcnow().isoformat()
     )
 
 
@@ -179,21 +197,39 @@ async def payment_webhook(
             logger.warning("[Payment] Invalid webhook payload")
             return {"success": False, "message": "Invalid payload"}
 
-        # Update session status
-        session_data = _payment_sessions.get(payment_id)
-        if session_data:
-            session_data["status"] = new_status
-            session_data["updated_at"] = datetime.utcnow()
-            logger.info(f"[Payment] Status updated: {payment_id} -> {new_status}")
+        # Map status string to enum
+        status_map = {
+            "paid": PaymentStatus.SUCCEEDED,
+            "success": PaymentStatus.SUCCEEDED,
+            "succeeded": PaymentStatus.SUCCEEDED,
+            "failed": PaymentStatus.FAILED,
+            "canceled": PaymentStatus.CANCELLED,
+            "cancelled": PaymentStatus.CANCELLED,
+        }
+        mapped_status = status_map.get(new_status.lower())
+        if not mapped_status:
+            logger.warning(f"[Payment] Unknown status: {new_status}")
+            return {"success": False, "message": f"Unknown status: {new_status}"}
+
+        # Update session status in database
+        session = _get_payment_session(db, payment_id)
+        if session:
+            session.status = mapped_status
+            # Store gateway reference if provided
+            if payload.get("gateway_reference"):
+                session.gateway_reference = payload.get("gateway_reference")
+            db.commit()
+            logger.info(f"[Payment] Status updated: {payment_id} -> {mapped_status.value}")
 
             # TODO: Update user subscription in database
-            # user_id = session_data.get("user_id")
-            # plan_id = session_data.get("plan_id")
-            # if new_status in ("paid", "success", "succeeded") and user_id:
+            # if mapped_status == PaymentStatus.SUCCEEDED and session.user_id:
             #     # Update user subscription
             #     pass
 
-        return {"success": True, "payment_id": payment_id}
+            return {"success": True, "payment_id": payment_id}
+        else:
+            logger.warning(f"[Payment] Session not found for webhook: {payment_id}")
+            return {"success": False, "message": "Payment not found"}
 
     except Exception as e:
         logger.error(f"[Payment] Webhook error: {e}", exc_info=True)
@@ -205,21 +241,21 @@ async def payment_webhook(
 async def mock_complete_payment(
     request: Request,
     payment_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _admin: bool = Depends(verify_admin_api_key)
 ):
     """
-    Mock: 테스트용 결제 완료 처리
-    Mock: Complete payment for testing
+    Mock: 테스트용 결제 완료 처리 (Admin 전용)
+    Mock: Complete payment for testing (Admin only)
 
-    ⚠️ WARNING: This endpoint should be REMOVED or PROTECTED in production!
-    ⚠️ 경고: 운영 환경에서는 이 엔드포인트를 삭제하거나 보호해야 합니다!
+    Requires X-Admin-API-Key header for security.
     """
-    logger.info(f"[Payment] Mock complete: {payment_id}")
+    logger.info(f"[Payment] Mock complete (admin): {payment_id}")
 
-    session_data = _payment_sessions.get(payment_id)
-    if session_data:
-        session_data["status"] = "succeeded"
-        session_data["updated_at"] = datetime.utcnow()
+    session = _get_payment_session(db, payment_id)
+    if session:
+        session.status = PaymentStatus.SUCCEEDED
+        db.commit()
         return {"success": True, "message": "Payment completed (mock)"}
 
     return {"success": False, "message": "Payment not found"}
@@ -230,21 +266,21 @@ async def mock_complete_payment(
 async def mock_cancel_payment(
     request: Request,
     payment_id: str,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _admin: bool = Depends(verify_admin_api_key)
 ):
     """
-    Mock: 테스트용 결제 취소 처리
-    Mock: Cancel payment for testing
+    Mock: 테스트용 결제 취소 처리 (Admin 전용)
+    Mock: Cancel payment for testing (Admin only)
 
-    ⚠️ WARNING: This endpoint should be REMOVED or PROTECTED in production!
-    ⚠️ 경고: 운영 환경에서는 이 엔드포인트를 삭제하거나 보호해야 합니다!
+    Requires X-Admin-API-Key header for security.
     """
-    logger.info(f"[Payment] Mock cancel: {payment_id}")
+    logger.info(f"[Payment] Mock cancel (admin): {payment_id}")
 
-    session_data = _payment_sessions.get(payment_id)
-    if session_data:
-        session_data["status"] = "cancelled"
-        session_data["updated_at"] = datetime.utcnow()
+    session = _get_payment_session(db, payment_id)
+    if session:
+        session.status = PaymentStatus.CANCELLED
+        db.commit()
         return {"success": True, "message": "Payment cancelled (mock)"}
 
     return {"success": False, "message": "Payment not found"}

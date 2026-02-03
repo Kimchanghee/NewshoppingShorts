@@ -124,19 +124,28 @@ async def list_users(
     query = db.query(User)
 
     # Search by username, name, email, or phone
-    # Security: Escape LIKE wildcards to prevent unexpected query behavior
+    # Security: Escape LIKE wildcards and validate input length
     if search:
-        from sqlalchemy import or_
-        # Escape special LIKE characters
-        safe_search = search.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
-        query = query.filter(
-            or_(
-                User.username.ilike(f"%{safe_search}%", escape='\\'),
-                User.name.ilike(f"%{safe_search}%", escape='\\'),
-                User.email.ilike(f"%{safe_search}%", escape='\\'),
-                User.phone.ilike(f"%{safe_search}%", escape='\\')
+        # Input validation: limit search length to prevent performance issues
+        search_clean = search.strip()
+        if len(search_clean) > 100:
+            raise HTTPException(
+                status_code=400,
+                detail="검색어는 100자 이내여야 합니다."
             )
-        )
+
+        if search_clean:
+            from sqlalchemy import or_
+            # Escape special LIKE characters
+            safe_search = search_clean.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+            query = query.filter(
+                or_(
+                    User.username.ilike(f"%{safe_search}%", escape='\\'),
+                    User.name.ilike(f"%{safe_search}%", escape='\\'),
+                    User.email.ilike(f"%{safe_search}%", escape='\\'),
+                    User.phone.ilike(f"%{safe_search}%", escape='\\')
+                )
+            )
 
     # Get total count
     total = query.count()
