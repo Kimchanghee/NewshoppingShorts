@@ -69,11 +69,14 @@ class VoiceManager:
     def __init__(self, gui):
         self.gui = gui
         # Normalize voice_vars into SimpleBoolVar instances for compatibility
-        raw_vars = getattr(self.gui, "voice_vars", {})
+        raw_vars = getattr(self.gui, "voice_vars", None) or {}
         self.gui.voice_vars = {
-            vid: SimpleBoolVar(var.get() if hasattr(var, "get") else var)
+            vid: SimpleBoolVar(var.get() if hasattr(var, "get") else bool(var))
             for vid, var in raw_vars.items()
         }
+
+        # Load saved voice selections on initialization
+        self.load_saved_voices()
 
     # --------- selection persistence ---------
     def _save_selected_voices(self, voice_ids: List[str]) -> None:
@@ -96,6 +99,10 @@ class VoiceManager:
             self.gui.available_tts_voices = []
 
     def load_saved_voices(self) -> None:
+        if not getattr(self.gui, 'voice_profiles', None):
+            logger.warning("[VoiceManager] voice_profiles not initialized yet, skipping load")
+            return
+
         try:
             saved_voice_ids = get_settings_manager().get_selected_voices()
             if not saved_voice_ids:
@@ -173,8 +180,8 @@ class VoiceManager:
         if hasattr(self.gui, "voice_panel"):
             try:
                 self.gui.voice_panel.rebuild_grid()
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("[VoiceManager] Failed to rebuild voice panel grid: %s", e)
 
         self._save_selected_voices(selected_ids)
 

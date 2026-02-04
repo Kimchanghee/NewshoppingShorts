@@ -72,8 +72,8 @@ def generate_samples():
 
         print(f"Generating {filename}...")
         try:
-            # Use gemini-1.5-flash which is generally available
-            model_name = "gemini-1.5-flash"
+            # Use gemini-2.5-flash-tts which is the latest standard
+            model_name = "gemini-2.5-flash-tts"
             response = client.models.generate_content(
                 model=model_name,
                 contents=[TEXT],

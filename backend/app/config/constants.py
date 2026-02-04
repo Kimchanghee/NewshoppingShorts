@@ -13,7 +13,7 @@ LOGIN_ATTEMPT_WINDOW_MINUTES = 15  # 로그인 시도 제한 시간 (분)
 MAX_IP_ATTEMPTS = 10  # IP별 최대 로그인 시도 횟수
 
 # Password Policy
-MIN_PASSWORD_LENGTH = 6
+MIN_PASSWORD_LENGTH = 8
 BCRYPT_ROUNDS = 14  # bcrypt 해싱 rounds (2^14 iterations)
 
 # Session Settings

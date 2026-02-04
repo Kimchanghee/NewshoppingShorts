@@ -24,6 +24,15 @@ class TokenCostCalculator:
             "threshold": 200000
         },
 
+        # Gemini 3.0 Pro
+        "gemini-3-pro": {
+            "input_small": 2.00,   # <= 200k tokens
+            "input_large": 4.00,   # > 200k tokens
+            "output_small": 12.00, # <= 200k tokens
+            "output_large": 18.00, # > 200k tokens
+            "threshold": 200000
+        },
+
         # Gemini 2.5 Flash
         "gemini-2.5-flash": {
             "input_text": 0.30,
@@ -31,6 +40,15 @@ class TokenCostCalculator:
             "input_video": 0.30,
             "input_audio": 1.00,
             "output": 2.50
+        },
+
+        # Gemini 3.0 Flash
+        "gemini-3-flash": {
+            "input_text": 0.50,
+            "input_image": 0.50,
+            "input_video": 0.50,
+            "input_audio": 1.00,
+            "output": 3.00
         },
 
         # Gemini 2.5 Pro
@@ -44,6 +62,12 @@ class TokenCostCalculator:
 
         # Gemini 2.5 Flash TTS
         "gemini-2.5-flash-preview-tts": {
+            "input": 0.50,
+            "output": 10.00
+        },
+
+        # Gemini 2.5 Flash TTS
+        "gemini-2.5-flash-tts": {
             "input": 0.50,
             "output": 10.00
         },

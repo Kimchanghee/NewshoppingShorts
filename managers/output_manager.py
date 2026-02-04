@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import shutil
 import subprocess
 from datetime import datetime
@@ -39,8 +40,9 @@ class OutputManager:
         folder_changed = old_folder != selected
 
         self.gui.output_folder_path = selected
-        if hasattr(self.gui, "output_folder_label"):
-            self.gui.output_folder_label.setText(selected)
+        output_folder_label = getattr(self.gui, "output_folder_label", None)
+        if output_folder_label is not None:
+            output_folder_label.setText(selected)
 
         if folder_changed:
             get_settings_manager().set_output_folder(selected)

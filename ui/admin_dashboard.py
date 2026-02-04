@@ -182,7 +182,7 @@ class AdminDashboard(QMainWindow):
         self.admin_api_key = (
             admin_api_key 
             or os.getenv("SSMAKER_ADMIN_KEY") 
-            or os.getenv("ADMIN_API_KEY", "")
+            or os.getenv("ADMIN_API_KEY")
         )
 
 
@@ -1288,7 +1288,9 @@ if __name__ == "__main__":
 
     # Get configuration from env or use defaults
     API_URL = os.getenv("API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app")
-    API_KEY = os.getenv("SSMAKER_ADMIN_KEY") or os.getenv("ADMIN_API_KEY", "ssmaker_admin_key_2024")
+    API_KEY = os.getenv("SSMAKER_ADMIN_KEY") or os.getenv("ADMIN_API_KEY")
+    if not API_KEY:
+        raise RuntimeError("SSMAKER_ADMIN_KEY 또는 ADMIN_API_KEY 환경변수가 설정되어야 합니다.")
 
     app = QApplication(sys.argv)
     

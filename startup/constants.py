@@ -120,20 +120,21 @@ CHECK_ITEM_IMPACTS: Dict[str, Dict[str, Any]] = {
 # =============================================================================
 
 REQUIRED_FONTS: List[str] = [
-    "SeoulHangangB.ttf",  # seoul_hangang
     "Pretendard-ExtraBold.ttf",  # pretendard
     "GmarketSansTTFBold.ttf",  # gmarket
     "Paperlogy-9Black.ttf",  # paperlogy
-    "UnPeople.ttf",  # unpeople
     "NanumSquareEB.ttf",  # nanumsquare
     "Cafe24Ssurround.ttf",  # cafe24
     "SpoqaHanSansNeo-Bold.ttf",  # spoqa
     "IBMPlexSansKR-Bold.ttf",  # ibm_plex
-    "KoPubBatangBold.ttf",  # kopub
 ]
 
 # =============================================================================
-# Optional Fonts
+# Optional Fonts (다운로드 소스가 불안정하여 선택사항으로 분류)
 # =============================================================================
 
-OPTIONAL_FONTS: List[str] = []
+OPTIONAL_FONTS: List[str] = [
+    "SeoulHangangB.ttf",  # seoul_hangang - 서울시 공식 사이트에서 다운로드
+    "UnPeople.ttf",  # unpeople - un-fonts 패키지에서 다운로드
+    "KoPubBatangBold.ttf",  # kopub - 한국출판인회의 사이트에서 다운로드
+]

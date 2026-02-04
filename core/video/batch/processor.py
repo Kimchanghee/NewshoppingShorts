@@ -11,10 +11,10 @@ import time
 import shutil
 import tempfile
 import subprocess
-import tkinter as tk
 from datetime import datetime
 from typing import List
 
+from PyQt6.QtCore import QTimer
 from utils.logging_config import get_logger
 from caller import rest
 from utils.error_handlers import TrialLimitExceededError
@@ -59,8 +59,9 @@ def _set_processing_step(app, url: str, step: str):
         app.url_status_message = {}
     app.url_status_message[url] = step
     # UI 갱신 (메인 스레드에서 실행)
-    if hasattr(app, "root") and app.root:
-        app.root.after(0, app.update_url_listbox)
+    update_fn = getattr(app, "update_url_listbox", None)
+    if update_fn is not None:
+        QTimer.singleShot(0, update_fn)
 
 
 from ui.components.custom_dialog import (
@@ -200,9 +201,9 @@ def dynamic_batch_processing_thread(app):
 
     try:
         app.add_log("=" * 60)
-        app.add_log("배치 처리를 시작합니다.")
-        app.add_log("대기열에 등록된 URL을 순서대로 처리합니다.")
-        app.add_log("HTTP 500 계열 오류가 발생하면 최대 3회까지 재시도합니다.")
+        app.add_log("영상 만들기를 시작합니다.")
+        app.add_log("등록된 URL을 순서대로 처리합니다.")
+        app.add_log("오류 발생 시 최대 3회까지 자동 재시도합니다.")
         app.add_log("=" * 60)
 
         while app.batch_processing:
@@ -267,8 +268,12 @@ def dynamic_batch_processing_thread(app):
                     # 상태 업데이트 (스레드 안전)
                     _safe_set_url_status(app, url, "processing")
                     app.current_processing_index = app.url_queue.index(url)
-                    app.root.after(0, app.update_url_listbox)
-                    app.root.after(0, app.update_overall_progress_display)
+                    update_listbox = getattr(app, "update_url_listbox", None)
+                    update_progress = getattr(app, "update_overall_progress_display", None)
+                    if update_listbox:
+                        QTimer.singleShot(0, update_listbox)
+                    if update_progress:
+                        QTimer.singleShot(0, update_progress)
 
                     # 이전 결과 초기화
                     clear_all_previous_results(app)
@@ -315,8 +320,9 @@ def dynamic_batch_processing_thread(app):
                                             work_result.get("used", 0)
                                         )
                                 # Refresh subscription info display
-                                if hasattr(app, "_update_subscription_info"):
-                                    app.root.after(0, app._update_subscription_info)
+                                update_sub_fn = getattr(app, "_update_subscription_info", None)
+                                if update_sub_fn is not None:
+                                    QTimer.singleShot(0, update_sub_fn)
                             else:
                                 logger.warning(
                                     "[작업횟수] 업데이트 실패: %s",
@@ -571,8 +577,12 @@ def dynamic_batch_processing_thread(app):
                     "[정리] 임시 파일 정리 실패 (무시됨): %s", str(cleanup_err)[:50]
                 )
 
-            app.root.after(0, app.update_url_listbox)
-            app.root.after(0, app.update_overall_progress_display)
+            update_listbox = getattr(app, "update_url_listbox", None)
+            update_progress = getattr(app, "update_overall_progress_display", None)
+            if update_listbox:
+                QTimer.singleShot(0, update_listbox)
+            if update_progress:
+                QTimer.singleShot(0, update_progress)
 
             # 간격 대기 - 10초 간격으로 다음 URL 처리
             if app.batch_processing:
@@ -599,7 +609,7 @@ def dynamic_batch_processing_thread(app):
             if app.url_status.get(url) in ("waiting", "processing")
         ]
         app.add_log("=" * 60)
-        app.add_log("배치 처리를 종료합니다.")
+        app.add_log("영상 만들기 종료!")
         app.add_log(f"성공 {successful_count}건 / 실패 {failed_count}건")
         if pending_remaining:
             app.add_log(
@@ -609,16 +619,22 @@ def dynamic_batch_processing_thread(app):
 
     except Exception as e:
         translated_error = _translate_error_message(str(e))
-        app.add_log(f"[오류] 배치 처리 오류: {translated_error}")
+        app.add_log(f"[오류] {translated_error}")
         ui_controller.write_error_log(e)
         # traceback 출력 제거 - 한글 메시지만 표시
 
     finally:
         app.batch_processing = False
         app.dynamic_processing = False
-        # threads.py에서는 tkinter를 임포트하지 않고 문자열로 상태 지정
-        app.root.after(0, lambda: app.start_batch_button.config(state="normal"))
-        app.root.after(0, lambda: app.stop_batch_button.config(state="disabled"))
+        # PyQt6 스레드 안전 UI 업데이트
+        def reset_batch_buttons():
+            start_btn = getattr(app, "start_batch_button", None)
+            stop_btn = getattr(app, "stop_batch_button", None)
+            if start_btn is not None:
+                start_btn.setEnabled(True)
+            if stop_btn is not None:
+                stop_btn.setEnabled(False)
+        QTimer.singleShot(0, reset_batch_buttons)
         summary = f"배치 처리 완료: 성공 {successful_count}건, 실패 {failed_count}건"
         if pending_remaining:
             summary += f" (미처리 {len(pending_remaining)}건 대기)"
@@ -640,7 +656,7 @@ def dynamic_batch_processing_thread(app):
                 logger.warning("[세션] 저장 실패: %s", session_err)
 
         if processed_urls and all_jobs_finished:
-            app.root.after(0, lambda: show_success(app.root, "배치 완료", summary))
+            QTimer.singleShot(0, lambda: show_success(app, "배치 완료", summary))
         app.update_status("준비 완료")
 
         # 비용은 각 URL 완료 시마다 출력되므로 여기서는 출력하지 않음
@@ -1862,33 +1878,38 @@ def clear_all_previous_results(app):
             "message": None,
         }
 
-    # 9. UI 업데이트는 스레드 안전하게
-    if hasattr(app, "root"):
-        app.root.after(0, app.update_all_progress_displays)
+    # 9. UI 업데이트는 스레드 안전하게 (PyQt6)
+    update_fn = getattr(app, "update_all_progress_displays", None)
+    if update_fn is not None:
+        QTimer.singleShot(0, update_fn)
 
-        # UI 탭들 초기화
-        if hasattr(app, "script_text"):
-            app.root.after(0, lambda: app.script_text.delete(1.0, tk.END))
-            app.root.after(
-                0,
-                lambda: app.script_text.insert(
-                    1.0, "새로운 동영상 분석을 시작합니다..."
-                ),
-            )
+    # UI 탭들 초기화 (PyQt6 QTextEdit/QLabel)
+    def reset_ui_texts():
+        script_text = getattr(app, "script_text", None)
+        if script_text is not None:
+            if hasattr(script_text, "setPlainText"):
+                script_text.setPlainText("새로운 동영상 분석을 시작합니다...")
+            elif hasattr(script_text, "setText"):
+                script_text.setText("새로운 동영상 분석을 시작합니다...")
 
-        if hasattr(app, "translation_text"):
-            app.root.after(0, lambda: app.translation_text.delete(1.0, tk.END))
-            app.root.after(
-                0, lambda: app.translation_text.insert(1.0, "한국어 번역 중...")
-            )
+        translation_text = getattr(app, "translation_text", None)
+        if translation_text is not None:
+            if hasattr(translation_text, "setPlainText"):
+                translation_text.setPlainText("한국어 번역 중...")
+            elif hasattr(translation_text, "setText"):
+                translation_text.setText("한국어 번역 중...")
 
-        if hasattr(app, "tts_result_text"):
-            app.root.after(0, lambda: app.tts_result_text.delete(1.0, tk.END))
-            app.root.after(
-                0, lambda: app.tts_result_text.insert(1.0, "TTS 음성 생성 대기 중...")
-            )
+        tts_result_text = getattr(app, "tts_result_text", None)
+        if tts_result_text is not None:
+            if hasattr(tts_result_text, "setPlainText"):
+                tts_result_text.setPlainText("TTS 음성 생성 대기 중...")
+            elif hasattr(tts_result_text, "setText"):
+                tts_result_text.setText("TTS 음성 생성 대기 중...")
 
-        if hasattr(app, "tts_status_label"):
-            app.root.after(0, lambda: app.tts_status_label.config(text=""))
+        tts_status_label = getattr(app, "tts_status_label", None)
+        if tts_status_label is not None and hasattr(tts_status_label, "setText"):
+            tts_status_label.setText("")
+
+    QTimer.singleShot(0, reset_ui_texts)
 
     logger.info("[초기화 완료] 새로운 분석을 시작할 준비가 되었습니다.")

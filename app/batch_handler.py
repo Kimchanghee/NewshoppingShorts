@@ -8,6 +8,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+from PyQt6.QtCore import QTimer
 from ui.components.custom_dialog import (
     show_warning,
     show_info,
@@ -35,12 +36,12 @@ class BatchHandler:
         """배치 처리 시작 - 동적 URL 처리 지원 (중복 실행 방지)"""
         # 이미 실행 중인 스레드가 있는지 확인
         if self.app.batch_thread and self.app.batch_thread.is_alive():
-            self.app.add_log("[배치] 이미 배치 처리가 실행 중입니다. 기다려주세요.")
-            show_warning(self.app.root, "경고", "이미 배치 처리가 실행 중입니다.")
+            self.app.add_log("이미 작업이 진행 중입니다. 기다려주세요.")
+            show_warning(self.app, "경고", "이미 작업이 진행 중입니다.")
             return
 
         if not self.app.url_queue:
-            show_warning(self.app.root, "경고", "처리할 URL이 없습니다.")
+            show_warning(self.app, "경고", "처리할 URL이 없습니다.")
             return
 
         # 대기 중인 URL만 처리 (thread-safe access)
@@ -52,7 +53,7 @@ class BatchHandler:
             ]
 
         if not waiting_urls:
-            show_info(self.app.root, "알림", "처리할 대기 중인 URL이 없습니다.")
+            show_info(self.app, "알림", "처리할 대기 중인 URL이 없습니다.")
             return
 
         # TTS 음성 선택 검증 - 실제 선택된 음성 체크
@@ -61,7 +62,7 @@ class BatchHandler:
         ]
         if not selected_voices or len(selected_voices) == 0:
             show_warning(
-                self.app.root, "경고", "TTS 음성을 최소 1개 이상 선택해주세요."
+                self.app, "경고", "TTS 음성을 최소 1개 이상 선택해주세요."
             )
             return
 
@@ -94,7 +95,7 @@ class BatchHandler:
         if not has_valid_api_key:
             self.app.add_log("[API] API 키가 설정되지 않았습니다.")
             result = show_question(
-                self.app.root,
+                self.app,
                 "🔑 API 키 필요",
                 "Gemini API 키가 설정되지 않았습니다.\n\n"
                 "작업을 시작하려면 최소 1개 이상의 API 키가 필요합니다.\n\n"
@@ -135,18 +136,18 @@ class BatchHandler:
                             def show_sub_dialog():
                                 try:
                                     from ui.components.subscription_dialog import SubscriptionDialog
-                                    dialog = SubscriptionDialog(self.app.root, user_id, work_used, work_count)
-                                    self.app.root.wait_window(dialog)
+                                    dialog = SubscriptionDialog(self.app, user_id, work_used, work_count)
+                                    dialog.exec()
                                 except Exception as e:
                                     logger.error(f"Failed to show subscription dialog: {e}")
-                                    show_warning(self.app.root, "오류", f"구독 신청 창을 열 수 없습니다: {e}")
+                                    show_warning(self.app, "오류", f"구독 신청 창을 열 수 없습니다: {e}")
 
-                            self.app.root.after(0, show_sub_dialog)
+                            QTimer.singleShot(0, show_sub_dialog)
                         else:
                             # 유료 사용자: 일반 초과 알림
                             self.app.add_log("[작업] 잔여 작업 횟수가 없습니다.")
                             show_warning(
-                                self.app.root,
+                                self.app,
                                 "작업 횟수 초과",
                                 "잔여 작업 횟수가 없습니다.\n\n"
                                 "관리자에게 문의하여 작업 횟수를 추가해 주세요.\n\n"
@@ -168,9 +169,9 @@ class BatchHandler:
         if not getattr(self.app, "genai_client", None):
             self.app.add_log("[API] Gemini 클라이언트를 초기화합니다.")
             if not self.app.init_client():
-                self.app.add_log("[API] 초기화 실패로 배치 처리를 중단합니다.")
+                self.app.add_log("API 연결 실패로 작업을 중단합니다.")
                 show_error(
-                    self.app.root,
+                    self.app,
                     "❌ API 초기화 실패",
                     "Gemini API 클라이언트 초기화에 실패했습니다.\n\n"
                     "가능한 원인:\n"
@@ -181,13 +182,17 @@ class BatchHandler:
                 )
                 return
 
-        self.app.add_log(f"배치 처리 시작 - {len(waiting_urls)}개 URL")
+        self.app.add_log(f"영상 만들기 시작 - {len(waiting_urls)}개 URL")
 
         # 동적 처리 플래그 설정
         self.app.dynamic_processing = True
         self.app.batch_processing = True
-        self.app.start_batch_button.config(state="disabled")
-        self.app.stop_batch_button.config(state="normal")
+        start_btn = getattr(self.app, "start_batch_button", None)
+        stop_btn = getattr(self.app, "stop_batch_button", None)
+        if start_btn is not None:
+            start_btn.setEnabled(False)
+        if stop_btn is not None:
+            stop_btn.setEnabled(True)
         self.app.reset_progress_states()
 
         # 동적 처리 스레드 시작 (순차 실행 보장)
@@ -206,7 +211,7 @@ class BatchHandler:
 
         acquired = self.app.batch_processing_lock.acquire(blocking=False)
         if not acquired:
-            self.app.add_log("[배치] 다른 배치 작업이 실행 중이어서 대기합니다...")
+            self.app.add_log("다른 작업이 진행 중이어서 대기합니다...")
             # Timeout-based acquisition to prevent deadlock
             for retry in range(MAX_RETRIES):
                 acquired = self.app.batch_processing_lock.acquire(
@@ -220,27 +225,31 @@ class BatchHandler:
 
             if not acquired:
                 self.app.add_log(
-                    "[배치] Lock 획득 실패 - 배치 처리를 시작할 수 없습니다."
+                    "다른 작업이 진행 중입니다. 잠시 후 다시 시도해주세요."
                 )
-                self.app.root.after(0, self._reset_batch_ui_on_complete)
+                QTimer.singleShot(0, self._reset_batch_ui_on_complete)
                 return
 
         try:
-            self.app.add_log("[배치] 배치 처리 시작 (Lock 획득)")
+            self.app.add_log("영상 만들기 시작!")
             DynamicBatch.dynamic_batch_processing_thread(self.app)
         finally:
             self.app.batch_processing_lock.release()
-            self.app.add_log("[배치] 배치 처리 완료 (Lock 해제)")
+            self.app.add_log("영상 만들기 완료!")
             # 스레드 종료 시 UI 상태 복구
-            self.app.root.after(0, self._reset_batch_ui_on_complete)
+            QTimer.singleShot(0, self._reset_batch_ui_on_complete)
 
     def _reset_batch_ui_on_complete(self):
         """배치 처리 완료 시 UI 상태 복구"""
         try:
             self.app.batch_processing = False
             self.app.dynamic_processing = False
-            self.app.start_batch_button.config(state="normal")
-            self.app.stop_batch_button.config(state="disabled")
+            start_btn = getattr(self.app, "start_batch_button", None)
+            stop_btn = getattr(self.app, "stop_batch_button", None)
+            if start_btn is not None:
+                start_btn.setEnabled(True)
+            if stop_btn is not None:
+                stop_btn.setEnabled(False)
 
             self._play_completion_alarm()
         except Exception as e:
@@ -263,21 +272,23 @@ class BatchHandler:
     def stop_batch_processing(self):
         """배치 처리 중지 (현재 URL 완료 후 중지)"""
         if not self.app.batch_processing:
-            self.app.add_log("[배치] 이미 중지된 상태입니다.")
+            self.app.add_log("이미 중지된 상태입니다.")
             return
 
         self.app.batch_processing = False
         self.app.dynamic_processing = False  # 동적 처리도 중지
-        self.app.add_log("[배치] 배치 처리 중지 요청 - 현재 작업 완료 후 중지됩니다.")
+        self.app.add_log("중지 요청됨 - 현재 영상 완료 후 중지됩니다.")
 
         # UI 즉시 업데이트 (실제 스레드는 백그라운드에서 정리됨)
-        self.app.stop_batch_button.config(state="disabled")
+        stop_btn = getattr(self.app, "stop_batch_button", None)
+        if stop_btn is not None:
+            stop_btn.setEnabled(False)
 
         # 백그라운드에서 스레드 종료 대기
         def wait_for_thread_finish():
             if self.app.batch_thread and self.app.batch_thread.is_alive():
                 self.app.batch_thread.join(timeout=30)  # 최대 30초 대기
-                self.app.add_log("[배치] 이전 배치 스레드 종료 완료")
+                self.app.add_log("이전 작업 종료 완료")
 
             # 세션 저장 (중지된 상태 기록)
             try:
@@ -288,8 +299,10 @@ class BatchHandler:
                 self.app.add_log(f"[세션] 저장 실패: {e}")
 
             # UI 상태 복구
-            self.app.root.after(
-                0, lambda: self.app.start_batch_button.config(state="normal")
-            )
+            def enable_start_btn():
+                start_btn = getattr(self.app, "start_batch_button", None)
+                if start_btn is not None:
+                    start_btn.setEnabled(True)
+            QTimer.singleShot(0, enable_start_btn)
 
         threading.Thread(target=wait_for_thread_finish, daemon=True).start()

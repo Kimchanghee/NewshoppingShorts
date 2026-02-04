@@ -39,7 +39,7 @@ class APIKeyManager:
 
     # 최대 API 키 개수 (UI와 동기화)
     # Maximum number of API keys (synced with UI)
-    MAX_KEYS = 10
+    MAX_KEYS = 20
 
     def __init__(self, use_secrets_manager: bool = True):
         """

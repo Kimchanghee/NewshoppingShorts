@@ -12,6 +12,7 @@ from abc import ABC, abstractmethod
 from typing import Optional, Dict, Any, List, Callable
 from urllib.parse import urlparse
 
+from PyQt6.QtCore import QTimer
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -927,7 +928,8 @@ class ProgressManager(ProgressObserver):
         if threading.current_thread() is threading.main_thread():
             func()
         else:
-            self.gui.root.after(0, func)
+            # PyQt6: QTimer.singleShot을 사용하여 메인 스레드에서 실행
+            QTimer.singleShot(0, func)
 
     def _update_sidebar_mini_progress(self, step: str, status: str) -> None:
         """
