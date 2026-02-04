@@ -8,6 +8,7 @@ import threading
 import time
 from typing import TYPE_CHECKING
 
+from PyQt6.QtCore import QTimer
 from ui.components.custom_dialog import show_warning, show_error
 from caller import rest
 from utils.logging_config import get_logger
@@ -73,7 +74,9 @@ class LoginHandler:
             if res.get("success"):
                 logger.info(f"[AutoTrial] Request success: {res.get('message')}")
                 # UI 업데이트를 위해 메인 스레드에서 새로고침 트리거
-                self.app.root.after(2000, self.app._refresh_subscription_status)
+                refresh_fn = getattr(self.app, "_refresh_subscription_status", None)
+                if refresh_fn is not None:
+                    QTimer.singleShot(2000, refresh_fn)
             else:
                 logger.warning(f"[AutoTrial] Request failed: {res.get('message')}")
         except Exception as e:
@@ -110,14 +113,14 @@ class LoginHandler:
                     
                 if st == "EU003":
                     logger.warning("[watch_loop] Duplicate login detected (EU003)")
-                    # Tkinter 스레드 안전 호출
-                    self.app.root.after(
+                    # PyQt6 스레드 안전 호출
+                    QTimer.singleShot(
                         0, lambda: self.exit_program_other_place("EU003")
                     )
                     break
                 elif st == "EU004":
                     logger.error("[watch_loop] Force close command received (EU004)")
-                    self.app.root.after(
+                    QTimer.singleShot(
                         0, lambda: self.error_program_force_close("EU004")
                     )
                     break
@@ -132,7 +135,7 @@ class LoginHandler:
         if status == "EU003":
             try:
                 show_warning(
-                    self.app.root,
+                    self.app,
                     "중복 로그인",
                     "다른 장소에서 로그인되어 프로그램을 종료합니다.",
                 )
@@ -144,7 +147,7 @@ class LoginHandler:
         """서버에서 강제 종료(EU004) → 알림 후 종료"""
         if status == "EU004":
             try:
-                show_error(self.app.root, "오류", "오류로 인해 프로그램을 종료합니다.")
+                show_error(self.app, "오류", "오류로 인해 프로그램을 종료합니다.")
             except Exception as e:
                 logger.warning("Failed to show force close error dialog: %s", e)
             self.app.processBeforeExitProgram()

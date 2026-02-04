@@ -8,6 +8,8 @@ Extracted from main.py for better code organization.
 import threading
 from typing import TYPE_CHECKING
 
+from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
 from caller import rest
 from ui.components.custom_dialog import show_question, show_error
 from utils.logging_config import get_logger
@@ -63,11 +65,10 @@ class ExitHandler:
     def _quit_qt_app(self):
         """Qt 앱 종료 시도"""
         try:
-            from PyQt5.QtWidgets import QCoreApplication
-            qt_app = QCoreApplication.instance()
+            qt_app = QApplication.instance()
             if qt_app is not None:
                 qt_app.quit()
-                logger.info("[종료] QCoreApplication.quit() 호출")
+                logger.info("[종료] QApplication.quit() 호출")
         except Exception:
             pass
 
@@ -103,7 +104,7 @@ class ExitHandler:
         if self.app.batch_processing:
             try:
                 result = show_question(
-                    self.app.root,
+                    self.app,
                     "종료 확인",
                     "배치 처리가 진행 중입니다.\n\n"
                     "정말 종료하시겠습니까?\n"
@@ -117,10 +118,9 @@ class ExitHandler:
         # 안전한 종료 수행
         self.safe_exit()
 
-        # Tk 윈도우 종료
+        # PyQt6 윈도우 종료
         try:
-            self.app.root.quit()
-            self.app.root.destroy()
+            self.app.close()
         except Exception:
             pass
 
@@ -148,8 +148,7 @@ class ExitHandler:
             logger.error(f"[세션] 자동 저장 실패: {e}")
 
         # 다음 자동 저장 예약 (5분)
-        if hasattr(self.app, 'root') and self.app.root:
-            self.app.root.after(300000, self.auto_save_session)
+        QTimer.singleShot(300000, self.auto_save_session)
 
     def retry_restore_session(self, max_retries: int = 3):
         """세션 복구 재시도"""

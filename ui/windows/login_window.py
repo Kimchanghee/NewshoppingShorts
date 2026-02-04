@@ -92,14 +92,11 @@ class Login(QMainWindow, Ui_LoginWindow):
             if res.get("status") is True:
                 self._handle_login_success(res)
             elif res.get("status") == "EU003":
-                # Handle duplicate login
-                msg = "이미 다른 기기(또는 브라우저)에서 로그인 중입니다.\n기존 연결을 끊고 현재 기기에서 로그인하시겠습니까?"
-                choice = QtWidgets.QMessageBox.question(
-                    self, "중복 로그인", msg, 
-                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No
-                )
-                if choice == QtWidgets.QMessageBox.StandardButton.Yes:
-                    self._loginCheck(force=True)
+                # Handle duplicate login - Auto-resolve per user request (Fix: Unconditional popup)
+                logger.info("Duplicate login detected (EU003). Auto-forcing login to clear stale session.")
+                
+                # Automatically retry with force=True to acquire session
+                self._loginCheck(force=True)
             else:
                 # Use friendly message converter
                 error_msg = rest._friendly_login_message(res)

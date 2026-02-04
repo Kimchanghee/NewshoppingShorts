@@ -154,20 +154,27 @@ def _generate_tts_full_script(app, full_script: str, voice: str) -> tuple:
     logger.debug(f"  원본: {full_script[:50]}...")
     logger.debug(f"  TTS용: {tts_text[:50]}...")
 
-    response = app.genai_client.models.generate_content(
-        model=config.GEMINI_TTS_MODEL,
-        contents=[tts_text],
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=voice
+    try:
+        response = app.genai_client.models.generate_content(
+            model=config.GEMINI_TTS_MODEL,
+            contents=[tts_text],
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=voice
+                        )
                     )
                 )
             )
         )
-    )
+    except Exception as e:
+        logger.error(f"[TTS API Error] {e}")
+        if "404" in str(e) or "NotFound" in str(e):
+            raise RuntimeError(f"TTS 모델을 찾을 수 없습니다: {config.GEMINI_TTS_MODEL}. config.py를 확인하세요.")
+        else:
+            raise e
 
     # 비용 계산 (선택적)
     if hasattr(response, 'usage_metadata') and response.usage_metadata:
@@ -250,20 +257,27 @@ def _generate_tts_for_segment(app, text: str, voice: str, is_cta: bool = False,
     # TTS용 텍스트: 숫자 -> 자연스러운 한국어, 영어 -> 한글
     tts_text = process_korean_script(text)
 
-    response = app.genai_client.models.generate_content(
-        model=config.GEMINI_TTS_MODEL,
-        contents=[tts_text],
-        config=types.GenerateContentConfig(
-            response_modalities=["AUDIO"],
-            speech_config=types.SpeechConfig(
-                voice_config=types.VoiceConfig(
-                    prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                        voice_name=voice
+    try:
+        response = app.genai_client.models.generate_content(
+            model=config.GEMINI_TTS_MODEL,
+            contents=[tts_text],
+            config=types.GenerateContentConfig(
+                response_modalities=["AUDIO"],
+                speech_config=types.SpeechConfig(
+                    voice_config=types.VoiceConfig(
+                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                            voice_name=voice
+                        )
                     )
                 )
             )
         )
-    )
+    except Exception as e:
+        logger.error(f"[TTS API Error] {e}")
+        if "404" in str(e) or "NotFound" in str(e):
+            raise RuntimeError(f"TTS 모델을 찾을 수 없습니다: {config.GEMINI_TTS_MODEL}. config.py를 확인하세요.")
+        else:
+            raise e
 
     # 비용 계산 (선택적)
     if hasattr(response, 'usage_metadata') and response.usage_metadata:

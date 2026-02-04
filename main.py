@@ -9,7 +9,7 @@ import re
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -51,13 +51,13 @@ from caller import rest
 
 logger = get_logger(__name__)
 
-URL_PATTERN = re.compile(r"https?://[^\\s\"'<>]+")
+URL_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
 
 
 class VideoAnalyzerGUI(QMainWindow):
     # Signals for cross-thread logging/progress
-    update_status_signal = None
-    log_signal = None
+    update_status_signal = pyqtSignal(str)
+    log_signal = pyqtSignal(str, str)  # message, level
 
     def __init__(self, parent=None, login_data=None, preloaded_ocr=None):
         super().__init__(parent)
@@ -89,15 +89,21 @@ class VideoAnalyzerGUI(QMainWindow):
         self.voice_manager = VoiceManager(self)
         self.output_manager = OutputManager(self)
         self.api_handler = APIHandler(self)
+
+        # API 키를 먼저 로드한 후 Provider 초기화
+        self.api_handler.load_saved_api_keys()
+
         self.model_provider = VertexGeminiProvider()
         self._warn_if_vertex_unset()
-        
+
+        # Set genai_client from model_provider for other modules
+        self.state.genai_client = self.model_provider.gemini_client
+
         # Tutorial flag
         self._tutorial_shown = False
         self._check_first_run()
 
         self.init_ui()
-        self.api_handler.load_saved_api_keys()
         self.refresh_user_status()
 
         # 구독 상태 자동 갱신 타이머 (60초마다)
@@ -151,14 +157,18 @@ class VideoAnalyzerGUI(QMainWindow):
                     # 구독 없음 - 체험계정으로 표시
                     self._subscription_expires_at = None
                     self._countdown_timer.stop()
-                    self.subscription_time_label.setText("체험계정")
-                    self.subscription_time_label.setStyleSheet(f"color: {self.design.colors.text_muted}; font-weight: normal;")
-                    self.subscription_time_label.show()
+                    sub_label = getattr(self, "subscription_time_label", None)
+                    if sub_label is not None:
+                        sub_label.setText("체험계정")
+                        sub_label.setStyleSheet(f"color: {self.design.colors.text_muted}; font-weight: normal;")
+                        sub_label.show()
 
                 # 크레딧 및 배지 업데이트
                 remaining = status.get("remaining", 0)
                 total = status.get("work_count", 0)
-                self.credits_label.setText(f"크레딧: {remaining}/{total}")
+                credits_lbl = getattr(self, "credits_label", None)
+                if credits_lbl is not None:
+                    credits_lbl.setText(f"크레딧: {remaining}/{total}")
 
                 logger.debug(f"[Subscription] Auto-refresh: expires_at={expires_at}, remaining={remaining}/{total}")
 
@@ -167,11 +177,15 @@ class VideoAnalyzerGUI(QMainWindow):
 
     def _update_countdown_display(self):
         """구독 남은 시간 카운트다운 업데이트 (1초마다 호출)"""
+        sub_label = getattr(self, "subscription_time_label", None)
+        if sub_label is None:
+            return  # UI 초기화 전이면 건너뜀
+
         if not self._subscription_expires_at:
             # 구독 없음 - 체험계정 표시
-            self.subscription_time_label.setText("체험계정")
-            self.subscription_time_label.setStyleSheet(f"color: {self.design.colors.text_muted}; font-weight: normal;")
-            self.subscription_time_label.show()
+            sub_label.setText("체험계정")
+            sub_label.setStyleSheet(f"color: {self.design.colors.text_muted}; font-weight: normal;")
+            sub_label.show()
             return
 
         try:
@@ -195,9 +209,9 @@ class VideoAnalyzerGUI(QMainWindow):
 
             if total_seconds <= 0:
                 # 구독 만료됨
-                self.subscription_time_label.setText("구독 만료됨")
-                self.subscription_time_label.setStyleSheet(f"color: #EF4444; font-weight: bold;")
-                self.subscription_time_label.show()
+                sub_label.setText("구독 만료됨")
+                sub_label.setStyleSheet("color: #EF4444; font-weight: bold;")
+                sub_label.show()
                 self._countdown_timer.stop()
                 return
 
@@ -232,31 +246,26 @@ class VideoAnalyzerGUI(QMainWindow):
             parts.append(f"{seconds}초")
 
             time_str = " ".join(parts)
-            self.subscription_time_label.setText(f"구독 남은 시간: {time_str}")
+            sub_label.setText(f"구독 남은 시간: {time_str}")
 
             # 색상 설정 (7일 미만이면 경고색)
             d = self.design
             if total_seconds < 7 * 24 * 3600:
-                self.subscription_time_label.setStyleSheet(f"color: #F59E0B; font-weight: bold;")  # 주황색 경고
+                sub_label.setStyleSheet("color: #F59E0B; font-weight: bold;")  # 주황색 경고
             else:
-                self.subscription_time_label.setStyleSheet(f"color: {d.colors.success}; font-weight: bold;")
+                sub_label.setStyleSheet(f"color: {d.colors.success}; font-weight: bold;")
 
-            self.subscription_time_label.show()
+            sub_label.show()
 
         except Exception as e:
             logger.error(f"[Subscription] Countdown update failed: {e}")
-            self.subscription_time_label.hide()
+            if sub_label is not None:
+                sub_label.hide()
 
     def _check_first_run(self):
-        """Check if this is the first run to show tutorial"""
-        import os
-        config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
-        tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
-        
-        if not os.path.exists(config_dir):
-            os.makedirs(config_dir)
-        
-        self._should_show_tutorial = not os.path.exists(tutorial_flag)
+        """Always show tutorial on app launch"""
+        # 항상 튜토리얼 표시 (첫 실행 여부와 무관)
+        self._should_show_tutorial = True
     
     def _mark_tutorial_complete(self):
         """Mark tutorial as completed"""
@@ -409,10 +418,95 @@ class VideoAnalyzerGUI(QMainWindow):
 
     # ------------- URL helpers -------------
     def add_url_from_entry(self):
-        show_warning(self, "안내", "URL 추가 로직은 미구현 상태입니다.")
+        """입력창에서 URL을 추출하여 대기열에 추가"""
+        if not hasattr(self, 'url_entry') or self.url_entry is None:
+            show_warning(self, "오류", "URL 입력창을 찾을 수 없습니다.")
+            return
+
+        text = self.url_entry.toPlainText().strip()
+        if not text:
+            show_warning(self, "안내", "URL을 입력해주세요.")
+            return
+
+        # URL 추출 (URL_PATTERN 사용)
+        urls = URL_PATTERN.findall(text)
+        if not urls:
+            show_warning(self, "안내", "유효한 URL을 찾을 수 없습니다.")
+            return
+
+        added_count = 0
+        duplicate_count = 0
+
+        for url in urls:
+            url = url.strip()
+            if url in self.url_queue or url in self.url_status:
+                duplicate_count += 1
+                continue
+
+            self.url_queue.append(url)
+            self.url_status[url] = "waiting"
+            self.url_timestamps[url] = datetime.now()
+            added_count += 1
+
+        # UI 업데이트
+        self.queue_manager.update_url_listbox()
+        self.queue_manager.update_queue_count()
+
+        # 입력창 초기화
+        self.url_entry.clear()
+
+        # 피드백
+        if added_count > 0:
+            msg = f"{added_count}개 URL이 대기열에 추가되었습니다."
+            if duplicate_count > 0:
+                msg += f"\n({duplicate_count}개 중복 URL은 제외)"
+            show_info(self, "완료", msg)
+            self.queue_manager.add_log(f"URL {added_count}개 추가됨")
+        elif duplicate_count > 0:
+            show_warning(self, "안내", f"모든 URL이 이미 대기열에 있습니다. ({duplicate_count}개)")
 
     def paste_and_extract(self):
-        show_info(self, "안내", "클립보드 붙여넣기 로직은 미구현 상태입니다.")
+        """클립보드에서 URL을 추출하여 대기열에 추가"""
+        clipboard = QApplication.clipboard()
+        text = clipboard.text()
+
+        if not text or not text.strip():
+            show_warning(self, "안내", "클립보드가 비어 있습니다.")
+            return
+
+        # URL 추출
+        urls = URL_PATTERN.findall(text)
+        if not urls:
+            show_warning(self, "안내", "클립보드에서 유효한 URL을 찾을 수 없습니다.")
+            return
+
+        added_count = 0
+        duplicate_count = 0
+
+        for url in urls:
+            url = url.strip()
+            if url in self.url_queue or url in self.url_status:
+                duplicate_count += 1
+                continue
+
+            self.url_queue.append(url)
+            self.url_status[url] = "waiting"
+            self.url_timestamps[url] = datetime.now()
+            added_count += 1
+
+        # UI 업데이트
+        self.queue_manager.update_url_listbox()
+        self.queue_manager.update_queue_count()
+
+        # 피드백
+        if added_count > 0:
+            msg = f"클립보드에서 {added_count}개 URL이 추가되었습니다."
+            if duplicate_count > 0:
+                msg += f"\n({duplicate_count}개 중복 URL은 제외)"
+            show_info(self, "완료", msg)
+            self.queue_manager.add_log(f"클립보드에서 URL {added_count}개 추가됨")
+        elif duplicate_count > 0:
+            show_warning(self, "안내", f"모든 URL이 이미 대기열에 있습니다. ({duplicate_count}개)")
 
     def remove_selected_url(self):
         self.queue_manager.remove_selected_url()
@@ -437,10 +531,10 @@ class VideoAnalyzerGUI(QMainWindow):
             logger.info(f"Model response: {preview[:80]}")
         except Exception as e:
             logger.warning(f"Model call failed: {e}")
-        show_info(self, "시작", "배치 처리를 시작합니다. (데모 모드)")
+        show_info(self, "시작", "영상 만들기를 시작합니다.")
 
     def stop_batch_processing(self):
-        show_info(self, "중지", "배치 처리를 중지했습니다. (데모 모드)")
+        show_info(self, "중지", "영상 만들기를 중지했습니다.")
 
     # ------------- Output / API -------------
     def select_output_folder(self):
@@ -461,10 +555,9 @@ class VideoAnalyzerGUI(QMainWindow):
 
     # ------------- Shell helpers -------------
     def _warn_if_vertex_unset(self):
-        if not config.VERTEX_PROJECT_ID or not config.VERTEX_MODEL_ID:
-            logger.warning("[Vertex] 프로젝트/모델 ID가 설정되지 않았습니다. GEMINI로 폴백됩니다.")
-        if not (config.VERTEX_JSON_KEY_PATH or os.getenv("GOOGLE_APPLICATION_CREDENTIALS")):
-            logger.info("[Vertex] 서비스 계정 키 경로가 비어 있습니다. ADC 또는 기본 자격 증명 사용을 시도합니다.")
+        """Check if Gemini API key is set."""
+        if not config.GEMINI_API_KEYS:
+            logger.info("[Provider] Gemini API 키를 설정에서 등록해주세요.")
 
     def _build_topbar(self) -> QWidget:
         """상단 헤더바 - STITCH 디자인 적용"""

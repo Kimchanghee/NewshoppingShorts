@@ -4,10 +4,10 @@ import random
 GEMINI_API_KEYS = {}
 
 # Gemini 3.0 모델 사용
-GEMINI_VIDEO_MODEL = "gemini-3-pro-preview"  # 비디오 분석 및 복잡한 추론 작업용
-GEMINI_TEXT_MODEL = "gemini-2.5-flash"  # 빠른 텍스트 처리용
-# 사용 가능 TTS 모델 (Gemini 2.5 TTS 프리뷰)
-GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"
+GEMINI_VIDEO_MODEL = "gemini-3-pro"  # 비디오 분석 및 복잡한 추론 작업용
+GEMINI_TEXT_MODEL = "gemini-3-flash"  # 빠른 텍스트 처리용
+# 사용 가능 TTS 모델 (Gemini 2.5 TTS)
+GEMINI_TTS_MODEL = "gemini-2.5-flash-tts"
 
 # Gemini 3.0 파라미터 설정
 GEMINI_THINKING_LEVEL = "low"  # low: 최소 레이턴시 (속도 우선), high: 최대 추론 깊이

@@ -248,20 +248,29 @@ class TTSProcessor:
             # 자막에는 "7개"로 표시되지만, TTS는 "일곱 개"로 읽음
             tts_script = process_korean_script(full_script)
 
-            response = self.gui.genai_client.models.generate_content(
-                model=self.gui.config.GEMINI_TTS_MODEL,
-                contents=[tts_script],
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=types.SpeechConfig(
-                        voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                voice_name=voice_name
+            try:
+                response = self.gui.genai_client.models.generate_content(
+                    model=self.gui.config.GEMINI_TTS_MODEL,
+                    contents=[tts_script],
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name=voice_name
+                                )
                             )
-                        )
+                        ),
                     ),
-                ),
-            )
+                )
+            except Exception as e:
+                logger.error(f"[TTS API Error] {e}")
+                if "404" in str(e) or "NotFound" in str(e):
+                    raise RuntimeError(f"TTS 모델을 찾을 수 없습니다: {self.gui.config.GEMINI_TTS_MODEL}. config.py를 확인하세요.")
+                elif "400" in str(e) or "InvalidArgument" in str(e):
+                    raise RuntimeError(f"TTS 요청 파라미터가 잘못되었습니다: {e}")
+                else:
+                    raise e
 
             # Response 구조 검증 및 audio_data 추출
             try:

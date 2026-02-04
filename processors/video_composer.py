@@ -8,6 +8,7 @@ import os
 import threading
 from typing import Optional
 
+from PyQt6.QtCore import QTimer
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -113,15 +114,14 @@ class VideoComposer:
             # Show warning for empty voice selection
             from ui.components.custom_dialog import show_warning
 
-            self.gui.root.after(
-                0,
-                lambda: show_warning(
-                    self.gui.root,
+            def show_voice_warning():
+                show_warning(
+                    self.gui,
                     "음성 선택 필요",
                     "TTS 음성이 선택되지 않았습니다.\n\n"
                     "최소 1개 이상의 음성을 선택해주세요.",
-                ),
-            )
+                )
+            QTimer.singleShot(0, show_voice_warning)
             self.gui.update_progress_state(
                 "tts", "error", 0, "음성이 선택되지 않아 처리를 중단했습니다."
             )

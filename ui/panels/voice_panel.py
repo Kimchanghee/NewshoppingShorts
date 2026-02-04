@@ -191,10 +191,9 @@ class VoicePanel(QFrame, ThemedMixin):
         for i, profile in enumerate(profiles):
             is_selected = False
             if hasattr(self.gui, 'voice_vars') and profile["id"] in self.gui.voice_vars:
-                # Assuming gui.voice_vars works with current selections
-                # We'll need to adapt this to PyQt6 Boolean usage
-                pass
-            
+                var = self.gui.voice_vars[profile["id"]]
+                is_selected = var.get() if hasattr(var, "get") else bool(var)
+
             card = VoiceCard(profile, is_selected=is_selected, theme_manager=self.theme_manager)
             card.clicked.connect(self._on_card_clicked)
             card.play_btn.clicked.connect(lambda _, vid=profile["id"]: self.gui.play_voice_sample(vid))
@@ -205,32 +204,54 @@ class VoicePanel(QFrame, ThemedMixin):
             self.gui.voice_card_frames[profile["id"]] = card
             self.gui.voice_play_buttons[profile["id"]] = card.play_btn
 
+        # Update selection count badge
+        self._update_count_badge()
+
     def _on_card_clicked(self, voice_id):
-        # Logic to toggle selection in GUI
+        """Handle voice card click - toggle selection and update UI"""
+        # Toggle via VoiceManager (which updates voice_vars)
         if hasattr(self.gui, '_toggle_voice'):
             self.gui._toggle_voice(voice_id)
-        else:
-            # Fallback toggle if not in main GUI yet
-            card = self.voice_cards.get(voice_id)
-            if card:
-                card.is_selected = not card.is_selected
+        elif hasattr(self.gui, 'voice_manager'):
+            self.gui.voice_manager.on_voice_card_clicked(voice_id)
+
+        # Update card visual state
+        card = self.voice_cards.get(voice_id)
+        if card and hasattr(self.gui, 'voice_vars'):
+            var = self.gui.voice_vars.get(voice_id)
+            if var:
+                card.is_selected = var.get() if hasattr(var, "get") else bool(var)
+                card.check_label.setText("✓" if card.is_selected else "")
                 card.apply_theme()
+
+        # Update selection count badge
+        self._update_count_badge()
 
     def _set_gender_filter(self, gender: str):
         """Set gender filter and rebuild grid"""
         self.gender_filter = gender
-        
+
         # Update button states
         self.tab_all.setChecked(gender == "all")
         self.tab_female.setChecked(gender == "female")
         self.tab_male.setChecked(gender == "male")
-        
-        # Rebuild the grid with filtered profiles
+
+        # Rebuild the grid with filtered profiles (also updates count badge)
         self.rebuild_grid()
-        
-        # Update count badge
-        count = len(self.voice_cards)
-        self.count_badge.setText(f"{count}개 음성")
+
+    def _update_count_badge(self):
+        """Update the selection count badge"""
+        if not hasattr(self.gui, 'voice_vars'):
+            self.count_badge.setText("0개 선택")
+            return
+
+        selected_count = 0
+        for voice_id, var in self.gui.voice_vars.items():
+            is_selected = var.get() if hasattr(var, "get") else bool(var)
+            if is_selected:
+                selected_count += 1
+
+        self.count_badge.setText(f"{selected_count}개 선택")
 
     def apply_theme(self):
         ds = self.ds

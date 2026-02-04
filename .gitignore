@@ -82,3 +82,6 @@ nul
 *.dll
 /output/main-ss/_internal
 /output
+
+# Security sensitive test files
+backend/test_conn.py

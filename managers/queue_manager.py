@@ -125,22 +125,37 @@ class QueueManager:
         self.update_queue_count()
 
     def update_queue_count(self):
+        if not self.gui:
+            return
+
+        url_status = getattr(self.gui, "url_status", None)
+        if url_status is None:
+            return
+
         counts = {k: 0 for k in ("processing", "waiting", "completed", "skipped", "failed")}
-        for status in self.gui.url_status.values():
+        for status in url_status.values():
             if status in counts:
                 counts[status] += 1
 
-        self.gui.count_processing.setText(f"🚥 진행 {counts['processing']}")
-        self.gui.count_waiting.setText(f"⏳ 대기 {counts['waiting']}")
-        self.gui.count_completed.setText(f"✅ 완료 {counts['completed']}")
-        self.gui.count_skipped.setText(f"⏭️ 건너뜀 {counts['skipped']}")
-        self.gui.count_failed.setText(f"⛔ 실패 {counts['failed']}")
+        # 안전한 위젯 접근 - 위젯이 None이거나 초기화 전이면 건너뜀
+        count_labels = [
+            ("count_processing", f"🚥 진행 {counts['processing']}"),
+            ("count_waiting", f"⏳ 대기 {counts['waiting']}"),
+            ("count_completed", f"✅ 완료 {counts['completed']}"),
+            ("count_skipped", f"⏭️ 건너뜀 {counts['skipped']}"),
+            ("count_failed", f"⛔ 실패 {counts['failed']}"),
+        ]
+        for attr, text in count_labels:
+            label = getattr(self.gui, attr, None)
+            if label is not None:
+                label.setText(text)
 
-        total = len(self.gui.url_status)
+        total = len(url_status)
         completed = counts["completed"]
-        if hasattr(self.gui, "overall_numeric_label"):
+        overall_label = getattr(self.gui, "overall_numeric_label", None)
+        if overall_label is not None:
             percent = (completed / total * 100) if total else 0
-            self.gui.overall_numeric_label.setText(f"{completed}/{total} ({percent:.0f}%)")
+            overall_label.setText(f"{completed}/{total} ({percent:.0f}%)")
 
     def update_queue_status(self, url: str, status: str, message: str = ""):
         if url not in self.gui.url_status:
@@ -157,7 +172,9 @@ class QueueManager:
     def add_log(self, message: str, level: str = "info"):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         full_msg = f"[{timestamp}] {message}"
-        if hasattr(self.gui, "log_signal"):
-            self.gui.log_signal.emit(full_msg, level)
+        log_signal = getattr(self.gui, "log_signal", None) if self.gui else None
+        if log_signal is not None:
+            log_signal.emit(full_msg, level)
         else:
-            logger.log(getattr(logger, level, logger.info), full_msg)
+            log_method = getattr(logger, level, logger.info)
+            log_method(full_msg)
