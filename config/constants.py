@@ -187,7 +187,7 @@ class SessionSettings:
 class VideoDurationLimits:
     """Video duration constraints for TikTok/Douyin short videos"""
 
-    MAX_VIDEO_DURATION_SECONDS: int = 39  # Maximum video duration
+    MAX_VIDEO_DURATION_SECONDS: int = 35  # Maximum video duration
     MIN_VIDEO_DURATION_SECONDS: int = 10  # Minimum video duration
 
 

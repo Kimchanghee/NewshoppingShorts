@@ -182,8 +182,8 @@ def _translate_error_message(error_text: str) -> str:
         duration_match = re.search(r'실제:\s*(\d+\.?\d*)', error_text)
         if duration_match:
             duration = float(duration_match.group(1))
-            return f"영상 {duration:.0f}초 - 39초 이하만 처리 가능"
-        return "영상이 39초 초과 - 다음 영상으로 건너뜀"
+            return f"영상 {duration:.0f}초 - 35초 이하만 처리 가능"
+        return "영상이 35초 초과 - 다음 영상으로 건너뜀"
 
     # TTS 길이 초과 오류 (영어/한글 모두 지원)
     if "TTS length" in error_text and "exceeds video length" in error_text:
