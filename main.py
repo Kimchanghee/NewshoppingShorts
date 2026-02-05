@@ -5,6 +5,7 @@ Re-designed with Enhanced Design System (Industrial-Creative Hybrid)
 """
 import sys
 import os
+import re
 import shutil
 import threading
 from datetime import datetime
@@ -388,6 +389,64 @@ class VideoAnalyzerGUI(QMainWindow):
         except Exception as e:
             logger.warning(f"[OCR] 자막 감지 실패: {e}")
             return []
+
+    # ================================================================
+    # Script extraction (called by tts_generator.py as app.extract_...)
+    # ================================================================
+    def extract_clean_script_from_translation(self, max_len: int = 14) -> str:
+        """번역 결과에서 한국어 대본 추출 (메타데이터/타임스탬프 제거)"""
+        try:
+            raw = (self.translation_result or "").strip()
+            full_script = ""
+
+            if raw:
+                cleaned_lines = []
+                for original_line in raw.splitlines():
+                    line = original_line.strip()
+                    if not line:
+                        continue
+                    if re.match(r"^[#*= -]{3,}$", line):
+                        continue
+                    line = re.sub(r"\[[^\]]*\]", "", line)
+                    line = re.sub(r"\([^)]*\)", "", line)
+                    line = re.sub(r"^\d+[\.)]\s*", "", line)
+                    line = re.sub(r"^(?:-|\*|\u2022)\s*", "", line)
+                    line = re.sub(r"\s+", " ", line).strip()
+                    if len(line) < 2:
+                        continue
+                    cleaned_lines.append(line)
+
+                if not cleaned_lines:
+                    cleaned_lines = [
+                        l.strip() for l in raw.splitlines() if l.strip()
+                    ]
+                full_script = re.sub(r"\s+", " ", " ".join(cleaned_lines)).strip()
+
+            if not full_script:
+                video_analysis = getattr(self, "video_analysis_result", None)
+                if video_analysis:
+                    if isinstance(video_analysis, str):
+                        full_script = video_analysis.strip()
+                    elif isinstance(video_analysis, dict):
+                        full_script = video_analysis.get("description", "") or video_analysis.get("script", "")
+
+            if not full_script and isinstance(getattr(self, "analysis_result", None), dict):
+                alt = self.analysis_result.get("script")
+                if isinstance(alt, list):
+                    fallback = " ".join(
+                        str(entry.get("text", "")).strip()
+                        for entry in alt
+                        if isinstance(entry, dict) and entry.get("text")
+                    )
+                    full_script = re.sub(r"\s+", " ", fallback).strip()
+
+            if max_len and len(full_script) > max_len * 200:
+                full_script = full_script[: max_len * 200].rsplit(" ", 1)[0].strip()
+
+            return full_script
+        except Exception as e:
+            logger.error(f"[ScriptExtract] 스크립트 추출 오류: {e}")
+            return re.sub(r"[^\w\s.,!?\uAC00-\uD7A3]", "", self.translation_result or "").strip()
 
     # ================================================================
     # Temp file cleanup
