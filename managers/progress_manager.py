@@ -632,48 +632,65 @@ class ProgressManager(ProgressObserver):
         highlight_message = self._build_current_task_message(stage_message, status)
 
         def _apply_updates():
-            self.update_all_progress_displays()
-            self.refresh_stage_indicator(step, status, progress)
+            try:
+                self.update_all_progress_displays()
+            except Exception as e:
+                logger.debug(f"[ProgressManager] update_all_progress_displays error: {e}")
+
+            try:
+                self.refresh_stage_indicator(step, status, progress)
+            except Exception as e:
+                logger.debug(f"[ProgressManager] refresh_stage_indicator error: {e}")
+
+            # ★ ProgressPanel 직접 업데이트 (가장 확실한 경로)
+            # Direct ProgressPanel update (most reliable path)
+            progress_panel = getattr(self.gui, 'progress_panel', None)
+            if progress_panel is not None and hasattr(progress_panel, 'update_step_status'):
+                # ProgressManager status -> ProgressPanel status 매핑
+                panel_status_map = {
+                    'waiting': 'pending',
+                    'processing': 'active',
+                    'completed': 'completed',
+                    'error': 'error',
+                }
+                panel_status = panel_status_map.get(status, 'pending')
+                try:
+                    progress_panel.update_step_status(step, panel_status, progress)
+                except Exception as e:
+                    logger.debug(f"[ProgressManager] panel.update_step_status error: {e}")
 
             # Update current task display (PyQt6 / State)
             if hasattr(self.gui, 'current_task_label'):
                 self.gui.current_task_label.setText(highlight_message)
-            
+
             # Update state for heartbeat
             if hasattr(self.gui, 'state'):
                 self.gui.state.current_task_var = highlight_message
             elif hasattr(self.gui, 'current_task_var'):
-                # Backward compatibility for StringVar or other types
                 var = self.gui.current_task_var
                 if hasattr(var, 'set'):
                     var.set(highlight_message)
                 else:
                     self.gui.current_task_var = highlight_message
 
-            # Status bar update (PyQt6 / Tkinter compatible)
+            # Status bar update
             status_bar = getattr(self.gui, 'status_bar', None)
             if status_bar is not None:
-                if hasattr(status_bar, 'showMessage'):
+                if hasattr(status_bar, 'update_status'):
+                    status_bar.update_status(stage_message)
+                elif hasattr(status_bar, 'showMessage'):
                     status_bar.showMessage(stage_message)
-                elif hasattr(status_bar, 'setText'):
-                    status_bar.setText(stage_message)
-                elif hasattr(status_bar, 'config'):
-                    try:
-                        status_bar.config(text=stage_message)
-                    except AttributeError:
-                        pass
 
             # 깜빡임 효과 처리
-            # Handle blink effect
-            progress_panel = getattr(self.gui, 'progress_panel', None)
             if progress_panel is not None:
                 if status == 'processing':
-                    progress_panel.start_blink(step)
+                    if hasattr(progress_panel, 'start_blink'):
+                        progress_panel.start_blink(step)
                 else:
-                    progress_panel.stop_blink()
+                    if hasattr(progress_panel, 'stop_blink'):
+                        progress_panel.stop_blink()
 
             # 사이드바 미니 진행 패널 업데이트
-            # Update sidebar mini progress panel
             self._update_sidebar_mini_progress(step, status)
 
         self._run_on_ui_thread(_apply_updates)
@@ -695,6 +712,15 @@ class ProgressManager(ProgressObserver):
             self.gui._stage_message_cache.clear()
 
         def _apply():
+            # ★ ProgressPanel 직접 초기화
+            progress_panel = getattr(self.gui, 'progress_panel', None)
+            if progress_panel is not None and hasattr(progress_panel, 'update_step_status'):
+                for step_key in getattr(self.gui, 'step_indicators', {}):
+                    try:
+                        progress_panel.update_step_status(step_key, 'pending', 0)
+                    except Exception:
+                        pass
+
             secondary = getattr(self.gui, 'secondary_text', '#6B7280')
             for indicator in getattr(self.gui, 'step_indicators', {}).values():
                 self._set_label(indicator.get('status_label'), text="⏸", color=secondary)
@@ -703,7 +729,10 @@ class ProgressManager(ProgressObserver):
             self._update_task_display("대기 중")
             self._update_status_bar("준비 완료")
 
-            self.update_all_progress_displays()
+            try:
+                self.update_all_progress_displays()
+            except Exception as e:
+                logger.debug(f"[ProgressManager] reset update_all error: {e}")
 
             # 사이드바 미니 진행 패널 초기화
             # Reset sidebar mini progress panel

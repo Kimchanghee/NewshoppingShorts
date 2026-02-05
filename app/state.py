@@ -132,6 +132,7 @@ class AppState:
         self.progress_states = {
             'download': {'status': 'waiting', 'progress': 0, 'message': None},
             'analysis': {'status': 'waiting', 'progress': 0, 'message': None},
+            'ocr_analysis': {'status': 'waiting', 'progress': 0, 'message': None},
             'subtitle': {'status': 'waiting', 'progress': 0, 'message': None},
             'translation': {'status': 'waiting', 'progress': 0, 'message': None},
             'tts': {'status': 'waiting', 'progress': 0, 'message': None},
