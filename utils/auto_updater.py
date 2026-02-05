@@ -57,18 +57,33 @@ def get_current_version() -> str:
 def get_version_file_path() -> Optional[Path]:
     """
     버전 파일 경로 반환.
-    
+
+    PyInstaller --onefile 모드에서는:
+    1. EXE 옆 version.json 우선 (업데이트 시 교체 가능)
+    2. _MEIPASS 번들 내 version.json 폴백 (초기 설치 시)
+
     Returns:
         버전 파일 경로 또는 None
     """
     if getattr(sys, 'frozen', False):
-        # PyInstaller로 빌드된 경우
-        base_path = Path(sys.executable).parent
+        # 1순위: EXE 옆 (업데이트 시 새 버전 파일이 여기에 놓임)
+        exe_dir = Path(sys.executable).parent
+        exe_version = exe_dir / "version.json"
+        if exe_version.exists():
+            return exe_version
+
+        # 2순위: _MEIPASS 번들 내 (--onefile 초기 실행 시)
+        meipass = getattr(sys, '_MEIPASS', None)
+        if meipass:
+            bundled_version = Path(meipass) / "version.json"
+            if bundled_version.exists():
+                return bundled_version
+
+        return exe_version  # 없어도 경로는 반환 (get_current_version에서 fallback)
     else:
         # 개발 환경
         base_path = Path(__file__).parent.parent
-    
-    return base_path / "version.json"
+        return base_path / "version.json"
 
 
 def parse_version(version_str: str) -> Tuple[int, int, int]:

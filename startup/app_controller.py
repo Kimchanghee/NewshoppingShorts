@@ -321,6 +321,16 @@ class AppController:
                 current_exe = sys.executable
                 updater_exe = os.path.join(base_dir, "updater.exe")
 
+                # updater.exe가 EXE 옆에 없으면 _MEIPASS 번들에서 추출
+                if not os.path.exists(updater_exe):
+                    meipass = getattr(sys, '_MEIPASS', None)
+                    if meipass:
+                        bundled_updater = os.path.join(meipass, "updater.exe")
+                        if os.path.exists(bundled_updater):
+                            import shutil
+                            shutil.copy2(bundled_updater, updater_exe)
+                            logger.info(f"Extracted updater.exe from bundle to {updater_exe}")
+
                 if not os.path.exists(updater_exe):
                     if hasattr(self, "update_progress_dialog"):
                         self.update_progress_dialog.close()
