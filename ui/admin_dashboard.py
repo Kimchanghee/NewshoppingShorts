@@ -205,6 +205,28 @@ class AdminDashboard(QMainWindow):
             self.workers.remove(worker)
         worker.deleteLater()
 
+    def closeEvent(self, event):
+        """윈도우 종료 시 모든 워커 스레드와 타이머를 안전하게 정리"""
+        logger.info("[Admin UI] Closing dashboard - cleaning up workers and timers")
+        
+        # 타이머 중지
+        if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
+            self.refresh_timer.stop()
+        
+        # 모든 실행 중인 워커 스레드 정리
+        for worker in self.workers[:]:  # 복사본으로 순회
+            if worker.isRunning():
+                worker.quit()
+                worker.wait(1000)  # 최대 1초 대기
+                if worker.isRunning():
+                    worker.terminate()  # 강제 종료
+                    worker.wait(500)
+            worker.deleteLater()
+        self.workers.clear()
+        
+        logger.info("[Admin UI] Cleanup complete - closing window")
+        event.accept()
+
     def _get_headers(self) -> dict:
         return {
             "X-Admin-API-Key": self.admin_api_key,
@@ -636,6 +658,9 @@ class AdminDashboard(QMainWindow):
             if expires_utc:
                 try:
                     dt = datetime.fromisoformat(expires_utc.replace("Z", "+00:00"))
+                    # Naive datetime (no timezone) -> assume UTC
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
                     if dt < now:
                          color = get_color("error")
                     elif (dt - now).days <= 7:

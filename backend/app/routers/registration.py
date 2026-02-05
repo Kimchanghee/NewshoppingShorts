@@ -86,6 +86,16 @@ async def submit_registration_request(
                 message="이미 가입된 아이디입니다. 로그인해 주세요.",
             )
 
+        # 1.5. 동일 IP 중복 가입 체크 (첫 번째 계정 이후 추가 가입 방지)
+        client_ip = get_client_ip(request)
+        existing_ip_user = db.query(User).filter(User.registration_ip == client_ip).first()
+        if existing_ip_user:
+            logger.warning(f"[Register Fail] Duplicate IP detected: {client_ip}, existing user: {existing_ip_user.username}")
+            return RegistrationResponse(
+                success=False,
+                message="⚠️ 중복 IP에서 회원가입 감지!\n\n동일한 IP에서 이미 가입된 계정이 존재합니다.\n추가 계정이 필요하시면 구독을 신청하시거나 담당자에게 문의해 주시기 바랍니다.",
+            )
+
         # 2. RegistrationRequest 테이블 중복 확인 (모든 상태 체크)
         existing_request = (
             db.query(RegistrationRequest)
@@ -129,13 +139,13 @@ async def submit_registration_request(
             email=data.email,
             phone=data.contact,
             name=data.name,
+            registration_ip=client_ip,  # 가입 IP 저장 (중복 가입 감지용)
         )
 
         db.add(new_user)
         db.flush()  # ID 생성을 위해 flush
 
-        # JWT 토큰 생성 (자동 로그인용)
-        client_ip = get_client_ip(request)
+        # JWT 토큰 생성 (자동 로그인용 - client_ip는 위에서 이미 가져옴)
         token, jti, expires_at = create_access_token(new_user.id, client_ip)
 
         # 세션 저장 (로그인과 동일한 방식)

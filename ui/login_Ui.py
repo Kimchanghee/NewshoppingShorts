@@ -19,7 +19,7 @@ if USE_MODERN_UI:
     from ui.login_ui_modern import ModernLoginUi as Ui_LoginWindow
 else:
     # 기존 UI 사용 (레거시 호환)
-    from PyQt5 import QtCore, QtGui, QtWidgets
+    from PyQt6 import QtCore, QtGui, QtWidgets
 
     class Ui_LoginWindow(object):
         def setupUi(self, LoginWindow):

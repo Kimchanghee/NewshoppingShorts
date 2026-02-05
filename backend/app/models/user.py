@@ -30,6 +30,7 @@ class User(Base):
     is_active = Column(Boolean, default=True, nullable=False)
     last_login_at = Column(TIMESTAMP, nullable=True)
     last_login_ip = Column(String(45), nullable=True)
+    registration_ip = Column(String(45), nullable=True)  # 회원가입 시 사용한 IP (중복 가입 감지용)
     login_count = Column(Integer, default=0, nullable=False)
     # 작업 횟수 관리 (-1 = 무제한)
     work_count = Column(Integer, default=-1, nullable=False)

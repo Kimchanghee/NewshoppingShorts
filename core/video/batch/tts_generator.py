@@ -362,24 +362,31 @@ def _generate_tts_for_batch(app, voice):
     # 영상 길이 확인
     video_duration = app.get_video_duration_helper()
 
-    app.add_log(f"[TTS] 음성 생성 시작 - 영상: {video_duration:.1f}초")
-    logger.info("=" * 60)
-    logger.info("[TTS] AudioPipeline을 사용한 통합 TTS 생성")
-    logger.info("=" * 60)
-
     # 음성 정보 설정
     selected_voice = voice
     voice_label = _get_voice_display_name(voice)
     app.fixed_tts_voice = voice
 
+    app.add_log(f"[TTS] 음성 생성 시작 - 영상: {video_duration:.1f}초")
+    logger.info("=" * 60)
+    logger.info("[TTS] AudioPipeline을 사용한 통합 TTS 생성")
+    logger.info("  영상 길이: %.1f초", video_duration)
+    logger.info("  음성: %s (%s)", voice_label, voice)
+    logger.info("=" * 60)
+
     # 스크립트 추출
     original_script = app.extract_clean_script_from_translation()
 
+    logger.info("[TTS] 스크립트 추출 완료: %d자", len(original_script) if original_script else 0)
+    if original_script:
+        preview = original_script[:100].replace('\n', ' ')
+        logger.info("  스크립트 미리보기: %s...", preview)
+
     if not original_script:
         logger.error("[TTS 오류] 스크립트 추출 실패!")
-        logger.error(f"  - translation_result: {len(app.translation_result) if app.translation_result else 'None'}자")
-        logger.error(f"  - video_analysis_result: {type(getattr(app, 'video_analysis_result', None))}")
-        logger.error(f"  - analysis_result.script: {len(app.analysis_result.get('script', [])) if app.analysis_result else 'None'}개")
+        logger.error("  - translation_result: %s자", len(app.translation_result) if app.translation_result else 'None')
+        logger.error("  - video_analysis_result: %s", type(getattr(app, 'video_analysis_result', None)))
+        logger.error("  - analysis_result.script: %s개", len(app.analysis_result.get('script', [])) if app.analysis_result else 'None')
         raise RuntimeError("추출된 대본이 없습니다 (분석 결과를 확인하세요)")
 
     # AudioPipeline 사용하여 TTS 생성
@@ -391,6 +398,7 @@ def _generate_tts_for_batch(app, voice):
         cta_lines = get_selected_cta_lines(app)
 
         # TTS 생성 (파이프라인이 길이 체크, 재시도, 배속 모두 처리)
+        logger.info("[TTS] AudioPipeline API 호출 중... (%d자)", len(original_script))
         app.add_log(f"[TTS] 음성 생성 API 호출 중... ({len(original_script)}자)")
 
         result = pipeline.generate_tts(

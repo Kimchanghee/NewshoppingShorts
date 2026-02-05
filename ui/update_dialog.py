@@ -7,9 +7,9 @@ Update Dialog UI
 다운로드/설치를 진행할 수 있는 UI를 제공합니다.
 """
 
-from PyQt5 import QtCore, QtGui
-from PyQt5.QtCore import Qt, QThread, pyqtSignal
-from PyQt5.QtWidgets import (
+from PyQt6 import QtCore, QtGui
+from PyQt6.QtCore import Qt, QThread, pyqtSignal
+from PyQt6.QtWidgets import (
     QDialog,
     QVBoxLayout,
     QHBoxLayout,
@@ -19,7 +19,7 @@ from PyQt5.QtWidgets import (
     QWidget,
     QFrame,
 )
-from PyQt5.QtGui import QFont
+from PyQt6.QtGui import QFont
 
 from typing import Optional, Dict, Any, Callable
 from pathlib import Path
@@ -85,7 +85,7 @@ class UpdateDialog(QDialog):
         """UI 설정"""
         self.setWindowTitle("업데이트 알림")
         self.setFixedSize(420, 300)
-        self.setWindowFlags(Qt.Dialog | Qt.WindowCloseButtonHint)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.WindowCloseButtonHint)
         
         # 스타일
         self.setStyleSheet("""
@@ -103,9 +103,9 @@ class UpdateDialog(QDialog):
         
         # 제목
         title_label = QLabel("새로운 버전이 있습니다!")
-        title_label.setFont(QFont(FONT_FAMILY, 16, QFont.Bold))
+        title_label.setFont(QFont(FONT_FAMILY, 16, QFont.Weight.Bold))
         title_label.setStyleSheet("color: #e31639;")
-        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(title_label)
         
         # 버전 정보
@@ -130,10 +130,10 @@ class UpdateDialog(QDialog):
         arrow_label = QLabel("→")
         arrow_label.setFont(QFont(FONT_FAMILY, 14))
         arrow_label.setStyleSheet("color: #9CA3AF;")
-        arrow_label.setAlignment(Qt.AlignCenter)
+        arrow_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         
         latest_label = QLabel(f"최신 버전: {latest_version}")
-        latest_label.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
+        latest_label.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
         latest_label.setStyleSheet("color: #10B981;")
         
         version_layout.addWidget(current_label)
@@ -151,7 +151,7 @@ class UpdateDialog(QDialog):
             notes_label.setFont(QFont(FONT_FAMILY, 10))
             notes_label.setStyleSheet("color: #6B7280;")
             notes_label.setWordWrap(True)
-            notes_label.setAlignment(Qt.AlignCenter)
+            notes_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             layout.addWidget(notes_label)
         
         # 진행률 바 (처음엔 숨김)
@@ -175,7 +175,7 @@ class UpdateDialog(QDialog):
         self.status_label = QLabel("")
         self.status_label.setFont(QFont(FONT_FAMILY, 9))
         self.status_label.setStyleSheet("color: #6B7280;")
-        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setVisible(False)
         layout.addWidget(self.status_label)
         
@@ -188,7 +188,7 @@ class UpdateDialog(QDialog):
         # 나중에 버튼
         self.later_btn = QPushButton("나중에")
         self.later_btn.setFont(QFont(FONT_FAMILY, 11))
-        self.later_btn.setCursor(Qt.PointingHandCursor)
+        self.later_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.later_btn.setStyleSheet("""
             QPushButton {
                 background-color: #F3F4F6;
@@ -205,8 +205,8 @@ class UpdateDialog(QDialog):
         
         # 업데이트 버튼
         self.update_btn = QPushButton("업데이트")
-        self.update_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Bold))
-        self.update_btn.setCursor(Qt.PointingHandCursor)
+        self.update_btn.setFont(QFont(FONT_FAMILY, 11, QFont.Weight.Bold))
+        self.update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update_btn.setStyleSheet("""
             QPushButton {
                 background-color: #e31639;
@@ -329,9 +329,9 @@ def show_update_dialog_if_needed(
     def on_update_checked(result: Dict[str, Any]):
         if result.get("update_available"):
             dialog = UpdateDialog(parent=parent, update_info=result)
-            dialog_result = dialog.exec_()
+            dialog_result = dialog.exec()
             
-            if dialog_result == QDialog.Rejected and on_complete:
+            if dialog_result == QDialog.DialogCode.Rejected and on_complete:
                 on_complete()
         else:
             if on_complete:

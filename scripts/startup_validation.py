@@ -107,7 +107,7 @@ class StartupValidator:
     def _check_required_packages(self) -> Tuple[bool, str]:
         """Check required Python packages"""
         required = [
-            "PyQt5",
+            "PyQt6",
             "requests",
             "opencv-python",
             "numpy",

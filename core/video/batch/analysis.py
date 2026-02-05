@@ -7,6 +7,7 @@ Contains video analysis and translation functions for batch processing.
 import os
 import re
 import time
+import traceback
 import threading
 import sys
 
@@ -45,8 +46,11 @@ def _analyze_video_for_batch(app):
         voice_label = _get_voice_display_name(selected_voice) if selected_voice != "미지정" else "미지정"
         app.add_log("[분석] 영상 분석을 시작합니다...")
         logger.info("[배치 분석] 시작")
-        logger.info(f"사용 모델: {config.GEMINI_VIDEO_MODEL}")
-        logger.info(f"선택된 TTS 음성: {voice_label}")
+        logger.info("  사용 모델: %s", config.GEMINI_VIDEO_MODEL)
+        logger.info("  선택된 TTS 음성: %s", voice_label)
+        logger.info("  영상 파일: %s", os.path.basename(getattr(app, '_temp_downloaded_file', '') or ''))
+        logger.info("  Thinking 레벨: %s", config.GEMINI_THINKING_LEVEL)
+        logger.info("  Temperature: %s", config.GEMINI_TEMPERATURE)
 
         prompt = get_video_analysis_prompt(cta_lines)
 
@@ -115,8 +119,10 @@ def _analyze_video_for_batch(app):
         current_api_key = getattr(api_mgr, "current_key", "unknown") if api_mgr else "unknown"
         logger.info(f"[영상 분석 API] 사용 중인 API 키: {current_api_key}")
         if api_mgr and hasattr(api_mgr, "get_status"):
-            for status_line in api_mgr.get_status():
-                logger.info(f"  {status_line}")
+            status_text = api_mgr.get_status()
+            if status_text:
+                for status_line in status_text.split("\n"):
+                    logger.info(f"  {status_line}")
 
         response = None
         last_error = None
@@ -220,7 +226,10 @@ def _analyze_video_for_batch(app):
                         logger.warning(f"[배치 분석] API 키 권한 오류(403) 감지. 현재 키: {blocked_key}")
 
                     if api_mgr:
-                        api_mgr.block_current_key(duration_minutes=30)
+                        try:
+                            api_mgr.block_current_key(duration_minutes=30)
+                        except Exception as block_err:
+                            logger.error(f"[배치 분석] 키 차단 실패: {block_err}")
                         try:
                             new_key_value = api_mgr.get_available_key()
                             new_key_name = getattr(api_mgr, 'current_key', 'unknown')
@@ -341,11 +350,12 @@ def _analyze_video_for_batch(app):
                 logger.info("[배치 분석] OCR 중국어 자막 없음")
 
     except Exception as e:
+        logger.error("[배치 분석 오류 스택트레이스]")
+        traceback.print_exc()
         ui_controller.write_error_log(e)
         error_text = str(e)
         translated_error = _translate_error_message(error_text)
         logger.error(f"[배치 분석 오류] {translated_error}")
-        # traceback 출력 제거 - 한글 메시지만 표시
         if "PERMISSION_DENIED" in error_text or "403" in error_text or "권한" in translated_error:
             logger.error("[배치 분석] API 키가 해당 Gemini 모델 또는 파일 업로드 기능을 사용할 권한이 있는지 확인하세요.")
         raise
@@ -374,12 +384,13 @@ def _translate_script_for_batch(app):
         voice_label = _get_voice_display_name(selected_voice) if selected_voice != "미지정" else "미지정"
         app.add_log("[번역] 대본 번역 및 각색을 시작합니다...")
         logger.info("[배치 번역] 시작")
-        logger.info(f"사용 모델: {config.GEMINI_TEXT_MODEL}")
-        logger.info(f"선택된 TTS 음성: {voice_label}")
+        logger.info("  사용 모델: %s", config.GEMINI_TEXT_MODEL)
+        logger.info("  선택된 TTS 음성: %s", voice_label)
 
         video_duration = app.get_video_duration_helper()
         target_duration = video_duration * config.DAESA_GILI
         target_chars = int(target_duration * 4.2)
+        logger.info("  영상 길이: %.1f초, 대사 목표: %.1f초 (%d자)", video_duration, target_duration, target_chars)
 
         script_lines = []
         original_total_chars = 0
@@ -480,7 +491,10 @@ def _translate_script_for_batch(app):
 
         app.translation_result = translated_text
         app.add_log(f"[번역] 번역 완료 - {len(app.translation_result)}자")
-        logger.info(f"[배치 번역] 완료 - {len(app.translation_result)}자")
+        logger.info("[배치 번역] 완료 - %d자", len(app.translation_result))
+        if translated_text:
+            preview = translated_text[:120].replace('\n', ' ')
+            logger.info("  번역 미리보기: %s...", preview)
     except Exception as e:
         ui_controller.write_error_log(e)
         translated_error = _translate_error_message(str(e))

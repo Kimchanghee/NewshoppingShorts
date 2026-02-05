@@ -250,9 +250,9 @@ def add_capture_menu_to_app(gui_instance):
 
 
 def capture_login_screen():
-    """로그인 화면 캡처 (PyQt5)"""
+    """로그인 화면 캡처 (PyQt6)"""
     try:
-        from PyQt5.QtWidgets import QApplication
+        from PyQt6.QtWidgets import QApplication
 
         capture = PageCapture()
         app = QApplication.instance()

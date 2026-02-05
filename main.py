@@ -119,6 +119,10 @@ class VideoAnalyzerGUI(QMainWindow):
         self.base_tts_dir = self.state.base_tts_dir
         self.tts_output_dir = self.state.tts_output_dir
         self.voice_sample_dir = self.state.voice_sample_dir
+        self.video_source = self.state.video_source
+        self.local_file_path = self.state.local_file_path
+        self.tiktok_douyin_url = self.state.tiktok_douyin_url
+        self.source_video = self.state.source_video
         self._temp_downloaded_file = self.state._temp_downloaded_file
         self.fixed_tts_voice = self.state.fixed_tts_voice
         self.selected_tts_voice = self.state.selected_tts_voice

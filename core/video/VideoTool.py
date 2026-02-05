@@ -8,6 +8,10 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+# Font cache to avoid repeated loading and log spam per subtitle segment
+_font_cache = {}  # key: (font_id, font_size) -> ImageFont object
+_font_fallback_warned = set()  # track which font_ids already had fallback warning
+
 
 def _resource_path(relative_path: str) -> str:
     if getattr(sys, "frozen", False):
@@ -148,109 +152,108 @@ def _create_single_line_subtitle(
         # 선택된 폰트 가져오기 (기본값: seoul_hangang)
         selected_font_id = getattr(app, "selected_font_id", "seoul_hangang")
 
-        # 프로젝트 폰트 폴더 경로
-        project_fonts_dir = _resource_path("fonts")
-        logger.debug(
-            f"[SubtitleFont] font dir = {project_fonts_dir} exists? {os.path.exists(project_fonts_dir)}"
-        )
-
-        # 폰트 ID별 경로 매핑 (프로젝트 fonts 폴더에 실제 존재하는 폰트만)
-        font_map = {
-            "seoul_hangang": [
-                os.path.join(project_fonts_dir, "SeoulHangangB.ttf"),
-                os.path.join(project_fonts_dir, "SeoulHangangEB.ttf"),
-                os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
-                os.path.join(project_fonts_dir, "SeoulHangangL.ttf"),
-            ],
-            "unpeople_gothic": [
-                os.path.join(project_fonts_dir, "UnPeople.ttf"),
-            ],
-            "pretendard": [
-                os.path.join(project_fonts_dir, "Pretendard-ExtraBold.ttf"),
-                os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
-                os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
-            ],
-            "paperlogy": [
-                os.path.join(project_fonts_dir, "Paperlogy-9Black.ttf"),
-                os.path.join(project_fonts_dir, "Paperlogy-8ExtraBold.ttf"),
-                os.path.join(project_fonts_dir, "Paperlogy-7Bold.ttf"),
-            ],
-            "gmarketsans": [
-                os.path.join(project_fonts_dir, "GmarketSansTTFBold.ttf"),
-                os.path.join(project_fonts_dir, "GmarketSansTTFMedium.ttf"),
-                os.path.join(project_fonts_dir, "GmarketSansTTFLight.ttf"),
-            ],
-        }
-
-        # 선택된 폰트 경로 가져오기 (fallback: seoul_hangang)
-        korean_fonts = font_map.get(selected_font_id, font_map["seoul_hangang"]).copy()
-
-        # ⚠ Windows 폰트 fallback 제거 (환경별 일관성 보장)
-        # 프로젝트 폰트만 사용하여 브랜드 일관성 유지
-
-        for p in korean_fonts:
-            logger.debug(f"    {p} exists? {os.path.exists(p)}")
-
-        font = None
-        for font_path in korean_fonts:
-            if os.path.exists(font_path):
-                try:
-                    font = ImageFont.truetype(font_path, font_size)
-                    logger.info(
-                        f"[SubtitleFont] Loaded {os.path.basename(font_path)} ({font_size}px) for {video_width}x{video_height}"
-                    )
-                    break
-                except Exception as e:
-                    logger.warning(
-                        f"[SubtitleFont] truetype failed for {font_path} -> {e}"
-                    )
-                    continue
-
-        if font is None:
-            # 프로젝트 폰트가 없으면 시스템 폴백 폰트 사용
-            logger.warning(
-                f"[SubtitleFont] {selected_font_id} 폰트 없음, 시스템 폰트로 폴백"
+        # Use cached font if available
+        cache_key = (selected_font_id, font_size)
+        if cache_key in _font_cache:
+            font = _font_cache[cache_key]
+        else:
+            # 프로젝트 폰트 폴더 경로
+            project_fonts_dir = _resource_path("fonts")
+            logger.info(
+                f"[SubtitleFont] 폰트 로드 시작: {selected_font_id} ({font_size}px), dir={project_fonts_dir}"
             )
-            fallback_fonts = []
 
-            # Windows 시스템 폰트
-            if sys.platform == "win32":
-                fallback_fonts = [
-                    "C:\\Windows\\Fonts\\malgun.ttf",  # 맑은 고딕
-                    "C:\\Windows\\Fonts\\batang.ttc",  # 바탕
-                    "C:\\Windows\\Fonts\\gulim.ttc",  # 굴림
-                ]
-            # macOS 시스템 폰트
-            elif sys.platform == "darwin":
-                fallback_fonts = [
-                    "/System/Library/Fonts/AppleSDGothicNeo.ttc",
-                    "/System/Library/Fonts/AppleGothic.ttf",
-                ]
-            # Linux 시스템 폰트
-            else:
-                fallback_fonts = [
-                    "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                ]
+            # 폰트 ID별 경로 매핑
+            font_map = {
+                "seoul_hangang": [
+                    os.path.join(project_fonts_dir, "SeoulHangangB.ttf"),
+                    os.path.join(project_fonts_dir, "SeoulHangangEB.ttf"),
+                    os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
+                    os.path.join(project_fonts_dir, "SeoulHangangL.ttf"),
+                ],
+                "unpeople_gothic": [
+                    os.path.join(project_fonts_dir, "UnPeople.ttf"),
+                ],
+                "pretendard": [
+                    os.path.join(project_fonts_dir, "Pretendard-ExtraBold.ttf"),
+                    os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
+                    os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
+                ],
+                "paperlogy": [
+                    os.path.join(project_fonts_dir, "Paperlogy-9Black.ttf"),
+                    os.path.join(project_fonts_dir, "Paperlogy-8ExtraBold.ttf"),
+                    os.path.join(project_fonts_dir, "Paperlogy-7Bold.ttf"),
+                ],
+                "gmarketsans": [
+                    os.path.join(project_fonts_dir, "GmarketSansTTFBold.ttf"),
+                    os.path.join(project_fonts_dir, "GmarketSansTTFMedium.ttf"),
+                    os.path.join(project_fonts_dir, "GmarketSansTTFLight.ttf"),
+                ],
+            }
 
-            for fallback_path in fallback_fonts:
-                if os.path.exists(fallback_path):
+            korean_fonts = font_map.get(selected_font_id, font_map["seoul_hangang"]).copy()
+
+            font = None
+            for font_path in korean_fonts:
+                if os.path.exists(font_path):
                     try:
-                        font = ImageFont.truetype(fallback_path, font_size)
+                        font = ImageFont.truetype(font_path, font_size)
                         logger.info(
-                            f"[SubtitleFont] 폴백 폰트 사용: {os.path.basename(fallback_path)}"
+                            f"[SubtitleFont] 로드 완료: {os.path.basename(font_path)} ({font_size}px)"
                         )
                         break
                     except Exception as e:
-                        logger.warning(f"[SubtitleFont] 폴백 실패 {fallback_path}: {e}")
+                        logger.warning(
+                            f"[SubtitleFont] truetype failed: {font_path} -> {e}"
+                        )
                         continue
 
-            # 모든 폴백 실패 시 기본 폰트 사용
             if font is None:
-                logger.warning(
-                    "[SubtitleFont] 모든 폰트 로드 실패, PIL 기본 폰트 사용 (스타일 없음)"
-                )
-                font = ImageFont.load_default()
+                # Only warn once per font_id to avoid spam
+                if selected_font_id not in _font_fallback_warned:
+                    _font_fallback_warned.add(selected_font_id)
+                    logger.warning(
+                        f"[SubtitleFont] {selected_font_id} 폰트 없음, 시스템 폰트로 폴백"
+                    )
+
+                fallback_fonts = []
+                if sys.platform == "win32":
+                    fallback_fonts = [
+                        "C:\\Windows\\Fonts\\malgun.ttf",
+                        "C:\\Windows\\Fonts\\batang.ttc",
+                        "C:\\Windows\\Fonts\\gulim.ttc",
+                    ]
+                elif sys.platform == "darwin":
+                    fallback_fonts = [
+                        "/System/Library/Fonts/AppleSDGothicNeo.ttc",
+                        "/System/Library/Fonts/AppleGothic.ttf",
+                    ]
+                else:
+                    fallback_fonts = [
+                        "/usr/share/fonts/truetype/nanum/NanumGothic.ttf",
+                        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    ]
+
+                for fallback_path in fallback_fonts:
+                    if os.path.exists(fallback_path):
+                        try:
+                            font = ImageFont.truetype(fallback_path, font_size)
+                            logger.info(
+                                f"[SubtitleFont] 시스템 폴백 사용: {os.path.basename(fallback_path)}"
+                            )
+                            break
+                        except Exception as e:
+                            logger.warning(f"[SubtitleFont] 폴백 실패 {fallback_path}: {e}")
+                            continue
+
+                if font is None:
+                    logger.warning(
+                        "[SubtitleFont] 모든 폰트 로드 실패, PIL 기본 폰트 사용"
+                    )
+                    font = ImageFont.load_default()
+
+            # Cache the loaded font
+            _font_cache[cache_key] = font
 
         text = text.strip()
 
