@@ -39,7 +39,7 @@ def _extract_product_name(app) -> str:
         return Tool.sanitize_filename(product.strip()[:30])
 
     # 3. 로컬 파일명에서 추출
-    if app.video_source.get() == "local" and app.local_file_path:
+    if getattr(app, 'video_source', 'none') == "local" and getattr(app, 'local_file_path', ''):
         base_name = os.path.splitext(os.path.basename(app.local_file_path))[0]
         if base_name:
             # 날짜/숫자 패턴 제거 (예: 20231124_video -> video)
@@ -250,8 +250,7 @@ def _get_short_error_message(error: Exception) -> str:
         str: 10자 이내의 한글 오류 메시지
     """
 
-    ui_controller.write_error_log(error)
-
+    # write_error_log 호출 제거 - 이미 상위 handler에서 호출됨
     error_str = str(error)
     error_type = type(error).__name__
 
@@ -615,12 +614,18 @@ def _is_bad_split_point(text, pos):
 
     # ★★★ 6. ~(으)ㄴ/는/ㄹ + 명사 관형사형 패턴 ★★★
     # "예쁜 꽃", "먹는 음식", "갈 곳" - 관형사형 어미 뒤에서 분리 금지
+    # 단, 조사 은/는 (음식은, 제품은 등 3글자+ 명사+조사)은 분리 허용
     if re.search(r'[ㄴ는ㄹ은]$', before):
-        # 다음에 명사/의존명사가 올 가능성 높음
-        if after and not re.match(r'^(것|수|때|줄|곳|바|터|뿐|편|정도|만큼)', after):
-            # 일반 명사로 시작하면 분리 금지
-            if re.match(r'^[가-힣]', after):
-                return True
+        last_char = before[-1]
+        last_word = before.split()[-1] if before.split() else before
+        # 은/는으로 끝나는 경우: 마지막 단어가 3글자 이상이면 조사 가능성 높음 → 분리 허용
+        # "음식은"(3자)→조사, "제품은"(3자)→조사, "높은"(2자)→관형사형, "큰"(1자)→관형사형
+        is_likely_particle = last_char in ('은', '는') and len(last_word) >= 3
+        if not is_likely_particle:
+            if after and not re.match(r'^(것|수|때|줄|곳|바|터|뿐|편|정도|만큼)', after):
+                # 일반 명사로 시작하면 분리 금지
+                if re.match(r'^[가-힣]', after):
+                    return True
 
     # ★★★ 7. 존칭/높임 표현 패턴 ★★★
     # "드릴게요", "드려요", "주세요" 등 분리 금지
@@ -665,10 +670,18 @@ def _is_bad_split_point(text, pos):
             return True
 
     # ★★★ 13. 보조사 패턴 ★★★
-    # "~도", "~만", "~까지", "~조차", "~마저" 뒤에서 동사/형용사 분리 금지
+    # "먹기도 하고", "이것만 있어" - 보조사 뒤에서 보조용언 분리 금지
+    # 단, 마지막 단어가 3글자 이상이면 명사+조사이므로 분리 허용
+    # "음식도 먹고"(음식도=3자) → 분리 허용, "하기도 해"(하기도=3자+보조용언) → 분리 금지
     if re.search(r'[도만]$', before):
-        if re.match(r'^[가-힣]', after) and not re.match(r'^[은는이가을를에서로와과의]', after):
+        last_word = before.split()[-1] if before.split() else before
+        # 보조용언 패턴: 하/해/있/없/않 등이 뒤따르면 분리 금지
+        if re.match(r'^(하|해|있|없|않|못|싶|보)', after):
             return True
+        # 2글자 이하 단어 + 도/만 → 분리 금지 (짧은 부사/조사 보호)
+        if len(last_word) <= 2:
+            if re.match(r'^[가-힣]', after) and not re.match(r'^[은는이가을를에서로와과의]', after):
+                return True
 
     return False
 
@@ -691,7 +704,9 @@ def _split_text_naturally(app, text, max_chars=13):
     max_chars: 기본 13글자 (띄어쓰기 포함)
     """
     normalized = re.sub(r"\s+", " ", (text or "").strip())
-    logger.info(f"[자막 분할] 원본 텍스트 길이: {len(normalized)}자")
+    logger.info(f"[자막 분할] 원본 텍스트 길이: {len(normalized)}자, 목표 글자수: {max_chars}자")
+    logger.info(f"[자막 분할] 원본: '{normalized[:100]}{'...' if len(normalized) > 100 else ''}'")
+
 
     if not normalized:
         return []
@@ -772,12 +787,14 @@ def _split_text_naturally(app, text, max_chars=13):
 
                 # 분리 위치 찾기 (우선순위별)
                 split_idx = -1
+                split_rule = ""
 
                 # 1순위: 쉼표, 가운뎃점 등 (가장 명확한 분리점)
                 for sep in [',', '，', 'ㆍ', '·', ';']:
                     idx = remaining.rfind(sep, min_chars, hard_max)
                     if idx > min_chars:
                         split_idx = idx + 1
+                        split_rule = f"1순위-구두점('{sep}' @{idx})"
                         break
 
                 # 2순위: 접속 부사 앞에서 분리
@@ -786,6 +803,7 @@ def _split_text_naturally(app, text, max_chars=13):
                         idx = remaining.find(conj, min_chars, hard_max + len(conj))
                         if idx > 0:
                             split_idx = idx
+                            split_rule = f"2순위-접속부사('{conj}' @{idx})"
                             break
 
                 # 3순위: 연결 어미 뒤에서 분리 (~고, ~며, ~서 등)
@@ -795,6 +813,7 @@ def _split_text_naturally(app, text, max_chars=13):
                         pos = m.end()
                         if pos >= min_chars:
                             split_idx = pos
+                            split_rule = f"3순위-연결어미('{m.group()}' @{pos})"
                             # target에 가까운 위치 선호
                             if pos >= target - 2:
                                 break
@@ -808,10 +827,12 @@ def _split_text_naturally(app, text, max_chars=13):
                     for m in josa_pattern.finditer(search_region):
                         pos = m.end()
                         if pos >= min_chars and not _is_bad_split_point(remaining, pos):
-                            candidates.append(pos)
+                            candidates.append((pos, m.group().strip()))
                     # target에 가장 가까운 위치 선택
                     if candidates:
-                        split_idx = min(candidates, key=lambda p: abs(p - target))
+                        best = min(candidates, key=lambda p: abs(p[0] - target))
+                        split_idx = best[0]
+                        split_rule = f"4순위-조사('{best[1]}' @{split_idx})"
 
                 # 5순위: 일반 공백에서 분리 (target 근처, 나쁜 위치 회피)
                 if split_idx < 0:
@@ -819,25 +840,34 @@ def _split_text_naturally(app, text, max_chars=13):
                     search_end = min(len(remaining), hard_max)
 
                     candidates = []
+                    rejected = []
                     for pos in range(search_start, search_end):
                         if remaining[pos] == ' ':
                             split_pos = pos + 1
                             if not _is_bad_split_point(remaining, split_pos):
                                 candidates.append(split_pos)
+                            else:
+                                rejected.append(split_pos)
+
+                    if rejected:
+                        logger.debug(f"[자막 분할] 5순위 거부된 위치: {rejected} (문법 보호)")
 
                     # target에 가장 가까운 좋은 위치 선택
                     if candidates:
                         split_idx = min(candidates, key=lambda p: abs(p - target))
+                        split_rule = f"5순위-공백(@{split_idx})"
                     else:
                         # 모든 위치가 나쁘면 가장 덜 나쁜 위치 선택 (확장 범위)
                         for pos in range(min_chars, min(len(remaining), hard_max + 3)):
                             if remaining[pos] == ' ':
                                 split_idx = pos + 1
+                                split_rule = f"5순위-강제공백(@{split_idx}, 모든 위치가 문법 보호)"
                                 break
 
                 # 6순위: 강제 분리 (공백 없으면)
                 if split_idx < 0:
                     split_idx = target
+                    split_rule = f"6순위-강제분리(@{target}, 공백없음)"
 
                 # 분리 실행
                 left = remaining[:split_idx].strip()
@@ -845,8 +875,11 @@ def _split_text_naturally(app, text, max_chars=13):
 
                 if left:
                     segments.append(left)
+                    logger.info(f"[자막 분할] 분리: [{len(left)}자] '{left}' | 규칙: {split_rule}")
 
     logger.info(f"[자막 분할] 2단계 길이 분리 후: {len(segments)}개")
+    for idx, s in enumerate(segments):
+        logger.info(f"  {idx+1}. [{len(s)}자] '{s}'")
 
     # ★★★ 3단계: 너무 짧은 세그먼트 병합 ★★★
     merged = []
@@ -857,7 +890,9 @@ def _split_text_naturally(app, text, max_chars=13):
         if merged and len(seg) < min_chars:
             # 이전 세그먼트와 합쳐도 hard_max 이내면 병합
             if len(merged[-1]) + 1 + len(seg) <= hard_max:
+                prev = merged[-1]
                 merged[-1] = f"{merged[-1]} {seg}".strip()
+                logger.info(f"[자막 분할] 3단계 병합: '{prev}' + '{seg}' -> '{merged[-1]}' ({len(seg)}자 < 최소 {min_chars}자)")
             else:
                 merged.append(seg)
         else:
@@ -866,8 +901,10 @@ def _split_text_naturally(app, text, max_chars=13):
     # 마지막 세그먼트가 너무 짧으면 이전과 병합
     if len(merged) > 1 and len(merged[-1]) < min_chars:
         if len(merged[-2]) + 1 + len(merged[-1]) <= hard_max + 3:
+            last = merged[-1]
             merged[-2] = f"{merged[-2]} {merged[-1]}".strip()
             merged.pop()
+            logger.info(f"[자막 분할] 3단계 마지막 병합: '{last}' -> '{merged[-1]}'")
 
     result = [seg for seg in merged if seg]
 
@@ -903,9 +940,9 @@ def _split_text_naturally(app, text, max_chars=13):
                 result.append(combined_cta)
                 logger.info(f"[자막 분할] CTA 합침: {len(preserved_cta)}개 → 1개 ('{combined_cta}')")
 
-    logger.info(f"[자막 분할] 최종 결과: {len(result)}개 세그먼트")
+    logger.info(f"[자막 분할] ===== 최종 결과: {len(result)}개 세그먼트 =====")
     for i, seg in enumerate(result):
-        logger.debug(f"  {i+1}. [{len(seg)}자] {seg}")
+        logger.info(f"  #{i+1} [{len(seg)}자] '{seg}'")
 
     return result
 

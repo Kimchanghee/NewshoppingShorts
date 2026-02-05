@@ -169,7 +169,7 @@ class SubtitleDetector:
         if not ocr_reader:
             return None
 
-        video_path = self.gui.local_file_path if self.gui.video_source.get() == 'local' else self.gui._temp_downloaded_file
+        video_path = getattr(self.gui, 'local_file_path', '') if getattr(self.gui, 'video_source', 'none') == 'local' else getattr(self.gui, '_temp_downloaded_file', None)
         # Video path determined silently
 
         # GPU/NumPy acceleration status (silently configured)
@@ -182,7 +182,7 @@ class SubtitleDetector:
             import numpy as np
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            video_path = self.gui.local_file_path if self.gui.video_source.get() == "local" else self.gui._temp_downloaded_file
+            video_path = getattr(self.gui, 'local_file_path', '') if getattr(self.gui, 'video_source', 'none') == "local" else getattr(self.gui, '_temp_downloaded_file', None)
             if not video_path or not os.path.exists(video_path):
                 # Video file not found
                 return None

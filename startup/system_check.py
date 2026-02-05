@@ -10,7 +10,7 @@ import subprocess
 import ctypes
 from typing import Tuple, List, Dict, Any
 
-from PyQt5.QtWidgets import QMessageBox
+from PyQt6.QtWidgets import QMessageBox
 
 from .constants import (
     MIN_RAM_GB,
@@ -210,7 +210,7 @@ def show_system_check_dialog() -> bool:
     if not can_run:
         # Cannot run - show error and exit
         msg = QMessageBox()
-        msg.setIcon(QMessageBox.Critical)
+        msg.setIcon(QMessageBox.Icon.Critical)
         msg.setWindowTitle("시스템 요구사항 미충족")
         msg.setText("이 컴퓨터에서는 프로그램을 실행할 수 없습니다.")
 
@@ -223,14 +223,14 @@ def show_system_check_dialog() -> bool:
                 detail += f"  {warn}\n"
 
         msg.setDetailedText(detail)
-        msg.setStandardButtons(QMessageBox.Ok)
-        msg.exec_()
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
         return False
 
     elif warnings:
         # Warnings but can run - confirm continuation
         msg = QMessageBox()
-        msg.setIcon(QMessageBox.Warning)
+        msg.setIcon(QMessageBox.Icon.Warning)
         msg.setWindowTitle("시스템 사양 확인")
         msg.setText(
             "프로그램을 실행할 수 있지만, 일부 제한이 있을 수 있습니다.\n"
@@ -242,11 +242,11 @@ def show_system_check_dialog() -> bool:
             detail += f"  {warn}\n"
 
         msg.setDetailedText(detail)
-        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
-        msg.setDefaultButton(QMessageBox.Yes)
+        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
 
-        result = msg.exec_()
-        return result == QMessageBox.Yes
+        result = msg.exec()
+        return result == QMessageBox.StandardButton.Yes
 
     else:
         # No issues - continue silently

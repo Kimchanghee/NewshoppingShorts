@@ -1226,10 +1226,10 @@ class TTSProcessor:
             if not MOVIEPY_AVAILABLE or VideoFileClip is None:
                 logger.warning("[영상 길이] moviepy가 없어 기본값 60초를 사용합니다.")
                 return 60.0
-            if self.gui.video_source.get() == "local":
-                source_video = self.gui.local_file_path
+            if getattr(self.gui, 'video_source', 'none') == "local":
+                source_video = getattr(self.gui, 'local_file_path', '')
             else:
-                source_video = self.gui._temp_downloaded_file
+                source_video = getattr(self.gui, '_temp_downloaded_file', None)
 
             if source_video and os.path.exists(source_video):
                 temp_video = VideoFileClip(source_video)

@@ -284,7 +284,7 @@ def main():
     # 필수 패키지 (requirements.txt와 동기화)
     base_packages = [
         # UI 및 네트워크
-        "PyQt5>=5.15.0",
+        "PyQt6>=6.4.0",
         "requests>=2.31.0",
 
         # 기본 패키지

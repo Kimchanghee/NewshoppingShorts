@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 Subscription Request UI
-구독 신청 다이얼로그 - Stitch 스타일 모던 디자인 (PyQt5)
+구독 신청 다이얼로그 - Stitch 스타일 모던 디자인 (PyQt6)
 """
-from PyQt5 import QtCore, QtGui, QtWidgets
-from PyQt5.QtCore import Qt, pyqtSignal
-from PyQt5.QtWidgets import QDialog, QWidget, QLabel, QTextEdit, QPushButton, QMessageBox
-from PyQt5.QtGui import QFont, QColor, QLinearGradient, QPalette, QBrush
+from PyQt6 import QtCore, QtGui, QtWidgets
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtWidgets import QDialog, QWidget, QLabel, QTextEdit, QPushButton, QMessageBox
+from PyQt6.QtGui import QFont, QColor, QLinearGradient, QPalette, QBrush
 
 FONT_FAMILY = "맑은 고딕"
 
@@ -24,8 +24,8 @@ class SubscriptionRequestDialog(QDialog):
     def _setup_ui(self):
         self.setWindowTitle("구독 신청")
         self.setFixedSize(500, 600)
-        self.setWindowFlags(Qt.Dialog | Qt.FramelessWindowHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         # Main Layout (Rounded with Gradient)
         self.main_frame = QWidget(self)
@@ -41,14 +41,14 @@ class SubscriptionRequestDialog(QDialog):
         # Title Bar (Custom)
         self.title_bar = QLabel("Shopping Shorts Maker", self.main_frame)
         self.title_bar.setGeometry(30, 30, 300, 30)
-        self.title_bar.setFont(QFont(FONT_FAMILY, 14, QFont.Bold))
+        self.title_bar.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         self.title_bar.setStyleSheet("color: #e31639; background: transparent; border: none;")
 
         # Close Button
         self.close_btn = QPushButton("✕", self.main_frame)
         self.close_btn.setGeometry(450, 20, 30, 30)
         self.close_btn.setFont(QFont(FONT_FAMILY, 12))
-        self.close_btn.setCursor(Qt.PointingHandCursor)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setStyleSheet("""
             QPushButton {
                 background: transparent;
@@ -64,21 +64,21 @@ class SubscriptionRequestDialog(QDialog):
         # Header Image / Icon Area
         self.icon_label = QLabel("💎", self.main_frame) # Gem icon
         self.icon_label.setGeometry(0, 80, 500, 80)
-        self.icon_label.setAlignment(Qt.AlignCenter)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_label.setFont(QFont("Segoe UI Emoji", 60))
         self.icon_label.setStyleSheet("background: transparent; border: none;")
 
         # Main Title
         self.main_title = QLabel("체험판 사용이 완료되었습니다", self.main_frame)
         self.main_title.setGeometry(0, 170, 500, 40)
-        self.main_title.setAlignment(Qt.AlignCenter)
-        self.main_title.setFont(QFont(FONT_FAMILY, 18, QFont.Bold))
+        self.main_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.main_title.setFont(QFont(FONT_FAMILY, 18, QFont.Weight.Bold))
         self.main_title.setStyleSheet("color: #333; background: transparent; border: none;")
 
         # Sub Title (Usage Stats)
         self.sub_title = QLabel(f"현재 사용량: {self.work_used} / {self.work_count}회", self.main_frame)
         self.sub_title.setGeometry(0, 215, 500, 30)
-        self.sub_title.setAlignment(Qt.AlignCenter)
+        self.sub_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.sub_title.setFont(QFont(FONT_FAMILY, 11))
         self.sub_title.setStyleSheet("color: #666; background: transparent; border: none;")
 
@@ -90,14 +90,14 @@ class SubscriptionRequestDialog(QDialog):
         """
         self.desc_label = QLabel(desc_text.strip(), self.main_frame)
         self.desc_label.setGeometry(50, 260, 400, 60)
-        self.desc_label.setAlignment(Qt.AlignCenter)
+        self.desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.desc_label.setFont(QFont(FONT_FAMILY, 10))
         self.desc_label.setStyleSheet("color: #555; background: transparent; border: none;")
 
         # Message Input
         self.msg_label = QLabel("신청 메시지 (선택)", self.main_frame)
         self.msg_label.setGeometry(50, 330, 200, 20)
-        self.msg_label.setFont(QFont(FONT_FAMILY, 10, QFont.Bold))
+        self.msg_label.setFont(QFont(FONT_FAMILY, 10, QFont.Weight.Bold))
         self.msg_label.setStyleSheet("color: #333; background: transparent; border: none;")
 
         self.message_edit = QTextEdit(self.main_frame)
@@ -121,8 +121,8 @@ class SubscriptionRequestDialog(QDialog):
         # Submit Button
         self.submit_btn = QPushButton("구독 신청하기", self.main_frame)
         self.submit_btn.setGeometry(50, 490, 400, 50)
-        self.submit_btn.setFont(QFont(FONT_FAMILY, 12, QFont.Bold))
-        self.submit_btn.setCursor(Qt.PointingHandCursor)
+        self.submit_btn.setFont(QFont(FONT_FAMILY, 12, QFont.Weight.Bold))
+        self.submit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.submit_btn.setStyleSheet("""
             QPushButton {
                 background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #e31639, stop:1 #ff4081);
@@ -143,7 +143,7 @@ class SubscriptionRequestDialog(QDialog):
         # Footer
         self.footer = QLabel("문의: help@ssmaker.com", self.main_frame)
         self.footer.setGeometry(0, 560, 500, 20)
-        self.footer.setAlignment(Qt.AlignCenter)
+        self.footer.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.footer.setFont(QFont(FONT_FAMILY, 9))
         self.footer.setStyleSheet("color: #999; background: transparent; border: none;")
 

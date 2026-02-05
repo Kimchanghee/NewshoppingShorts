@@ -21,18 +21,50 @@ logger = get_logger(__name__)
 
 def create_subtitle_clips_for_speed(app, video_duration: float):
     """Generate subtitle clips optimized for speed adjustments."""
-    logger.info(f"[Subtitles-Speed] Generating captions for {video_duration:.2f}s video")
+    logger.info("[자막 생성] 영상 길이: %.2f초, 자막 세그먼트: %d개",
+                video_duration,
+                len(app._per_line_tts) if hasattr(app, '_per_line_tts') and app._per_line_tts else 0)
+
+    # Log segment timing details
+    if hasattr(app, '_per_line_tts') and app._per_line_tts:
+        for i, entry in enumerate(app._per_line_tts):
+            if isinstance(entry, dict):
+                text_preview = (entry.get('text', '') or '')[:20]
+                start = entry.get('start', 0)
+                end = entry.get('end', 0)
+                logger.info("  자막 #%d: %.2f~%.2fs '%s'", i + 1, start, end, text_preview)
 
     try:
         _ensure_gemini_timestamps_synced(app)
     except (ValueError, TypeError, KeyError, AttributeError) as sync_exc:
-        logger.warning(f"[Subtitles-Speed] Gemini sync skipped: {sync_exc}")
+        logger.warning("[자막 생성] Gemini 싱크 스킵: %s", sync_exc)
+
+    # Post-sync validation: log final timing state before clip creation
+    sync_info = getattr(app, 'tts_sync_info', {}) or {}
+    final_source = sync_info.get('timestamps_source', 'unknown') if isinstance(sync_info, dict) else 'unknown'
+    logger.info("[자막 싱크 검증] 타이밍 소스: %s", final_source)
+    if hasattr(app, '_per_line_tts') and app._per_line_tts:
+        seg_count = len(app._per_line_tts)
+        first = app._per_line_tts[0] if app._per_line_tts else {}
+        last = app._per_line_tts[-1] if app._per_line_tts else {}
+        first_start = first.get('start', 0) if isinstance(first, dict) else 0
+        last_end = last.get('end', 0) if isinstance(last, dict) else 0
+        coverage = last_end - first_start
+        gap = video_duration - last_end if last_end > 0 else video_duration
+        logger.info("[자막 싱크 검증] 세그먼트: %d개, 범위: %.3f~%.3fs (커버리지: %.1fs), 영상 끝까지 여백: %.1fs",
+                    seg_count, first_start, last_end, coverage, gap)
+        # Warn if subtitles end significantly before video ends (possible sync issue)
+        if gap > 3.0 and coverage > 0:
+            logger.warning("[자막 싱크 경고] 자막이 영상보다 %.1f초 일찍 끝남 - 싱크 확인 필요", gap)
+        # Warn if subtitles extend beyond video duration
+        if last_end > video_duration + 0.5:
+            logger.warning("[자막 싱크 경고] 자막이 영상보다 %.1f초 넘어감", last_end - video_duration)
 
     clips = create_subtitle_clips_improved(app, video_duration)
     if clips:
-        logger.info(f"[Subtitles-Speed] Prepared {len(clips)} subtitle clips for burn-in")
+        logger.info("[자막 생성] 자막 클립 %d개 생성 완료", len(clips))
     else:
-        logger.warning("[Subtitles-Speed] No subtitle clips generated")
+        logger.warning("[자막 생성] 자막 클립 생성 실패 (0개)")
     return clips
 
 
@@ -201,7 +233,7 @@ def _merge_gemini_timestamps_into_metadata(app, subtitle_segments, timestamps):
             if ts_idx is not None:
                 timestamps_by_idx[ts_idx] = ts
 
-    total_entries = len(subtitle_segments) if subtitle_segments else max(len(per_line), len(timestamps))
+    total_entries = len(subtitle_segments) if subtitle_segments else max(len(per_line or []), len(timestamps or []))
     if total_entries == 0:
         return
 
@@ -212,7 +244,7 @@ def _merge_gemini_timestamps_into_metadata(app, subtitle_segments, timestamps):
     last_end = 0.0
 
     for idx in range(total_entries):
-        if idx < len(per_line) and isinstance(per_line[idx], dict):
+        if per_line and idx < len(per_line) and isinstance(per_line[idx], dict):
             base = dict(per_line[idx])
         elif per_line and isinstance(per_line[-1], dict):
             base = dict(per_line[-1])
@@ -225,7 +257,7 @@ def _merge_gemini_timestamps_into_metadata(app, subtitle_segments, timestamps):
 
         base["idx"] = idx
 
-        if idx < len(subtitle_segments):
+        if subtitle_segments and idx < len(subtitle_segments):
             base["text"] = subtitle_segments[idx].strip()
         elif idx in timestamps_by_idx and timestamps_by_idx[idx].get("text"):
             base["text"] = str(timestamps_by_idx[idx]["text"]).strip()

@@ -10,6 +10,7 @@ import gc
 import time
 import shutil
 import tempfile
+import traceback
 import subprocess
 from datetime import datetime
 from typing import List
@@ -735,15 +736,22 @@ def _process_single_video(app, url, current_number, total_urls):
         )
 
     current_step = "download"
+    _stage_times = {}  # Track elapsed time per stage
 
     try:
-        # 1. Download the source clip.
+        # ===============================================================
+        # STAGE 1: Download
+        # ===============================================================
+        _stage_start = time.time()
         _set_processing_step(app, url, "다운로드 중")
         app.update_progress_state(
             "download", "processing", 5, "현재 원본 동영상을 찾고 있습니다."
         )
         app.update_step_progress("download", 20)
-        app.add_log(f"📥 [{current_number}/{total_urls}] 영상 다운로드 중...")
+        logger.info("=" * 70)
+        logger.info("[STAGE 1/5] 다운로드 시작 - [%d/%d] %s", current_number, total_urls, url[:80])
+        logger.info("=" * 70)
+        app.add_log(f"[다운로드] [{current_number}/{total_urls}] 영상 다운로드 중...")
 
         # 저장 폴더 변경 시나 기존 다운로드 파일이 없으면 재다운로드
         need_redownload = (
@@ -812,38 +820,67 @@ def _process_single_video(app, url, current_number, total_urls):
                 logger.warning("[세션] 저장 실패: %s", session_err)
             return
 
+        _stage_times['download'] = time.time() - _stage_start
+        logger.info("[STAGE 1 완료] 다운로드 소요: %.1f초", _stage_times['download'])
         app.update_progress_state("download", "completed", 100, "원본 영상 확보 완료!")
         app.update_step_progress("download", 100)
 
-        # 2. Analyze the clip with the AI helper.
+        # ===============================================================
+        # STAGE 2: AI Analysis
+        # ===============================================================
+        _stage_start = time.time()
         current_step = "analysis"
         _set_processing_step(app, url, "분석 중")
         app.update_progress_state(
             "analysis", "processing", 5, "동영상을 분석하고 있습니다."
         )
         app.update_step_progress("analysis", 20)
+        logger.info("=" * 70)
+        logger.info("[STAGE 2/5] AI 분석 시작 - 영상 길이: %.1f초", original_video_duration)
+        logger.info("=" * 70)
         app.add_log(
-            f"[AI] [{current_number}/{total_urls}] 영상 분석 중... ({original_video_duration:.1f}s)"
+            f"[분석] [{current_number}/{total_urls}] AI 영상 분석 중... ({original_video_duration:.1f}s)"
         )
         _analyze_video_for_batch(app)
+        _stage_times['analysis'] = time.time() - _stage_start
+        logger.info("[STAGE 2 완료] AI 분석 소요: %.1f초", _stage_times['analysis'])
+        # Log analysis result summary
+        script_count = len(app.analysis_result.get('script', [])) if isinstance(app.analysis_result, dict) else 0
+        subtitle_count = len(app.analysis_result.get('subtitle_positions', [])) if isinstance(app.analysis_result, dict) else 0
+        logger.info("  대본 라인: %d개, OCR 자막 영역: %d개", script_count, subtitle_count)
         app.update_progress_state("analysis", "completed", 100, None)
         app.update_step_progress("analysis", 100)
 
-        # 3. Translate / adapt the generated script.
+        # ===============================================================
+        # STAGE 3: Translation
+        # ===============================================================
+        _stage_start = time.time()
         current_step = "translation"
         _set_processing_step(app, url, "번역 중")
         app.update_progress_state(
             "translation", "processing", 5, "번역과 각색을 하고 있습니다."
         )
         app.update_step_progress("translation", 20)
-        app.add_log(f"[SCRIPT] [{current_number}/{total_urls}] 대본 정리 중...")
+        logger.info("=" * 70)
+        logger.info("[STAGE 3/5] 번역/각색 시작")
+        logger.info("=" * 70)
+        app.add_log(f"[번역] [{current_number}/{total_urls}] 대본 번역/각색 중...")
         _translate_script_for_batch(app)
+        _stage_times['translation'] = time.time() - _stage_start
+        translation_len = len(app.translation_result) if app.translation_result else 0
+        logger.info("[STAGE 3 완료] 번역 소요: %.1f초, 결과: %d자", _stage_times['translation'], translation_len)
+        if app.translation_result:
+            preview = app.translation_result[:80].replace('\n', ' ')
+            logger.info("  번역 미리보기: %s...", preview)
         app.update_progress_state("translation", "completed", 100, None)
         app.update_step_progress("translation", 100)
 
-        # 4. TTS + 자막 생성 (음성마다 개별 계산)
-        # 각 음성마다 Whisper 분석을 통해 독립적인 자막 타이밍 생성
-        logger.debug("[자막 준비] 음성별 개별 타이밍 계산")
+        # ===============================================================
+        # STAGE 4-5: TTS + Video Encoding (per voice)
+        # ===============================================================
+        logger.info("=" * 70)
+        logger.info("[STAGE 4-5] TTS 생성 + 영상 인코딩 (음성별)")
+        logger.info("=" * 70)
 
         # 4. TTS + 5. Final video creation (per voice).
         # 사용자가 실제로 선택한 음성만 사용 (voice_vars에서 체크된 것)
@@ -902,6 +939,10 @@ def _process_single_video(app, url, current_number, total_urls):
             app.fixed_tts_voice = voice
             voice_label = _get_voice_display_name(voice)  # 한글 이름으로 변환
 
+            logger.info("-" * 50)
+            logger.info("[음성 %d/%d] %s (%s)", idx_voice, total_voices, voice_label, voice)
+            logger.info("-" * 50)
+
             # ★ 현재 처리 중인 음성을 진행현황 패널에 표시
             if hasattr(app, "set_active_voice"):
                 app.set_active_voice(voice, idx_voice, total_voices)
@@ -924,7 +965,28 @@ def _process_single_video(app, url, current_number, total_urls):
                 tts_sync_progress,
                 f"{voice_label} 음성 생성 준비 중입니다.",
             )
+            _tts_start = time.time()
+            logger.info("[STAGE 4] TTS 생성 시작 - %s", voice_label)
             _generate_tts_for_batch(app, voice)
+            _tts_elapsed = time.time() - _tts_start
+            _stage_times[f'tts_{voice_label}'] = _tts_elapsed
+            logger.info("[STAGE 4] TTS 생성 완료 - %.1f초 소요", _tts_elapsed)
+            # Log TTS result summary
+            tts_segments = len(app._per_line_tts) if hasattr(app, '_per_line_tts') and app._per_line_tts else 0
+            tts_duration = (app.tts_sync_info or {}).get('speeded_duration', 0)
+            ts_source = (app.tts_sync_info or {}).get('timestamps_source', 'unknown')
+            audio_offset = (app.tts_sync_info or {}).get('audio_start_offset', 0)
+            logger.info("  TTS 세그먼트: %d개, 배속 후 길이: %.1f초", tts_segments, tts_duration)
+            logger.info("  타이밍 소스: %s, 앞무음 오프셋: %.3f초", ts_source, audio_offset)
+            # 자막 싱크 검증 로그
+            if hasattr(app, '_per_line_tts') and app._per_line_tts:
+                first_seg = app._per_line_tts[0] if app._per_line_tts else {}
+                last_seg = app._per_line_tts[-1] if app._per_line_tts else {}
+                first_start = first_seg.get('start', 0) if isinstance(first_seg, dict) else 0
+                last_end = last_seg.get('end', 0) if isinstance(last_seg, dict) else 0
+                coverage = last_end - first_start if last_end > first_start else 0
+                logger.info("  [싱크 검증] 자막 범위: %.3f초 ~ %.3f초 (커버리지: %.1f초 / 영상: %.1f초)",
+                           first_start, last_end, coverage, original_video_duration)
             after_voice_progress = max(
                 voice_progress, int((idx_voice / total_voices) * 100)
             )
@@ -960,9 +1022,14 @@ def _process_single_video(app, url, current_number, total_urls):
                 f"{voice_label} 음성으로 영상을 준비 중입니다.",
             )
             app.update_step_progress("video", 20)
+            _encode_start = time.time()
+            logger.info("[STAGE 5] 영상 인코딩 시작 - %s", voice_label)
             _create_final_video_for_batch(
                 app, voice, idx_voice, total_voices, current_number, total_urls
             )
+            _encode_elapsed = time.time() - _encode_start
+            _stage_times[f'encode_{voice_label}'] = _encode_elapsed
+            logger.info("[STAGE 5] 영상 인코딩 완료 - %.1f초 소요", _encode_elapsed)
             after_video_progress = max(
                 video_progress, int((idx_voice / total_voices) * 100)
             )
@@ -987,7 +1054,14 @@ def _process_single_video(app, url, current_number, total_urls):
             f"영상 렌더링 단계가 완료되었습니다. (작업 {current_number}/{total_urls})",
         )
 
-        # URL 1개 처리 완료 - 비용 요약 출력
+        # URL 1개 처리 완료 - 총 소요 시간 + 비용 요약 출력
+        _total_elapsed = sum(_stage_times.values())
+        logger.info("=" * 70)
+        logger.info("[처리 완료] URL %d/%d - 전체 소요: %.1f초", current_number, total_urls, _total_elapsed)
+        for stage_name, stage_time in _stage_times.items():
+            logger.info("  %s: %.1f초", stage_name, stage_time)
+        logger.info("=" * 70)
+        app.add_log(f"[완료] [{current_number}/{total_urls}] 영상 처리 완료 ({_total_elapsed:.0f}초 소요)")
         app.token_calculator.log_session_summary(
             f"영상 완성 [{current_number}/{total_urls}]"
         )
@@ -995,7 +1069,9 @@ def _process_single_video(app, url, current_number, total_urls):
         app.token_calculator.reset_session()
 
     except Exception as exc:
-        # traceback 출력 제거 - 한글 메시지만 표시
+        # 디버깅용 전체 스택 트레이스 출력
+        logger.error("[처리 오류 스택트레이스]")
+        traceback.print_exc()
         ui_controller.write_error_log(exc)
         error_msg = _translate_error_message(str(exc))
         error_lower = str(exc).lower()
@@ -1106,27 +1182,23 @@ def _create_final_video_for_batch(
         if abs(current_ratio - target_ratio) > 0.01:  # 비율이 다르면 조정
             # 원본이 더 넓으면(가로 영상) 좌우 crop
             if current_ratio < target_ratio:
-                # 높이 기준으로 맞추고 좌우 crop
                 new_height = video.h
                 new_width = int(new_height / target_ratio)
                 x_center = video.w / 2
                 x1 = int(x_center - new_width / 2)
                 video = video.crop(x1=x1, width=new_width)
-                logger.debug("  가로 crop: %dx%d", video.w, video.h)
-            # 원본이 더 좁으면(이미 세로) 상하 crop
+                logger.info("  가로 crop: %dx%d -> %dx%d", video.w + (video.w - new_width), video.h, video.w, video.h)
             else:
-                # 너비 기준으로 맞추고 상하 crop
                 new_width = video.w
                 new_height = int(new_width * target_ratio)
                 y_center = video.h / 2
                 y1 = int(y_center - new_height / 2)
                 video = video.crop(y1=y1, height=new_height)
-                logger.debug("  세로 crop: %dx%d", video.w, video.h)
+                logger.info("  세로 crop: %dx%d", video.w, video.h)
 
-        # 최종 크기로 리사이즈 (1080x1920)
         if video.w != target_width or video.h != target_height:
             video = video.resize((target_width, target_height))
-            logger.debug("  최종 크기: %dx%d", video.w, video.h)
+            logger.info("  리사이즈 완료: %dx%d", video.w, video.h)
 
         # 자막 생성을 위해 변환된 크기를 캐시
         app.cached_video_width = target_width
@@ -1139,7 +1211,7 @@ def _create_final_video_for_batch(
             video = video.fx(vfx.mirror_x)
 
         # 중국어 자막 블러
-        logger.debug("  중국어 자막 블러 처리...")
+        logger.info("[블러 처리] 중국어 자막 블러 적용 중...")
         cached_last_frame = (
             None  # 마지막 프레임 캐시 (블러 처리된 VideoClip의 파일 참조 문제 방지)
         )
@@ -1389,10 +1461,10 @@ def _create_final_video_for_batch(
                     hasattr(app, "_cached_subtitle_clips")
                     and app._cached_subtitle_clips is not None
                 ):
-                    logger.debug("[Subtitles] 동일 음성 내 캐시된 자막 재사용")
+                    logger.info("[자막] 동일 음성 내 캐시된 자막 재사용")
                     subtitle_clips = app._cached_subtitle_clips
                 else:
-                    logger.debug("[Subtitles] 현재 음성에 맞춰 자막 타이밍 계산 중...")
+                    logger.info("[자막] 현재 음성(%s)에 맞춰 자막 타이밍 계산 중...", voice_label)
 
                     # ========== [SYNC DEBUG] 자막 생성 전 오디오/영상 정보 ==========
                     logger.debug("=" * 70)
@@ -1468,7 +1540,7 @@ def _create_final_video_for_batch(
                 )
 
                 if subtitle_clips and len(subtitle_clips) > 0:
-                    logger.debug("  Generated subtitles: %d", len(subtitle_clips))
+                    logger.info("[자막] 자막 클립 %d개 생성 완료, 영상에 오버레이 중...", len(subtitle_clips))
                     final_video = CompositeVideoClip([final_video] + subtitle_clips)
                     final_video.fps = original_fps
                     subtitle_applied = True

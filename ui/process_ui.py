@@ -19,7 +19,7 @@ if USE_MODERN_UI:
     from ui.process_ui_modern import ModernProcessUi as Process_Ui
 else:
     # 기존 UI 사용 (레거시 호환)
-    from PyQt5 import QtCore, QtGui, QtWidgets
+    from PyQt6 import QtCore, QtGui, QtWidgets
 
     class Process_Ui(object):
         def setupUi(self, window):

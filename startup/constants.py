@@ -35,7 +35,7 @@ CONNECTIVITY_ENDPOINTS: List[Tuple[str, int, str]] = [
 # optional=True means the program can run without it
 REQUIRED_PACKAGES: List[Tuple[str, str, bool]] = [
     # UI and networking
-    ("PyQt5", "PyQt5", False),
+    ("PyQt6", "PyQt6", False),
     ("requests", "requests", False),
     # Basic packages
     ("psutil", "psutil", False),

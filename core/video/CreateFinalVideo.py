@@ -82,7 +82,7 @@ def create_final_video_thread(app):
 
         logger.debug("?먮낯 鍮꾨뵒?? %s", app.source_video)
 
-        logger.debug("TTS ?뚯씪 ?? %s", len(app._per_line_tts))
+        logger.debug("TTS ?뚯씪 ?? %s", len(app._per_line_tts) if app._per_line_tts else 0)
 
         logger.debug("?좏깮??TTS ?뚯꽦: %s", selected_voice)
 
@@ -1283,11 +1283,11 @@ def _resolve_video_dimensions(app):
 
         return int(width), int(height)
 
-    if app.video_source.get() == "local":
-        source_video = app.local_file_path
+    if getattr(app, 'video_source', 'none') == "local":
+        source_video = getattr(app, 'local_file_path', '')
 
     else:
-        source_video = app._temp_downloaded_file
+        source_video = getattr(app, '_temp_downloaded_file', None)
 
     video_width = 1080
 
@@ -1465,7 +1465,7 @@ def _build_timed_subtitle_segments(app, video_duration):
             # Skip 조건 3: 잘못된 타임스탬프 (end <= start)
 
             if end <= start:
-                if idx == len(per_line):
+                if per_line and idx == len(per_line):
                     # 마지막 세그먼트가 0초 길이로 눌려 CTA가 사라지는 경우 복구
 
                     min_tail = 0.6  # CTA 노출을 위한 최소 노출 시간
