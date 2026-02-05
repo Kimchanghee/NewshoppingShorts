@@ -86,9 +86,9 @@ def create_final_video_thread(app):
 
         logger.debug("?좏깮??TTS ?뚯꽦: %s", selected_voice)
 
-        logger.debug("醫뚯슦 諛섏쟾 ?곸슜: %s", app.mirror_video.get())
+        logger.debug("醫뚯슦 諛섏쟾 ?곸슜: %s", getattr(app, "mirror_video", False))
 
-        logger.debug("?먮쭑 ?앹꽦: %s", app.add_subtitles.get())
+        logger.debug("?먮쭑 ?앹꽦: %s", getattr(app, "add_subtitles", True))
 
         app.update_progress_state("video", "processing", 10)
 
@@ -116,7 +116,7 @@ def create_final_video_thread(app):
 
         # 醫뚯슦 諛섏쟾 泥섎━
 
-        if app.mirror_video.get():
+        if getattr(app, "mirror_video", False):
             logger.debug("[鍮꾨뵒??泥섎━] 醫뚯슦 諛섏쟾 ?곸슜")
 
             video = video.fx(vfx.mirror_x)
@@ -219,7 +219,7 @@ def create_final_video_thread(app):
 
         subtitle_applied = False
 
-        if app.add_subtitles.get():
+        if getattr(app, "add_subtitles", True):
             logger.debug("[鍮꾨뵒??泥섎━] ?먮쭑 ?앹꽦 ?쒕룄 以?..")
 
             try:
@@ -387,10 +387,10 @@ def create_final_video_thread(app):
 
         message_highlights = []
 
-        if app.mirror_video.get():
+        if getattr(app, "mirror_video", False):
             message_highlights.append("- Mirroring applied")
 
-        if app.add_subtitles.get():
+        if getattr(app, "add_subtitles", True):
             message_highlights.append("- Korean subtitles burned-in")
 
         if selected_voice:

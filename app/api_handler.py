@@ -45,7 +45,8 @@ class APIHandler:
 
     def _migrate_legacy_keys(self):
         try:
-            api_keys_file = getattr(self.app, "api_keys_file", None)
+            state = getattr(self.app, "state", None)
+            api_keys_file = getattr(state, "api_keys_file", None) if state else None
             if not api_keys_file or not os.path.exists(api_keys_file):
                 return
 

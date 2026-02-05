@@ -14,7 +14,7 @@ from ui.design_system_v2 import get_design_system, get_color
 
 
 class SpinningLoader(QWidget):
-    """Custom spinning loader with gradient ring"""
+    """Custom spinning loader with gradient ring (optimized)"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -22,51 +22,63 @@ class SpinningLoader(QWidget):
         self.setFixedSize(80, 80)
         self._rotation = 0
 
-        # Animation for rotation
+        # 색상 캐싱 (매 프레임 get_color 호출 방지)
+        self._primary_color = QColor(get_color('primary'))
+        self._secondary_color = QColor(get_color('secondary'))
+        self._glow_colors = [
+            QColor(get_color('primary') + "40"),
+            QColor(get_color('primary') + "20"),
+            QColor(get_color('primary') + "00"),
+        ]
+
+        # Animation for rotation (started on showEvent)
         self.rotation_timer = QTimer(self)
         self.rotation_timer.timeout.connect(self._update_rotation)
-        self.rotation_timer.start(16)  # ~60fps
 
     def _update_rotation(self):
         self._rotation = (self._rotation + 4) % 360
         self.update()
 
+    def showEvent(self, event):
+        super().showEvent(event)
+        if not self.rotation_timer.isActive():
+            self.rotation_timer.start(16)
+
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        self.rotation_timer.stop()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        # Center point
         center = QPoint(40, 40)
 
-        # Save state
         painter.save()
         painter.translate(center)
         painter.rotate(self._rotation)
 
-        # Create gradient for the ring
+        # 캐싱된 색상 사용
         gradient = QLinearGradient(-40, -40, 40, 40)
-        gradient.setColorAt(0.0, QColor(get_color('primary')))
-        gradient.setColorAt(0.5, QColor(get_color('secondary')))
-        gradient.setColorAt(1.0, QColor(get_color('primary')))
+        gradient.setColorAt(0.0, self._primary_color)
+        gradient.setColorAt(0.5, self._secondary_color)
+        gradient.setColorAt(1.0, self._primary_color)
 
-        # Draw spinning arc segments
         pen = QPen(gradient, 4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
         painter.setPen(pen)
 
-        # Draw 3 arcs with gaps for spinning effect
         for i in range(3):
             start_angle = i * 120 * 16
             span_angle = 80 * 16
             painter.drawArc(-30, -30, 60, 60, start_angle, span_angle)
 
-        # Restore state
         painter.restore()
 
-        # Draw inner glow circle
+        # 캐싱된 glow 색상 사용
         glow_gradient = QRadialGradient(center, 25)
-        glow_gradient.setColorAt(0.0, QColor(get_color('primary') + "40"))
-        glow_gradient.setColorAt(0.7, QColor(get_color('primary') + "20"))
-        glow_gradient.setColorAt(1.0, QColor(get_color('primary') + "00"))
+        glow_gradient.setColorAt(0.0, self._glow_colors[0])
+        glow_gradient.setColorAt(0.7, self._glow_colors[1])
+        glow_gradient.setColorAt(1.0, self._glow_colors[2])
 
         painter.setBrush(glow_gradient)
         painter.setPen(Qt.PenStyle.NoPen)
@@ -74,7 +86,7 @@ class SpinningLoader(QWidget):
 
 
 class PulsingDot(QWidget):
-    """Pulsing dot indicator"""
+    """Pulsing dot indicator (optimized)"""
 
     def __init__(self, parent=None, delay=0):
         super().__init__(parent)
@@ -82,6 +94,8 @@ class PulsingDot(QWidget):
         self.setFixedSize(12, 12)
         self._opacity = 0.3
         self._growing = True
+        self._base_color = QColor(get_color('primary'))
+        self.pulse_timer = None
 
         # Delayed start for staggered effect
         QTimer.singleShot(delay, self._start_animation)
@@ -102,11 +116,21 @@ class PulsingDot(QWidget):
                 self._growing = True
         self.update()
 
+    def hideEvent(self, event):
+        super().hideEvent(event)
+        if self.pulse_timer:
+            self.pulse_timer.stop()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        if self.pulse_timer and not self.pulse_timer.isActive():
+            self.pulse_timer.start(30)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        color = QColor(get_color('primary'))
+        color = QColor(self._base_color)
         color.setAlphaF(self._opacity)
 
         painter.setBrush(color)

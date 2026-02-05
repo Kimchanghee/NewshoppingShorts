@@ -168,6 +168,81 @@ class QueueManager:
             self.gui.url_status_message[url] = message
         self.update_url_listbox()
 
+    # ----------------------- URL input helpers -----------------------
+    def _enqueue_urls(self, text: str, source_label: str) -> tuple:
+        """Extract URLs from text and add non-duplicates to the queue.
+
+        Returns (added_count, duplicate_count).
+        """
+        urls = URL_PATTERN.findall(text)
+        if not urls:
+            return 0, 0
+
+        added_count = 0
+        duplicate_count = 0
+
+        for raw_url in urls:
+            url = raw_url.strip()
+            if url in self.gui.url_queue or url in self.gui.url_status:
+                duplicate_count += 1
+                continue
+            self.gui.url_queue.append(url)
+            self.gui.url_status[url] = "waiting"
+            self.gui.url_timestamps[url] = datetime.now()
+            added_count += 1
+
+        self.update_url_listbox()
+        self.update_queue_count()
+
+        if added_count > 0:
+            msg = f"{source_label} {added_count}개 URL이 추가되었습니다."
+            if duplicate_count > 0:
+                msg += f"\n({duplicate_count}개 중복 URL은 제외)"
+            show_info(self.gui, "완료", msg)
+            self.add_log(f"{source_label} URL {added_count}개 추가됨")
+        elif duplicate_count > 0:
+            show_warning(self.gui, "안내", f"모든 URL이 이미 대기열에 있습니다. ({duplicate_count}개)")
+
+        return added_count, duplicate_count
+
+    def add_url_from_entry(self):
+        """Extract URLs from the entry widget and add to queue."""
+        url_entry = getattr(self.gui, "url_entry", None)
+        if url_entry is None:
+            show_warning(self.gui, "오류", "URL 입력창을 찾을 수 없습니다.")
+            return
+
+        text = url_entry.toPlainText().strip()
+        if not text:
+            show_warning(self.gui, "안내", "URL을 입력해주세요.")
+            return
+
+        urls = URL_PATTERN.findall(text)
+        if not urls:
+            show_warning(self.gui, "안내", "유효한 URL을 찾을 수 없습니다.")
+            return
+
+        self._enqueue_urls(text, "")
+        url_entry.clear()
+
+    def paste_and_extract(self):
+        """Extract URLs from clipboard and add to queue."""
+        from PyQt6.QtWidgets import QApplication
+
+        clipboard = QApplication.clipboard()
+        text = clipboard.text()
+
+        if not text or not text.strip():
+            show_warning(self.gui, "안내", "클립보드가 비어 있습니다.")
+            return
+
+        urls = URL_PATTERN.findall(text)
+        if not urls:
+            show_warning(self.gui, "안내", "클립보드에서 유효한 URL을 찾을 수 없습니다.")
+            return
+
+        self._enqueue_urls(text, "클립보드에서")
+
     # ----------------------- logging -----------------------
     def add_log(self, message: str, level: str = "info"):
         timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

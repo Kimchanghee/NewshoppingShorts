@@ -10,31 +10,43 @@ Features:
 - Professional polish
 """
 
+from typing import Optional
+
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QFrame, QPushButton, QWidget
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QPainter, QLinearGradient, QColor, QFont
+from PyQt6.QtGui import QPainter, QLinearGradient, QColor, QFont, QPixmap
 
 from ui.components.base_widget_enhanced import ThemedMixin, create_button
 
 
 class GradientAccent(QWidget):
-    """Diagonal gradient accent strip"""
+    """Diagonal gradient accent strip with pixmap caching"""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setFixedHeight(4)
+        self._cached_pixmap: Optional[QPixmap] = None
+        self._cached_width = 0
 
     def paintEvent(self, event):
+        w = self.width()
+        if w <= 0:
+            return
+
+        # 폭이 변경된 경우에만 pixmap 재생성
+        if self._cached_pixmap is None or self._cached_width != w:
+            self._cached_width = w
+            self._cached_pixmap = QPixmap(w, 4)
+            pm_painter = QPainter(self._cached_pixmap)
+            gradient = QLinearGradient(0, 0, w, 0)
+            gradient.setColorAt(0, QColor("#FF1744"))
+            gradient.setColorAt(0.5, QColor("#FF4D6A"))
+            gradient.setColorAt(1, QColor("#FF6B9D"))
+            pm_painter.fillRect(0, 0, w, 4, gradient)
+            pm_painter.end()
+
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-
-        # Diagonal gradient
-        gradient = QLinearGradient(0, 0, self.width(), 0)
-        gradient.setColorAt(0, QColor("#FF1744"))
-        gradient.setColorAt(0.5, QColor("#FF4D6A"))
-        gradient.setColorAt(1, QColor("#FF6B9D"))
-
-        painter.fillRect(self.rect(), gradient)
+        painter.drawPixmap(0, 0, self._cached_pixmap)
 
 
 class EnhancedHeaderPanel(QFrame, ThemedMixin):

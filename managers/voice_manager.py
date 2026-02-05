@@ -62,6 +62,12 @@ class SimpleBoolVar:
     def set(self, value: bool):
         self._value = bool(value)
 
+    def __bool__(self) -> bool:
+        return self._value
+
+    def __repr__(self) -> str:
+        return f"SimpleBoolVar({self._value})"
+
 
 class VoiceManager:
     """Manager class for handling all voice-related operations."""

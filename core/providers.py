@@ -17,7 +17,11 @@ logger = get_logger(__name__)
 class VertexGeminiProvider:
     """Gemini-only provider. Vertex AI is disabled."""
 
+    # Sentinel for "no API key configured"
+    NO_API_KEY_ERROR = "NO_API_KEY"
+
     def __init__(self):
+        self._api_key_configured = False
         self.gemini_client = self._init_gemini()
 
     def _get_first_api_key(self) -> Optional[str]:
@@ -54,14 +58,22 @@ class VertexGeminiProvider:
             key = self._get_first_api_key()
             if not key:
                 logger.warning("[Provider] Gemini API 키가 없습니다. 설정에서 API 키를 등록해주세요.")
+                self._api_key_configured = False
                 return None
 
             client = genai.Client(api_key=key)
+            self._api_key_configured = True
             logger.info(f"[Provider] Gemini 초기화 완료 (모델: {config.GEMINI_TEXT_MODEL})")
             return client
         except Exception as e:
             logger.warning(f"[Provider] Gemini 초기화 실패: {e}")
+            self._api_key_configured = False
             return None
+
+    @property
+    def has_api_key(self) -> bool:
+        """API 키가 등록되어 있는지 여부"""
+        return self._api_key_configured
 
     def _call_gemini(self, prompt: str) -> Optional[str]:
         """Call Gemini API."""
@@ -79,8 +91,10 @@ class VertexGeminiProvider:
 
     def generate_text(self, prompt: str) -> str:
         """Generate text using Gemini API."""
+        if not self._api_key_configured:
+            return self.NO_API_KEY_ERROR
         text = self._call_gemini(prompt)
         if text:
             return text
-        return "Gemini API 응답 없음. API 키를 확인해주세요."
+        return "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해주세요."
 
