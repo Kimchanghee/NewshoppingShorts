@@ -3,6 +3,7 @@ Settings tab implementation (PyQt6).
 Provides API key management, output folder settings, theme settings, and app info.
 Uses design system v2 for consistent styling.
 """
+import os
 import re
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
@@ -161,7 +162,7 @@ class SettingsTab(QWidget, ThemedMixin):
         content_layout.addWidget(output_section)
         
         # =================== SECTION: API Key Management ===================
-        self.api_section = SettingsSection("API 키 설정 (최대 20개)")
+        self.api_section = SettingsSection("API 키 설정 (최대 8개)")
 
         # 설명 라벨
         desc_label = QLabel("여러 개의 API 키를 등록하면 자동으로 로테이션됩니다. Rate Limit 발생 시 다음 키로 자동 전환됩니다.")
@@ -169,36 +170,9 @@ class SettingsTab(QWidget, ThemedMixin):
         desc_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;")
         self.api_section.content_layout.addWidget(desc_label)
 
-        # API 키 입력 필드들 (20개)
+        # API 키 입력 필드들 (8개)
         self.api_key_inputs = []
-        MAX_API_KEYS = 20
-
-        # 스크롤 영역 (API 키 입력 필드용)
-        api_scroll = QScrollArea()
-        api_scroll.setWidgetResizable(True)
-        api_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        api_scroll.setMaximumHeight(300)
-        api_scroll.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: transparent;
-                border: none;
-            }}
-            QScrollBar:vertical {{
-                background-color: {c.surface_variant};
-                width: 8px;
-                border-radius: 4px;
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {c.border};
-                border-radius: 4px;
-                min-height: 20px;
-            }}
-        """)
-
-        api_keys_container = QWidget()
-        api_keys_layout = QVBoxLayout(api_keys_container)
-        api_keys_layout.setContentsMargins(0, 0, 8, 0)
-        api_keys_layout.setSpacing(8)
+        MAX_API_KEYS = 8
 
         input_style = f"""
             QLineEdit {{
@@ -216,14 +190,15 @@ class SettingsTab(QWidget, ThemedMixin):
 
         for i in range(1, MAX_API_KEYS + 1):
             row_widget = QWidget()
+            row_widget.setStyleSheet("background: transparent; border: none;")
             row_layout = QHBoxLayout(row_widget)
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(8)
 
             # 라벨
-            label = QLabel(f"키 {i:02d}")
-            label.setFixedWidth(45)
-            label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; font-size: 11px;")
+            label = QLabel(f"키 {i}")
+            label.setFixedWidth(30)
+            label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px;")
             row_layout.addWidget(label)
 
             # 입력 필드
@@ -251,11 +226,8 @@ class SettingsTab(QWidget, ThemedMixin):
             toggle_btn.clicked.connect(lambda checked, inp=key_input: self._toggle_key_visibility(inp))
             row_layout.addWidget(toggle_btn)
 
-            api_keys_layout.addWidget(row_widget)
+            self.api_section.content_layout.addWidget(row_widget)
             self.api_key_inputs.append(key_input)
-
-        api_scroll.setWidget(api_keys_container)
-        self.api_section.content_layout.addWidget(api_scroll)
 
         # 버튼 영역
         btn_container = QWidget()
@@ -337,9 +309,15 @@ class SettingsTab(QWidget, ThemedMixin):
         # =================== SECTION: App Info ===================
         info_section = SettingsSection("앱 정보")
 
-        version_label = QLabel("버전: 1.0.0")
+        version_info = self._load_version_info()
+        version_label = QLabel(f"버전: {version_info.get('version', '알 수 없음')}")
         version_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
         info_section.content_layout.addWidget(version_label)
+
+        updated_at = version_info.get('updated_at', version_info.get('build_date', '알 수 없음'))
+        update_label = QLabel(f"업데이트: {updated_at}")
+        update_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        info_section.content_layout.addWidget(update_label)
 
         dev_label = QLabel("개발: Shopping Shorts Team")
         dev_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
@@ -384,15 +362,15 @@ class SettingsTab(QWidget, ThemedMixin):
     def _select_folder(self):
         """Open folder selection dialog"""
         folder = QFileDialog.getExistingDirectory(
-            self, "출력 폴더 선택", 
+            self, "출력 폴더 선택",
             self.folder_input.text() or ""
         )
         if folder:
             self.folder_input.setText(folder)
             if self.gui:
                 self.gui.output_folder_path = folder
-                if hasattr(self.gui, 'output_folder_label') and self.gui.output_folder_label:
-                    self.gui.output_folder_label.setText(folder)
+            from managers.settings_manager import get_settings_manager
+            get_settings_manager().set_output_folder(folder)
     
     def _show_api_status(self):
         """Show API status dialog"""
@@ -410,7 +388,7 @@ class SettingsTab(QWidget, ThemedMixin):
         """저장된 API 키들을 로드하여 입력 필드에 표시"""
         try:
             loaded_count = 0
-            for i in range(1, 21):
+            for i in range(1, 9):
                 key_value = SecretsManager.get_api_key(f"gemini_api_{i}")
                 if key_value and i <= len(self.api_key_inputs):
                     self.api_key_inputs[i - 1].setText(key_value)
@@ -427,58 +405,89 @@ class SettingsTab(QWidget, ThemedMixin):
         self.api_count_label.setText(f"등록된 키: {count}개")
 
     def _save_all_api_keys(self):
-        """모든 API 키 저장"""
-        from ui.components.custom_dialog import show_info, show_warning
+        """모든 API 키 저장 (빈칸 제거 및 당겨서 저장)"""
+        from ui.components.custom_dialog import show_info, show_warning, show_error
 
-        saved_count = 0
-        invalid_keys = []
-        new_keys = {}
-
-        for i, key_input in enumerate(self.api_key_inputs, start=1):
+        # 1. 유효한 키 수집 (빈칸 제거)
+        valid_keys = []
+        invalid_format_keys = []
+        
+        # 현재 입력된 모든 텍스트 확인
+        for i, key_input in enumerate(self.api_key_inputs):
             key_value = key_input.text().strip()
             if not key_value:
                 continue
-
+                
             # 키 형식 검증
             if not GEMINI_API_KEY_PATTERN.match(key_value):
-                invalid_keys.append(i)
+                invalid_format_keys.append(i + 1)
+                # 형식이 잘못돼도 일단 수집하지 않음 (저장하지 않음)
                 continue
+                
+            valid_keys.append(key_value)
 
-            # SecretsManager에 저장
-            try:
-                if SecretsManager.store_api_key(f"gemini_api_{i}", key_value):
-                    saved_count += 1
-                    new_keys[f"api_{i}"] = key_value
-            except Exception as e:
-                from utils.logging_config import get_logger
-                logger = get_logger(__name__)
-                logger.error(f"[Settings] API 키 {i} 저장 실패: {e}")
+        # 형식이 잘못된 키가 있으면 경고하고 중단
+        if invalid_format_keys:
+            show_warning(
+                self,
+                "형식이 올바르지 않은 키",
+                f"다음 위치의 키 형식이 올바르지 않습니다: {invalid_format_keys}\n\n"
+                "Gemini API 키는 'AIza'로 시작해야 합니다.\n"
+                "해당 키를 수정하거나 지운 후 다시 저장해주세요."
+            )
+            return
 
-        # config 업데이트
-        if new_keys:
-            config.GEMINI_API_KEYS = new_keys
+        # 2. UI 업데이트 (앞으로 당기기)
+        # 모든 입력창 초기화
+        for key_input in self.api_key_inputs:
+            key_input.clear()
+            
+        # 유효한 키 순서대로 채우기
+        for i, key_value in enumerate(valid_keys):
+            if i < len(self.api_key_inputs):
+                self.api_key_inputs[i].setText(key_value)
 
-            # APIKeyManager 재초기화
-            if self.gui and hasattr(self.gui, 'api_key_manager'):
-                self.gui.api_key_manager = APIKeyManager(use_secrets_manager=True)
-                # genai client 재초기화
-                if hasattr(self.gui, 'init_client'):
-                    self.gui.init_client()
+        # 3. 저장 및 미사용 슬롯 삭제
+        saved_count = 0
+        new_keys_dict = {}
+        
+        try:
+            # 3-1. 유효한 키 순서대로 저장
+            for i, key_value in enumerate(valid_keys):
+                idx = i + 1  # 1-based index
+                SecretsManager.store_api_key(f"gemini_api_{idx}", key_value)
+                new_keys_dict[f"api_{idx}"] = key_value
+                saved_count += 1
+            
+            # 3-2. 나머지 슬롯(기존에 있었을 수 있는 키) 삭제
+            # valid_keys 개수 다음부터 MAX_API_KEYS(20)까지 삭제
+            MAX_API_KEYS = len(self.api_key_inputs)
+            for i in range(len(valid_keys) + 1, MAX_API_KEYS + 1):
+                SecretsManager.delete_api_key(f"gemini_api_{i}")
+                
+        except Exception as e:
+            from utils.logging_config import get_logger
+            logger = get_logger(__name__)
+            logger.error(f"[Settings] API 키 저장 중 오류 발생: {e}")
+            show_error(self, "저장 오류", f"API 키 저장 중 오류가 발생했습니다:\n{e}")
+            return
+
+        # 4. config 업데이트 및 매니저 재초기화
+        config.GEMINI_API_KEYS = new_keys_dict
+
+        # APIKeyManager 재초기화
+        if self.gui and hasattr(self.gui, 'api_key_manager'):
+            self.gui.api_key_manager = APIKeyManager(use_secrets_manager=True)
+            # genai client 재초기화
+            if hasattr(self.gui, 'init_client'):
+                self.gui.init_client()
 
         self._update_key_count()
 
-        if invalid_keys:
-            show_warning(
-                self,
-                "일부 키 저장 실패",
-                f"저장 완료: {saved_count}개\n"
-                f"잘못된 형식 (키 번호): {invalid_keys}\n\n"
-                "Gemini API 키는 'AIza'로 시작해야 합니다."
-            )
-        elif saved_count > 0:
-            show_info(self, "저장 완료", f"{saved_count}개의 API 키가 저장되었습니다.")
+        if saved_count > 0:
+            show_info(self, "저장 완료", f"총 {saved_count}개의 API 키가 순서대로 정렬되어 저장되었습니다.")
         else:
-            show_warning(self, "저장 실패", "저장할 API 키가 없습니다.")
+            show_info(self, "저장 완료", "모든 API 키가 삭제되었습니다.")
 
     def _clear_all_api_keys(self):
         """모든 API 키 삭제"""
@@ -492,7 +501,7 @@ class SettingsTab(QWidget, ThemedMixin):
             key_input.clear()
 
         # SecretsManager에서 삭제
-        for i in range(1, 21):
+        for i in range(1, 9):
             try:
                 SecretsManager.delete_api_key(f"gemini_api_{i}")
             except Exception:
@@ -504,6 +513,17 @@ class SettingsTab(QWidget, ThemedMixin):
         self._update_key_count()
         show_info(self, "삭제 완료", "모든 API 키가 삭제되었습니다.")
     
+    @staticmethod
+    def _load_version_info() -> dict:
+        """version.json에서 앱 버전 정보 로드"""
+        import json
+        try:
+            version_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "version.json")
+            with open(version_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except Exception:
+            return {"version": "알 수 없음", "updated_at": "알 수 없음"}
+
     def _replay_tutorial(self):
         """튜토리얼 재실행"""
         if self.gui and hasattr(self.gui, 'show_tutorial_manual'):

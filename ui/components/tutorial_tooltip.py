@@ -7,7 +7,7 @@ from typing import Optional
 from PyQt6.QtCore import Qt, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QGraphicsOpacityEffect, QWidget
+    QGraphicsOpacityEffect, QWidget, QCheckBox
 )
 from PyQt6.QtGui import QFont
 
@@ -23,7 +23,8 @@ class TutorialTooltip(QFrame):
 
     # 고정 크기
     TOOLTIP_WIDTH = 340
-    TOOLTIP_HEIGHT = 200
+    TOOLTIP_HEIGHT = 230
+    TOOLTIP_HEIGHT_LAST = 264  # 마지막 단계 (체크박스 포함)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -65,14 +66,41 @@ class TutorialTooltip(QFrame):
         self.title_label.setStyleSheet(f"color: {c.text_primary}; background: transparent;")
         layout.addWidget(self.title_label)
 
-        # 설명 (고정 높이)
+        # 설명
         self.desc_label = QLabel()
-        self.desc_label.setFixedHeight(60)
+        self.desc_label.setFixedHeight(80)
         self.desc_label.setFont(QFont(self.ds.typography.font_family_primary, 12))
         self.desc_label.setStyleSheet(f"color: {c.text_secondary}; background: transparent;")
         self.desc_label.setWordWrap(True)
         self.desc_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.desc_label)
+
+        # "다음에 그만 보기" 체크박스 (마지막 단계에서만 표시)
+        self.dont_show_checkbox = QCheckBox("다음에 그만 보기")
+        self.dont_show_checkbox.setFont(QFont(self.ds.typography.font_family_primary, 10))
+        self.dont_show_checkbox.setStyleSheet("""
+            QCheckBox {
+                color: #FFFFFF;
+                background: transparent;
+                spacing: 6px;
+            }
+            QCheckBox::indicator {
+                width: 14px;
+                height: 14px;
+                border: 1.5px solid #94A3B8;
+                border-radius: 3px;
+                background: transparent;
+            }
+            QCheckBox::indicator:hover {
+                border-color: #FFFFFF;
+            }
+            QCheckBox::indicator:checked {
+                background: #3B82F6;
+                border-color: #3B82F6;
+            }
+        """)
+        self.dont_show_checkbox.setVisible(False)
+        layout.addWidget(self.dont_show_checkbox)
 
         layout.addStretch()
 
@@ -161,6 +189,18 @@ class TutorialTooltip(QFrame):
 
         # 첫 번째 단계면 이전 버튼 숨김
         self.prev_btn.setVisible(step > 1)
+
+        # 마지막 단계에서만 "다음에 그만 보기" 체크박스 표시
+        self.dont_show_checkbox.setVisible(is_last)
+        if is_last:
+            self.setFixedSize(self.TOOLTIP_WIDTH, self.TOOLTIP_HEIGHT_LAST)
+        else:
+            self.setFixedSize(self.TOOLTIP_WIDTH, self.TOOLTIP_HEIGHT)
+
+    @property
+    def dont_show_again(self) -> bool:
+        """체크박스 상태 반환"""
+        return self.dont_show_checkbox.isChecked()
 
     def fade_in(self):
         """페이드 인 애니메이션"""

@@ -153,17 +153,15 @@ def show_error(parent, title, message):
     return CustomDialog(parent, title, message, "error").show_and_wait()
 
 def show_question(parent, title, message):
-    dialog = CustomDialog(parent, title, message, "question")
-    dialog.buttons = [
-        ("예", lambda: dialog.done_with_result(True)),
-        ("아니오", lambda: dialog.done_with_result(False))
-    ]
-    # Re-create buttons for question type specifically if needed, 
-    # but the constructor already handled the default case.
-    # Let's override the buttons layout here for question.
-    return CustomDialog(parent, title, message, "question", 
-                       buttons=[("예", lambda: dialog.done_with_result(True)), 
-                                ("아니오", lambda: dialog.done_with_result(False))]).show_and_wait()
+    # Lambda closures are late-binding: dialog is resolved at click time, not creation time
+    dialog = CustomDialog(
+        parent, title, message, "question",
+        buttons=[
+            ("아니오", lambda: dialog.done_with_result(False)),
+            ("예", lambda: dialog.done_with_result(True)),
+        ]
+    )
+    return dialog.show_and_wait()
 
 def show_success(parent, title, message):
     return CustomDialog(parent, title, message, "success").show_and_wait()

@@ -75,7 +75,7 @@ class LoginHandler:
             if res.get("success"):
                 logger.info(f"[AutoTrial] Request success: {res.get('message')}")
                 # UI 업데이트를 위해 메인 스레드에서 새로고침 트리거
-                refresh_fn = getattr(self.app, "_refresh_subscription_status", None)
+                refresh_fn = getattr(self.app, "_update_subscription_info", None)
                 if refresh_fn is not None:
                     QTimer.singleShot(2000, refresh_fn)
             else:

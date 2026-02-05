@@ -2,19 +2,13 @@
 URL Input Panel for PyQt6
 Refactored to integrity with Main Shell Design System
 """
-import logging
-import os
-import subprocess
-import sys
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, 
-    QTextEdit, QWidget, QFrame
+    QVBoxLayout, QHBoxLayout, QLabel,
+    QTextEdit, QWidget
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QEvent
 from PyQt6.QtGui import QFont
 from ui.design_system_v2 import get_design_system, get_color
-
-logger = logging.getLogger(__name__)
 
 class URLInputPanel(QWidget):
     def __init__(self, parent, gui, theme_manager=None):
@@ -77,50 +71,19 @@ class URLInputPanel(QWidget):
         
         self.main_layout.addLayout(action_layout)
         
-        # Divider
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFixedHeight(1)
-        line.setStyleSheet(f"background-color: {get_color('border_light')};")
-        self.main_layout.addWidget(line)
-        
-        # 3. Output Folder Settings
-        folder_layout = QHBoxLayout()
-        folder_layout.setSpacing(ds.spacing.space_3)
-        
-        f_lbl = QLabel("저장 위치:")
-        f_lbl.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
-        f_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
-        folder_layout.addWidget(f_lbl)
-        
-        self.folder_path_lbl = QLabel("설정되지 않음")
-        self.folder_path_lbl.setFont(QFont(ds.typography.font_family_mono, ds.typography.size_xs))
-        self.folder_path_lbl.setStyleSheet(f"""
-            color: {get_color('text_secondary')}; 
-            background: {get_color('surface_variant')}; 
-            padding: {ds.spacing.space_1}px {ds.spacing.space_2}px; 
-            border-radius: {ds.radius.sm}px;
-        """)
-        # Link to gui for updates
-        self.gui.output_folder_label = self.folder_path_lbl 
-        folder_layout.addWidget(self.folder_path_lbl)
-        
-        chg_btn = QPushButton("변경")
-        chg_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        chg_btn.setStyleSheet(self._get_button_style("secondary", "sm"))
-        chg_btn.clicked.connect(self.gui.select_output_folder)
-        folder_layout.addWidget(chg_btn)
-        
-        open_btn = QPushButton("폴더 열기")
-        open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        open_btn.setStyleSheet(self._get_button_style("ghost", "sm"))
-        open_btn.clicked.connect(self._open_output_folder)
-        folder_layout.addWidget(open_btn)
-        
-        folder_layout.addStretch()
-        self.main_layout.addLayout(folder_layout)
-        
         self.main_layout.addStretch()
+
+        # Enter key to add URL
+        self.gui.url_entry.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        """Enter key triggers URL add (Shift+Enter for newline)"""
+        if obj is self.gui.url_entry and event.type() == QEvent.Type.KeyPress:
+            if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                if not (event.modifiers() & Qt.KeyboardModifier.ShiftModifier):
+                    self.gui.add_url_from_entry()
+                    return True
+        return super().eventFilter(obj, event)
 
     def _get_input_style(self) -> str:
         """Get input style using design system v2."""
@@ -178,19 +141,3 @@ class URLInputPanel(QWidget):
             }}
         """
 
-    def _open_output_folder(self):
-        output_path = getattr(self.gui, 'output_folder_path', None)
-        if not output_path:
-            output_path = os.path.join(os.getcwd(), "outputs")
-        
-        os.makedirs(output_path, exist_ok=True)
-        
-        try:
-            if sys.platform == 'win32':
-                os.startfile(output_path)
-            elif sys.platform == 'darwin':
-                subprocess.run(['open', output_path])
-            else:
-                subprocess.run(['xdg-open', output_path])
-        except Exception as e:
-            logger.error(f"폴더 열기 오류: {e}")

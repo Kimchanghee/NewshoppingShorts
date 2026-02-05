@@ -1,82 +1,94 @@
+"""
+Voice sample generator using Gemini TTS API.
+Reads voice profiles from voice_profiles.py and generates WAV samples
+for each voice using its sample_text.
+"""
 import os
 import sys
-import requests
+import time
+import wave
+
+# Add project root to path
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, PROJECT_ROOT)
+
 from google import genai
 from google.genai import types
+from voice_profiles import VOICE_PROFILES
+from utils.secrets_manager import SecretsManager
 
-# API Key from prompt
-# API Key from prompt
-API_KEY = os.getenv("GEMINI_API_KEY", "")
-
-# Target directory
-BASE_DIR = os.getcwd()
-VOICE_DIR = os.path.join(BASE_DIR, "resource", "voice_samples")
+VOICE_DIR = os.path.join(PROJECT_ROOT, "resource", "voice_samples")
 os.makedirs(VOICE_DIR, exist_ok=True)
 
-# Voice list (Standard Korean voices if available, otherwise typical ones)
-# Using standard Google TTS voice names for Korean
-VOICES = [
-    "ko-KR-Standard-A",
-    "ko-KR-Standard-B",
-    "ko-KR-Standard-C",
-    "ko-KR-Standard-D",
-    "ko-KR-Wavenet-A",
-    "ko-KR-Wavenet-B",
-    "ko-KR-Wavenet-C",
-    "ko-KR-Wavenet-D",
-    # Fill up to 10 with others or English if needed, but sticking to KR context
-    # Gemini might use different names like "ko-KR-Neural2-A" etc.
-    # Let's try generic names that usually work with Google Cloud TTS / Gemini
-    # Actually Gemini uses specific voice names. Let's try to list them or use known ones.
-    # If using gemini-1.5-flash for TTS, it might be "Puck", "Charon", "Kore", "Fenrir", "Aoede" (OpenAI style)
-    # OR standard Google Cloud voices.
-    # Let's assume the user wants the "Gemini TTS" voices which are often:
-    # "Puck", "Charon", "Kore", "Fenrir", "Aoede" (English mostly?)
-    # Wait, the codebase uses `types.VoiceConfig(prebuilt_voice_config=types.PrebuiltVoiceConfig(voice_name=voice_name))`.
-    # Valid names for Gemini TTS are usually: "Puck", "Charon", "Kore", "Fenrir", "Aoede".
-    # But for Korean?
-    # Let's generate for the 5 main Gemini voices + 5 Google Cloud standard ones if possible.
-    # Actually, let's just stick to the 5 known Gemini voices first:
-    "Puck",
-    "Charon",
-    "Kore",
-    "Fenrir",
-    "Aoede",
-]
+TTS_MODEL = "gemini-2.5-flash-preview-tts"
+RATE_LIMIT_WAIT = 12  # seconds between requests to avoid 429
 
-# Text to speak
-TEXT = "안녕하세요. 쇼핑 숏폼 메이커 목소리 테스트입니다."
+
+def get_api_keys():
+    """Get all API keys from SecretsManager or environment."""
+    keys = []
+    env_key = os.getenv("GEMINI_API_KEY", "")
+    if env_key:
+        keys.append(env_key)
+    for i in range(1, 9):
+        key = SecretsManager.get_api_key(f"gemini_api_{i}")
+        if key and key not in keys:
+            keys.append(key)
+    return keys
+
+
+def save_wav(filepath, audio_data):
+    """Save audio data as WAV file."""
+    if isinstance(audio_data, str):
+        import base64
+        audio_data = base64.b64decode(audio_data)
+
+    if audio_data[:4] == b"RIFF":
+        with open(filepath, "wb") as f:
+            f.write(audio_data)
+    else:
+        with wave.open(filepath, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(24000)
+            wf.writeframes(audio_data)
 
 
 def generate_samples():
-    print(f"Initializing Gemini Client...")
-    try:
-        client = genai.Client(api_key=API_KEY)
-    except Exception as e:
-        print(f"Failed to init client: {e}")
+    api_keys = get_api_keys()
+    if not api_keys:
+        print("ERROR: No API key found. Set GEMINI_API_KEY env var or add key via SecretsManager.")
         return
 
-    print(f"Generating samples in {VOICE_DIR}...")
+    print(f"Found {len(api_keys)} API key(s)")
 
-    # We need 10 samples. If only 5 gemini voices, we can change pitch/speed or just duplicate with suffix?
-    # Or maybe there are more.
-    # Let's try the 5 known ones.
+    # Create clients for each key (rotate to avoid per-key rate limits)
+    clients = [genai.Client(api_key=k) for k in api_keys]
 
-    for i, voice_name in enumerate(VOICES):
-        filename = f"{voice_name}.wav"
-        filepath = os.path.join(VOICE_DIR, filename)
-
+    pending = []
+    for profile in VOICE_PROFILES:
+        filepath = os.path.join(VOICE_DIR, f"{profile['id']}.wav")
         if os.path.exists(filepath):
-            print(f"Skipping {filename} (exists)")
-            continue
+            print(f"  [{profile['id']}] SKIP (exists)")
+        else:
+            pending.append(profile)
 
-        print(f"Generating {filename}...")
+    print(f"Generating {len(pending)} voice samples in {VOICE_DIR}")
+
+    for idx, profile in enumerate(pending):
+        voice_id = profile["id"]
+        voice_name = profile["voice_name"]
+        sample_text = profile["sample_text"]
+        label = profile["label"]
+        filepath = os.path.join(VOICE_DIR, f"{voice_id}.wav")
+
+        client = clients[idx % len(clients)]
+        print(f"  [{voice_id}] {label} ({voice_name}) - generating... (key {idx % len(clients) + 1})")
+
         try:
-            # Use gemini-2.5-flash-tts which is the latest standard
-            model_name = "gemini-2.5-flash-tts"
             response = client.models.generate_content(
-                model=model_name,
-                contents=[TEXT],
+                model=TTS_MODEL,
+                contents=[sample_text],
                 config=types.GenerateContentConfig(
                     response_modalities=["AUDIO"],
                     speech_config=types.SpeechConfig(
@@ -89,18 +101,22 @@ def generate_samples():
                 ),
             )
 
-            # Extract audio data
-            # Check response structure. Usually response.candidates[0].content.parts[0].inline_data.data
             if response.candidates and response.candidates[0].content.parts:
                 audio_bytes = response.candidates[0].content.parts[0].inline_data.data
-                with open(filepath, "wb") as f:
-                    f.write(audio_bytes)
-                print(f"Saved {filename}")
+                save_wav(filepath, audio_bytes)
+                print(f"  [{voice_id}] OK ({len(audio_bytes)} bytes)")
             else:
-                print(f"No audio content for {voice_name}")
+                print(f"  [{voice_id}] FAIL - no audio in response")
 
         except Exception as e:
-            print(f"Error generating {voice_name}: {e}")
+            print(f"  [{voice_id}] ERROR - {e}")
+
+        # Wait between requests to avoid rate limiting
+        if idx < len(pending) - 1:
+            print(f"  ... waiting {RATE_LIMIT_WAIT}s (rate limit)...")
+            time.sleep(RATE_LIMIT_WAIT)
+
+    print("\nDone!")
 
 
 if __name__ == "__main__":

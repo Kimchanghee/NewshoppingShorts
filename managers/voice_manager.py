@@ -81,6 +81,9 @@ class VoiceManager:
             for vid, var in raw_vars.items()
         }
 
+        # Load voice sample paths from resource directory
+        self._load_voice_sample_paths()
+
         # Load saved voice selections on initialization
         self.load_saved_voices()
 
@@ -190,6 +193,23 @@ class VoiceManager:
                 logger.debug("[VoiceManager] Failed to rebuild voice panel grid: %s", e)
 
         self._save_selected_voices(selected_ids)
+
+    # --------- sample loading ---------
+    def _load_voice_sample_paths(self):
+        """Scan resource/voice_samples/ and populate gui.voice_sample_paths."""
+        import sys as _sys
+        base = getattr(_sys, "_MEIPASS", os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        sample_dir = os.path.join(base, "resource", "voice_samples")
+        paths = {}
+        if os.path.isdir(sample_dir):
+            for profile in getattr(self.gui, "voice_profiles", []):
+                voice_id = profile.get("id", "")
+                wav_path = os.path.join(sample_dir, f"{voice_id}.wav")
+                if os.path.isfile(wav_path):
+                    paths[voice_id] = wav_path
+        self.gui.voice_sample_paths = paths
+        if paths:
+            logger.info("[VoiceManager] %d개 음성 샘플 로드됨", len(paths))
 
     # --------- sample playback ---------
     def play_voice_sample(self, voice_id: str):

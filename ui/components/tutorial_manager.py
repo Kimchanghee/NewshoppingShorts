@@ -207,6 +207,9 @@ class TutorialManager(QObject):
 
     def _highlight_target(self, step: Dict[str, Any]):
         """타겟 위젯 하이라이트"""
+        if not self._is_running:
+            return
+
         target_widget = self._get_target_widget(step)
 
         if not target_widget:
@@ -276,45 +279,64 @@ class TutorialManager(QObject):
             self._show_step(self._current_step - 1)
 
     def _skip(self):
-        """튜토리얼 건너뛰기"""
+        """튜토리얼 건너뛰기 - 체크박스 체크 시 다음부터 안 보임"""
+        dont_show = self._get_dont_show_flag()
         self.stop()
-        self._mark_complete()
+        if dont_show:
+            self._mark_complete()
         self.tutorial_skipped.emit()
 
     def _complete(self):
-        """튜토리얼 완료"""
+        """튜토리얼 완료 - 마지막까지 본 경우 항상 완료 처리"""
         self.stop()
         self._mark_complete()
         self.tutorial_completed.emit()
 
+    def _get_dont_show_flag(self) -> bool:
+        """툴팁의 '다음에 그만 보기' 체크박스 상태 확인"""
+        if self._tooltip and hasattr(self._tooltip, 'dont_show_again'):
+            return self._tooltip.dont_show_again
+        return False
+
     def _mark_complete(self):
-        """튜토리얼 완료 플래그 저장"""
+        """튜토리얼 완료 플래그 저장 (SettingsManager 사용)"""
         try:
-            config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
-            tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
-
-            os.makedirs(config_dir, exist_ok=True)
-
-            with open(tutorial_flag, 'w') as f:
-                f.write("1")
+            from managers.settings_manager import get_settings_manager
+            get_settings_manager().mark_tutorial_completed()
         except Exception:
-            pass  # 튜토리얼 플래그 저장 실패는 무시 (비필수)
+            # fallback: 파일 직접 저장
+            try:
+                config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
+                tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
+                os.makedirs(config_dir, exist_ok=True)
+                with open(tutorial_flag, 'w') as f:
+                    f.write("1")
+            except Exception:
+                pass
 
     @staticmethod
     def should_show_tutorial() -> bool:
-        """튜토리얼을 보여줘야 하는지 확인"""
-        config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
-        tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
-        return not os.path.exists(tutorial_flag)
+        """튜토리얼을 보여줘야 하는지 확인 (SettingsManager 기반)"""
+        try:
+            from managers.settings_manager import get_settings_manager
+            return get_settings_manager().is_first_run()
+        except Exception:
+            # fallback: 파일 직접 확인
+            config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
+            tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
+            return not os.path.exists(tutorial_flag)
 
     @staticmethod
     def reset_tutorial_flag():
         """튜토리얼 플래그 초기화 (재실행용)"""
-        config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
-        tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
-
-        if os.path.exists(tutorial_flag):
-            os.remove(tutorial_flag)
+        try:
+            from managers.settings_manager import get_settings_manager
+            get_settings_manager().reset_tutorial()
+        except Exception:
+            config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
+            tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
+            if os.path.exists(tutorial_flag):
+                os.remove(tutorial_flag)
 
 
 def show_guided_tutorial(gui: "VideoAnalyzerGUI", on_complete=None, on_skip=None):
