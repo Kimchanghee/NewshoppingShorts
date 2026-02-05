@@ -540,10 +540,11 @@ def _is_bad_split_point(text, pos):
         if re.match(r'^(있|싶|보|나)', after):
             return True
 
-    # ★★★ 3-6. ~아/어 주다/보다/내다/버리다/있다/없다 보조용언 패턴 ★★★
+    # ★★★ 3-6. ~아/어 주다/보다/내다/버리다/있다/없다/지다/달라 보조용언 패턴 ★★★
     # "해 줘", "먹어 봐", "해 내다", "먹어 버려", "되어 있고", "되어 없어"
+    # "좋아 져요" (상태변화), "보내 달라" (요청)
     if re.search(r'[아어해]$', before):
-        if re.match(r'^(주|줘|보|봐|내|버|드|있|없)', after):
+        if re.match(r'^(주|줘|보|봐|내|버|드|있|없|지|져|진|졌|달)', after):
             return True
 
     # ★★★ 3-7. ~ㄹ 것 같다 추측 패턴 ★★★
@@ -569,10 +570,10 @@ def _is_bad_split_point(text, pos):
         if after.startswith('없'):
             return True
 
-    # ★★★ 3-11. ~(으)면 되다/안되다 조건 결과 패턴 ★★★
-    # "하면 돼", "먹으면 안돼"
+    # ★★★ 3-11. ~(으)면 되다/안되다/좋겠다 조건 결과 패턴 ★★★
+    # "하면 돼", "먹으면 안돼", "있으면 좋겠어요"
     if re.search(r'[으]?면$', before):
-        if re.match(r'^(돼|되|안)', after):
+        if re.match(r'^(돼|되|안|좋)', after):
             return True
 
     # ★★★ 3-12. ~(으)려고 하다 의도 패턴 ★★★
@@ -593,9 +594,9 @@ def _is_bad_split_point(text, pos):
         if re.match(r'^(없|못|안|아니)', after):
             return True
 
-    # ★★★ 3-15. ~기 때문에/위해/전에/후에 명사형 어미 + 의존명사/형용사 ★★★
+    # ★★★ 3-15. ~기 때문에/위해/전에/후에/시작 명사형 어미 + 의존명사/형용사/동사 ★★★
     if before.endswith('기'):
-        if re.match(r'^(때문|위해|전에|후에|위한|바라|싫|좋|쉬|어려|힘들|편하|불편|나름)', after):
+        if re.match(r'^(때문|위해|전에|후에|위한|바라|싫|좋|쉬|어려|힘들|편하|불편|나름|시작)', after):
             return True
 
     # ★★★ 3-16. ~ㄴ/는 편이다 평가 패턴 ★★★
@@ -736,6 +737,57 @@ def _is_bad_split_point(text, pos):
             if len(last_word) <= 2:
                 if re.match(r'^[가-힣]', after) and not re.match(r'^[은는이가을를에서로와과의]', after):
                     return True
+
+    # ★★★ 14. ~아/어야 하다/되다 의무 패턴 ★★★
+    # "해야 해요", "사야 돼요", "써야 해요", "먹어야 돼요"
+    if before.endswith('야'):
+        last_word = before.split()[-1] if before.split() else before
+        if len(last_word) >= 2:  # 동사+야 (해야, 사야 등), "야" 단독 제외
+            if re.match(r'^(하|해|했|돼|되|될|할)', after):
+                return True
+
+    # ★★★ 15. ~기로 하다 결심 패턴 ★★★
+    # "사기로 했어", "가기로 했어", "먹기로 약속"
+    if before.endswith('기로'):
+        if re.match(r'^(하|해|했|한)', after):
+            return True
+
+    # ★★★ 16. ~(으)러 가다/오다 목적 패턴 ★★★
+    # "사러 가요", "보러 왔어", "먹으러 갈까"
+    if before.endswith('러') or before.endswith('으러'):
+        if re.match(r'^(가|갔|와|왔|오|갈|올)', after):
+            return True
+
+    # ★★★ 17. ~다 보면/보니 경험적 발견 패턴 ★★★
+    # "쓰다 보면 좋아요", "먹다 보니 맛있어", "하다 보면 늘어요"
+    if before.endswith('다'):
+        last_word = before.split()[-1] if before.split() else before
+        if len(last_word) >= 2:  # 동사+다 (쓰다, 먹다 등), 부사 "다" 단독 제외
+            if re.match(r'^(보면|보니|봐)', after):
+                return True
+
+    # ★★★ 18. ~ㄹ/을 필요 필요성 패턴 ★★★
+    # "살 필요 없어", "할 필요 있어", "쓸 필요 없어요"
+    if after.startswith('필요'):
+        if re.search(r'[ㄹ을]$', before):
+            return True
+        last_word = before.split()[-1] if before.split() else ''
+        if last_word and _has_rieul_batchim(last_word[-1]):
+            return True
+
+    # ★★★ 19. ~나 보다 추측 패턴 ★★★
+    # "좋나 봐", "먹나 봐", "되나 봐요"
+    if before.endswith('나'):
+        last_word = before.split()[-1] if before.split() else before
+        if len(last_word) >= 2:  # 동사+나 (좋나, 먹나 등), 대명사 "나" 단독 제외
+            if re.match(r'^(봐|보다|보아|본|보)', after):
+                return True
+
+    # ★★★ 20. ~곤 하다 습관 패턴 ★★★
+    # "쓰곤 해요", "사곤 했어요", "먹곤 했어요"
+    if before.endswith('곤'):
+        if re.match(r'^(하|해|했|한)', after):
+            return True
 
     return False
 
