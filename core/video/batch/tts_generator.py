@@ -683,53 +683,28 @@ def _generate_tts_for_batch_legacy(app, voice):
             )
             app.add_log("[자막] Whisper 분석 완료")
 
-            # 결과 처리
-            if whisper_result and 'segments' in whisper_result:
-                whisper_segments = whisper_result['segments']
-                voice_start = whisper_result.get('voice_start', 0)
-                voice_end = whisper_result.get('voice_end', speeded_duration_sec)
+            # 결과 처리 - Whisper 분석은 반드시 성공해야 함
+            if not whisper_result or 'segments' not in whisper_result:
+                raise RuntimeError("Whisper 분석 결과가 없습니다 - 자막 싱크 불가")
 
-                subtitle_entries = []
-                for seg in whisper_segments:
-                    idx = seg.get('index', 1) - 1
-                    subtitle_entries.append({
-                        'idx': idx,
-                        'start': seg['start'],
-                        'end': seg['end'],
-                        'text': seg['text'],
-                        'path': speeded_path,
-                        'speaker': selected_voice,
-                        'is_narr': False,
-                    })
+            whisper_segments = whisper_result['segments']
+            voice_start = whisper_result.get('voice_start', 0)
+            voice_end = whisper_result.get('voice_end', speeded_duration_sec)
 
-                timestamps_source = 'whisper_analysis'
-            else:
-                # 글자 수 비례 폴백
-                logger.warning("[Whisper] 분석 실패 -> 글자 수 비례 폴백")
-                char_counts = [max(1, len(re.sub(r'[\s,.!?~\-]', '', seg))) for seg in subtitle_segments]
-                total_chars = sum(char_counts)
+            subtitle_entries = []
+            for seg in whisper_segments:
+                idx = seg.get('index', 1) - 1
+                subtitle_entries.append({
+                    'idx': idx,
+                    'start': seg['start'],
+                    'end': seg['end'],
+                    'text': seg['text'],
+                    'path': speeded_path,
+                    'speaker': selected_voice,
+                    'is_narr': False,
+                })
 
-                subtitle_entries = []
-                current_time = 0.0
-
-                for idx, seg_text in enumerate(subtitle_segments):
-                    char_ratio = char_counts[idx] / total_chars
-                    segment_duration = speeded_duration_sec * char_ratio
-
-                    subtitle_entries.append({
-                        'idx': idx,
-                        'start': round(current_time, 3),
-                        'end': round(current_time + segment_duration, 3),
-                        'text': seg_text,
-                        'path': speeded_path,
-                        'speaker': selected_voice,
-                        'is_narr': False,
-                    })
-                    current_time += segment_duration
-
-                voice_start = 0
-                voice_end = speeded_duration_sec
-                timestamps_source = 'char_proportional_fallback'
+            timestamps_source = 'whisper_analysis'
 
             # 결과 저장
             app._per_line_tts = subtitle_entries

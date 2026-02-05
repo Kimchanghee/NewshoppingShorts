@@ -472,7 +472,14 @@ def _is_bad_split_point(text, pos):
             return True
 
     # "~을/ㄹ" 로 끝나고 "수 있/없"이 다음에 오면 나쁜 분리
-    if re.search(r'[을ㄹ]$', before):
+    # ㄹ 받침 감지: 할(54624), 볼, 갈, 될 등 완성형 한글도 포함
+    def _has_rieul_batchim(ch):
+        if '\uac00' <= ch <= '\ud7a3':
+            return (ord(ch) - 0xAC00) % 28 == 8
+        return ch == 'ㄹ'
+
+    last_ch = before[-1] if before else ''
+    if last_ch == '을' or _has_rieul_batchim(last_ch):
         if after.startswith('수 있') or after.startswith('수 없'):
             return True
 
@@ -498,10 +505,16 @@ def _is_bad_split_point(text, pos):
     dependent_nouns = ['것', '줄', '데', '바', '리', '터', '뿐', '만큼', '대로', '듯', '뻔']
     for dn in dependent_nouns:
         if after.startswith(dn):
+            last_word = before.split()[-1] if before.split() else before
+            last_char = before[-1] if before else ''
+            # 3글자+ 단어가 을/를/은/는으로 끝나면 명사+조사 (관형사형이 아님)
+            # "뚜껑을 바로" → "뚜껑을"(3자)은 명사+조사 → 의존명사 패턴 아님
+            # "먹을 것" → "먹을"(2자)은 관형사형 → 의존명사 패턴
+            if last_char in ('을', '를', '은', '는') and len(last_word) >= 3:
+                continue
             # 앞이 관형사형 어미로 끝나면 나쁜 분리
             if re.search(r'[ㄴㄹ은을는]$', before):
                 return True
-            last_word = before.split()[-1] if before.split() else ''
             if last_word and re.search(r'[ㄴㄹ은을는]$', last_word):
                 return True
 
@@ -523,10 +536,10 @@ def _is_bad_split_point(text, pos):
         if re.match(r'^(있|싶|보|나)', after):
             return True
 
-    # ★★★ 3-6. ~아/어 주다/보다/내다/버리다 보조용언 패턴 ★★★
-    # "해 줘", "먹어 봐", "해 내다", "먹어 버려"
+    # ★★★ 3-6. ~아/어 주다/보다/내다/버리다/있다/없다 보조용언 패턴 ★★★
+    # "해 줘", "먹어 봐", "해 내다", "먹어 버려", "되어 있고", "되어 없어"
     if re.search(r'[아어해]$', before):
-        if re.match(r'^(주|줘|보|봐|내|버|드)', after):
+        if re.match(r'^(주|줘|보|봐|내|버|드|있|없)', after):
             return True
 
     # ★★★ 3-7. ~ㄹ 것 같다 추측 패턴 ★★★
@@ -600,6 +613,26 @@ def _is_bad_split_point(text, pos):
         if len(cp) > 1 and before.endswith(cp[:-1]) and after.startswith(cp[-1]):
             return True
 
+    # ★★★ 3-19. 주어(이/가) + 있/없 존재 패턴 ★★★
+    # "턱이 있어", "물이 흘러", "크기가 있어" - 주어와 서술어 분리 금지
+    if re.search(r'[이가]$', before):
+        last_word = before.split()[-1] if before.split() else before
+        # 2~4글자 명사+주격조사 뒤에 서술어가 오면 분리 금지
+        if 2 <= len(last_word) <= 4:
+            if re.match(r'^(있|없|많|적|되|돼|생기|나|들|흘)', after):
+                return True
+
+    # ★★★ 3-20. 한자어 + 가능/불가 복합 명사 패턴 ★★★
+    # "사용 가능", "배송 가능", "확인 가능" - 복합 한자어 분리 금지
+    sino_compound_prefixes = ['확인', '선택', '등록', '수정', '삭제', '저장', '검색', '구매', '결제', '배송',
+                              '주문', '취소', '문의', '상담', '추천', '할인', '적용', '완료', '진행', '처리',
+                              '사용', '이용', '참고', '참조', '설명', '안내', '소개', '공유', '연결', '연락',
+                              '설치', '제거', '변경', '교환', '환불', '예약', '발송', '수령', '접수', '출력']
+    if re.match(r'^(가능|불가|불가능|필요|완료)', after):
+        last_word = before.split()[-1] if before.split() else before
+        if last_word in sino_compound_prefixes:
+            return True
+
     # ★★★ 4. 관형사 + 명사 패턴 (짧은 경우) ★★★
     # "이 제품", "그 방법", "저 사람" - 1글자 관형사 뒤에서 끊지 않음
     if len(before) >= 1 and before[-1] in ['이', '그', '저', '새', '헌', '온']:
@@ -609,7 +642,8 @@ def _is_bad_split_point(text, pos):
     # ★★★ 5. 부사 + 동사/형용사 패턴 ★★★
     # "잘 맞는", "못 하는", "안 되는"
     short_adverbs = ['잘', '못', '안', '꼭', '다', '더', '덜', '막']
-    if before.split()[-1] if before.split() else '' in short_adverbs:
+    last_word_adv = before.split()[-1] if before.split() else ''
+    if last_word_adv in short_adverbs:
         return True
 
     # ★★★ 6. ~(으)ㄴ/는/ㄹ + 명사 관형사형 패턴 ★★★
@@ -658,10 +692,12 @@ def _is_bad_split_point(text, pos):
 
     # ★★★ 11. 짧은 단어 보호 (2글자 이하) ★★★
     # 마지막 단어가 2글자 이하면 분리하지 않음 (조사 등과 붙어있어야 함)
+    # 단, 동사/형용사 활용 어미로 끝나면 분리 허용 (있어, 없어, 않아 등)
     last_word = before.split()[-1] if before.split() else ''
     if len(last_word) <= 2 and not re.search(r'[은는이가을를에서로]$', last_word):
-        # 조사가 아닌 2글자 이하 단어 뒤에서 분리 금지
-        return True
+        # 동사/형용사 활용형 어미로 끝나면 완결된 서술어이므로 분리 허용
+        if not re.search(r'[아어요고며면서게지니]$', last_word):
+            return True
 
     # ★★★ 12. 인용/인칭 패턴 ★★★
     # "~라고", "~다고", "~냐고" 등의 인용 표현
@@ -673,10 +709,11 @@ def _is_bad_split_point(text, pos):
     # "먹기도 하고", "이것만 있어" - 보조사 뒤에서 보조용언 분리 금지
     # 단, 마지막 단어가 3글자 이상이면 명사+조사이므로 분리 허용
     # "음식도 먹고"(음식도=3자) → 분리 허용, "하기도 해"(하기도=3자+보조용언) → 분리 금지
+    # "처리도 되어" → 되/돼 추가
     if re.search(r'[도만]$', before):
         last_word = before.split()[-1] if before.split() else before
-        # 보조용언 패턴: 하/해/있/없/않 등이 뒤따르면 분리 금지
-        if re.match(r'^(하|해|있|없|않|못|싶|보)', after):
+        # 보조용언 패턴: 하/해/있/없/않/되/돼 등이 뒤따르면 분리 금지
+        if re.match(r'^(하|해|있|없|않|못|싶|보|되|돼)', after):
             return True
         # 2글자 이하 단어 + 도/만 → 분리 금지 (짧은 부사/조사 보호)
         if len(last_word) <= 2:
@@ -684,6 +721,41 @@ def _is_bad_split_point(text, pos):
                 return True
 
     return False
+
+
+def _split_cta_by_max_chars(text: str, max_chars: int) -> list:
+    """CTA 텍스트를 max_chars 이하로 공백 기준 분할.
+
+    Args:
+        text: CTA 문자열
+        max_chars: 세그먼트당 최대 글자수
+
+    Returns:
+        분할된 CTA 세그먼트 리스트
+    """
+    hard_max = max_chars + 2
+    if len(text) <= hard_max:
+        return [text]
+
+    parts = []
+    remaining = text
+    while remaining:
+        if len(remaining) <= hard_max:
+            parts.append(remaining)
+            break
+        # max_chars 근처에서 가장 가까운 공백 찾기
+        best = -1
+        for i in range(min(hard_max, len(remaining)), max(0, max_chars // 2) - 1, -1):
+            if remaining[i] == " ":
+                best = i
+                break
+        if best <= 0:
+            # 공백이 없으면 hard_max 위치에서 강제 분할
+            best = hard_max
+        parts.append(remaining[:best].strip())
+        remaining = remaining[best:].strip()
+
+    return [p for p in parts if p]
 
 
 def _split_text_naturally(app, text, max_chars=13):
@@ -730,7 +802,8 @@ def _split_text_naturally(app, text, max_chars=13):
 
     # ★★★ 자연스러운 분할을 위한 파라미터 ★★★
     target = max_chars or 13  # 목표 글자 수 (기본 13자)
-    min_chars = max(4, target - 3)  # 최소 4글자 (너무 짧은 분할 방지)
+    min_chars = max(4, target - 3)  # 최소 4글자 (너무 짧은 분할 방지) - 4/5순위용
+    clause_min = max(4, target // 2)  # 절 경계 최소 글자수 (1~3순위용, 더 짧게 허용)
     hard_max = target + 2  # 최대 15글자까지만 허용 (엄격한 제한)
 
     # CTA가 없으면 원본 텍스트 사용
@@ -770,7 +843,7 @@ def _split_text_naturally(app, text, max_chars=13):
     # 한국어 연결 어미 패턴 (분리하기 좋은 위치)
     # ~고, ~며, ~서, ~면, ~니, ~라, ~지만, ~는데, ~요 뒤 공백
     connective_endings = re.compile(
-        r'(고|며|서|면|니|지만|는데|지요|네요|어요|아요|죠|거든요|잖아요) '
+        r'(고|며|서|면|니|지만|는데|지요|네요|어요|아요|죠|거든요|잖아요|없이|위해) '
     )
 
     for sentence in sentences:
@@ -791,8 +864,8 @@ def _split_text_naturally(app, text, max_chars=13):
 
                 # 1순위: 쉼표, 가운뎃점 등 (가장 명확한 분리점)
                 for sep in [',', '，', 'ㆍ', '·', ';']:
-                    idx = remaining.rfind(sep, min_chars, hard_max)
-                    if idx > min_chars:
+                    idx = remaining.rfind(sep, clause_min, hard_max)
+                    if idx > clause_min:
                         split_idx = idx + 1
                         split_rule = f"1순위-구두점('{sep}' @{idx})"
                         break
@@ -800,18 +873,18 @@ def _split_text_naturally(app, text, max_chars=13):
                 # 2순위: 접속 부사 앞에서 분리
                 if split_idx < 0:
                     for conj in ['그리고', '하지만', '그래서', '그런데', '또한', '그러나', '그러면', '만약']:
-                        idx = remaining.find(conj, min_chars, hard_max + len(conj))
+                        idx = remaining.find(conj, clause_min, hard_max + len(conj))
                         if idx > 0:
                             split_idx = idx
                             split_rule = f"2순위-접속부사('{conj}' @{idx})"
                             break
 
-                # 3순위: 연결 어미 뒤에서 분리 (~고, ~며, ~서 등)
+                # 3순위: 연결 어미 뒤에서 분리 (~고, ~며, ~서, ~없이 등)
                 if split_idx < 0:
                     search_region = remaining[:hard_max]
                     for m in connective_endings.finditer(search_region):
                         pos = m.end()
-                        if pos >= min_chars:
+                        if pos >= clause_min:
                             split_idx = pos
                             split_rule = f"3순위-연결어미('{m.group()}' @{pos})"
                             # target에 가까운 위치 선호
@@ -857,12 +930,21 @@ def _split_text_naturally(app, text, max_chars=13):
                         split_idx = min(candidates, key=lambda p: abs(p - target))
                         split_rule = f"5순위-공백(@{split_idx})"
                     else:
-                        # 모든 위치가 나쁘면 가장 덜 나쁜 위치 선택 (확장 범위)
-                        for pos in range(min_chars, min(len(remaining), hard_max + 3)):
+                        # 모든 위치가 나쁘면 확장 범위에서 좋은 위치 먼저 탐색
+                        expanded_end = min(len(remaining), hard_max + 5)
+                        for pos in range(min_chars, expanded_end):
                             if remaining[pos] == ' ':
-                                split_idx = pos + 1
-                                split_rule = f"5순위-강제공백(@{split_idx}, 모든 위치가 문법 보호)"
-                                break
+                                if not _is_bad_split_point(remaining, pos + 1):
+                                    split_idx = pos + 1
+                                    split_rule = f"5순위-확장공백(@{split_idx})"
+                                    break
+                        # 그래도 없으면 첫 번째 공백 강제 사용
+                        if split_idx < 0:
+                            for pos in range(min_chars, expanded_end):
+                                if remaining[pos] == ' ':
+                                    split_idx = pos + 1
+                                    split_rule = f"5순위-강제공백(@{split_idx}, 모든 위치가 문법 보호)"
+                                    break
 
                 # 6순위: 강제 분리 (공백 없으면)
                 if split_idx < 0:
@@ -908,37 +990,19 @@ def _split_text_naturally(app, text, max_chars=13):
 
     result = [seg for seg in merged if seg]
 
-    # ★★★ CTA 2분할 로직 ★★★
-    # CTA 3줄을 통합 후 길면 2분할
-    # 예: "영상 속 제품은 고정댓글 확인해 주세요" → "영상 속 제품은" / "고정댓글 확인해 주세요"
+    # ★★★ CTA 분할 로직 (일반 자막과 동일한 max_chars 적용) ★★★
     if preserved_cta:
         combined_cta = " ".join(preserved_cta)
-        cta_max_chars = 15  # 한 세그먼트 최대 글자수
+        cta_max_chars = target  # 일반 자막과 동일한 한도 (기본 13자)
 
         if len(combined_cta) <= cta_max_chars:
-            # 짧으면 한줄로
             result.append(combined_cta)
             logger.info(f"[자막 분할] CTA 합침: {len(preserved_cta)}개 → 1개 ('{combined_cta}')")
         else:
-            # 길면 2분할 (중간 지점에서 공백 기준 분할)
-            mid = len(combined_cta) // 2
-            # 중간 근처 공백 찾기
-            split_idx = combined_cta.rfind(" ", 0, mid + 5)
-            if split_idx <= 0:
-                split_idx = combined_cta.find(" ", mid)
-            if split_idx <= 0:
-                split_idx = mid
-
-            part1 = combined_cta[:split_idx].strip()
-            part2 = combined_cta[split_idx:].strip()
-
-            if part1 and part2:
-                result.append(part1)
-                result.append(part2)
-                logger.info(f"[자막 분할] CTA 2분할: '{part1}' / '{part2}'")
-            else:
-                result.append(combined_cta)
-                logger.info(f"[자막 분할] CTA 합침: {len(preserved_cta)}개 → 1개 ('{combined_cta}')")
+            # CTA도 hard_max 기준으로 다단 분할
+            cta_parts = _split_cta_by_max_chars(combined_cta, cta_max_chars)
+            result.extend(cta_parts)
+            logger.info(f"[자막 분할] CTA {len(cta_parts)}분할: {cta_parts}")
 
     logger.info(f"[자막 분할] ===== 최종 결과: {len(result)}개 세그먼트 =====")
     for i, seg in enumerate(result):

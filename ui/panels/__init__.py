@@ -11,6 +11,7 @@ from .queue_panel import QueuePanel
 from .progress_panel import ProgressPanel
 from .url_content_panel import URLContentPanel
 from .subscription_panel import SubscriptionPanel
+from .watermark_panel import WatermarkPanel
 
 __all__ = [
     'HeaderPanel',
@@ -18,6 +19,7 @@ __all__ = [
     'VoicePanel',
     'FontPanel',
     'CTAPanel',
+    'WatermarkPanel',
     'QueuePanel',
     'ProgressPanel',
     'URLContentPanel',

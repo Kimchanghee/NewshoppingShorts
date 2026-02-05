@@ -129,7 +129,7 @@ def _styled_question_box(parent, title: str, message: str) -> bool:
 class ApiWorker(QThread):
     """백그라운드 API 호출"""
 
-    finished = pyqtSignal(dict)
+    data_ready = pyqtSignal(dict)
     error = pyqtSignal(str)
 
     def __init__(self, method: str, url: str, headers: dict = None, data: dict = None):
@@ -161,9 +161,9 @@ class ApiWorker(QThread):
                 return
 
             if resp.status_code == 200:
-                self.finished.emit(resp.json())
+                self.data_ready.emit(resp.json())
             elif resp.status_code == 204:
-                self.finished.emit({"success": True})
+                self.data_ready.emit({"success": True})
             else:
                 self.error.emit(f"Error {resp.status_code}: {resp.text}")
         except Exception as e:
@@ -599,10 +599,9 @@ class AdminDashboard(QMainWindow):
 
         logger.info("[Admin UI] Load users | search=%s", search)
         worker = ApiWorker("GET", url, self._get_headers())
-        worker.finished.connect(self._on_users_loaded)
+        worker.data_ready.connect(self._on_users_loaded)
         worker.error.connect(self._on_error)
-        worker.finished.connect(lambda _: self._cleanup_worker(worker))
-        worker.error.connect(lambda _: self._cleanup_worker(worker))
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 
@@ -918,10 +917,9 @@ class AdminDashboard(QMainWindow):
 
         logger.info("[Admin UI] Load subscriptions | filter=%s", status_filter)
         worker = ApiWorker("GET", url, self._get_headers())
-        worker.finished.connect(self._on_subscriptions_loaded)
+        worker.data_ready.connect(self._on_subscriptions_loaded)
         worker.error.connect(self._on_error)
-        worker.finished.connect(lambda _: self._cleanup_worker(worker))
-        worker.error.connect(lambda _: self._cleanup_worker(worker))
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 
@@ -981,10 +979,9 @@ class AdminDashboard(QMainWindow):
         """구독 요청 통계 로드 (정확한 카운트)"""
         url = f"{self.api_base_url}/user/subscription/stats"
         worker = ApiWorker("GET", url, self._get_headers())
-        worker.finished.connect(self._on_subscription_stats_loaded)
+        worker.data_ready.connect(self._on_subscription_stats_loaded)
         worker.error.connect(lambda e: logger.warning("[Admin UI] Failed to load subscription stats: %s", e))
-        worker.finished.connect(lambda _: self._cleanup_worker(worker))
-        worker.error.connect(lambda _: self._cleanup_worker(worker))
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
     
@@ -1052,10 +1049,9 @@ class AdminDashboard(QMainWindow):
             }
             logger.info("[Admin UI] Approve request | request_id=%s days=%s work_count=%s", request_id, days, work_count)
             worker = ApiWorker("POST", url, self._get_headers(), data)
-            worker.finished.connect(lambda d: self._on_action_done("구독 승인", d))
+            worker.data_ready.connect(lambda d: self._on_action_done("구독 승인", d))
             worker.error.connect(self._on_error)
-            worker.finished.connect(lambda _: self._cleanup_worker(worker))
-            worker.error.connect(lambda _: self._cleanup_worker(worker))
+            worker.finished.connect(lambda: self._cleanup_worker(worker))
             self.workers.append(worker)
             worker.start()
 
@@ -1069,10 +1065,9 @@ class AdminDashboard(QMainWindow):
             data = {"request_id": request_id, "admin_response": reason}
             logger.info("[Admin UI] Reject request | request_id=%s reason=%s", request_id, reason)
             worker = ApiWorker("POST", url, self._get_headers(), data)
-            worker.finished.connect(lambda d: self._on_action_done("구독 거부", d))
+            worker.data_ready.connect(lambda d: self._on_action_done("구독 거부", d))
             worker.error.connect(self._on_error)
-            worker.finished.connect(lambda _: self._cleanup_worker(worker))
-            worker.error.connect(lambda _: self._cleanup_worker(worker))
+            worker.finished.connect(lambda: self._cleanup_worker(worker))
             self.workers.append(worker)
             worker.start()
 
@@ -1086,10 +1081,9 @@ class AdminDashboard(QMainWindow):
             data = {"days": days}
             logger.info("[Admin UI] Extend request | user_id=%s days=%s", user_id, days)
             worker = ApiWorker("POST", url, self._get_headers(), data)
-            worker.finished.connect(lambda d: self._on_action_done("구독 연장", d))
+            worker.data_ready.connect(lambda d: self._on_action_done("구독 연장", d))
             worker.error.connect(self._on_error)
-            worker.finished.connect(lambda _: self._cleanup_worker(worker))
-            worker.error.connect(lambda _: self._cleanup_worker(worker))
+            worker.finished.connect(lambda: self._cleanup_worker(worker))
             self.workers.append(worker)
             worker.start()
 
@@ -1103,10 +1097,9 @@ class AdminDashboard(QMainWindow):
 
         url = f"{self.api_base_url}/user/admin/users/{user_id}/toggle-active"
         worker = ApiWorker("POST", url, self._get_headers(), {})
-        worker.finished.connect(lambda d: self._on_action_done("상태 변경", d))
+        worker.data_ready.connect(lambda d: self._on_action_done("상태 변경", d))
         worker.error.connect(self._on_error)
-        worker.finished.connect(lambda _: self._cleanup_worker(worker))
-        worker.error.connect(lambda _: self._cleanup_worker(worker))
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 
@@ -1115,10 +1108,9 @@ class AdminDashboard(QMainWindow):
         logger.info("[Admin UI] Check work status | user_id=%s username=%s", user_id, username)
         url = f"{self.api_base_url}/user/admin/users/{user_id}"
         worker = ApiWorker("GET", url, self._get_headers())
-        worker.finished.connect(lambda d: self._show_work_status_dialog(username, d))
+        worker.data_ready.connect(lambda d: self._show_work_status_dialog(username, d))
         worker.error.connect(self._on_error)
-        worker.finished.connect(lambda _: self._cleanup_worker(worker))
-        worker.error.connect(lambda _: self._cleanup_worker(worker))
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
     
@@ -1223,10 +1215,9 @@ class AdminDashboard(QMainWindow):
 
         url = f"{self.api_base_url}/user/admin/users/{user_id}"
         worker = ApiWorker("DELETE", url, self._get_headers())
-        worker.finished.connect(lambda d: self._on_action_done("삭제", d))
+        worker.data_ready.connect(lambda d: self._on_action_done("삭제", d))
         worker.error.connect(lambda e: self._on_action_error("삭제", e))
-        worker.finished.connect(lambda _: self._cleanup_worker(worker))
-        worker.error.connect(lambda _: self._cleanup_worker(worker))
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 

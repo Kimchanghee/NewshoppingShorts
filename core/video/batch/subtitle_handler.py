@@ -386,12 +386,11 @@ def _ensure_gemini_timestamps_synced(app):
     # force_scaled_from_no_gemini: 이전 버전 호환성 강제 스케일링 완료
     # gemini_scaled: 원본 파일 분석 후 1/1.2 스케일링 완료
     # segment_by_segment: ★ 레퍼런스 방식 - 세그먼트별 생성으로 이미 100% 정확한 타이밍 ★
-    # whisper_analysis: ★ OpenAI Whisper 분석 완료 - 100% 정확한 타이밍 ★
-    # char_proportional_fallback: 글자 수 비례 폴백
+    # whisper_analysis: ★ Whisper 분석 완료 - 100% 정확한 타이밍 ★
     if timestamps_source in ("gemini", "scaled_fallback", "scaled_speeded",
                               "gemini_speeded", "fallback", "scaled_from_existing_speeded",
                               "scaled_no_gemini", "force_scaled_from_no_gemini", "gemini_scaled",
-                              "segment_by_segment", "whisper_analysis", "char_proportional_fallback"):
+                              "segment_by_segment", "whisper_analysis"):
         logger.debug(f"[Gemini Sync] 이미 처리됨 (source: {timestamps_source})")
         return
 

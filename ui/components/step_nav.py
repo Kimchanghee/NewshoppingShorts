@@ -18,6 +18,7 @@ STEP_ICONS = {
     "voice": "♪",       # Music/voice
     "cta": "▶",         # Play/action
     "font": "A",        # Font
+    "watermark": "◈",   # Watermark
     "queue": "≡",       # List/queue
     "settings": "⚙",   # Settings gear
 }

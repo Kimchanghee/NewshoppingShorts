@@ -622,6 +622,7 @@ class ProgressManager(ProgressObserver):
         status = state.get('status', 'waiting')
         progress = state.get('progress')
         message = state.get('message')
+        logger.debug(f"[ProgressManager] on_progress_changed: step={step}, status={status}, progress={progress}")
 
         # GUI progress_states 동기화 (하위 호환성)
         # Sync GUI progress_states (backward compatibility)
@@ -632,6 +633,7 @@ class ProgressManager(ProgressObserver):
         highlight_message = self._build_current_task_message(stage_message, status)
 
         def _apply_updates():
+            logger.debug(f"[ProgressManager] _apply_updates executing on UI thread: step={step}, status={status}, progress={progress}")
             try:
                 self.update_all_progress_displays()
             except Exception as e:
@@ -959,8 +961,16 @@ class ProgressManager(ProgressObserver):
         if threading.current_thread() is threading.main_thread():
             func()
         else:
-            # PyQt6: QTimer.singleShot을 사용하여 메인 스레드에서 실행
-            QTimer.singleShot(0, func)
+            # pyqtSignal 기반 스레드 안전 디스패치 (QTimer.singleShot보다 안정적)
+            signal = getattr(self.gui, 'ui_callback_signal', None)
+            if signal is not None:
+                try:
+                    signal.emit(func)
+                except RuntimeError:
+                    # GUI가 이미 파괴된 경우
+                    pass
+            else:
+                QTimer.singleShot(0, func)
 
     # ---- PyQt6-safe widget helpers (replace Tkinter .config()) ----
 
@@ -1476,30 +1486,23 @@ class ProgressManager(ProgressObserver):
         """
         현재 영상 진행률 표시 업데이트 (단계별 가중치 기반)
         Update current video progress display (weight-based)
-        """
-        overall_numeric_label = getattr(self.gui, 'overall_numeric_label', None)
-        if overall_numeric_label is None:
-            return
 
+        NOTE: overall_numeric_label은 queue_manager가 "완료/전체 (X%)" 형식으로 관리.
+              여기서는 overall_witty_label만 현재 단계 + 영상 진행률로 업데이트.
+        """
         # 모델에서 전체 진행률 계산
-        # Calculate overall progress from model
         total_progress = self._model.calculate_overall_progress()
         progress = max(0, min(100, int(total_progress)))
 
         # 현재 진행 중인 단계 찾기
-        # Find currently processing step
         current_step = self._model.get_current_processing_step()
 
-        # 진행률 숫자 표시
-        # Display progress percentage
-        numeric_text = f"{progress}%"
-        self._set_label(overall_numeric_label, text=numeric_text)
-
-        # 회색 라벨: 현재 작업 단계 표시
-        # Gray label: display current work step
+        # 회색 라벨: 현재 작업 단계 + 영상 진행률
         overall_witty_label = getattr(self.gui, 'overall_witty_label', None)
         if overall_witty_label is not None:
             step_text = self._get_current_step_text(current_step)
+            if progress > 0:
+                step_text = f"{step_text}  ({progress}%)"
             self._set_label(overall_witty_label, text=step_text)
 
     # -------------------------------------------------------------------------

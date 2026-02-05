@@ -43,13 +43,15 @@ from managers.subscription_manager import SubscriptionManager
 from ui.panels import (
     URLInputPanel, VoicePanel, QueuePanel,
     ProgressPanel, SubscriptionPanel, FontPanel, CTAPanel,
+    WatermarkPanel,
 )
 from ui.panels.settings_tab import SettingsTab
 from ui.panels.topbar_panel import TopBarPanel
 from ui.components.status_bar import StatusBar
 from ui.theme_manager import get_theme_manager
 from ui.design_system_v2 import get_design_system
-from utils.logging_config import get_logger
+from pathlib import Path
+from utils.logging_config import get_logger, AppLogger
 from utils.error_handlers import global_exception_handler
 from utils.token_cost_calculator import TokenCostCalculator
 from core.providers import VertexGeminiProvider
@@ -66,6 +68,7 @@ class VideoAnalyzerGUI(QMainWindow):
     # Signals for cross-thread logging/progress
     update_status_signal = pyqtSignal(str)
     log_signal = pyqtSignal(str, str)  # message, level
+    ui_callback_signal = pyqtSignal(object)  # thread-safe UI callback dispatch
 
     def __init__(self, parent=None, login_data=None, preloaded_ocr=None):
         super().__init__(parent)
@@ -211,6 +214,9 @@ class VideoAnalyzerGUI(QMainWindow):
         # Connect log_signal to progress panel
         self.log_signal.connect(self._on_log_signal)
 
+        # Thread-safe UI callback signal (used by ProgressManager)
+        self.ui_callback_signal.connect(self._execute_ui_callback)
+
     # ================================================================
     # Window close event
     # ================================================================
@@ -292,23 +298,30 @@ class VideoAnalyzerGUI(QMainWindow):
     # Logging (processor.py calls app.add_log)
     # ================================================================
     def add_log(self, message: str, level: str = "info"):
-        """스레드 안전 로깅 - log_signal emit"""
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        full_msg = f"[{timestamp}] {message}"
+        """스레드 안전 로깅 - 터미널 1회 출력 + UI 시그널"""
+        log_method = getattr(logger, level, logger.info)
+        log_method(message)
+        # UI 패널 업데이트용 시그널 (터미널 출력은 위에서 이미 완료)
         try:
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            full_msg = f"[{timestamp}] {message}"
             self.log_signal.emit(full_msg, level)
         except RuntimeError:
-            log_method = getattr(logger, level, logger.info)
-            log_method(full_msg)
+            pass
 
     def _on_log_signal(self, message: str, level: str):
-        """메인 스레드에서 로그 표시"""
+        """메인 스레드에서 UI 로그 패널에만 표시 (터미널 중복 출력 안 함)"""
         panel = getattr(self, "progress_panel", None)
         if panel is not None and hasattr(panel, "append_log"):
             panel.append_log(message, level)
-        else:
-            log_method = getattr(logger, level, logger.info)
-            log_method(message)
+
+    def _execute_ui_callback(self, callback):
+        """ui_callback_signal 슬롯: 메인 스레드에서 콜백 실행"""
+        try:
+            if callable(callback):
+                callback()
+        except Exception as e:
+            logger.debug(f"[UI callback] error: {e}")
 
     # ================================================================
     # Progress state (delegated to ProgressManager if available)
@@ -607,8 +620,8 @@ class VideoAnalyzerGUI(QMainWindow):
                 self._tutorial_shown = True
                 QTimer.singleShot(800, self._show_tutorial_then_session)
             else:
-                # 튜토리얼 없으면 바로 세션 복구
-                QTimer.singleShot(300, self._check_previous_session)
+                # 튜토리얼 없으면 세션 복구 (UI 초기화 완료 대기)
+                QTimer.singleShot(1500, self._check_previous_session)
 
     def _check_previous_session(self):
         """이전 세션 복구 확인 + 자동 저장 타이머 시작"""
@@ -671,6 +684,7 @@ class VideoAnalyzerGUI(QMainWindow):
             ("voice", "음성 선택", "voice"),
             ("cta", "CTA 선택", "cta"),
             ("font", "폰트 선택", "font"),
+            ("watermark", "워터마크", "watermark"),
             ("queue", "대기/진행", "queue"),
             ("settings", "설정", "settings"),
         ]
@@ -729,6 +743,7 @@ class VideoAnalyzerGUI(QMainWindow):
         self.voice_panel = VoicePanel(self.stack, self, theme_manager=self.theme_manager)
         self.cta_panel = CTAPanel(self.stack, self, theme_manager=self.theme_manager)
         self.font_panel = FontPanel(self.stack, self, theme_manager=self.theme_manager)
+        self.watermark_panel = WatermarkPanel(self.stack, self, theme_manager=self.theme_manager)
         self.queue_panel = QueuePanel(self.stack, self, theme_manager=self.theme_manager)
         self.settings_tab = SettingsTab(self.stack, self, theme_manager=self.theme_manager)
         self.api_key_section = self.settings_tab.api_section
@@ -739,6 +754,7 @@ class VideoAnalyzerGUI(QMainWindow):
             ("voice", "음성 선택", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", self.voice_panel),
             ("cta", "CTA 선택", "영상 마지막 클릭 유도 멘트를 선택하세요.", self.cta_panel),
             ("font", "폰트 선택", "자막에 사용할 폰트를 선택하세요.", self.font_panel),
+            ("watermark", "워터마크 설정", "영상에 표시할 워터마크를 설정하세요.", self.watermark_panel),
             ("queue", "대기/진행", "작업 대기열 및 진행 상황을 관리합니다.", self.queue_panel),
             ("settings", "설정", "앱 설정 및 API 키를 관리합니다.", self.settings_tab),
             ("subscription", "구독 관리", "구독 상태 및 플랜을 관리합니다.", self.subscription_panel),
@@ -883,6 +899,10 @@ class VideoAnalyzerGUI(QMainWindow):
 
 def main():
     sys.excepthook = global_exception_handler
+
+    # 로깅 시스템 초기화 - 모든 logger.info() 호출이 터미널에 표시됨
+    AppLogger.setup(Path("logs"), level="INFO")
+
     app = QApplication(sys.argv)
 
     gui = VideoAnalyzerGUI()

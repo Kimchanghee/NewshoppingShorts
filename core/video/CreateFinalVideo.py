@@ -287,6 +287,10 @@ def create_final_video_thread(app):
 
         watermark_position = getattr(app, "watermark_position", "bottom_right")
 
+        watermark_font_id = getattr(app, "watermark_font_id", None)
+
+        watermark_font_size = getattr(app, "watermark_font_size", None)
+
         if watermark_enabled and watermark_channel_name:
             # 영상 크기 확인 (None 방어)
 
@@ -295,11 +299,13 @@ def create_final_video_thread(app):
             video_h = getattr(app, "cached_video_height", None) or 1920
 
             logger.info(
-                "[워터마크] 적용 중: '%s' at %s (%dx%d)",
+                "[워터마크] 적용 중: '%s' at %s (%dx%d) font=%s size=%s",
                 watermark_channel_name,
                 watermark_position,
                 video_w,
                 video_h,
+                watermark_font_id,
+                watermark_font_size,
             )
 
             try:
@@ -310,6 +316,8 @@ def create_final_video_thread(app):
                     video_w,
                     video_h,
                     final_video.duration,
+                    font_id=watermark_font_id,
+                    size_key=watermark_font_size,
                 )
 
                 if watermark_clip:
@@ -1149,6 +1157,38 @@ def create_subtitle_clips_improved(app, video_duration):
 
             video_width, video_height = _resolve_video_dimensions(app)
 
+            # ★ 안전장치: max_chars 초과 세그먼트를 시간 분할하여 재분할
+            max_subtitle_chars = getattr(app, "max_chars_per_segment", 13) + 2  # hard_max
+            split_segments = []
+            for start_ts, duration, text in timed_segments:
+                clean = (text or "").strip()
+                if len(clean) <= max_subtitle_chars:
+                    split_segments.append((start_ts, duration, clean))
+                else:
+                    # 공백 기준으로 분할 후 시간 균등 배분
+                    words = clean.split()
+                    parts = []
+                    current_part = ""
+                    for w in words:
+                        candidate = f"{current_part} {w}".strip() if current_part else w
+                        if len(candidate) <= max_subtitle_chars:
+                            current_part = candidate
+                        else:
+                            if current_part:
+                                parts.append(current_part)
+                            current_part = w
+                    if current_part:
+                        parts.append(current_part)
+                    if not parts:
+                        parts = [clean]
+                    sub_dur = duration / len(parts)
+                    for i, part in enumerate(parts):
+                        split_segments.append((start_ts + sub_dur * i, sub_dur, part))
+                    logger.info(
+                        f"[Subtitles] 긴 세그먼트 재분할: '{clean[:20]}...' → {len(parts)}개"
+                    )
+            timed_segments = split_segments
+
             for start_ts, duration, text in timed_segments:
                 clip = VideoTool._create_single_line_subtitle(
                     app,
@@ -1610,6 +1650,35 @@ def _build_timed_subtitle_segments(app, video_duration):
             segments.append((start_ts, duration, text))
 
         segments.sort(key=lambda x: x[0])
+
+        # ========== 짧은 자막 세그먼트 병합 ==========
+        # 0.3초 미만이면서 2글자 이하인 경우만 병합 (싱크 보존 우선)
+        if len(segments) > 1:
+            merged = [segments[0]]
+            for i in range(1, len(segments)):
+                seg_start, seg_dur, seg_text = segments[i]
+                if seg_dur < 0.3 and len(seg_text) <= 2:
+                    prev_start, prev_dur, prev_text = merged[-1]
+                    combined_text = prev_text + seg_text
+                    combined_dur = (seg_start + seg_dur) - prev_start
+                    merged[-1] = (prev_start, combined_dur, combined_text)
+                    logger.info(
+                        "[자막 병합] '%s' + '%s' → '%s' (%.3fs)",
+                        prev_text, seg_text, combined_text, combined_dur,
+                    )
+                else:
+                    merged.append(segments[i])
+            # 첫 세그먼트가 0.3초 미만이면서 2글자 이하이면 다음에 병합
+            if len(merged) > 1:
+                first_start, first_dur, first_text = merged[0]
+                if first_dur < 0.3 and len(first_text) <= 2:
+                    sec_start, sec_dur, sec_text = merged[1]
+                    combined = first_text + sec_text
+                    combined_dur = (sec_start + sec_dur) - first_start
+                    merged[1] = (first_start, combined_dur, combined)
+                    merged.pop(0)
+                    logger.info("[자막 병합] 첫 세그먼트 병합: '%s'", combined)
+            segments = merged
 
         # ========== [SYNC DEBUG] 최종 자막 segments 상세 출력 ==========
 

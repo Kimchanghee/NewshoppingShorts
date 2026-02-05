@@ -659,7 +659,9 @@ def _download_file( url: str, dest_path: str, referer: str, platform: str = "",
             return
         
         # 일반 다운로드 시도
+        logger.info("[다운로드] HTTP 스트림 다운로드 시작...")
         size, ctype, total = _stream_download(url, dest_path, headers)
+        logger.info("[다운로드] 완료: %.1fKB (type: %s)", size / 1024 if size else 0, ctype or "unknown")
         
         if platform == "douyin" and _is_m3u8_like(url, ctype):
             try:

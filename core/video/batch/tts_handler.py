@@ -28,7 +28,6 @@ from .audio_utils import (
 # ============================================================================
 from .whisper_analyzer import (
     analyze_tts_with_whisper,
-    _create_char_proportional_timestamps,
     analyze_tts_with_gemini,
 )
 
@@ -62,7 +61,6 @@ __all__ = [
     '_prepare_segment',
     # whisper_analyzer
     'analyze_tts_with_whisper',
-    '_create_char_proportional_timestamps',
     'analyze_tts_with_gemini',
     # tts_speed
     '_apply_speed_to_segment_tts',

@@ -461,11 +461,11 @@ class SessionManager:
 
     def _is_ui_ready(self) -> bool:
         """UI가 세션 복구를 할 준비가 되었는지 확인"""
-        # 필수 UI 요소 확인
+        # 실제로 init_ui() 완료 후 존재하는 속성만 체크
         required_attrs = [
             'voice_vars',           # 음성 선택 변수 (존재만 확인, 비어있어도 OK)
-            'output_folder_var',    # 출력 폴더 변수
-            'update_url_listbox',   # URL 리스트 업데이트 메서드
+            'url_input_panel',      # URL 입력 패널
+            'queue_manager',        # 큐 매니저 (update_url_listbox 위임)
         ]
 
         for attr in required_attrs:
@@ -474,7 +474,6 @@ class SessionManager:
                 return False
 
         # voice_vars는 비어있어도 URL/상태 복구는 진행
-        # 음성 프로필만 선택적으로 복구됨
         if not self.gui.voice_vars:
             logger.debug("[세션] 경고: voice_vars 비어있음 - 음성 프로필은 복구 생략")
 
