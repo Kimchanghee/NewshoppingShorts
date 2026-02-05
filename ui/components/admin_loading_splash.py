@@ -7,7 +7,7 @@ Uses the design system v2 for consistent styling.
 """
 
 from PyQt6.QtWidgets import QWidget, QLabel, QProgressBar, QApplication
-from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, pyqtProperty
+from PyQt6.QtCore import Qt, QTimer, QPropertyAnimation, QEasingCurve, QRect, QPoint, QPointF, pyqtProperty
 from PyQt6.QtGui import QFont, QPainter, QPen, QColor, QLinearGradient, QPainterPath, QRadialGradient
 
 from ui.design_system_v2 import get_design_system, get_color
@@ -52,7 +52,7 @@ class SpinningLoader(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
-        center = QPoint(40, 40)
+        center = QPointF(40, 40)
 
         painter.save()
         painter.translate(center)
