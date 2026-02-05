@@ -454,9 +454,13 @@ def _is_bad_split_point(text, pos):
     # ★★★ 1. 숫자/수량사 + 단위 패턴 (끊으면 안됨) ★★★
     # "한 톨", "두 개", "세 마리", "한두 개" 등
     number_words = ['한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열',
-                    '한두', '두세', '서너', '몇', '몇몇', '여러']
+                    '스물', '서른', '마흔', '쉰', '예순', '일흔', '여든', '아흔',
+                    '한두', '두세', '서너', '몇', '몇몇', '여러',
+                    '일', '이', '삼', '사', '오', '육', '칠', '팔', '구', '십', '백', '천']
     counter_words = ['개', '톨', '마리', '명', '장', '권', '병', '잔', '그릇', '벌', '켤레',
-                     '대', '채', '척', '자루', '송이', '알', '방울', '조각', '점', '가지']
+                     '대', '채', '척', '자루', '송이', '알', '방울', '조각', '점', '가지',
+                     '통', '쪽', '그루', '포기', '줄', '다발', '쌍', '박스', '세트', '팩',
+                     '번', '회', '차', '층', '칸', '곳', '군데', '살', '배', '할', '푼']
 
     # before가 숫자로 끝나고 after가 단위로 시작하면 나쁜 분리
     for num in number_words:
@@ -502,7 +506,7 @@ def _is_bad_split_point(text, pos):
 
     # ★★★ 3-2. 의존명사 패턴 (끊으면 안됨) ★★★
     # "먹을 것", "알 줄", "갈 데", "할 바", "올 리", "할 터", "할 뿐"
-    dependent_nouns = ['것', '줄', '데', '바', '리', '터', '뿐', '만큼', '대로', '듯', '뻔']
+    dependent_nouns = ['것', '줄', '데', '바', '리', '터', '뿐', '만큼', '대로', '듯', '뻔', '적', '법', '셈']
     for dn in dependent_nouns:
         if after.startswith(dn):
             last_word = before.split()[-1] if before.split() else before
@@ -589,9 +593,9 @@ def _is_bad_split_point(text, pos):
         if re.match(r'^(없|못|안|아니)', after):
             return True
 
-    # ★★★ 3-15. ~기 때문에/위해/전에/후에 명사형 어미 + 의존명사 ★★★
+    # ★★★ 3-15. ~기 때문에/위해/전에/후에 명사형 어미 + 의존명사/형용사 ★★★
     if before.endswith('기'):
-        if re.match(r'^(때문|위해|전에|후에|위한|바라|싫|좋|쉬)', after):
+        if re.match(r'^(때문|위해|전에|후에|위한|바라|싫|좋|쉬|어려|힘들|편하|불편|나름)', after):
             return True
 
     # ★★★ 3-16. ~ㄴ/는 편이다 평가 패턴 ★★★
@@ -693,11 +697,19 @@ def _is_bad_split_point(text, pos):
     # ★★★ 11. 짧은 단어 보호 (2글자 이하) ★★★
     # 마지막 단어가 2글자 이하면 분리하지 않음 (조사 등과 붙어있어야 함)
     # 단, 동사/형용사 활용 어미로 끝나면 분리 허용 (있어, 없어, 않아 등)
+    # 단, 조사(도/만/와/과 등)로 끝나면 완결된 문법 단위이므로 분리 허용 (개도, 잔만 등)
+    # 단, 독립적 2글자 부사/명사는 분리 허용 (진짜, 정말, 너무, 아래 등)
+    standalone_2char = {'진짜', '정말', '너무', '완전', '매우', '가장', '아주', '상당',
+                        '오늘', '내일', '어제', '지금', '아까', '방금', '나중', '당장',
+                        '아래', '여기', '거기', '저기', '우리', '저희', '모두', '전부',
+                        '다시', '이미', '아직', '먼저', '계속', '함께', '같이', '직접',
+                        '드디어', '솔직', '확실', '대충', '보통'}
     last_word = before.split()[-1] if before.split() else ''
-    if len(last_word) <= 2 and not re.search(r'[은는이가을를에서로]$', last_word):
-        # 동사/형용사 활용형 어미로 끝나면 완결된 서술어이므로 분리 허용
-        if not re.search(r'[아어요고며면서게지니]$', last_word):
-            return True
+    if len(last_word) <= 2 and last_word not in standalone_2char:
+        if not re.search(r'[은는이가을를에서로도만와과의]$', last_word):
+            # 동사/형용사 활용형 어미로 끝나면 완결된 서술어이므로 분리 허용
+            if not re.search(r'[아어요고며면서게지니]$', last_word):
+                return True
 
     # ★★★ 12. 인용/인칭 패턴 ★★★
     # "~라고", "~다고", "~냐고" 등의 인용 표현
@@ -710,15 +722,20 @@ def _is_bad_split_point(text, pos):
     # 단, 마지막 단어가 3글자 이상이면 명사+조사이므로 분리 허용
     # "음식도 먹고"(음식도=3자) → 분리 허용, "하기도 해"(하기도=3자+보조용언) → 분리 금지
     # "처리도 되어" → 되/돼 추가
+    # ★ 예외: 양사+도/만 (개도, 명도, 잔만 등)은 주동사 "있/없"이므로 분리 허용
     if re.search(r'[도만]$', before):
         last_word = before.split()[-1] if before.split() else before
-        # 보조용언 패턴: 하/해/있/없/않/되/돼 등이 뒤따르면 분리 금지
-        if re.match(r'^(하|해|있|없|않|못|싶|보|되|돼)', after):
-            return True
-        # 2글자 이하 단어 + 도/만 → 분리 금지 (짧은 부사/조사 보호)
-        if len(last_word) <= 2:
-            if re.match(r'^[가-힣]', after) and not re.match(r'^[은는이가을를에서로와과의]', after):
+        # 양사(counter)+조사 패턴 감지: "개도", "명만" 등 → 뒤의 있/없은 보조용언이 아님
+        word_stem = last_word[:-1] if len(last_word) >= 2 else ''
+        is_counter_particle = word_stem in counter_words
+        if not is_counter_particle:
+            # 보조용언 패턴: 하/해/있/없/않/되/돼 등이 뒤따르면 분리 금지
+            if re.match(r'^(하|해|있|없|않|못|싶|보|되|돼)', after):
                 return True
+            # 2글자 이하 단어 + 도/만 → 분리 금지 (짧은 부사/조사 보호)
+            if len(last_word) <= 2:
+                if re.match(r'^[가-힣]', after) and not re.match(r'^[은는이가을를에서로와과의]', after):
+                    return True
 
     return False
 
@@ -810,8 +827,9 @@ def _split_text_naturally(app, text, max_chars=13):
     working_text = text_without_cta if preserved_cta else normalized
 
     # ★★★ 1단계: 구두점 기준 문장 분리 ★★★
-    # 마침표, 물음표, 느낌표 뒤에서 확실히 분리 (구두점은 앞 문장에 포함)
-    sentence_pattern = re.compile(r'([.!?。？！]+)')
+    # 마침표, 물음표, 느낌표, 쉼표 뒤에서 확실히 분리 (구두점은 앞 문장에 포함)
+    # 글자수와 상관없이 구두점이 나오면 반드시 다음 자막으로 넘어감
+    sentence_pattern = re.compile(r'([.!?,;，。？！]+)')
     parts = sentence_pattern.split(working_text)
 
     sentences = []
@@ -963,13 +981,72 @@ def _split_text_naturally(app, text, max_chars=13):
     for idx, s in enumerate(segments):
         logger.info(f"  {idx+1}. [{len(s)}자] '{s}'")
 
+    # ★★★ 2.5단계: 수사+양사 분리 복구 ★★★
+    # 분할 결과에서 수사(두, 세 등)와 양사(개, 명 등)가 분리된 경우 병합
+    number_words_set = {'한', '두', '세', '네', '다섯', '여섯', '일곱', '여덟', '아홉', '열',
+                        '스물', '서른', '마흔', '쉰', '예순', '일흔', '여든', '아흔',
+                        '한두', '두세', '서너', '몇', '몇몇', '여러',
+                        '일', '이', '삼', '사', '오', '육', '칠', '팔', '구', '십', '백', '천'}
+    counter_words_set = {'개', '톨', '마리', '명', '장', '권', '병', '잔', '그릇', '벌', '켤레',
+                         '대', '채', '척', '자루', '송이', '알', '방울', '조각', '점', '가지',
+                         '통', '쪽', '그루', '포기', '줄', '다발', '쌍', '박스', '세트', '팩',
+                         '번', '회', '차', '층', '칸', '곳', '군데', '살', '배', '할', '푼'}
+    i = 0
+    while i < len(segments) - 1:
+        curr = segments[i]
+        next_seg = segments[i + 1]
+
+        curr_words = curr.split()
+        next_words = next_seg.split()
+        last_word = curr_words[-1] if curr_words else ''
+        first_word = next_words[0] if next_words else ''
+
+        # 현재 세그먼트 끝 단어가 수사이고 다음 세그먼트 첫 단어가 양사로 시작
+        is_split_pair = False
+        if last_word in number_words_set:
+            for cw in counter_words_set:
+                if first_word.startswith(cw):
+                    is_split_pair = True
+                    break
+
+        if is_split_pair:
+            # 방법 A: 다음 세그먼트의 첫 단어(양사)를 현재 세그먼트에 병합
+            merged_curr = f"{curr} {first_word}"
+            rest_of_next = ' '.join(next_words[1:]).strip()
+
+            if len(merged_curr) <= hard_max:
+                segments[i] = merged_curr
+                if rest_of_next:
+                    segments[i + 1] = rest_of_next
+                else:
+                    segments.pop(i + 1)
+                logger.info(f"[자막 분할] 2.5단계 수사+양사 병합: '{curr}' + '{first_word}' → '{merged_curr}'")
+                continue  # 같은 위치 재검사
+
+            # 방법 B: 수사를 다음 세그먼트로 이동
+            rest_of_curr = ' '.join(curr_words[:-1]).strip()
+            merged_next = f"{last_word} {next_seg}"
+            if rest_of_curr and len(merged_next) <= hard_max:
+                segments[i] = rest_of_curr
+                segments[i + 1] = merged_next
+                logger.info(f"[자막 분할] 2.5단계 수사 이동: '{last_word}' → 다음 세그먼트 '{merged_next}'")
+
+        i += 1
+
+    if len(segments) != len([s for s in segments if s]):
+        segments = [s for s in segments if s]
+
     # ★★★ 3단계: 너무 짧은 세그먼트 병합 ★★★
+    # 단, 구두점(.!?,;)으로 끝나는 세그먼트 뒤에서는 병합하지 않음
+    _punct_ends = set('.!?,;，。？！')
     merged = []
     for seg in segments:
-        seg = seg.strip(' ,;')
+        seg = seg.strip()
         if not seg:
             continue
-        if merged and len(seg) < min_chars:
+        # 이전 세그먼트가 구두점으로 끝나면 병합 금지
+        prev_ends_punct = merged and merged[-1][-1] in _punct_ends
+        if merged and len(seg) < min_chars and not prev_ends_punct:
             # 이전 세그먼트와 합쳐도 hard_max 이내면 병합
             if len(merged[-1]) + 1 + len(seg) <= hard_max:
                 prev = merged[-1]
@@ -980,9 +1057,10 @@ def _split_text_naturally(app, text, max_chars=13):
         else:
             merged.append(seg)
 
-    # 마지막 세그먼트가 너무 짧으면 이전과 병합
+    # 마지막 세그먼트가 너무 짧으면 이전과 병합 (구두점으로 끝나면 병합 금지)
     if len(merged) > 1 and len(merged[-1]) < min_chars:
-        if len(merged[-2]) + 1 + len(merged[-1]) <= hard_max + 3:
+        prev_ends_punct = merged[-2][-1] in _punct_ends
+        if not prev_ends_punct and len(merged[-2]) + 1 + len(merged[-1]) <= hard_max + 3:
             last = merged[-1]
             merged[-2] = f"{merged[-2]} {merged[-1]}".strip()
             merged.pop()
