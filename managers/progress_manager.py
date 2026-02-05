@@ -659,8 +659,23 @@ class ProgressManager(ProgressObserver):
                 except Exception as e:
                     logger.debug(f"[ProgressManager] panel.update_step_status error: {e}")
 
-            # Update current task display (PyQt6 / State)
-            if hasattr(self.gui, 'current_task_label'):
+            # Update current task display via ProgressPanel.set_current_task
+            # (also updates status icon: ⏳/✅/❌/⏸)
+            if progress_panel is not None and hasattr(progress_panel, 'set_current_task'):
+                panel_task_status_map = {
+                    'waiting': 'pending',
+                    'processing': 'active',
+                    'completed': 'completed',
+                    'error': 'error',
+                }
+                try:
+                    progress_panel.set_current_task(
+                        highlight_message,
+                        panel_task_status_map.get(status, 'pending'),
+                    )
+                except Exception as e:
+                    logger.debug(f"[ProgressManager] panel.set_current_task error: {e}")
+            elif hasattr(self.gui, 'current_task_label'):
                 self.gui.current_task_label.setText(highlight_message)
 
             # Update state for heartbeat

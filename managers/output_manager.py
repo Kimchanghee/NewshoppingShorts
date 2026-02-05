@@ -59,6 +59,32 @@ class OutputManager:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         return f"{timestamp}_{sanitized}"
 
+    def verify_video_log(self, url: str) -> str:
+        """처리 로그를 분석하여 싱크/오류 문제를 확인하고 비고 문자열 반환."""
+        log_buffer = getattr(self.gui, "_url_log_buffer", None)
+        if not log_buffer:
+            return "통과"
+
+        log_text = "".join(log_buffer)
+        issues: List[str] = []
+
+        error_patterns = {
+            "싱크 불일치": ["sync", "싱크", "synchronization", "timing mismatch"],
+            "TTS 실패": ["tts 실패", "tts fail", "음성 생성 실패", "voice generation failed"],
+            "자막 오류": ["subtitle error", "자막 오류", "srt error"],
+            "인코딩 오류": ["encoding error", "인코딩 오류", "ffmpeg error", "codec error"],
+            "API 오류": ["api error", "api 오류", "500 internal"],
+        }
+
+        log_lower = log_text.lower()
+        for label, keywords in error_patterns.items():
+            if any(kw in log_lower for kw in keywords):
+                issues.append(label)
+
+        if issues:
+            return ", ".join(issues)
+        return "통과"
+
     def open_folder(self, path: str):
         if not path:
             return

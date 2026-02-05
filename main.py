@@ -358,8 +358,8 @@ class VideoAnalyzerGUI(QMainWindow):
 
     def update_overall_progress_display(self):
         mgr = getattr(self, "progress_manager", None)
-        if mgr is not None and hasattr(mgr, "update_overall_progress"):
-            mgr.update_overall_progress("overall", "processing")
+        if mgr is not None and hasattr(mgr, "update_overall_progress_display"):
+            mgr.update_overall_progress_display()
 
     # ================================================================
     # Status update
@@ -578,16 +578,9 @@ class VideoAnalyzerGUI(QMainWindow):
                 logger.warning(f"[세션] 자동 저장 실패: {e}")
 
     def _check_first_run(self):
-        """Always show tutorial on app launch"""
-        self._should_show_tutorial = True
-
-    def _mark_tutorial_complete(self):
-        """Mark tutorial as completed"""
-        config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
-        os.makedirs(config_dir, exist_ok=True)
-        tutorial_flag = os.path.join(config_dir, ".tutorial_complete")
-        with open(tutorial_flag, 'w') as f:
-            f.write("1")
+        """Check if tutorial should be shown (respects 'don't show again' setting)"""
+        from ui.components.tutorial_manager import TutorialManager
+        self._should_show_tutorial = TutorialManager.should_show_tutorial()
 
     def resizeEvent(self, event):
         """리사이즈 중 비필수 업데이트 일시 중지"""
@@ -603,15 +596,40 @@ class VideoAnalyzerGUI(QMainWindow):
         self.subscription_manager.resume_countdown()
 
     def showEvent(self, event):
-        """Show tutorial on first launch"""
+        """Show tutorial on first launch + check for previous session (sequenced)"""
         super().showEvent(event)
-        if hasattr(self, '_should_show_tutorial') and self._should_show_tutorial and not self._tutorial_shown:
-            self._tutorial_shown = True
-            QTimer.singleShot(500, self._show_tutorial)
 
-    def _show_tutorial(self):
-        """Display guided tutorial with spotlight effect"""
-        self._tutorial_manager = show_guided_tutorial(self)
+        if not getattr(self, '_show_event_handled', False):
+            self._show_event_handled = True
+
+            if hasattr(self, '_should_show_tutorial') and self._should_show_tutorial and not self._tutorial_shown:
+                # 튜토리얼 먼저 → 완료/건너뛰기 후 세션 복구
+                self._tutorial_shown = True
+                QTimer.singleShot(800, self._show_tutorial_then_session)
+            else:
+                # 튜토리얼 없으면 바로 세션 복구
+                QTimer.singleShot(300, self._check_previous_session)
+
+    def _check_previous_session(self):
+        """이전 세션 복구 확인 + 자동 저장 타이머 시작"""
+        # 세션 복구 확인
+        if hasattr(self, 'exit_handler'):
+            try:
+                self.exit_handler.check_and_restore_session()
+            except Exception as e:
+                logger.warning(f"[세션] 복구 확인 중 오류: {e}")
+
+        # 자동 저장 타이머 시작 (5분 간격)
+        if hasattr(self, 'exit_handler'):
+            self.exit_handler.auto_save_session()
+
+    def _show_tutorial_then_session(self):
+        """튜토리얼 표시 후 완료/건너뛰기 시 세션 복구 진행"""
+        self._tutorial_manager = show_guided_tutorial(
+            self,
+            on_complete=lambda: QTimer.singleShot(300, self._check_previous_session),
+            on_skip=lambda: QTimer.singleShot(300, self._check_previous_session),
+        )
 
     def show_tutorial_manual(self):
         """Manually show tutorial (from settings or help menu)"""

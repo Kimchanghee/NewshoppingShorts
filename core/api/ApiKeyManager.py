@@ -28,18 +28,16 @@ class APIKeyManager:
     - SecretsManager를 통한 암호화된 키 로드
     - 키 로테이션 및 부하 분산
     - 차단된 키 관리 (Rate Limit 대응)
-    - 사용량 추적
 
     Features:
     - Encrypted key loading via SecretsManager
     - Key rotation and load balancing
     - Blocked key management (Rate Limit handling)
-    - Usage tracking
     """
 
     # 최대 API 키 개수 (UI와 동기화)
     # Maximum number of API keys (synced with UI)
-    MAX_KEYS = 20
+    MAX_KEYS = 8
 
     def __init__(self, use_secrets_manager: bool = True):
         """
@@ -52,7 +50,7 @@ class APIKeyManager:
         self.use_secrets_manager = use_secrets_manager
         self.blocked_keys: Dict[str, datetime] = {}
         self.current_key: Optional[str] = None
-        self.usage_count: Dict[str, int] = {}
+        self._last_key_index = -1  # 라운드로빈 인덱스
 
         # SecretsManager에서 키 로드 또는 config fallback
         # Load keys from SecretsManager or fallback to config
@@ -187,14 +185,12 @@ class APIKeyManager:
             else:
                 raise Exception("사용 가능한 API 키가 없습니다.")
         
-        # 가장 적게 사용된 키 선택
-        available_keys.sort(key=lambda x: self.usage_count.get(x[0], 0))
-        selected_key_name, selected_key_value = available_keys[0]
-        
+        # 라운드로빈 키 선택
+        self._last_key_index = (self._last_key_index + 1) % len(available_keys)
+        selected_key_name, selected_key_value = available_keys[self._last_key_index]
+
         self.current_key = selected_key_name
-        self.usage_count[selected_key_name] = self.usage_count.get(selected_key_name, 0) + 1
-        
-        logger.debug(f"[API Manager] {selected_key_name} 선택됨 (사용 횟수: {self.usage_count[selected_key_name]})")
+        logger.debug(f"[API Manager] {selected_key_name} 선택됨")
         return selected_key_value
 
     def _get_available_key_after_wait(self, max_retries: int = 3):
@@ -213,11 +209,10 @@ class APIKeyManager:
                               if v and k not in self.blocked_keys]
 
             if available_keys:
-                available_keys.sort(key=lambda x: self.usage_count.get(x[0], 0))
-                selected_key_name, selected_key_value = available_keys[0]
+                self._last_key_index = (self._last_key_index + 1) % len(available_keys)
+                selected_key_name, selected_key_value = available_keys[self._last_key_index]
                 self.current_key = selected_key_name
-                self.usage_count[selected_key_name] = self.usage_count.get(selected_key_name, 0) + 1
-                logger.debug(f"[API Manager] {selected_key_name} 선택됨 (사용 횟수: {self.usage_count[selected_key_name]})")
+                logger.debug(f"[API Manager] {selected_key_name} 선택됨")
                 return selected_key_value
 
             # 여전히 사용 가능한 키가 없으면 대기
@@ -242,13 +237,12 @@ class APIKeyManager:
     def get_status(self):
         status = []
         current_time = datetime.now()
-        
+
         for key_name in self.api_keys:
             if key_name in self.blocked_keys:
                 remaining = (self.blocked_keys[key_name] - current_time).total_seconds()
                 status.append(f"{key_name}: 차단됨 ({int(remaining/60)}분 남음)")
             else:
-                count = self.usage_count.get(key_name, 0)
-                status.append(f"{key_name}: 사용가능 (사용횟수: {count})")
-        
+                status.append(f"{key_name}: 사용가능")
+
         return "\n".join(status)

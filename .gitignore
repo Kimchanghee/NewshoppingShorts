@@ -49,6 +49,9 @@ ui_preferences.json
 *.m4a
 *.mp3
 
+# 음성 샘플은 포함 (앱 미리듣기용)
+!resource/voice_samples/*.wav
+
 # 출력 폴더
 outputs/
 temp/

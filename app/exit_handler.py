@@ -125,17 +125,42 @@ class ExitHandler:
             pass
 
     def check_and_restore_session(self):
-        """세션 복구 확인 및 처리"""
+        """세션 복구 확인 및 처리 - 사용자 확인 다이얼로그 포함"""
         if not hasattr(self.app, 'session_manager'):
             return
 
         try:
             session_manager = self.app.session_manager
-            if session_manager.has_saved_session():
-                session_manager.restore_session()
-                logger.info("[세션] 이전 세션 복구 완료")
+            session_data = session_manager.get_session_info()
+
+            if session_data is None:
+                # 복구할 세션 없음 (파일 없거나 모두 완료됨)
+                return
+
+            # 사용자에게 복구 여부 확인
+            message = session_manager.get_restore_confirmation_message(session_data)
+            result = show_question(self.app, "이전 작업 발견", message)
+
+            if result:
+                success = session_manager.restore_session(session_data)
+                if success:
+                    logger.info("[세션] 이전 세션 복구 완료")
+                else:
+                    logger.warning("[세션] 세션 복구 실패 - 세션 파일 삭제")
+                    session_manager.clear_session()
+            else:
+                # 사용자가 "아니오" 선택 → 세션 삭제
+                session_manager.clear_session()
+                logger.info("[세션] 사용자가 세션 복구 거부 - 세션 삭제")
+
         except Exception as e:
-            logger.error(f"[세션] 복구 실패: {e}")
+            logger.error(f"[세션] 복구 확인 실패: {e}")
+            # 오류 시 세션 파일 정리
+            try:
+                if hasattr(self.app, 'session_manager'):
+                    self.app.session_manager.clear_session()
+            except Exception:
+                pass
 
     def auto_save_session(self):
         """자동 세션 저장 (주기적 호출)"""
@@ -150,12 +175,17 @@ class ExitHandler:
         # 다음 자동 저장 예약 (5분)
         QTimer.singleShot(300000, self.auto_save_session)
 
-    def retry_restore_session(self, max_retries: int = 3):
-        """세션 복구 재시도"""
+    def retry_restore_session(self, session_data, max_retries: int = 3):
+        """세션 복구 재시도
+
+        Args:
+            session_data: 복구할 세션 데이터 dict
+            max_retries: 최대 재시도 횟수
+        """
         for attempt in range(max_retries):
             try:
                 if hasattr(self.app, 'session_manager'):
-                    self.app.session_manager.restore_session()
+                    self.app.session_manager.restore_session(session_data)
                     logger.info(f"[세션] 복구 성공 (시도 {attempt + 1})")
                     return True
             except Exception as e:
@@ -164,5 +194,5 @@ class ExitHandler:
                     import time
                     time.sleep(1)
 
-        logger.error(f"[세션] 최대 재시도 횟수 초과")
+        logger.error("[세션] 최대 재시도 횟수 초과")
         return False

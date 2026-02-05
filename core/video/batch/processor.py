@@ -845,8 +845,8 @@ def _process_single_video(app, url, current_number, total_urls):
         _stage_times['analysis'] = time.time() - _stage_start
         logger.info("[STAGE 2 완료] AI 분석 소요: %.1f초", _stage_times['analysis'])
         # Log analysis result summary
-        script_count = len(app.analysis_result.get('script', [])) if isinstance(app.analysis_result, dict) else 0
-        subtitle_count = len(app.analysis_result.get('subtitle_positions', [])) if isinstance(app.analysis_result, dict) else 0
+        script_count = len(app.analysis_result.get('script') or []) if isinstance(app.analysis_result, dict) else 0
+        subtitle_count = len(app.analysis_result.get('subtitle_positions') or []) if isinstance(app.analysis_result, dict) else 0
         logger.info("  대본 라인: %d개, OCR 자막 영역: %d개", script_count, subtitle_count)
         app.update_progress_state("analysis", "completed", 100, None)
         app.update_step_progress("analysis", 100)
