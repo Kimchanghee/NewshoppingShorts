@@ -23,7 +23,7 @@ import config
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from app.main_app import VideoAnalyzerGUI
+    from main import VideoAnalyzerGUI
 
 
 class BatchHandler:
@@ -58,7 +58,7 @@ class BatchHandler:
 
         # TTS 음성 선택 검증 - 실제 선택된 음성 체크
         selected_voices = [
-            vid for vid, state in self.app.voice_vars.items() if state.get()
+            vid for vid, selected in self.app.voice_vars.items() if selected
         ]
         if not selected_voices or len(selected_voices) == 0:
             show_warning(
@@ -110,7 +110,12 @@ class BatchHandler:
 
         # 작업 횟수 확인 (Work count check)
         try:
-            user_id = self.app.login_data.get("data", {}).get("data", {}).get("id", "")
+            login_data = self.app.login_data
+            if not login_data or not isinstance(login_data, dict):
+                logger.warning("[BatchHandler] No login_data, skipping work count check")
+                user_id = ""
+            else:
+                user_id = login_data.get("data", {}).get("data", {}).get("id", "")
             if user_id:
                 work_check = rest.checkWorkAvailable(user_id)
                 if work_check.get("success"):
@@ -127,6 +132,7 @@ class BatchHandler:
                         == "trial"
                     )
 
+                    if remaining != -1 and remaining <= 0:
                         if is_trial_user:
                             # 체험판 사용자: 구독 신청 다이얼로그 표시
                             self.app.add_log(
@@ -227,6 +233,8 @@ class BatchHandler:
                 self.app.add_log(
                     "다른 작업이 진행 중입니다. 잠시 후 다시 시도해주세요."
                 )
+                self.app.batch_processing = False
+                self.app.dynamic_processing = False
                 QTimer.singleShot(0, self._reset_batch_ui_on_complete)
                 return
 

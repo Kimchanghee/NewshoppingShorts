@@ -161,13 +161,13 @@ class SettingsTab(QWidget, ThemedMixin):
         content_layout.addWidget(output_section)
         
         # =================== SECTION: API Key Management ===================
-        api_section = SettingsSection("API 키 설정 (최대 20개)")
+        self.api_section = SettingsSection("API 키 설정 (최대 20개)")
 
         # 설명 라벨
         desc_label = QLabel("여러 개의 API 키를 등록하면 자동으로 로테이션됩니다. Rate Limit 발생 시 다음 키로 자동 전환됩니다.")
         desc_label.setWordWrap(True)
         desc_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;")
-        api_section.content_layout.addWidget(desc_label)
+        self.api_section.content_layout.addWidget(desc_label)
 
         # API 키 입력 필드들 (20개)
         self.api_key_inputs = []
@@ -255,7 +255,7 @@ class SettingsTab(QWidget, ThemedMixin):
             self.api_key_inputs.append(key_input)
 
         api_scroll.setWidget(api_keys_container)
-        api_section.content_layout.addWidget(api_scroll)
+        self.api_section.content_layout.addWidget(api_scroll)
 
         # 버튼 영역
         btn_container = QWidget()
@@ -322,14 +322,14 @@ class SettingsTab(QWidget, ThemedMixin):
         btn_layout.addWidget(self.api_clear_btn)
 
         btn_layout.addStretch()
-        api_section.content_layout.addWidget(btn_container)
+        self.api_section.content_layout.addWidget(btn_container)
 
         # 등록된 키 개수 표시
         self.api_count_label = QLabel("등록된 키: 0개")
         self.api_count_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;")
-        api_section.content_layout.addWidget(self.api_count_label)
+        self.api_section.content_layout.addWidget(self.api_count_label)
 
-        content_layout.addWidget(api_section)
+        content_layout.addWidget(self.api_section)
 
         # 저장된 키 로드
         self._load_saved_api_keys()

@@ -658,7 +658,10 @@ class ProgressManager(ProgressObserver):
                 elif hasattr(status_bar, 'setText'):
                     status_bar.setText(stage_message)
                 elif hasattr(status_bar, 'config'):
-                    status_bar.config(text=stage_message)
+                    try:
+                        status_bar.config(text=stage_message)
+                    except AttributeError:
+                        pass
 
             # 깜빡임 효과 처리
             # Handle blink effect
@@ -692,19 +695,13 @@ class ProgressManager(ProgressObserver):
             self.gui._stage_message_cache.clear()
 
         def _apply():
+            secondary = getattr(self.gui, 'secondary_text', '#6B7280')
             for indicator in getattr(self.gui, 'step_indicators', {}).values():
-                indicator['status_label'].config(text="⏸", fg=self.gui.secondary_text)
-                progress_label = indicator.get('progress_label')
-                if progress_label:
-                    progress_label.config(text="0%", fg=self.gui.secondary_text)
+                self._set_label(indicator.get('status_label'), text="⏸", color=secondary)
+                self._set_label(indicator.get('progress_label'), text="0%", color=secondary)
 
-            current_task_var = getattr(self.gui, 'current_task_var', None)
-            if current_task_var is not None:
-                current_task_var.set("대기 중")
-
-            status_bar = getattr(self.gui, 'status_bar', None)
-            if status_bar is not None:
-                status_bar.config(text="준비 완료")
+            self._update_task_display("대기 중")
+            self._update_status_bar("준비 완료")
 
             self.update_all_progress_displays()
 
@@ -744,13 +741,8 @@ class ProgressManager(ProgressObserver):
             else:
                 message = "📹 영상을 준비하고 있습니다"
 
-            current_task_var = getattr(self.gui, 'current_task_var', None)
-            if current_task_var is not None:
-                current_task_var.set(message)
-
-            status_bar = getattr(self.gui, 'status_bar', None)
-            if status_bar is not None:
-                status_bar.config(text=message)
+            self._update_task_display(message)
+            self._update_status_bar(message)
 
             self.update_overall_progress_display()
 
@@ -795,13 +787,8 @@ class ProgressManager(ProgressObserver):
             else:
                 message = " · ".join(parts)
 
-            current_task_var = getattr(self.gui, 'current_task_var', None)
-            if current_task_var is not None:
-                current_task_var.set(message)
-
-            status_bar = getattr(self.gui, 'status_bar', None)
-            if status_bar is not None:
-                status_bar.config(text=message)
+            self._update_task_display(message)
+            self._update_status_bar(message)
 
             self.update_overall_progress_display()
 
@@ -931,6 +918,71 @@ class ProgressManager(ProgressObserver):
             # PyQt6: QTimer.singleShot을 사용하여 메인 스레드에서 실행
             QTimer.singleShot(0, func)
 
+    # ---- PyQt6-safe widget helpers (replace Tkinter .config()) ----
+
+    @staticmethod
+    def _set_label(widget, text=None, color=None, bg=None, font_tuple=None):
+        """PyQt6-safe label/frame update."""
+        if widget is None:
+            return
+        try:
+            if text is not None and hasattr(widget, 'setText'):
+                widget.setText(str(text))
+            parts = []
+            if color is not None:
+                parts.append(f"color: {color}")
+            if bg is not None:
+                parts.append(f"background-color: {bg}")
+            if parts and hasattr(widget, 'setStyleSheet'):
+                widget.setStyleSheet("; ".join(parts))
+            if font_tuple is not None and hasattr(widget, 'setFont'):
+                from PyQt6.QtGui import QFont
+                family = font_tuple[0] if len(font_tuple) > 0 else "맑은 고딕"
+                size = font_tuple[1] if len(font_tuple) > 1 else 9
+                qf = QFont(family, size)
+                if len(font_tuple) > 2 and font_tuple[2] == "bold":
+                    qf.setBold(True)
+                widget.setFont(qf)
+        except Exception:
+            pass
+
+    def _update_task_display(self, message: str) -> None:
+        """Update the current task label / variable."""
+        ctl = getattr(self.gui, 'current_task_label', None)
+        if ctl is not None and hasattr(ctl, 'setText'):
+            ctl.setText(message)
+        if hasattr(self.gui, 'state'):
+            self.gui.state.current_task_var = message
+        var = getattr(self.gui, 'current_task_var', None)
+        if var is not None:
+            if hasattr(var, 'set'):
+                var.set(message)
+            elif hasattr(var, 'setText'):
+                var.setText(message)
+
+    def _update_status_bar(self, message: str) -> None:
+        """Update the status bar with a message."""
+        bar = getattr(self.gui, 'status_bar', None)
+        if bar is None:
+            return
+        if hasattr(bar, 'showMessage'):
+            bar.showMessage(message)
+        elif hasattr(bar, 'setText'):
+            bar.setText(message)
+
+    @staticmethod
+    def _set_progress_bar(pb, value):
+        """Set progress bar value (PyQt6 QProgressBar or Tkinter ttk)."""
+        if pb is None:
+            return
+        try:
+            if hasattr(pb, 'setValue'):
+                pb.setValue(int(value))
+            else:
+                pb['value'] = value
+        except Exception:
+            pass
+
     def _update_sidebar_mini_progress(self, step: str, status: str) -> None:
         """
         사이드바 미니 진행 패널 업데이트
@@ -1020,30 +1072,32 @@ class ProgressManager(ProgressObserver):
         def _apply():
             # 상태 아이콘 업데이트
             # Update status icon
-            indicator['status_label'].config(text=icon, fg=status_color)
+            self._set_label(indicator.get('status_label'), text=icon, color=status_color)
 
             # 제목 레이블 - 진행 중일 때 강조
             # Title label - emphasized when processing
             title_label = indicator.get('title_label')
             if title_label:
+                primary = getattr(self.gui, 'primary_text', '#E5E7EB')
                 if status == 'processing':
-                    title_label.config(fg=status_color, font=("맑은 고딕", 9, "bold"))
+                    self._set_label(title_label, color=status_color, font_tuple=("맑은 고딕", 9, "bold"))
                 else:
-                    title_label.config(fg=self.gui.primary_text, font=("맑은 고딕", 9))
+                    self._set_label(title_label, color=primary, font_tuple=("맑은 고딕", 9))
 
             # 진행률 텍스트
             # Progress text
             progress_label = indicator.get('progress_label')
             if progress_label:
+                secondary = getattr(self.gui, 'secondary_text', '#6B7280')
                 if progress is not None:
                     value = max(0, min(100, int(progress)))
-                    progress_label.config(text=f"{value}%", fg=status_color)
+                    self._set_label(progress_label, text=f"{value}%", color=status_color)
                 elif status == 'completed':
-                    progress_label.config(text="완료", fg=status_color)
+                    self._set_label(progress_label, text="완료", color=status_color)
                 elif status == 'processing':
-                    progress_label.config(text="진행중", fg=status_color)
+                    self._set_label(progress_label, text="진행중", color=status_color)
                 else:
-                    progress_label.config(text="", fg=self.gui.secondary_text)
+                    self._set_label(progress_label, text="", color=secondary)
 
             # 행 배경색 - 진행 중일 때 강조
             # Row background - emphasized when processing
@@ -1055,14 +1109,17 @@ class ProgressManager(ProgressObserver):
                 else:
                     row_bg = bg_secondary if idx % 2 == 0 else bg_card
 
-                row_frame.config(bg=row_bg)
-                # 자식 위젯들도 배경색 업데이트
+                if hasattr(row_frame, 'setStyleSheet'):
+                    row_frame.setStyleSheet(f"background-color: {row_bg}; border-radius: 4px;")
+                # 자식 위젯도 배경색 업데이트
                 # Update child widgets background too
-                for child in row_frame.winfo_children():
-                    try:
-                        child.config(bg=row_bg)
-                    except Exception:
-                        pass
+                from PyQt6.QtWidgets import QWidget
+                if hasattr(row_frame, 'findChildren'):
+                    for child in row_frame.findChildren(QWidget):
+                        try:
+                            self._set_label(child, bg=row_bg)
+                        except Exception:
+                            pass
 
         self._run_on_ui_thread(_apply)
 
@@ -1172,9 +1229,11 @@ class ProgressManager(ProgressObserver):
         if not voice_id:
             return "알 수 없음"
 
-        profile = self.gui.get_voice_profile(voice_id)
-        if profile:
-            return profile.get('label', voice_id)
+        vm = getattr(self.gui, 'voice_manager', None)
+        if vm is not None:
+            profile = vm.get_voice_profile(voice_id)
+            if profile:
+                return profile.get('label', voice_id)
         return voice_id
 
     # -------------------------------------------------------------------------
@@ -1322,16 +1381,12 @@ class ProgressManager(ProgressObserver):
         status = state.get('status', 'waiting')
         progress = state.get('progress', 0)
 
-        progress_bar = script_progress.get('progress_bar')
-        if progress_bar is not None:
-            progress_bar['value'] = progress
-
-        status_label = script_progress.get('status_label')
-        if status_label is not None:
-            status_label.config(
-                text=f"{self.get_status_text(status)} ({progress}%)",
-                fg=self.get_status_color(status)
-            )
+        self._set_progress_bar(script_progress.get('progress_bar'), progress)
+        self._set_label(
+            script_progress.get('status_label'),
+            text=f"{self.get_status_text(status)} ({progress}%)",
+            color=self.get_status_color(status)
+        )
 
     def update_translation_progress(self) -> None:
         """
@@ -1346,16 +1401,12 @@ class ProgressManager(ProgressObserver):
         status = state.get('status', 'waiting')
         progress = state.get('progress', 0)
 
-        progress_bar = translation_progress.get('progress_bar')
-        if progress_bar is not None:
-            progress_bar['value'] = progress
-
-        status_label = translation_progress.get('status_label')
-        if status_label is not None:
-            status_label.config(
-                text=f"{self.get_status_text(status)} ({progress}%)",
-                fg=self.get_status_color(status)
-            )
+        self._set_progress_bar(translation_progress.get('progress_bar'), progress)
+        self._set_label(
+            translation_progress.get('status_label'),
+            text=f"{self.get_status_text(status)} ({progress}%)",
+            color=self.get_status_color(status)
+        )
 
     def update_tts_progress(self) -> None:
         """
@@ -1370,16 +1421,12 @@ class ProgressManager(ProgressObserver):
         status = state.get('status', 'waiting')
         progress = state.get('progress', 0)
 
-        progress_bar = tts_progress.get('progress_bar')
-        if progress_bar is not None:
-            progress_bar['value'] = progress
-
-        status_label = tts_progress.get('status_label')
-        if status_label is not None:
-            status_label.config(
-                text=f"{self.get_status_text(status)} ({progress}%)",
-                fg=self.get_status_color(status)
-            )
+        self._set_progress_bar(tts_progress.get('progress_bar'), progress)
+        self._set_label(
+            tts_progress.get('status_label'),
+            text=f"{self.get_status_text(status)} ({progress}%)",
+            color=self.get_status_color(status)
+        )
 
     def update_overall_progress_display(self) -> None:
         """
@@ -1402,15 +1449,14 @@ class ProgressManager(ProgressObserver):
         # 진행률 숫자 표시
         # Display progress percentage
         numeric_text = f"{progress}%"
-        if overall_numeric_label is not None:
-            overall_numeric_label.config(text=numeric_text)
+        self._set_label(overall_numeric_label, text=numeric_text)
 
         # 회색 라벨: 현재 작업 단계 표시
         # Gray label: display current work step
         overall_witty_label = getattr(self.gui, 'overall_witty_label', None)
         if overall_witty_label is not None:
             step_text = self._get_current_step_text(current_step)
-            overall_witty_label.config(text=step_text)
+            self._set_label(overall_witty_label, text=step_text)
 
     # -------------------------------------------------------------------------
     # 레거시 호환 메서드 (위트 메시지)

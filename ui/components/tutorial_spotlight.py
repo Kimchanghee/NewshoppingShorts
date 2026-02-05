@@ -36,11 +36,12 @@ class TutorialSpotlight(QWidget):
         self._animation.setDuration(300)
         self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
 
-        # 리사이즈 쓰로틀링 (60fps)
+        # 리사이즈 쓰로틀링
         self._resize_timer = QTimer(self)
         self._resize_timer.setSingleShot(True)
-        self._resize_timer.setInterval(16)
+        self._resize_timer.setInterval(60)
         self._resize_timer.timeout.connect(self._on_resize_complete)
+        self._is_resizing = False
 
         self._setup_ui()
 
@@ -129,8 +130,10 @@ class TutorialSpotlight(QWidget):
         """부모 창 이벤트 필터"""
         if obj == self._parent_window:
             if event.type() == QEvent.Type.Resize:
+                self._is_resizing = True
                 # 자신의 크기도 부모에 맞춤
                 self.setGeometry(self._parent_window.rect())
+                self._invalidate_cache()
                 # 쓰로틀링된 위치 업데이트
                 self._resize_timer.start()
             elif event.type() == QEvent.Type.Move:
@@ -140,6 +143,7 @@ class TutorialSpotlight(QWidget):
 
     def _on_resize_complete(self):
         """리사이즈 완료 후 스포트라이트 위치 재계산"""
+        self._is_resizing = False
         if self._target_widget and self._target_widget.isVisible():
             self.set_target(self._target_widget, self._padding, animate=False)
 
@@ -149,11 +153,17 @@ class TutorialSpotlight(QWidget):
             self._rebuild_path_cache()
 
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # 어두운 오버레이 색상
         overlay_color = QColor("#0F172A")
-        overlay_color.setAlpha(200)  # ~78% 불투명도
+        overlay_color.setAlpha(200)
+
+        # 리사이즈 중에는 간소화된 렌더링 (안티앨리어싱 + 글로우 생략)
+        if self._is_resizing:
+            painter.fillPath(self._cached_path, overlay_color)
+            return
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         # 오버레이 그리기 (스포트라이트 영역 제외)
         painter.fillPath(self._cached_path, overlay_color)

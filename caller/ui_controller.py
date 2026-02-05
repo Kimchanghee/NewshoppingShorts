@@ -61,3 +61,11 @@ def accountSaveInfo(*args):
 
 def errorSaveInfo(self, message):
     pass
+
+
+def write_error_log(error):
+    """에러를 로그에 기록 (processor.py 등에서 호출)"""
+    try:
+        logger.error(f"[ErrorLog] {type(error).__name__}: {error}")
+    except Exception:
+        pass

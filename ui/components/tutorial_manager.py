@@ -21,7 +21,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
     {
         "id": "source",
         "title": "소스 입력",
-        "description": "변환할 영상의 URL을 입력하세요.\n도우인, 타오바오 등 중국 쇼핑몰 링크를\n붙여넣고 추가 버튼을 클릭합니다.",
+        "description": "변환할 영상의 URL을 입력하세요.\n도우인 영상 링크를 붙여넣고\n추가 버튼을 클릭합니다.",
         "target_type": "sidebar",
         "target_id": "source",
         "navigate_to": "source",
@@ -97,6 +97,16 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "navigate_to": None,
         "tooltip_x": 1050,
         "tooltip_y": 60,
+    },
+    {
+        "id": "api_key_setup",
+        "title": "API Key 연결",
+        "description": "영상 제작을 시작하려면 Gemini API Key가\n필요합니다. 아래 입력란에 API Key를 붙여넣고\n'모든 키 저장' 버튼을 클릭하세요.",
+        "target_type": "widget",
+        "target_widget": "api_key_section",
+        "navigate_to": "settings",
+        "tooltip_x": 680,
+        "tooltip_y": 120,
     },
 ]
 

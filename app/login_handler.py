@@ -9,6 +9,7 @@ import time
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QTimer
+from PyQt6.QtWidgets import QApplication
 from ui.components.custom_dialog import show_warning, show_error
 from caller import rest
 from utils.logging_config import get_logger
@@ -16,7 +17,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 if TYPE_CHECKING:
-    from app.main_app import VideoAnalyzerGUI
+    from main import VideoAnalyzerGUI
 
 
 class LoginHandler:
@@ -130,6 +131,50 @@ class LoginHandler:
                     logger.debug(f"[watch_loop] Check exception: {e}")
             time.sleep(5)
 
+    def _safe_exit(self):
+        """안전한 앱 종료 - 로그아웃 후 Qt 앱 종료 (메인 스레드에서만 호출)"""
+        # 백그라운드 스레드에서 직접 호출된 경우 메인 스레드로 재스케줄
+        qt_app = QApplication.instance()
+        if qt_app is not None:
+            from PyQt6.QtCore import QThread
+            if QThread.currentThread() != qt_app.thread():
+                logger.warning("[LoginHandler] _safe_exit called from background thread, rescheduling")
+                QTimer.singleShot(0, self._safe_exit)
+                return
+        try:
+            # 배치 처리 중지
+            self.app.batch_processing = False
+            self.app.dynamic_processing = False
+
+            # 서버 로그아웃
+            if self.app.login_data and isinstance(self.app.login_data, dict):
+                user_id = (
+                    self.app.login_data.get("data", {})
+                    .get("data", {})
+                    .get("id")
+                )
+                if user_id:
+                    try:
+                        rest.logOut(userId=user_id, key="ssmaker")
+                        logger.info("[LoginHandler] Logout successful")
+                    except Exception as logout_err:
+                        logger.warning("Logout failed (ignored): %s", logout_err)
+
+            # 구독 매니저 타이머 중지
+            sub_mgr = getattr(self.app, "subscription_manager", None)
+            if sub_mgr is not None:
+                sub_mgr.stop()
+        except Exception as e:
+            logger.error("Safe exit cleanup failed: %s", e)
+
+        # Qt 앱 종료
+        try:
+            qt_app = QApplication.instance()
+            if qt_app is not None:
+                qt_app.quit()
+        except Exception:
+            pass
+
     def exit_program_other_place(self, status: str):
         """다른 장소에서 로그인(EU003) → 알림 후 종료"""
         if status == "EU003":
@@ -141,7 +186,7 @@ class LoginHandler:
                 )
             except Exception as e:
                 logger.warning("Failed to show duplicate login warning: %s", e)
-            self.app.processBeforeExitProgram()
+            self._safe_exit()
 
     def error_program_force_close(self, status: str):
         """서버에서 강제 종료(EU004) → 알림 후 종료"""
@@ -150,4 +195,4 @@ class LoginHandler:
                 show_error(self.app, "오류", "오류로 인해 프로그램을 종료합니다.")
             except Exception as e:
                 logger.warning("Failed to show force close error dialog: %s", e)
-            self.app.processBeforeExitProgram()
+            self._safe_exit()

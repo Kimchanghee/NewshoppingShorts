@@ -1157,7 +1157,7 @@ def get_subscription_status_with_consistency(user_id: str) -> Dict[str, Any]:
     """
     raw_status = getSubscriptionStatus(user_id)
 
-    # ? ?? ?????    validated_status = _subscription_state_manager.update_state(raw_status)
+    validated_status = _subscription_state_manager.update_state(raw_status)
 
     return validated_status
 

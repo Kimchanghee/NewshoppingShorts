@@ -10,6 +10,7 @@ from managers.queue_manager import QueueManager
 from managers.progress_manager import ProgressManager
 from managers.voice_manager import VoiceManager
 from managers.output_manager import OutputManager
+from managers.subscription_manager import SubscriptionManager
 from managers.settings_manager import SettingsManager, get_settings_manager
 from managers.youtube_manager import YouTubeManager, get_youtube_manager
 from managers.tiktok_manager import TikTokManager, get_tiktok_manager
@@ -25,6 +26,7 @@ __all__ = [
     'ProgressManager',
     'VoiceManager',
     'OutputManager',
+    'SubscriptionManager',
     'SettingsManager',
     'get_settings_manager',
     'YouTubeManager',

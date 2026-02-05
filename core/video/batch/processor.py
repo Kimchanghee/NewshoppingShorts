@@ -409,7 +409,6 @@ def dynamic_batch_processing_thread(app):
                             )
 
                     # Use QTimer to show dialog on main thread
-                    from PyQt6.QtCore import QTimer
                     QTimer.singleShot(0, show_trial_dialog)
 
                     # Break out of retry loop and stop processing
@@ -464,13 +463,19 @@ def dynamic_batch_processing_thread(app):
                             )
 
                             # API 키 교체
+                            api_mgr = getattr(app, "api_key_manager", None)
                             try:
-                                app.api_key_manager.block_current_key(
-                                    duration_minutes=5
-                                )
-                                new_key = app.api_key_manager.get_available_key()
-                                app.init_client(use_specific_key=new_key)
-                                app.add_log("🔑 API 키 교체 완료")
+                                if api_mgr is not None:
+                                    api_mgr.block_current_key(
+                                        duration_minutes=5
+                                    )
+                                    new_key = api_mgr.get_available_key()
+                                    if new_key and app.init_client(use_specific_key=new_key):
+                                        app.add_log("🔑 API 키 교체 완료")
+                                    else:
+                                        app.add_log("[WARN] 사용 가능한 API 키 없음 - 동일 키로 재시도")
+                                else:
+                                    app.add_log("[WARN] API 키 관리자 미초기화 - 동일 키로 재시도")
                             except Exception as api_key_err:
                                 logger.warning("API 키 교체 실패: %s", api_key_err)
                                 app.add_log("[WARN] API 키 교체 실패")
@@ -537,22 +542,27 @@ def dynamic_batch_processing_thread(app):
                             app.add_log(
                                 "[WARN] API 권한 오류 감지. 현재 키를 차단하고 다른 키로 교체합니다."
                             )
-                            try:
-                                # 장기간 차단하여 곧바로 재사용되지 않도록 처리
-                                app.api_key_manager.block_current_key(
-                                    duration_minutes=60
-                                )
-                            except Exception as block_exc:
-                                app.add_log(f"[WARN] 키 차단 중 오류: {block_exc}")
-                            try:
-                                new_key = app.api_key_manager.get_available_key()
-                                if app.init_client(use_specific_key=new_key):
-                                    app.add_log("🔑 API 키 교체 완료 (권한 오류 대응)")
-                                    continue
-                            except Exception as switch_exc:
-                                app.add_log(
-                                    f"[WARN] 권한 오류 후 새 API 키 확보 실패: {switch_exc}"
-                                )
+                            perm_api_mgr = getattr(app, "api_key_manager", None)
+                            if perm_api_mgr is not None:
+                                try:
+                                    perm_api_mgr.block_current_key(
+                                        duration_minutes=60
+                                    )
+                                except Exception as block_exc:
+                                    app.add_log(f"[WARN] 키 차단 중 오류: {block_exc}")
+                                try:
+                                    new_key = perm_api_mgr.get_available_key()
+                                    if new_key and app.init_client(use_specific_key=new_key):
+                                        app.add_log("🔑 API 키 교체 완료 (권한 오류 대응)")
+                                        continue
+                                    else:
+                                        app.add_log("[WARN] 사용 가능한 API 키 없음 - 키 교체 불가")
+                                except Exception as switch_exc:
+                                    app.add_log(
+                                        f"[WARN] 권한 오류 후 새 API 키 확보 실패: {switch_exc}"
+                                    )
+                            else:
+                                app.add_log("[WARN] API 키 관리자 미초기화 - 키 교체 불가")
                         _safe_set_url_status(app, url, "failed")
                         # 비고란에 짧은 오류 메시지 저장
                         app.url_status_message[url] = _get_short_error_message(e)
@@ -833,7 +843,7 @@ def _process_single_video(app, url, current_number, total_urls):
 
         # 4. TTS + 5. Final video creation (per voice).
         # 사용자가 실제로 선택한 음성만 사용 (voice_vars에서 체크된 것)
-        selected_voices = [vid for vid, state in app.voice_vars.items() if state.get()]
+        selected_voices = [vid for vid, selected in app.voice_vars.items() if selected]
         voice_manager = getattr(app, "voice_manager", None)
         if selected_voices:
             voices = []
@@ -1120,7 +1130,7 @@ def _create_final_video_for_batch(
         logger.debug("  자막 생성용 크기 캐시: %dx%d", target_width, target_height)
 
         # 좌우 반전 (필요시)
-        if hasattr(app, "mirror_video") and app.mirror_video and app.mirror_video.get():
+        if getattr(app, "mirror_video", False):
             logger.debug("  좌우 반전 적용")
             video = video.fx(vfx.mirror_x)
 
@@ -1369,7 +1379,7 @@ def _create_final_video_for_batch(
         analysis_progress_base = min(100, merge_end + 5)
         overlay_progress_base = min(100, analysis_progress_base + 5)
 
-        if app.add_subtitles.get() if hasattr(app, "add_subtitles") else True:
+        if getattr(app, "add_subtitles", True):
             try:
                 if (
                     hasattr(app, "_cached_subtitle_clips")
