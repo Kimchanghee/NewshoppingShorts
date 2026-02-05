@@ -784,10 +784,10 @@ def _process_single_video(app, url, current_number, total_urls):
         app.original_video_duration = original_video_duration
 
         # 영상 길이 제한 체크
-        MAX_VIDEO_DURATION = 39
+        MAX_VIDEO_DURATION = 35
         MIN_VIDEO_DURATION = 10
 
-        # 39초 초과 영상 건너뛰기 (팝업 없이 자동 스킵)
+        # 35초 초과 영상 건너뛰기 (팝업 없이 자동 스킵)
         if original_video_duration > MAX_VIDEO_DURATION:
             skip_message = f"영상 길이 초과 (제한: {MAX_VIDEO_DURATION}초, 실제: {original_video_duration:.1f}초)"
             app.add_log(

@@ -132,6 +132,7 @@ class VideoAnalyzerGUI(QMainWindow):
         self.last_voice_used = self.state.last_voice_used
         self.mirror_video = self.state.mirror_video
         self.add_subtitles = self.state.add_subtitles
+        self.apply_blur = self.state.apply_blur
         self.cached_video_width = self.state.cached_video_width
         self.cached_video_height = self.state.cached_video_height
         self.current_processing_index = self.state.current_processing_index
@@ -143,7 +144,7 @@ class VideoAnalyzerGUI(QMainWindow):
         self.last_chinese_script_lines = self.state.last_chinese_script_lines
         self.last_chinese_script_text = self.state.last_chinese_script_text
         self.last_chinese_script_digest = self.state.last_chinese_script_digest
-        self.ocr_reader = self.state.ocr_reader
+        self.ocr_reader = preloaded_ocr or self.state.ocr_reader
 
         # --- Gemini client (direct reference for processor/analysis compat) ---
         self.genai_client = None

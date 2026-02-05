@@ -96,20 +96,19 @@ class SubtitleProcessor:
             "subtitle", "processing", 10, "중국어 자막을 분석하고 있습니다."
         )
         self.gui.update_step_progress("subtitle", 10)
-        try:
-            add_subs = getattr(self.gui, "add_subtitles", None)
-            blur_opt = getattr(self.gui, "apply_blur", None)
-            logger.debug("[BLUR MAIN] Option status:")
-            logger.debug(f"  - add_subtitles: {add_subs.get() if add_subs else 'N/A'}")
-            logger.debug(f"  - apply_blur: {blur_opt.get() if blur_opt else 'N/A'}")
-        except Exception as e:
-            logger.debug(f"[BLUR MAIN] Option status logging failed: {e}")
+        def _get_bool(attr):
+            """Extract bool from plain bool or BoolVar-like object."""
+            if attr is None:
+                return None
+            return attr.get() if hasattr(attr, "get") else bool(attr)
 
-        if (
-            hasattr(self.gui, "apply_blur")
-            and self.gui.apply_blur
-            and not self.gui.apply_blur.get()
-        ):
+        blur_opt = getattr(self.gui, "apply_blur", None)
+        blur_val = _get_bool(blur_opt)
+        logger.debug("[BLUR MAIN] Option status:")
+        logger.debug(f"  - add_subtitles: {_get_bool(getattr(self.gui, 'add_subtitles', None))}")
+        logger.debug(f"  - apply_blur: {blur_val}")
+
+        if blur_val is not None and not blur_val:
             logger.info("[BLUR MAIN] Blur option disabled - skipping")
             self.gui.update_progress_state(
                 "subtitle", "completed", 100, "블러 단계가 비활성화되어 건너뛰었습니다."
