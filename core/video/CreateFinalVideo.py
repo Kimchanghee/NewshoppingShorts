@@ -1158,6 +1158,7 @@ def create_subtitle_clips_improved(app, video_duration):
             video_width, video_height = _resolve_video_dimensions(app)
 
             # ★ 안전장치: max_chars 초과 세그먼트를 시간 분할하여 재분할
+            from core.video.batch.utils import _is_bad_split_point
             max_subtitle_chars = getattr(app, "max_chars_per_segment", 13) + 2  # hard_max
             split_segments = []
             for start_ts, duration, text in timed_segments:
@@ -1165,16 +1166,24 @@ def create_subtitle_clips_improved(app, video_duration):
                 if len(clean) <= max_subtitle_chars:
                     split_segments.append((start_ts, duration, clean))
                 else:
-                    # 공백 기준으로 분할 후 시간 균등 배분
+                    # 문법 인식 분할: _is_bad_split_point 활용하여 수사+양사 등 보호
                     words = clean.split()
                     parts = []
                     current_part = ""
-                    for w in words:
+                    for w_idx, w in enumerate(words):
                         candidate = f"{current_part} {w}".strip() if current_part else w
                         if len(candidate) <= max_subtitle_chars:
                             current_part = candidate
                         else:
+                            # 분할 전 문법 체크: current_part | w 분리가 나쁜지 확인
                             if current_part:
+                                split_pos = len(current_part) + 1  # space position
+                                test_text = f"{current_part} {w}"
+                                if _is_bad_split_point(test_text, split_pos):
+                                    # 나쁜 분리 → w를 현재 파트에 강제 포함 (약간 초과 허용)
+                                    if len(candidate) <= max_subtitle_chars + 3:
+                                        current_part = candidate
+                                        continue
                                 parts.append(current_part)
                             current_part = w
                     if current_part:
@@ -1958,22 +1967,45 @@ def _smart_sentence_split(text, max_chars=10):
                 candidates.append(candidate)
 
     segments = []
+    from core.video.batch.utils import _is_bad_split_point
 
     for candidate in candidates:
         working = candidate
 
         while len(working) > max_chars:
-            split_idx = working.rfind(" ", 0, max_chars)
+            # 문법 인식 분할: 나쁜 분리 위치 회피
+            best_idx = -1
+            hard_max = max_chars + 2
 
-            if split_idx <= 0:
-                split_idx = working.find(" ", max_chars)
+            # 1차: max_chars 범위 내에서 좋은 공백 찾기
+            for pos in range(min(len(working), hard_max) - 1, 3, -1):
+                if working[pos] == ' ':
+                    if not _is_bad_split_point(working, pos + 1):
+                        best_idx = pos
+                        break
 
-            if split_idx <= 0:
-                split_idx = max_chars
+            # 2차: 좋은 위치 없으면 확장 범위에서 찾기
+            if best_idx <= 0:
+                expanded = min(len(working), hard_max + 5)
+                for pos in range(4, expanded):
+                    if working[pos] == ' ':
+                        if not _is_bad_split_point(working, pos + 1):
+                            best_idx = pos
+                            break
 
-            segments.append(working[:split_idx].strip())
+            # 3차: 그래도 없으면 기존 방식 (rfind)
+            if best_idx <= 0:
+                best_idx = working.rfind(" ", 0, max_chars)
 
-            working = working[split_idx:].strip()
+            if best_idx <= 0:
+                best_idx = working.find(" ", max_chars)
+
+            if best_idx <= 0:
+                best_idx = max_chars
+
+            segments.append(working[:best_idx].strip())
+
+            working = working[best_idx:].strip()
 
         if working:
             segments.append(working)
