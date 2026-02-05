@@ -59,10 +59,17 @@ def _set_processing_step(app, url: str, step: str):
     if not hasattr(app, "url_status_message"):
         app.url_status_message = {}
     app.url_status_message[url] = step
-    # UI 갱신 (메인 스레드에서 실행)
+    # UI 갱신 (메인 스레드에서 실행 - signal 우선, fallback QTimer)
     update_fn = getattr(app, "update_url_listbox", None)
     if update_fn is not None:
-        QTimer.singleShot(0, update_fn)
+        signal = getattr(app, 'ui_callback_signal', None)
+        if signal is not None:
+            try:
+                signal.emit(update_fn)
+            except RuntimeError:
+                pass
+        else:
+            QTimer.singleShot(0, update_fn)
 
 
 from ui.components.custom_dialog import (
@@ -1030,6 +1037,14 @@ def _process_single_video(app, url, current_number, total_urls):
             _encode_elapsed = time.time() - _encode_start
             _stage_times[f'encode_{voice_label}'] = _encode_elapsed
             logger.info("[STAGE 5] 영상 인코딩 완료 - %.1f초 소요", _encode_elapsed)
+
+            # ★ 보이스별 즉시 저장: 완료 즉시 출력 폴더로 이동 (사용자에게 바로 보임)
+            try:
+                app.save_generated_videos_locally(show_popup=False)
+                logger.info("[LocalSave] 음성 %d/%d 즉시 저장 완료", idx_voice, total_voices)
+            except Exception as _save_err:
+                logger.warning("[LocalSave] 즉시 저장 실패 (배치 종료 시 재시도): %s", _save_err)
+
             after_video_progress = max(
                 video_progress, int((idx_voice / total_voices) * 100)
             )
@@ -1582,6 +1597,52 @@ def _create_final_video_for_batch(
             app.update_progress_state(
                 "subtitle_overlay", "completed", 100, overlay_message
             )
+
+        # *** 워터마크 적용 ***
+        watermark_enabled = getattr(app, "watermark_enabled", False)
+        watermark_channel_name = getattr(app, "watermark_channel_name", "")
+        watermark_position = getattr(app, "watermark_position", "bottom_right")
+        watermark_font_id = getattr(app, "watermark_font_id", None)
+        watermark_font_size = getattr(app, "watermark_font_size", None)
+
+        if watermark_enabled and watermark_channel_name:
+            video_w = getattr(app, "cached_video_width", None) or target_width
+            video_h = getattr(app, "cached_video_height", None) or target_height
+
+            logger.info(
+                "[워터마크] 적용 중: '%s' at %s (%dx%d) font=%s size=%s",
+                watermark_channel_name,
+                watermark_position,
+                video_w,
+                video_h,
+                watermark_font_id,
+                watermark_font_size,
+            )
+
+            try:
+                watermark_clip = VideoTool._create_watermark_clip(
+                    app,
+                    watermark_channel_name,
+                    watermark_position,
+                    video_w,
+                    video_h,
+                    final_video.duration,
+                    font_id=watermark_font_id,
+                    size_key=watermark_font_size,
+                )
+
+                if watermark_clip:
+                    final_video = CompositeVideoClip([final_video, watermark_clip])
+                    final_video.fps = original_fps
+                    logger.info("[워터마크] 적용 완료")
+                else:
+                    logger.warning("[워터마크] 클립 생성 실패")
+
+            except Exception as e:
+                logger.error("[워터마크] 적용 중 오류: %s", e)
+                ui_controller.write_error_log(e)
+        elif watermark_enabled and not watermark_channel_name:
+            logger.warning("[워터마크] 채널 이름이 비어있어 건너뜀")
 
         # *** Final trim - align to target duration ***
         logger.info("[Video Trim]")

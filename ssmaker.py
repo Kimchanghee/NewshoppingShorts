@@ -123,26 +123,13 @@ if __name__ == "__main__":
     def on_finished():
         global controller
         try:
-            # Thread cleanup
             worker.quit()
             worker.wait()
 
             from startup.app_controller import AppController
             controller = AppController(app)
-
-            # Connect Login window's ready signal to close splash
-            def on_login_ready():
-                splash.close()
-                logging.info("Login window ready, splash closed")
-
-            controller.start()  # Creates and shows login window
-
-            # Connect the signal after start() creates the login_window
-            if controller.login_window:
-                controller.login_window.window_ready.connect(on_login_ready)
-            else:
-                # Fallback if login_window not created
-                splash.close()
+            controller.splash = splash  # Splash managed by AppController
+            controller.start()
 
             logging.info("Application controller started successfully")
         except Exception as e:

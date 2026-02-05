@@ -100,7 +100,7 @@ def combine_tts_files_with_speed(app, target_duration=None):
     - segment_by_segment_measured: 이미 완료됨
     - gemini_audio_analysis: 재처리 불필요
     - whisper_analysis: 재처리 불필요
-    - char_proportional_fallback: 재처리 불필요
+    - (char_proportional_fallback 제거됨 - Whisper 필수)
     """
     try:
         logger.info(f"[TTS 배속 처리] 시작 {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
@@ -162,12 +162,6 @@ def combine_tts_files_with_speed(app, target_duration=None):
             logger.info(f"[TTS 배속] Whisper 분석 완료됨 - 재처리 스킵, "
                        f"파일={os.path.basename(tts_path)}, 배속 후 길이={sync_info.get('speeded_duration', 0):.3f}초, "
                        f"세그먼트 수={sync_info.get('segment_count', 'N/A')}개 (100% 정확)")
-            return tts_path
-
-        if timestamps_source == 'char_proportional_fallback':
-            tts_path = sync_info.get('file_path') or app._per_line_tts[0]['path']
-            logger.info(f"[TTS 배속] 글자 수 비례 폴백 - 재처리 스킵, "
-                       f"파일={os.path.basename(tts_path)}, 배속 후 길이={sync_info.get('speeded_duration', 0):.3f}초")
             return tts_path
 
         tts_path = app._per_line_tts[0]['path']

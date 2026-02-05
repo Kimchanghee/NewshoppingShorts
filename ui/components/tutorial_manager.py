@@ -59,6 +59,16 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "tooltip_y": 176,
     },
     {
+        "id": "watermark",
+        "title": "워터마크 설정",
+        "description": "영상에 채널 이름 워터마크를 추가하세요.\n텍스트, 위치, 크기, 폰트를\n자유롭게 설정할 수 있습니다.",
+        "target_type": "sidebar",
+        "target_id": "watermark",
+        "navigate_to": "watermark",
+        "tooltip_x": 260,
+        "tooltip_y": 224,
+    },
+    {
         "id": "queue",
         "title": "대기/진행",
         "description": "추가된 영상들의 대기열과\n진행 상태를 확인하고 관리합니다.\n완료된 영상은 여기서 다운로드됩니다.",
@@ -66,7 +76,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "queue",
         "navigate_to": "queue",
         "tooltip_x": 260,
-        "tooltip_y": 224,
+        "tooltip_y": 272,
     },
     {
         "id": "settings",
@@ -76,7 +86,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "settings",
         "navigate_to": "settings",
         "tooltip_x": 260,
-        "tooltip_y": 272,
+        "tooltip_y": 320,
     },
     {
         "id": "progress",

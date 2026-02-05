@@ -87,7 +87,7 @@ class TTSResult:
         original_duration: 원본 TTS 길이 (초)
         speeded_duration: 배속 후 TTS 길이 (초)
         metadata: 자막 동기화를 위한 메타데이터 리스트
-        timestamps_source: 타임스탬프 추출 방식 (whisper/char_proportional 등)
+        timestamps_source: 타임스탬프 추출 방식 (whisper_analysis)
     """
 
     audio_path: str
@@ -666,122 +666,38 @@ class AudioPipeline:
         Returns:
             (메타데이터 리스트, 타임스탬프 소스, 음성 시작, 음성 끝)
         """
-        try:
-            from core.video.batch.whisper_analyzer import analyze_tts_with_whisper
+        from core.video.batch.whisper_analyzer import analyze_tts_with_whisper
 
-            logger.info("[Whisper] 자막 타이밍 분석 시작...")
+        logger.info("[Whisper] 자막 타이밍 분석 시작...")
 
-            whisper_result = analyze_tts_with_whisper(
-                self.app, audio_path, script, subtitle_segments
-            )
-
-            if whisper_result and "segments" in whisper_result:
-                whisper_segments = whisper_result["segments"]
-                voice_start = whisper_result.get("voice_start", 0)
-                voice_end = whisper_result.get("voice_end", total_duration)
-
-                metadata = []
-                for seg in whisper_segments:
-                    idx = seg.get("index", 1) - 1
-                    metadata.append(
-                        {
-                            "idx": idx,
-                            "start": seg["start"],
-                            "end": seg["end"],
-                            "text": seg["text"],
-                            "path": audio_path,
-                            "speaker": None,  # 나중에 설정
-                            "is_narr": False,
-                        }
-                    )
-
-                logger.info(f"[Whisper] {len(metadata)}개 세그먼트 분석 완료")
-                return metadata, "whisper_analysis", voice_start, voice_end
-
-        except Exception as e:
-            logger.warning(f"[Whisper] 분석 실패: {e}")
-
-        # Whisper 실패 시 글자 수 비례 폴백
-        logger.info("[Whisper] 글자 수 비례 폴백 사용")
-        fallback_metadata, fallback_voice_start, fallback_voice_end = (
-            self._create_fallback_metadata(
-                subtitle_segments, total_duration, audio_path
-            )
-        )
-        return (
-            fallback_metadata,
-            "char_proportional_fallback",
-            fallback_voice_start,
-            fallback_voice_end,
+        whisper_result = analyze_tts_with_whisper(
+            self.app, audio_path, script, subtitle_segments
         )
 
-    def _create_fallback_metadata(
-        self,
-        subtitle_segments: List[str],
-        total_duration: float,
-        audio_path: str,
-    ) -> List[Dict[str, Any]]:
-        """
-        글자 수 비례 폴백 메타데이터 생성
-        앞무음(audio_start_offset) 감지하여 자막 시작 지연
-        """
-        if not subtitle_segments or total_duration <= 0:
-            return []
+        if not whisper_result or "segments" not in whisper_result:
+            raise RuntimeError("Whisper 분석 결과가 없습니다 - 자막 싱크 불가")
 
-        # 앞무음/뒷무음 감지 - 자막이 실제 음성 구간에만 표시되도록
-        voice_start = 0.0
-        voice_end = total_duration
-        try:
-            if PYDUB_AVAILABLE and os.path.exists(audio_path):
-                audio = AudioSegment.from_file(audio_path)
-                from pydub.silence import detect_leading_silence
-                # 앞무음 감지
-                leading_ms = detect_leading_silence(audio, silence_threshold=-40)
-                voice_start = leading_ms / 1000.0
-                if voice_start > 0:
-                    logger.info(f"[Fallback] 앞무음 감지: {voice_start:.3f}초 (자막 시작 지연)")
-                # 뒷무음 감지 - 오디오를 뒤집어서 앞무음 감지
-                reversed_audio = audio.reverse()
-                trailing_ms = detect_leading_silence(reversed_audio, silence_threshold=-40)
-                if trailing_ms > 50:  # 50ms 이상만 의미있는 뒷무음
-                    voice_end = total_duration - (trailing_ms / 1000.0)
-                    logger.info(f"[Fallback] 뒷무음 감지: {trailing_ms / 1000.0:.3f}초 (자막 종료: {voice_end:.3f}초)")
-        except Exception as e:
-            logger.debug(f"[Fallback] 무음 감지 실패 (무시): {e}")
-
-        # 글자 수 계산 (공백, 구두점 제외)
-        char_counts = []
-        for text in subtitle_segments:
-            clean = re.sub(r"[\s,.!?~\-]", "", text.strip())
-            char_counts.append(max(1, len(clean)))
-
-        total_chars = sum(char_counts)
-        effective_duration = max(0.1, voice_end - voice_start)
+        whisper_segments = whisper_result["segments"]
+        voice_start = whisper_result.get("voice_start", 0)
+        voice_end = whisper_result.get("voice_end", total_duration)
 
         metadata = []
-        current_time = voice_start  # 앞무음 이후부터 시작
-
-        for idx, text in enumerate(subtitle_segments):
-            char_ratio = char_counts[idx] / total_chars
-            segment_duration = effective_duration * char_ratio
-
+        for seg in whisper_segments:
+            idx = seg.get("index", 1) - 1
             metadata.append(
                 {
                     "idx": idx,
-                    "start": round(current_time, 3),
-                    "end": round(current_time + segment_duration, 3),
-                    "text": text.strip(),
+                    "start": seg["start"],
+                    "end": seg["end"],
+                    "text": seg["text"],
                     "path": audio_path,
-                    "speaker": None,
+                    "speaker": None,  # 나중에 설정
                     "is_narr": False,
                 }
             )
-            current_time += segment_duration
 
-        logger.info(f"[Fallback] {len(metadata)}개 세그먼트 (글자 수 비례, 음성: {voice_start:.3f}~{voice_end:.3f}초, 유효: {effective_duration:.3f}초)")
-        for entry in metadata:
-            logger.info(f"  #{entry['idx']+1}: {entry['start']:.3f}s ~ {entry['end']:.3f}s [{len(entry['text'])}자] '{entry['text'][:20]}'")
-        return metadata, voice_start, voice_end
+        logger.info(f"[Whisper] {len(metadata)}개 세그먼트 분석 완료")
+        return metadata, "whisper_analysis", voice_start, voice_end
 
     def _split_text_naturally(self, text: str) -> List[str]:
         """

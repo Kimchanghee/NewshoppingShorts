@@ -11,7 +11,6 @@ import sys
 import platform
 
 from pydub import AudioSegment
-from pydub.silence import detect_leading_silence
 
 from .audio_utils import _ensure_pydub_converter
 from .utils import _split_text_naturally
@@ -104,25 +103,6 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
                 os.environ['PATH'] = ffmpeg_dir + os.pathsep + current_path
                 logger.debug(f"[Faster-Whisper] ffmpeg 경로 추가: {ffmpeg_dir}")
 
-        # Python 3.14+ 호환성 체크 - faster-whisper는 Python 3.14를 지원하지 않음
-        py_version = sys.version_info
-        if py_version >= (3, 14):
-            logger.info(
-                f"[Faster-Whisper] Python {py_version.major}.{py_version.minor}은 "
-                "faster-whisper를 지원하지 않습니다. 글자 수 비례 폴백 사용."
-            )
-            if subtitle_segments is None:
-                subtitle_segments = _split_text_naturally(app, transcript_text)
-            try:
-                audio = AudioSegment.from_file(tts_path)
-                audio_duration = len(audio) / 1000.0
-            except Exception as audio_err:
-                logger.warning(f"[Faster-Whisper 폴백] 오디오 로드 실패: {audio_err}")
-                audio_duration = 0.0
-            return _create_char_proportional_timestamps(
-                app, tts_path, subtitle_segments, audio_duration
-            )
-
         # Faster-Whisper 모델 로드
         try:
             from faster_whisper import WhisperModel
@@ -176,13 +156,26 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
         # Faster-Whisper 음성 인식 (단어 타임스탬프 포함)
         logger.info("[Faster-Whisper] 음성 인식 중...")
 
-        segments, info = model.transcribe(
-            tts_path,
-            language="ko",
-            beam_size=beam_size,
-            word_timestamps=True,
-            vad_filter=True
-        )
+        try:
+            segments, info = model.transcribe(
+                tts_path,
+                language="ko",
+                beam_size=beam_size,
+                word_timestamps=True,
+                vad_filter=True
+            )
+        except RuntimeError as vad_err:
+            if "onnxruntime" in str(vad_err).lower():
+                logger.warning("[Faster-Whisper] VAD 필터에 onnxruntime 필요 - VAD 없이 재시도")
+                segments, info = model.transcribe(
+                    tts_path,
+                    language="ko",
+                    beam_size=beam_size,
+                    word_timestamps=True,
+                    vad_filter=False
+                )
+            else:
+                raise
 
         # 세그먼트를 리스트로 변환 (generator이므로)
         whisper_segments = list(segments)
@@ -228,10 +221,10 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
                     mapped_segments.append({
                         'index': seg_idx + 1,
                         'text': seg_text,
-                        'start': round(start_time, 2),
-                        'end': round(end_time, 2)
+                        'start': round(start_time, 3),
+                        'end': round(end_time, 3)
                     })
-                    logger.debug(f"  #{seg_idx+1}: {start_time:.2f}s ~ {end_time:.2f}s | '{seg_text[:20]}'")
+                    logger.debug(f"  #{seg_idx+1}: {start_time:.3f}s ~ {end_time:.3f}s | '{seg_text[:20]}'")
             else:
                 logger.info("[Faster-Whisper] 세그먼트도 없음 - 오디오 전체 균등 분배")
                 num_segs = len(subtitle_segments)
@@ -244,10 +237,10 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
                     mapped_segments.append({
                         'index': seg_idx + 1,
                         'text': seg_text,
-                        'start': round(start_time, 2),
-                        'end': round(end_time, 2)
+                        'start': round(start_time, 3),
+                        'end': round(end_time, 3)
                     })
-                    logger.debug(f"  #{seg_idx+1}: {start_time:.2f}s ~ {end_time:.2f}s | '{seg_text[:20]}'")
+                    logger.debug(f"  #{seg_idx+1}: {start_time:.3f}s ~ {end_time:.3f}s | '{seg_text[:20]}'")
         else:
             # 단어가 있을 때: 단어를 자막 세그먼트에 매핑
             logger.info("[Faster-Whisper] 단어 → 세그먼트 매핑 중...")
@@ -282,11 +275,11 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
                 mapped_segments.append({
                     'index': seg_idx + 1,
                     'text': seg_text,
-                    'start': round(start_time, 2),
-                    'end': round(end_time, 2)
+                    'start': round(start_time, 3),
+                    'end': round(end_time, 3)
                 })
 
-                logger.debug(f"  #{seg_idx+1}: {start_time:.2f}s ~ {end_time:.2f}s | '{seg_text[:20]}'")
+                logger.debug(f"  #{seg_idx+1}: {start_time:.3f}s ~ {end_time:.3f}s | '{seg_text[:20]}'")
 
         # 타임스탬프 정규화
         logger.debug("[Faster-Whisper] 타임스탬프 정규화...")
@@ -295,76 +288,83 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
         for i, seg in enumerate(mapped_segments):
             duration = seg['end'] - seg['start']
             if duration <= 0:
-                seg['end'] = round(seg['start'] + 0.3, 2)
-                logger.debug(f"  [수정] #{i+1}: duration {duration:.2f}s → 0.3s")
+                seg['end'] = round(seg['start'] + 0.3, 3)
+                logger.debug(f"  [수정] #{i+1}: duration {duration:.3f}s → 0.3s")
 
-        # 2단계: 역행(overlap) 수정
+        # 2단계: 역행(overlap) 수정 - 최소 갭으로 원본 타이밍 보존
         for i in range(1, len(mapped_segments)):
             prev_end = mapped_segments[i-1]['end']
             curr_start = mapped_segments[i]['start']
 
             if curr_start < prev_end:
-                overlap = prev_end - curr_start
                 old_start = curr_start
-                new_start = round(prev_end + 0.02, 2)
-
-                seg_text = mapped_segments[i]['text']
-                seg_chars = len(re.sub(r'[\s,.!?~·\-]', '', seg_text))
-                min_duration_by_chars = max(0.3, seg_chars * 0.12)
+                # 0.005s 갭만 추가 (기존 0.02s → 0.005s로 축소하여 싱크 드리프트 최소화)
+                new_start = round(prev_end + 0.005, 3)
 
                 original_duration = mapped_segments[i]['end'] - curr_start
-                actual_duration = max(original_duration, min_duration_by_chars)
-                new_end = round(new_start + actual_duration, 2)
+                new_end = round(new_start + original_duration, 3)
 
                 if new_end > audio_duration:
-                    new_end = round(audio_duration - 0.02, 2)
+                    new_end = round(audio_duration - 0.005, 3)
                     if new_end <= new_start:
-                        new_end = round(new_start + min_duration_by_chars, 2)
+                        seg_text = mapped_segments[i]['text']
+                        seg_chars = len(re.sub(r'[\s,.!?~·\-]', '', seg_text))
+                        min_duration_by_chars = max(0.2, seg_chars * 0.08)
+                        new_end = round(new_start + min_duration_by_chars, 3)
 
                 mapped_segments[i]['start'] = new_start
                 mapped_segments[i]['end'] = new_end
-                logger.debug(f"  [역행 수정] #{i+1}: {old_start:.2f}s → {new_start:.2f}s")
+                logger.debug(f"  [역행 수정] #{i+1}: {old_start:.3f}s → {new_start:.3f}s")
 
-        # 3단계: 전체 스케일링
+        # 3단계: 전체 스케일링 - 0.05s 이상 초과할 때만 (미세 오차는 무시)
         last_seg = mapped_segments[-1]
-        if last_seg['end'] > audio_duration:
+        overshoot = last_seg['end'] - audio_duration
+        if overshoot > 0.05:
             current_total = last_seg['end']
-            target_total = audio_duration - 0.02
+            target_total = audio_duration - 0.005
             scale_factor = target_total / current_total if current_total > 0 else 1.0
 
-            logger.debug(f"  [스케일링] 전체 축소: {current_total:.2f}s → {target_total:.2f}s")
+            logger.debug(f"  [스케일링] 전체 축소: {current_total:.3f}s → {target_total:.3f}s (overshoot={overshoot:.3f}s)")
 
             for seg in mapped_segments:
-                seg['start'] = round(seg['start'] * scale_factor, 2)
-                seg['end'] = round(seg['end'] * scale_factor, 2)
+                seg['start'] = round(seg['start'] * scale_factor, 3)
+                seg['end'] = round(seg['end'] * scale_factor, 3)
 
                 seg_text = seg['text']
                 seg_chars = len(re.sub(r'[\s,.!?~·\-]', '', seg_text))
-                min_duration = max(0.2, seg_chars * 0.08)
+                min_duration = max(0.15, seg_chars * 0.06)
 
                 if seg['end'] - seg['start'] < min_duration:
-                    seg['end'] = round(seg['start'] + min_duration, 2)
+                    seg['end'] = round(seg['start'] + min_duration, 3)
 
-        # 4단계: 최종 검증
+            # 스케일링 후 재발생한 overlap 수정
+            for i in range(1, len(mapped_segments)):
+                if mapped_segments[i]['start'] < mapped_segments[i-1]['end']:
+                    mapped_segments[i]['start'] = round(mapped_segments[i-1]['end'] + 0.005, 3)
+        elif overshoot > 0:
+            # 소폭 초과: 마지막 세그먼트 end만 클램프
+            last_seg['end'] = round(audio_duration - 0.005, 3)
+            logger.debug(f"  [클램프] 마지막 세그먼트 end → {last_seg['end']:.3f}s (overshoot={overshoot:.3f}s)")
+
+        # 4단계: 최종 검증 - 원본 Whisper 타이밍 최대 보존
         for i, seg in enumerate(mapped_segments):
             if seg['start'] < 0:
-                seg['start'] = 0
-
-            seg_text = seg['text']
-            seg_chars = len(re.sub(r'[\s,.!?~·\-]', '', seg_text))
-            min_duration = max(0.2, seg_chars * 0.08)
+                seg['start'] = 0.0
 
             if seg['end'] <= seg['start']:
-                seg['end'] = round(seg['start'] + min_duration, 2)
-            elif seg['end'] - seg['start'] < min_duration:
-                seg['end'] = round(seg['start'] + min_duration, 2)
+                seg_text = seg['text']
+                seg_chars = len(re.sub(r'[\s,.!?~·\-]', '', seg_text))
+                min_duration = max(0.15, seg_chars * 0.06)
+                seg['end'] = round(seg['start'] + min_duration, 3)
 
             if seg['end'] > audio_duration:
-                seg['end'] = round(audio_duration - 0.01, 2)
+                seg['end'] = round(audio_duration - 0.005, 3)
+                if seg['end'] <= seg['start']:
+                    seg['start'] = max(0.0, seg['end'] - 0.15)
 
         logger.info("[Faster-Whisper] 최종 세그먼트:")
         for seg in mapped_segments:
-            logger.debug(f"  #{seg['index']}: {seg['start']:.2f}s ~ {seg['end']:.2f}s | '{seg['text'][:20]}'")
+            logger.debug(f"  #{seg['index']}: {seg['start']:.3f}s ~ {seg['end']:.3f}s | '{seg['text'][:20]}'")
 
         # 결과 구성
         voice_start = mapped_segments[0]['start'] if mapped_segments else 0
@@ -378,8 +378,8 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
         }
 
         logger.info("[Faster-Whisper] 분석 완료!")
-        logger.info(f"  - voice_start: {voice_start:.2f}초")
-        logger.info(f"  - voice_end: {voice_end:.2f}초")
+        logger.info(f"  - voice_start: {voice_start:.3f}초")
+        logger.info(f"  - voice_end: {voice_end:.3f}초")
         logger.info(f"  - 매핑된 세그먼트: {len(mapped_segments)}개")
         logger.info("=" * 60)
 
@@ -388,89 +388,7 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
     except Exception as e:
         ui_controller.write_error_log(e)
         logger.error(f"[Faster-Whisper 오류] {str(e)}", exc_info=True)
-
-        try:
-            if subtitle_segments is None:
-                subtitle_segments = _split_text_naturally(app, transcript_text)
-
-            audio = AudioSegment.from_file(tts_path)
-            audio_duration = len(audio) / 1000.0
-        except Exception as audio_err:
-            logger.warning(f"[Faster-Whisper 폴백] 오디오 로드 실패: {audio_err}")
-            audio_duration = 0.0
-
-        logger.info("[Faster-Whisper] 실패 → 글자 수 비례 폴백 사용")
-
-        return _create_char_proportional_timestamps(
-            app, tts_path, subtitle_segments, audio_duration
-        )
-
-
-def _create_char_proportional_timestamps(app, tts_path, subtitle_segments, audio_duration):
-    """
-    글자 수 비례 타임스탬프 생성 (Whisper 실패시 폴백)
-    """
-    logger.info("[글자 수 비례] 타임스탬프 생성...")
-
-    # 앞/뒤 무음 감지
-    try:
-        audio = AudioSegment.from_file(tts_path)
-        leading_silence_ms = detect_leading_silence(audio, silence_threshold=-40, chunk_size=10)
-        voice_start = min(leading_silence_ms / 1000.0, 0.3)
-        trailing_silence_ms = detect_leading_silence(audio.reverse(), silence_threshold=-40, chunk_size=10)
-        voice_end = max(audio_duration - (trailing_silence_ms / 1000.0), voice_start + 0.5)
-    except Exception as e:
-        logger.debug(f"[글자 수 비례] 무음 감지 실패, 기본값 사용: {e}")
-        voice_start = 0.0
-        voice_end = audio_duration
-
-    effective_duration = voice_end - voice_start
-
-    # 글자 수 계산
-    char_counts = []
-    for seg_text in subtitle_segments:
-        clean_text = re.sub(r'[\s,.!?~·\-]', '', seg_text)
-        char_counts.append(max(1, len(clean_text)))
-
-    total_chars = sum(char_counts)
-
-    # 세그먼트별 시간 할당
-    mapped_segments = []
-    current_time = voice_start
-
-    for seg_idx, seg_text in enumerate(subtitle_segments):
-        char_ratio = char_counts[seg_idx] / total_chars
-        segment_duration = effective_duration * char_ratio
-
-        start_time = current_time
-        end_time = current_time + segment_duration
-
-        if seg_idx == len(subtitle_segments) - 1:
-            end_time = voice_end
-
-        mapped_segments.append({
-            'index': seg_idx + 1,
-            'text': seg_text,
-            'start': round(start_time, 2),
-            'end': round(end_time, 2)
-        })
-
-        logger.debug(f"  #{seg_idx+1}: {start_time:.2f}s ~ {end_time:.2f}s | '{seg_text[:15]}...' ({char_counts[seg_idx]}자)")
-        current_time = end_time
-
-    # 마지막 자막 끝을 오디오 끝에 맞춤
-    if mapped_segments:
-        mapped_segments[-1]['end'] = round(audio_duration - 0.02, 2)
-
-    logger.info(f"[글자 수 비례] 완료 ({len(mapped_segments)}개 세그먼트)")
-
-    return {
-        'audio_duration': audio_duration,
-        'voice_start': voice_start,
-        'voice_end': voice_end,
-        'segments': mapped_segments,
-        'method': 'char_proportional'
-    }
+        raise RuntimeError(f"Whisper 자막 분석 실패: {e}") from e
 
 
 def analyze_tts_with_gemini(app, tts_path, transcript_text, subtitle_segments=None):

@@ -29,6 +29,8 @@ class SettingsManager:
         "watermark_enabled": False,  # 워터마크 활성화 여부
         "watermark_channel_name": "",  # 채널 이름
         "watermark_position": "bottom_right",  # 위치: top_left, top_right, bottom_left, bottom_right
+        "watermark_font_id": "pretendard",  # 워터마크 폰트 ID
+        "watermark_font_size": "medium",  # 워터마크 크기: small, medium, large
     }
 
     def __init__(self, settings_file: str = "ui_preferences.json"):
@@ -304,12 +306,56 @@ class SettingsManager:
             self._settings["watermark_position"] = position
         return self._save_settings()
 
+    def get_watermark_font_id(self) -> str:
+        """Get the watermark font ID"""
+        return self._settings.get("watermark_font_id", "pretendard")
+
+    def set_watermark_font_id(self, font_id: str) -> bool:
+        """
+        Save the watermark font ID.
+
+        Args:
+            font_id: One of 'seoul_hangang', 'pretendard', 'gmarketsans', 'paperlogy', 'unpeople_gothic'
+
+        Returns:
+            True if save was successful
+        """
+        valid_fonts = ("seoul_hangang", "pretendard", "gmarketsans", "paperlogy", "unpeople_gothic")
+        if font_id not in valid_fonts:
+            font_id = "pretendard"
+        with self._lock:
+            self._settings["watermark_font_id"] = font_id
+        return self._save_settings()
+
+    def get_watermark_font_size(self) -> str:
+        """Get the watermark font size key"""
+        return self._settings.get("watermark_font_size", "medium")
+
+    def set_watermark_font_size(self, size: str) -> bool:
+        """
+        Save the watermark font size.
+
+        Args:
+            size: One of 'small', 'medium', 'large'
+
+        Returns:
+            True if save was successful
+        """
+        valid_sizes = ("small", "medium", "large")
+        if size not in valid_sizes:
+            size = "medium"
+        with self._lock:
+            self._settings["watermark_font_size"] = size
+        return self._save_settings()
+
     def get_watermark_settings(self) -> Dict[str, Any]:
         """Get all watermark settings as a dictionary"""
         return {
             "enabled": self.get_watermark_enabled(),
             "channel_name": self.get_watermark_channel_name(),
             "position": self.get_watermark_position(),
+            "font_id": self.get_watermark_font_id(),
+            "font_size": self.get_watermark_font_size(),
         }
 
     # ============ Bulk Operations ============

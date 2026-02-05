@@ -265,6 +265,25 @@ def _create_single_line_subtitle(
         text_w = bbox[2] - bbox[0]
         text_h = bbox[3] - bbox[1]
 
+        # ★ 텍스트가 영상 너비의 85%를 초과하면 폰트 축소
+        max_text_width = int(video_width * 0.85)
+        min_font_size = max(32, font_size // 2)
+        current_font_size = font_size
+        while text_w > max_text_width and current_font_size > min_font_size:
+            current_font_size -= 2
+            try:
+                shrunk_font = ImageFont.truetype(font.path, current_font_size)
+            except Exception:
+                break
+            bbox = draw_tmp.textbbox((0, 0), text, font=shrunk_font)
+            text_w = bbox[2] - bbox[0]
+            text_h = bbox[3] - bbox[1]
+            font = shrunk_font
+        if current_font_size < font_size:
+            logger.info(
+                f"[Subtitle] 폰트 축소: {font_size}→{current_font_size}px (텍스트 '{text[:20]}' 너비 초과)"
+            )
+
         # 균일한 여백 계산 (상하좌우 동일한 비율)
         padding = max(
             20, min(50, int(text_w * 0.2))
@@ -353,7 +372,8 @@ def _sanitize_channel_name(name: str) -> str:
 
 
 def _create_watermark_clip(
-    app, channel_name, position, video_width, video_height, duration
+    app, channel_name, position, video_width, video_height, duration,
+    font_id=None, size_key=None
 ):
     """
     워터마크 클립 생성 (회색 50% 불투명도 텍스트)
@@ -365,6 +385,8 @@ def _create_watermark_clip(
         video_width: 영상 너비
         video_height: 영상 높이
         duration: 영상 전체 길이
+        font_id: 폰트 ID (None이면 pretendard 기본값)
+        size_key: 크기 키 ('small', 'medium', 'large', None이면 medium 기본값)
 
     Returns:
         moviepy ImageClip 또는 None (실패 시)
@@ -382,19 +404,45 @@ def _create_watermark_clip(
         if not channel_name:
             return None
 
-        # 워터마크 폰트 크기 (영상 높이의 2.5% 정도)
-        font_size = max(20, int(video_height * 0.025))
+        # 크기 키 → 비율 매핑
+        size_map = {"small": 0.015, "medium": 0.025, "large": 0.035}
+        size_ratio = size_map.get(size_key, 0.025)
+        font_size = max(20, int(video_height * size_ratio))
 
         # 프로젝트 폰트 폴더 경로
         project_fonts_dir = _resource_path("fonts")
 
-        # 워터마크용 폰트 (가벼운 폰트 우선)
-        font_candidates = [
+        # 폰트 ID → 파일 매핑
+        font_id_map = {
+            "pretendard": [
+                os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
+                os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
+            ],
+            "seoul_hangang": [
+                os.path.join(project_fonts_dir, "SeoulHangangB.ttf"),
+                os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
+            ],
+            "gmarketsans": [
+                os.path.join(project_fonts_dir, "GmarketSansTTFMedium.ttf"),
+                os.path.join(project_fonts_dir, "GmarketSansTTFBold.ttf"),
+            ],
+            "paperlogy": [
+                os.path.join(project_fonts_dir, "Paperlogy-9Black.ttf"),
+            ],
+            "unpeople_gothic": [
+                os.path.join(project_fonts_dir, "UnPeople.ttf"),
+            ],
+        }
+
+        # 선택된 폰트 후보 + 폴백
+        selected_fonts = font_id_map.get(font_id, [])
+        fallback_fonts = [
             os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
             os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
             os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
             os.path.join(project_fonts_dir, "GmarketSansTTFMedium.ttf"),
         ]
+        font_candidates = selected_fonts + [f for f in fallback_fonts if f not in selected_fonts]
 
         # 시스템 폴백 폰트
         if sys.platform == "win32":
