@@ -238,22 +238,42 @@ class VideoAnalyzerGUI(QMainWindow):
     # Gemini client re-initialization (API key rotation support)
     # ================================================================
     def init_client(self, use_specific_key=None) -> bool:
-        """Gemini 클라이언트 재초기화 (API 키 교체 시)"""
+        """Gemini 클라이언트 재초기화 (API 키 교체 시)
+
+        use_specific_key: 직접 지정할 API 키 값. None이면 api_key_manager에서 다음 키 자동 선택.
+        """
         try:
             from google import genai
-            if use_specific_key:
-                key = use_specific_key
-            else:
+
+            key = use_specific_key
+            key_name = "직접지정"
+
+            # use_specific_key가 없으면 api_key_manager에서 다음 사용 가능한 키 선택
+            if not key:
+                mgr = getattr(self, "api_key_manager", None)
+                if mgr is not None:
+                    try:
+                        key = mgr.get_available_key()
+                        key_name = getattr(mgr, "current_key", "unknown")
+                    except Exception as mgr_err:
+                        logger.warning(f"[init_client] api_key_manager 키 선택 실패: {mgr_err}")
+                        key = None
+
+            # api_key_manager가 없거나 실패한 경우 provider에서 가져오기
+            if not key:
                 key = self.model_provider._get_first_api_key()
+                key_name = "config_fallback"
+
             if not key:
                 logger.warning("[init_client] 사용 가능한 API 키가 없습니다.")
                 return False
+
             client = genai.Client(api_key=key)
             self.genai_client = client
             self.state.genai_client = client
             self.model_provider.gemini_client = client
             self.model_provider._api_key_configured = True
-            logger.info("[init_client] Gemini 클라이언트 재초기화 완료")
+            logger.info(f"[init_client] Gemini 클라이언트 재초기화 완료 (키: {key_name})")
             return True
         except Exception as e:
             logger.error(f"[init_client] 초기화 실패: {e}")

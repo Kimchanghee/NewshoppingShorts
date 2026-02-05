@@ -113,7 +113,10 @@ def _analyze_video_for_batch(app):
         # 현재 사용 중인 API 키 로깅 (api_key_manager를 우선 사용)
         api_mgr = getattr(app, "api_key_manager", None) or getattr(app, "api_manager", None)
         current_api_key = getattr(api_mgr, "current_key", "unknown") if api_mgr else "unknown"
-        logger.debug(f"[영상 분석 API] 사용 중인 API 키: {current_api_key}")
+        logger.info(f"[영상 분석 API] 사용 중인 API 키: {current_api_key}")
+        if api_mgr and hasattr(api_mgr, "get_status"):
+            for status_line in api_mgr.get_status():
+                logger.info(f"  {status_line}")
 
         response = None
         last_error = None
@@ -210,20 +213,27 @@ def _analyze_video_for_batch(app):
                 is_permission_error = "403" in str(e) or "PERMISSION_DENIED" in str(e) or "permission denied" in str(e).lower()
 
                 if is_quota_error or is_permission_error:
+                    blocked_key = getattr(api_mgr, 'current_key', 'unknown') if api_mgr else 'unknown'
                     if is_quota_error:
-                        logger.warning("[배치 분석] API 키 할당량 초과(429) 감지. 키 교체를 시도합니다.")
+                        logger.warning(f"[배치 분석] API 키 할당량 초과(429) 감지. 현재 키: {blocked_key}")
                     else:
-                        logger.warning("[배치 분석] API 키 권한 오류(403) 감지. 키 교체 및 파일 재업로드를 시도합니다.")
-                    
+                        logger.warning(f"[배치 분석] API 키 권한 오류(403) 감지. 현재 키: {blocked_key}")
+
                     if api_mgr:
-                        api_mgr.block_current_key(duration_minutes=60 if is_permission_error else 5)
-                        if app.init_client():
-                            new_key = getattr(api_mgr, 'current_key', 'unknown')
-                            logger.info(f"[배치 분석] API 키 교체 완료 -> {new_key}. 즉시 재시도합니다.")
-                            video_file = None  # 새 키로 재업로드 필요하므로 초기화
-                            continue
-                        else:
-                            logger.error("[배치 분석] 교체할 API 키가 더 이상 없습니다.")
+                        api_mgr.block_current_key(duration_minutes=30)
+                        try:
+                            new_key_value = api_mgr.get_available_key()
+                            new_key_name = getattr(api_mgr, 'current_key', 'unknown')
+                            if app.init_client(use_specific_key=new_key_value):
+                                logger.info(f"[배치 분석] API 키 교체 완료: {blocked_key} -> {new_key_name}")
+                                app.add_log(f"[분석] API 키 교체: {blocked_key} -> {new_key_name}")
+                                video_file = None  # 새 키로 재업로드 필요하므로 초기화
+                                continue
+                            else:
+                                logger.error(f"[배치 분석] 새 키 {new_key_name} 초기화 실패")
+                        except Exception as key_err:
+                            logger.error(f"[배치 분석] 교체할 API 키가 없습니다: {key_err}")
+                            app.add_log(f"[분석] 사용 가능한 API 키 없음 - {key_err}")
                     else:
                         logger.warning("[배치 분석] API Key Manager가 없어 키 교체를 수행할 수 없습니다.")
 
@@ -429,16 +439,21 @@ def _translate_script_for_batch(app):
                 
                 # 429 Quota Exceeded 처리 (키 교체)
                 if "429" in str(e) and ("RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower()):
-                    logger.warning("[배치 번역] API 키 할당량 초과(429) 감지. 키 교체를 시도합니다.")
+                    blocked_key = getattr(api_mgr, 'current_key', 'unknown') if api_mgr else 'unknown'
+                    logger.warning(f"[배치 번역] API 키 할당량 초과(429) 감지. 현재 키: {blocked_key}")
                     if api_mgr:
-                        api_mgr.block_current_key(duration_minutes=60)
-                        # 클라이언트 재초기화 (새 키 로드)
-                        if app.init_client():
-                            new_key = getattr(api_mgr, 'current_key', 'unknown')
-                            logger.info(f"[배치 번역] API 키 교체 완료 -> {new_key}. 즉시 재시도합니다.")
-                            continue
-                        else:
-                            logger.error("[배치 번역] 교체할 API 키가 더 이상 없습니다.")
+                        api_mgr.block_current_key(duration_minutes=30)
+                        try:
+                            new_key_value = api_mgr.get_available_key()
+                            new_key_name = getattr(api_mgr, 'current_key', 'unknown')
+                            if app.init_client(use_specific_key=new_key_value):
+                                logger.info(f"[배치 번역] API 키 교체 완료: {blocked_key} -> {new_key_name}")
+                                app.add_log(f"[번역] API 키 교체: {blocked_key} -> {new_key_name}")
+                                continue
+                            else:
+                                logger.error(f"[배치 번역] 새 키 {new_key_name} 초기화 실패")
+                        except Exception as key_err:
+                            logger.error(f"[배치 번역] 교체할 API 키가 없습니다: {key_err}")
                     else:
                         logger.warning("[배치 번역] API Key Manager가 없어 키 교체를 수행할 수 없습니다.")
                 

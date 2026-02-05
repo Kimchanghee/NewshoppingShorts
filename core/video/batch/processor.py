@@ -466,19 +466,21 @@ def dynamic_batch_processing_thread(app):
                             api_mgr = getattr(app, "api_key_manager", None)
                             try:
                                 if api_mgr is not None:
+                                    blocked_key = getattr(api_mgr, 'current_key', 'unknown')
                                     api_mgr.block_current_key(
-                                        duration_minutes=5
+                                        duration_minutes=30
                                     )
                                     new_key = api_mgr.get_available_key()
+                                    new_key_name = getattr(api_mgr, 'current_key', 'unknown')
                                     if new_key and app.init_client(use_specific_key=new_key):
-                                        app.add_log("🔑 API 키 교체 완료")
+                                        app.add_log(f"[키 교체] {blocked_key} -> {new_key_name} (30분 차단)")
                                     else:
                                         app.add_log("[WARN] 사용 가능한 API 키 없음 - 동일 키로 재시도")
                                 else:
                                     app.add_log("[WARN] API 키 관리자 미초기화 - 동일 키로 재시도")
                             except Exception as api_key_err:
                                 logger.warning("API 키 교체 실패: %s", api_key_err)
-                                app.add_log("[WARN] API 키 교체 실패")
+                                app.add_log(f"[WARN] API 키 교체 실패: {api_key_err}")
 
                             # 대기
                             for _ in range(wait_time):
@@ -544,16 +546,18 @@ def dynamic_batch_processing_thread(app):
                             )
                             perm_api_mgr = getattr(app, "api_key_manager", None)
                             if perm_api_mgr is not None:
+                                blocked_key = getattr(perm_api_mgr, 'current_key', 'unknown')
                                 try:
                                     perm_api_mgr.block_current_key(
-                                        duration_minutes=60
+                                        duration_minutes=30
                                     )
                                 except Exception as block_exc:
                                     app.add_log(f"[WARN] 키 차단 중 오류: {block_exc}")
                                 try:
                                     new_key = perm_api_mgr.get_available_key()
+                                    new_key_name = getattr(perm_api_mgr, 'current_key', 'unknown')
                                     if new_key and app.init_client(use_specific_key=new_key):
-                                        app.add_log("🔑 API 키 교체 완료 (권한 오류 대응)")
+                                        app.add_log(f"[키 교체] {blocked_key} -> {new_key_name} (403 권한 오류, 30분 차단)")
                                         continue
                                     else:
                                         app.add_log("[WARN] 사용 가능한 API 키 없음 - 키 교체 불가")
