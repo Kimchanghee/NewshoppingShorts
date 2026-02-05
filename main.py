@@ -71,6 +71,7 @@ class VideoAnalyzerGUI(QMainWindow):
         super().__init__(parent)
         self.login_data = login_data
         self.preloaded_ocr = preloaded_ocr
+        self.config = config  # config 모듈 참조 (pipeline.py, tts_processor.py에서 app.config.X 접근)
         self.state = AppState(root=self, login_data=login_data)
         self.theme_manager = get_theme_manager()
         self.design = get_design_system()  # Load enhanced design system
@@ -157,7 +158,11 @@ class VideoAnalyzerGUI(QMainWindow):
         if config.GEMINI_API_KEYS:
             try:
                 self.api_key_manager = ApiKeyManager.APIKeyManager(use_secrets_manager=True)
-                logger.info(f"[Main] API key manager initialized with {len(config.GEMINI_API_KEYS)} keys")
+                # 초기 current_key 설정 (첫 번째 사용 가능 키)
+                if self.api_key_manager.api_keys:
+                    first_key_name = next(iter(self.api_key_manager.api_keys))
+                    self.api_key_manager.current_key = first_key_name
+                    logger.info(f"[Main] API key manager 초기화 완료: {len(self.api_key_manager.api_keys)}개 키, 현재: {first_key_name}")
             except Exception as e:
                 logger.warning(f"[Main] API key manager init failed: {e}")
 
