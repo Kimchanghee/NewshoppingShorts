@@ -21,97 +21,114 @@ class ProgressPanel(QFrame, ThemedMixin):
         self.create_widgets()
         self.apply_theme()
 
+    def _create_section_divider(self):
+        """Create a subtle horizontal divider between sections."""
+        divider = QFrame()
+        divider.setFixedHeight(1)
+        divider.setStyleSheet("background-color: #334155; margin: 0 8px;")
+        return divider
+
     def create_widgets(self):
         ds = self.ds
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(12, 12, 12, 12)
-        self.main_layout.setSpacing(8)
+        self.main_layout.setSpacing(6)
 
-        # Header
-        self.title_label = QLabel("📋 제작 진행")
-        self.title_label.setStyleSheet("""
-            font-size: 15px;
-            font-weight: bold;
-            color: #FFFFFF;
-            padding-bottom: 2px;
-        """)
-        self.main_layout.addWidget(self.title_label)
-
-        # Current Task Display - Clean Style (no background)
-        self.status_container = QFrame()
-        self.status_container.setStyleSheet("""
+        # ══════════════════════════════════════════════
+        # Section 1: 전체 영상 진행률 (Overall Queue Progress)
+        # ══════════════════════════════════════════════
+        overall_section = QFrame()
+        overall_section.setStyleSheet("""
             QFrame {
-                background-color: transparent;
-                border: none;
-                border-radius: 6px;
+                background-color: rgba(30, 41, 59, 0.6);
+                border: 1px solid #334155;
+                border-radius: 8px;
             }
         """)
-        status_layout = QVBoxLayout(self.status_container)
-        status_layout.setContentsMargins(10, 8, 10, 8)
-        status_layout.setSpacing(2)
+        overall_layout = QVBoxLayout(overall_section)
+        overall_layout.setContentsMargins(12, 10, 12, 10)
+        overall_layout.setSpacing(4)
 
-        # Status indicator row
-        status_header = QHBoxLayout()
-        self.status_icon = QLabel("⏳")
-        self.status_icon.setStyleSheet("font-size: 15px; color: #FACC15;")
-        status_header.addWidget(self.status_icon)
+        # Section header
+        overall_header = QHBoxLayout()
+        overall_icon = QLabel("📊")
+        overall_icon.setStyleSheet("font-size: 13px; background: transparent; border: none;")
+        overall_header.addWidget(overall_icon)
+        overall_title = QLabel("전체 영상 진행률")
+        overall_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #E2E8F0; background: transparent; border: none;")
+        overall_header.addWidget(overall_title)
+        overall_header.addStretch()
+        overall_layout.addLayout(overall_header)
 
-        self.status_title = QLabel("현재 작업")
-        self.status_title.setStyleSheet("font-size: 12px; color: #94A3B8; font-weight: bold;")
-        status_header.addWidget(self.status_title)
-        status_header.addStretch()
-        status_layout.addLayout(status_header)
-
-        # Task label
-        self.gui.current_task_label = QLabel("대기 중...")
-        self.gui.current_task_label.setStyleSheet("""
-            font-size: 13px;
-            font-weight: bold;
-            color: #F1F5F9;
-            padding: 2px 0;
-        """)
-        self.gui.current_task_label.setWordWrap(True)
-        status_layout.addWidget(self.gui.current_task_label)
-
-        self.main_layout.addWidget(self.status_container)
-
-        # Overall Progress Section
-        progress_section = QFrame()
-        progress_section.setStyleSheet("""
-            QFrame {
-                background-color: transparent;
-                border: none;
-                border-radius: 6px;
-            }
-        """)
-        progress_layout = QVBoxLayout(progress_section)
-        progress_layout.setContentsMargins(10, 8, 10, 8)
-        progress_layout.setSpacing(4)
-
-        # Progress header
-        self.overall_title = QLabel("📊 영상 진행률")
-        self.overall_title.setStyleSheet("font-size: 12px; font-weight: bold; color: #94A3B8;")
-        progress_layout.addWidget(self.overall_title)
-
-        # Progress value
+        # Progress value (X/Y (Z%))
         self.gui.overall_numeric_label = QLabel("0/0 (0%)")
         self.gui.overall_numeric_label.setStyleSheet("""
-            font-size: 13px;
+            font-size: 20px;
             font-weight: bold;
             color: #22C55E;
-            padding: 0;
+            padding: 2px 0;
+            background: transparent;
+            border: none;
         """)
-        progress_layout.addWidget(self.gui.overall_numeric_label)
+        overall_layout.addWidget(self.gui.overall_numeric_label)
 
         # Witty message
         self.gui.overall_witty_label = QLabel("큐를 채우면 제작이 시작됩니다")
-        self.gui.overall_witty_label.setStyleSheet("font-size: 10px; color: #64748B;")
+        self.gui.overall_witty_label.setStyleSheet("font-size: 10px; color: #64748B; background: transparent; border: none;")
         self.gui.overall_witty_label.setWordWrap(True)
-        progress_layout.addWidget(self.gui.overall_witty_label)
+        overall_layout.addWidget(self.gui.overall_witty_label)
 
-        self.main_layout.addWidget(progress_section)
+        self.main_layout.addWidget(overall_section)
 
-        # Steps Container with Scroll
+        # ══════════════════════════════════════════════
+        # Section 2: 현재 영상 진행율 (Current Video Progress)
+        # ══════════════════════════════════════════════
+        current_section = QFrame()
+        current_section.setStyleSheet("""
+            QFrame {
+                background-color: rgba(30, 41, 59, 0.4);
+                border: 1px solid #334155;
+                border-radius: 8px;
+            }
+        """)
+        current_layout = QVBoxLayout(current_section)
+        current_layout.setContentsMargins(12, 10, 12, 10)
+        current_layout.setSpacing(4)
+
+        # Section header with status icon
+        current_header = QHBoxLayout()
+        self.status_icon = QLabel("⏳")
+        self.status_icon.setStyleSheet("font-size: 13px; color: #FACC15; background: transparent; border: none;")
+        current_header.addWidget(self.status_icon)
+        self.current_section_title = QLabel("현재 영상 진행율")
+        self.current_section_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #E2E8F0; background: transparent; border: none;")
+        current_header.addWidget(self.current_section_title)
+        current_header.addStretch()
+        self.status_title = QLabel("대기 중")
+        self.status_title.setStyleSheet("font-size: 11px; color: #94A3B8; font-weight: bold; background: transparent; border: none;")
+        current_header.addWidget(self.status_title)
+        current_layout.addLayout(current_header)
+
+        # Current task label
+        self.gui.current_task_label = QLabel("대기 중...")
+        self.gui.current_task_label.setStyleSheet("""
+            font-size: 12px;
+            font-weight: bold;
+            color: #F1F5F9;
+            padding: 2px 0;
+            background: transparent;
+            border: none;
+        """)
+        self.gui.current_task_label.setWordWrap(True)
+        current_layout.addWidget(self.gui.current_task_label)
+
+        # Divider inside current section
+        inner_divider = QFrame()
+        inner_divider.setFixedHeight(1)
+        inner_divider.setStyleSheet("background-color: #334155; border: none;")
+        current_layout.addWidget(inner_divider)
+
+        # Steps list (embedded in current section)
         self.steps_scroll = QScrollArea()
         self.steps_scroll.setWidgetResizable(True)
         self.steps_scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -132,7 +149,7 @@ class ProgressPanel(QFrame, ThemedMixin):
         """)
 
         self.steps_container = QWidget()
-        self.steps_container.setStyleSheet("background: transparent;")
+        self.steps_container.setStyleSheet("background: transparent; border: none;")
         steps_layout = QVBoxLayout(self.steps_container)
         steps_layout.setSpacing(1)
         steps_layout.setContentsMargins(0, 4, 0, 0)
@@ -158,6 +175,7 @@ class ProgressPanel(QFrame, ThemedMixin):
             row.setStyleSheet("""
                 QFrame {
                     background-color: transparent;
+                    border: none;
                     border-radius: 4px;
                     padding: 2px;
                 }
@@ -197,7 +215,9 @@ class ProgressPanel(QFrame, ThemedMixin):
 
         steps_layout.addStretch()
         self.steps_scroll.setWidget(self.steps_container)
-        self.main_layout.addWidget(self.steps_scroll, stretch=1)
+        current_layout.addWidget(self.steps_scroll, stretch=1)
+
+        self.main_layout.addWidget(current_section, stretch=1)
 
 
     # -----------------------------------------------------------------
@@ -225,6 +245,7 @@ class ProgressPanel(QFrame, ThemedMixin):
         indicator['row_frame'].setStyleSheet(f"""
             QFrame {{
                 background-color: {bg_color};
+                border: none;
                 border-radius: 4px;
             }}
         """)
@@ -248,22 +269,29 @@ class ProgressPanel(QFrame, ThemedMixin):
         """Update current task display with status icon"""
         self.gui.current_task_label.setText(task_text)
 
+        base_style = "font-size: 13px; background: transparent; border: none;"
+        title_style = "font-size: 11px; font-weight: bold; background: transparent; border: none;"
+
         if status == 'active':
             self.status_icon.setText("⏳")
-            self.status_icon.setStyleSheet("font-size: 14px; color: #FACC15;")
+            self.status_icon.setStyleSheet(f"{base_style} color: #FACC15;")
             self.status_title.setText("진행 중")
+            self.status_title.setStyleSheet(f"{title_style} color: #FACC15;")
         elif status == 'completed':
             self.status_icon.setText("✅")
-            self.status_icon.setStyleSheet("font-size: 14px; color: #22C55E;")
+            self.status_icon.setStyleSheet(f"{base_style} color: #22C55E;")
             self.status_title.setText("완료")
+            self.status_title.setStyleSheet(f"{title_style} color: #22C55E;")
         elif status == 'error':
             self.status_icon.setText("❌")
-            self.status_icon.setStyleSheet("font-size: 14px; color: #EF4444;")
+            self.status_icon.setStyleSheet(f"{base_style} color: #EF4444;")
             self.status_title.setText("오류")
+            self.status_title.setStyleSheet(f"{title_style} color: #EF4444;")
         else:
             self.status_icon.setText("⏸")
-            self.status_icon.setStyleSheet("font-size: 14px; color: #64748B;")
+            self.status_icon.setStyleSheet(f"{base_style} color: #64748B;")
             self.status_title.setText("대기 중")
+            self.status_title.setStyleSheet(f"{title_style} color: #94A3B8;")
 
     # -----------------------------------------------------------------
     # Blink effect for active step
