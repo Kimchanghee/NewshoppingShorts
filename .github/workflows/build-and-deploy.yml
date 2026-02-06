@@ -18,6 +18,14 @@ jobs:
       with:
         python-version: '3.12'
 
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
@@ -26,9 +34,12 @@ jobs:
 
     - name: Download Whisper models
       run: python download_whisper_models.py
+      continue-on-error: true
+      timeout-minutes: 10
 
     - name: Download fonts
       run: python download_all_fonts.py
+      continue-on-error: true
 
     - name: Extract version from tag
       id: version
