@@ -44,9 +44,9 @@ PLAN_PRICES = {
 }
 
 # PayApp Configuration (from environment)
-PAYAPP_USERID = os.getenv("PAYAPP_USERID", "")
-PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
-PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
+PAYAPP_USERID = os.getenv("PAYAPP_USERID", "yumc")
+PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "HZv+goDnY69SypcNztTi0u1DPJnCCRVaOgT+oqg6zaM=")
+PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "HZv+goDnY69SypcNztTi0sVFzyDowNDrzkW1J98377U=")
 PAYAPP_API_URL = "https://api.payapp.kr/oapi/apiLoad.html"
 SUBSCRIPTION_DAYS = 30
 
