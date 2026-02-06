@@ -67,7 +67,7 @@ class AppState:
         self.source_video = ""
 
         # TTS voice configuration
-        from voice_profiles import DEFAULT_MULTI_VOICE_PRESETS, VOICE_PROFILES
+        from config.voice_profiles import DEFAULT_MULTI_VOICE_PRESETS, VOICE_PROFILES
 
         default_voice = DEFAULT_MULTI_VOICE_PRESETS[0]
         self.selected_tts_voice = default_voice

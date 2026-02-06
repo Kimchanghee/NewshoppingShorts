@@ -14,7 +14,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from google import genai
 from google.genai import types
-from voice_profiles import VOICE_PROFILES
+from config.voice_profiles import VOICE_PROFILES
 from utils.secrets_manager import SecretsManager
 
 VOICE_DIR = os.path.join(PROJECT_ROOT, "resource", "voice_samples")

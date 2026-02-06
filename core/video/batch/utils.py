@@ -106,7 +106,7 @@ def _get_voice_display_name(voice_name: str) -> str:
         str: 한글 표시 이름 (예: "준호", "지은")
     """
     try:
-        from voice_profiles import VOICE_PROFILES
+        from config.voice_profiles import VOICE_PROFILES
         for profile in VOICE_PROFILES:
             if profile.get('voice_name') == voice_name or profile.get('id') == voice_name:
                 return profile.get('label', voice_name)

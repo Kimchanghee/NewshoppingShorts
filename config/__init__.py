@@ -53,6 +53,8 @@ PAYMENT_API_BASE_URL = os.getenv("PAYMENT_API_BASE_URL", "https://payments.examp
 CHECKOUT_POLL_INTERVAL = float(os.getenv("CHECKOUT_POLL_INTERVAL", "3"))
 CHECKOUT_POLL_MAX_TRIES = int(os.getenv("CHECKOUT_POLL_MAX_TRIES", "20"))
 
+from config.voice_profiles import VOICE_PROFILES, DEFAULT_MULTI_VOICE_PRESETS
+
 __all__ = [
     "GEMINI_API_KEYS",
     "GEMINI_VIDEO_MODEL",
@@ -72,4 +74,6 @@ __all__ = [
     "PAYMENT_API_BASE_URL",
     "CHECKOUT_POLL_INTERVAL",
     "CHECKOUT_POLL_MAX_TRIES",
+    "VOICE_PROFILES",
+    "DEFAULT_MULTI_VOICE_PRESETS",
 ]
