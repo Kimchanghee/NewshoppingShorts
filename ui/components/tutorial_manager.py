@@ -247,6 +247,10 @@ class TutorialManager(QObject):
             self._go_next()
             return
 
+        # settings 페이지의 위젯이면 scroll area에서 보이도록 스크롤
+        if step.get("navigate_to") == "settings":
+            self._scroll_settings_to_widget(target_widget)
+
         # 스포트라이트 설정
         if self._spotlight:
             self._spotlight.set_target(target_widget, padding=8)
@@ -276,6 +280,19 @@ class TutorialManager(QObject):
 
         self._tooltip.move(tooltip_x, tooltip_y)
         self._tooltip.raise_()
+
+    def _scroll_settings_to_widget(self, target_widget: QWidget):
+        """Settings 탭의 scroll area에서 target_widget이 보이도록 스크롤"""
+        try:
+            settings_tab = getattr(self._gui, "settings_tab", None)
+            if settings_tab is None:
+                return
+            scroll_area = getattr(settings_tab, "scroll_area", None)
+            if scroll_area is None:
+                return
+            scroll_area.ensureWidgetVisible(target_widget, 50, 50)
+        except Exception:
+            pass
 
     def _get_target_widget(self, step: Dict[str, Any]) -> Optional[QWidget]:
         """단계에 해당하는 타겟 위젯 가져오기"""

@@ -2,14 +2,19 @@
 """
 Application initialization with progress tracking for PyQt6.
 """
+import json
 import os
 import sys
 import time
 import socket
 import subprocess
 import importlib.util
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict, Any
+
+import requests
 from PyQt6 import QtCore
+
+from config import PAYMENT_API_BASE_URL
 from utils.logging_config import get_logger
 from utils.tts_config import get_safe_tts_base_dir
 from .constants import (
@@ -26,6 +31,7 @@ class Initializer(QtCore.QObject):
     statusChanged = QtCore.pyqtSignal(str)
     ocrReaderReady = QtCore.pyqtSignal(object)
     initWarnings = QtCore.pyqtSignal(list)
+    updateInfoReady = QtCore.pyqtSignal(dict)  # 업데이트 정보 전달용
 
     def run(self) -> None:
         emit_finished = True
@@ -91,19 +97,27 @@ class Initializer(QtCore.QObject):
             self.progressChanged.emit(75)
             time.sleep(0.2)
 
-            # 7. TTS directory (75-90%)
+            # 7. TTS directory (75-85%)
             self.checkItemChanged.emit("tts_dir", "checking", "")
             self.statusChanged.emit("음성 폴더 확인 중...")
             time.sleep(0.3)
             self.checkItemChanged.emit("tts_dir", "success", "준비 완료")
-            self.progressChanged.emit(90)
+            self.progressChanged.emit(85)
             time.sleep(0.2)
 
-            # 8. API (90-100%)
+            # 8. API (85-92%)
             self.checkItemChanged.emit("api", "checking", "")
             self.statusChanged.emit("API 연결 확인 중...")
             time.sleep(0.3)
             self.checkItemChanged.emit("api", "success", "준비 완료")
+            self.progressChanged.emit(92)
+            time.sleep(0.2)
+
+            # 9. Update check (92-100%)
+            self.checkItemChanged.emit("update_check", "checking", "")
+            self.statusChanged.emit("업데이트 내역 확인 중...")
+            time.sleep(0.3)
+            update_info = self._check_update_info()
             self.progressChanged.emit(100)
 
             # Final delay to show 100% before transitioning
@@ -126,3 +140,96 @@ class Initializer(QtCore.QObject):
         except Exception as e:
             logger.error(f"OCR initialization failed: {e}", exc_info=True)
             self.checkItemChanged.emit("ocr", "warning", "수동 모드")
+
+    def _check_update_info(self) -> Dict[str, Any]:
+        """
+        서버에서 최신 업데이트 정보(릴리즈 노트)를 가져옵니다.
+        업데이트 팝업 표시용.
+        """
+        update_info: Dict[str, Any] = {
+            "has_update_notes": False,
+            "version": "",
+            "release_notes": "",
+            "is_new_version": False,
+        }
+
+        try:
+            # 현재 버전 확인
+            current_version = self._get_current_version()
+
+            # 서버에서 최신 버전 정보 가져오기 (config에서 URL 사용)
+            response = requests.get(f"{PAYMENT_API_BASE_URL}/app/version", timeout=5)
+
+            if response.status_code == 200:
+                data = response.json()
+                latest_version = data.get("version", "")
+                release_notes = data.get("release_notes", "")
+
+                update_info["version"] = latest_version
+                update_info["release_notes"] = release_notes
+
+                # 릴리즈 노트가 있으면 표시
+                if release_notes:
+                    update_info["has_update_notes"] = True
+
+                # 새 버전 여부 확인 (처음 실행 또는 버전 업데이트 후)
+                last_seen_version = self._get_last_seen_version()
+                if latest_version and latest_version != last_seen_version:
+                    update_info["is_new_version"] = True
+                    self._save_last_seen_version(latest_version)
+
+                self.checkItemChanged.emit("update_check", "success", "확인 완료")
+                self.updateInfoReady.emit(update_info)
+            else:
+                logger.warning(f"Update check returned status {response.status_code}")
+                self.checkItemChanged.emit("update_check", "warning", "확인 실패")
+
+        except requests.exceptions.Timeout:
+            logger.warning("Update check timed out")
+            self.checkItemChanged.emit("update_check", "warning", "시간 초과")
+        except Exception as e:
+            logger.warning(f"Update check failed: {e}")
+            self.checkItemChanged.emit("update_check", "warning", "확인 실패")
+
+        return update_info
+
+    def _get_current_version(self) -> str:
+        """현재 앱 버전 반환"""
+        try:
+            if getattr(sys, "frozen", False):
+                base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+            else:
+                base_path = os.path.dirname(os.path.dirname(__file__))
+
+            version_path = os.path.join(base_path, "version.json")
+            if os.path.exists(version_path):
+                with open(version_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("version", "1.0.0")
+        except Exception as e:
+            logger.debug(f"Failed to read version: {e}")
+        return "1.0.0"
+
+    def _get_last_seen_version(self) -> str:
+        """마지막으로 확인한 버전 반환"""
+        try:
+            config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
+            seen_version_file = os.path.join(config_dir, "last_seen_version.json")
+            if os.path.exists(seen_version_file):
+                with open(seen_version_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("version", "")
+        except Exception as e:
+            logger.debug(f"Failed to read last seen version: {e}")
+        return ""
+
+    def _save_last_seen_version(self, version: str) -> None:
+        """마지막으로 확인한 버전 저장"""
+        try:
+            config_dir = os.path.join(os.path.expanduser("~"), ".ssmaker")
+            os.makedirs(config_dir, exist_ok=True)
+            seen_version_file = os.path.join(config_dir, "last_seen_version.json")
+            with open(seen_version_file, "w", encoding="utf-8") as f:
+                json.dump({"version": version}, f)
+        except Exception as e:
+            logger.debug(f"Failed to save last seen version: {e}")

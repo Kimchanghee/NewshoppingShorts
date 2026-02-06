@@ -101,7 +101,7 @@ class SettingsTab(QWidget, ThemedMixin):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
         
-        scroll = QScrollArea()
+        scroll = self.scroll_area = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setStyleSheet(f"background-color: {c.background};")

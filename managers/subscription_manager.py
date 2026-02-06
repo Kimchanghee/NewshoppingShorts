@@ -97,14 +97,13 @@ class SubscriptionManager:
                 else:
                     self._subscription_expires_at = None
                     self._countdown_timer.stop()
+                    # 무료계정: 구독 시간 숨기고 "구독 하기" 버튼 표시
                     sub_label = getattr(self.gui, "subscription_time_label", None)
+                    subscribe_btn = getattr(self.gui, "subscribe_btn", None)
                     if sub_label is not None:
-                        d = self.gui.design
-                        sub_label.setText("체험계정")
-                        sub_label.setStyleSheet(
-                            f"color: {d.colors.text_muted}; font-weight: normal;"
-                        )
-                        sub_label.show()
+                        sub_label.hide()
+                    if subscribe_btn is not None:
+                        subscribe_btn.show()
 
                 remaining = status.get("remaining", 0)
                 total = status.get("work_count", 0)
@@ -129,16 +128,15 @@ class SubscriptionManager:
     def _update_countdown_display(self):
         """Update countdown label (called every 1s)."""
         sub_label = getattr(self.gui, "subscription_time_label", None)
+        subscribe_btn = getattr(self.gui, "subscribe_btn", None)
         if sub_label is None:
             return
 
         if not self._subscription_expires_at:
-            d = self.gui.design
-            sub_label.setText("체험계정")
-            sub_label.setStyleSheet(
-                f"color: {d.colors.text_muted}; font-weight: normal;"
-            )
-            sub_label.show()
+            # 무료계정: 구독 시간 숨기고 "구독 하기" 버튼 표시
+            sub_label.hide()
+            if subscribe_btn is not None:
+                subscribe_btn.show()
             return
 
         try:
@@ -205,6 +203,9 @@ class SubscriptionManager:
                     )
 
             sub_label.show()
+            # 유료: 구독 하기 버튼 숨김
+            if subscribe_btn is not None:
+                subscribe_btn.hide()
 
         except (ValueError, TypeError, OverflowError) as e:
             logger.warning(f"[Subscription] Countdown parse error: {e}")

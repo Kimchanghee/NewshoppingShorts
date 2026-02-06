@@ -448,22 +448,29 @@ class RegistrationRequestDialog(QWidget):
         self.passwordConfirmEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.passwordConfirmEdit)
 
-        # 연락처 (Shifted down +75)
+        # 비밀번호 확인 상태 라벨 (passwordConfirmEdit 바로 아래)
+        self.passwordMatchLabel = QLabel(self)
+        self.passwordMatchLabel.setGeometry(QtCore.QRect(30, 556, 340, 18))
+        self.passwordMatchLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
+        self.passwordMatchLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.passwordMatchLabel.setText("")
+
+        # 연락처 (Shifted down for passwordMatchLabel)
         self.contactLabel = QLabel(self)
-        self.contactLabel.setGeometry(QtCore.QRect(30, 560, 100, 25))
+        self.contactLabel.setGeometry(QtCore.QRect(30, 578, 100, 25))
         self.contactLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
         self.contactLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.contactLabel.setText("연락처")
 
         self.contactEdit = QLineEdit(self)
-        self.contactEdit.setGeometry(QtCore.QRect(30, 585, 340, ds.button_sizes['md'].height))
+        self.contactEdit.setGeometry(QtCore.QRect(30, 603, 340, ds.button_sizes['md'].height))
         self.contactEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
         self.contactEdit.setPlaceholderText("010-1234-5678")
         self._apply_input_style(self.contactEdit)
 
-        # 제출 버튼 (Shifted down +75)
+        # 제출 버튼 (Shifted down)
         self.submitButton = QPushButton(self)
-        self.submitButton.setGeometry(QtCore.QRect(30, 640, 340, ds.button_sizes['lg'].height))
+        self.submitButton.setGeometry(QtCore.QRect(30, 660, 340, ds.button_sizes['lg'].height))
         self.submitButton.setFont(QFont(FONT_FAMILY, ds.button_sizes['lg'].font_size, QFont.Weight.Bold))
         self.submitButton.setText("회원가입")
         self.submitButton.setStyleSheet(f"""
@@ -549,10 +556,20 @@ class RegistrationRequestDialog(QWidget):
         if len(password) < 6:
             is_valid = False
 
-        # 비밀번호 확인 검증
+        # 비밀번호 확인 검증 + 실시간 피드백
         password_confirm = self.passwordConfirmEdit.text()
-        if password != password_confirm:
-            is_valid = False
+        if password_confirm:  # 입력이 있을 때만 피드백 표시
+            if password != password_confirm:
+                is_valid = False
+                self.passwordMatchLabel.setText("✗ 비밀번호가 일치하지 않습니다")
+                self.passwordMatchLabel.setStyleSheet(f"color: {login_color('error')}; background: transparent;")
+            else:
+                self.passwordMatchLabel.setText("✓ 비밀번호가 일치합니다")
+                self.passwordMatchLabel.setStyleSheet(f"color: {login_color('success')}; background: transparent;")
+        else:
+            self.passwordMatchLabel.setText("")
+            if password:  # 비밀번호는 있지만 확인은 비어있음
+                is_valid = False
 
         # 연락처 검증
         contact_raw = self.contactEdit.text().strip()

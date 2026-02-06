@@ -31,3 +31,13 @@ PAYMENT_API_BASE_URL = os.getenv(
 # 결제 체크아웃 설정
 CHECKOUT_POLL_INTERVAL = 5.0  # seconds - 결제 상태 확인 주기 (5초)
 CHECKOUT_POLL_MAX_TRIES = 60  # 최대 확인 횟수 (5분 = 60 * 5초)
+
+# PayApp 결제 연동 설정
+PAYAPP_USERID = os.getenv("PAYAPP_USERID", "")
+PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
+PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
+PAYAPP_API_URL = "https://api.payapp.kr/oapi/apiLoad.html"
+
+# 구독 설정
+SUBSCRIPTION_PRICE = 190000  # KRW - 프로 구독 월 가격
+SUBSCRIPTION_DAYS = 30  # 구독 기간 (1개월)

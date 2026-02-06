@@ -45,3 +45,4 @@ class User(Base):
     last_heartbeat = Column(TIMESTAMP, nullable=True)    # For precise online status
     is_online = Column(Boolean, default=False, nullable=False) # Direct online status tracking
     current_task = Column(String(255), nullable=True)    # Current working task description
+    app_version = Column(String(20), nullable=True)      # 사용자가 사용 중인 앱 버전

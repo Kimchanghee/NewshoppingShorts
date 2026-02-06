@@ -4,14 +4,18 @@ Login Watch Handler
 This module handles login status monitoring thread logic, extracted from main.py.
 """
 
+import json
+import os
+import sys
 import threading
 import time
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
-from ui.components.custom_dialog import show_warning, show_error
+
 from caller import rest
+from ui.components.custom_dialog import show_warning, show_error
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -101,7 +105,8 @@ class LoginHandler:
                     logger.debug(f"[watch_loop] Heartbeat check... (seq={loop_count})")
                     
                 current_task = getattr(self.app.state, 'current_task_var', None)
-                data = {"userId": userId, "key": "ssmaker", "ip": userIp, "current_task": current_task}
+                app_version = self._get_app_version()
+                data = {"userId": userId, "key": "ssmaker", "ip": userIp, "current_task": current_task, "app_version": app_version}
                 res = rest.loginCheck(**data)
                 st = res.get("status") if isinstance(res, dict) else None
                 
@@ -196,3 +201,30 @@ class LoginHandler:
             except Exception as e:
                 logger.warning("Failed to show force close error dialog: %s", e)
             self._safe_exit()
+
+    def _get_app_version(self) -> str:
+        """현재 앱 버전을 version.json에서 읽어 반환"""
+        try:
+            # PyInstaller 번들 또는 개발 환경에서 경로 결정
+            if getattr(sys, 'frozen', False):
+                base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
+            else:
+                base_path = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+            version_file = os.path.join(base_path, "version.json")
+            if os.path.exists(version_file):
+                with open(version_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    return data.get("version", "unknown")
+
+            # fallback: config에서 버전 확인
+            try:
+                from config import APP_VERSION
+                return APP_VERSION
+            except ImportError:
+                pass
+
+            return "unknown"
+        except Exception as e:
+            logger.warning(f"[LoginHandler] Failed to get app version: {e}")
+            return "unknown"

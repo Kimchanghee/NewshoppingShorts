@@ -135,6 +135,30 @@ class TopBarPanel(QFrame):
         self.gui.subscription_time_label.hide()
         layout.addWidget(self.gui.subscription_time_label)
 
+        # Subscribe button (shown for free accounts instead of countdown)
+        self.gui.subscribe_btn = QPushButton("구독 하기")
+        self.gui.subscribe_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.gui.subscribe_btn.setFont(
+            QFont(d.typography.font_family_body, d.typography.size_2xs, QFont.Weight.Bold)
+        )
+        self.gui.subscribe_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #E31639, stop:1 #FF4D6A);
+                color: white;
+                padding: 6px 14px;
+                border-radius: {d.radius.base}px;
+                border: none;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #C41230, stop:1 #E63D5A);
+            }}
+        """)
+        self.gui.subscribe_btn.clicked.connect(self.show_subscription_panel)
+        self.gui.subscribe_btn.hide()
+        layout.addWidget(self.gui.subscribe_btn)
+
     def show_subscription_panel(self):
         """Navigate to subscription panel."""
         if hasattr(self.gui, "_on_step_selected"):
@@ -209,7 +233,7 @@ class TopBarPanel(QFrame):
                 badge_color = c.text_secondary
 
                 if user_type == "subscriber":
-                    badge_text = "프로 플랜"
+                    badge_text = "유료계정"
                     badge_bg = c.primary_light
                     badge_color = c.primary
                 elif user_type == "admin":
@@ -217,7 +241,7 @@ class TopBarPanel(QFrame):
                     badge_bg = "#374151"
                     badge_color = "#FFFFFF"
                 else:  # trial
-                    badge_text = "체험계정"
+                    badge_text = "무료계정"
                     if remaining <= 0:
                         badge_bg = "#FEF2F2"
                         badge_color = "#EF4444"

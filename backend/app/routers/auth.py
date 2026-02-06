@@ -188,7 +188,8 @@ async def check_session(
     client_ip = get_client_ip(request)
     service = AuthService(db)
     return await service.check_session(
-        user_id=data.id, token=data.key, ip_address=client_ip, current_task=data.current_task
+        user_id=data.id, token=data.key, ip_address=client_ip,
+        current_task=data.current_task, app_version=data.app_version
     )
 
 

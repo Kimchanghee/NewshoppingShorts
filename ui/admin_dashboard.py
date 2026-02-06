@@ -490,10 +490,10 @@ class AdminDashboard(QMainWindow):
         table_w = 1520
         table_h = 580
 
-        # 사용자 관리 테이블 (확장된 컨럼 + 비밀번호)
+        # 사용자 관리 테이블 (확장된 컨럼 + 비밀번호 + 버전)
         self.users_table = QTableWidget(self.central)
         self.users_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.users_table.setColumnCount(15)  # 컬럼 수 변경
+        self.users_table.setColumnCount(16)  # 컬럼 수 변경 (버전 추가)
         self.users_table.setHorizontalHeaderLabels(
             [
                 "ID",
@@ -504,18 +504,19 @@ class AdminDashboard(QMainWindow):
                 "이메일",
                 "유형",
                 "구독만료",
-                "작업횟수",
+                "무료 횟수",
                 "로그인",
                 "마지막 로그인",
                 "IP",
                 "접속",
                 "현재작업",
+                "버전",
                 "작업",
             ]
         )
         self._style_table(
              # Increased Action column (last) to 330px to prevent button overflow
-            self.users_table, [40, 80, 90, 80, 110, 150, 60, 130, 70, 50, 130, 100, 50, 90, 330]
+            self.users_table, [40, 80, 90, 80, 110, 150, 70, 120, 70, 50, 120, 100, 45, 80, 60, 290]
         )
         # 사용자 테이블이 기본 표시됨
 
@@ -643,8 +644,8 @@ class AdminDashboard(QMainWindow):
             # 6: Type
             utype = user.get("user_type", "trial")
             utype_text = {
-                "trial": "체험계정",
-                "subscriber": "구독자",
+                "trial": "무료계정",
+                "subscriber": "유료계정",
                 "admin": "관리자",
             }.get(utype, utype)
             utype_color = {
@@ -656,9 +657,9 @@ class AdminDashboard(QMainWindow):
 
             # 7: Subscription Expires
             expires_utc = user.get("subscription_expires_at")
-            expires_str = self._convert_to_kst(expires_utc)
-            
-            color = get_color("text_primary")
+            expires_str = self._convert_to_kst(expires_utc) if expires_utc else "무료계정"
+
+            color = get_color("text_muted") if not expires_utc else get_color("text_primary")
             if expires_utc:
                 try:
                     dt = datetime.fromisoformat(expires_utc.replace("Z", "+00:00"))
@@ -667,8 +668,9 @@ class AdminDashboard(QMainWindow):
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt < now:
                          color = get_color("error")
-                    elif (dt - now).days <= 7:
-                         color = get_color("warning")
+                    elif (dt - now).days <= 10:
+                         # 구독만료 10일 이내: 빨간색으로 경고 (갱신 유도)
+                         color = get_color("error")
                     else:
                          color = get_color("success")
                          active_sub_count += 1
@@ -711,14 +713,20 @@ class AdminDashboard(QMainWindow):
             # 13: Current Task
             self._set_cell(self.users_table, row, 13, user.get("current_task", "-"))
 
-            # 14: Actions
+            # 14: App Version
+            app_version = user.get("app_version") or "-"
+            # 최신 버전 여부에 따라 색상 표시 (unknown이면 회색)
+            version_color = get_color("text_muted") if app_version == "-" or app_version == "unknown" else get_color("success")
+            self._set_cell(self.users_table, row, 14, app_version, version_color)
+
+            # 15: Actions
             widget = self._create_user_actions(
                 user.get("id"),
                 user.get("username"),
                 row,
                 user.get("hashed_password"),
             )
-            self.users_table.setCellWidget(row, 14, widget)
+            self.users_table.setCellWidget(row, 15, widget)
 
         self.online_label.setText(str(online_count))
         self.active_sub_label.setText(str(active_sub_count))

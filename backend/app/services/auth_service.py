@@ -215,7 +215,8 @@ class AuthService:
             return "error"
 
     async def check_session(
-        self, user_id: str, token: str, ip_address: str, current_task: Optional[str] = None
+        self, user_id: str, token: str, ip_address: str,
+        current_task: Optional[str] = None, app_version: Optional[str] = None
     ) -> dict:
         """Session check logic (called every 5 seconds)"""
         try:
@@ -271,6 +272,8 @@ class AuthService:
                 user.is_online = True
                 if current_task is not None:
                     user.current_task = current_task
+                if app_version is not None:
+                    user.app_version = app_version
             
             self.db.commit()
 
