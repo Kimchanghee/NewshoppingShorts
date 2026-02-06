@@ -19,6 +19,16 @@ if TYPE_CHECKING:
 # tooltip_x, tooltip_y: 툴팁의 절대 좌표
 TUTORIAL_STEPS: List[Dict[str, Any]] = [
     {
+        "id": "mode",
+        "title": "모드 선택",
+        "description": "영상 제작 방식을 선택하세요.\n\n• 단일 영상: 1개 영상을 변환\n• 믹스 모드: 여러 영상을 믹스",
+        "target_type": "sidebar",
+        "target_id": "mode",
+        "navigate_to": "mode",
+        "tooltip_x": 260,
+        "tooltip_y": 32,
+    },
+    {
         "id": "source",
         "title": "소스 입력",
         "description": "변환할 영상의 URL을 입력하세요.\n도우인 영상 링크를 붙여넣고\n추가 버튼을 클릭합니다.",
@@ -26,7 +36,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "source",
         "navigate_to": "source",
         "tooltip_x": 260,
-        "tooltip_y": 32,
+        "tooltip_y": 80,
     },
     {
         "id": "voice",
@@ -36,7 +46,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "voice",
         "navigate_to": "voice",
         "tooltip_x": 260,
-        "tooltip_y": 80,
+        "tooltip_y": 128,
     },
     {
         "id": "cta",
@@ -46,7 +56,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "cta",
         "navigate_to": "cta",
         "tooltip_x": 260,
-        "tooltip_y": 128,
+        "tooltip_y": 176,
     },
     {
         "id": "font",
@@ -56,7 +66,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "font",
         "navigate_to": "font",
         "tooltip_x": 260,
-        "tooltip_y": 176,
+        "tooltip_y": 224,
     },
     {
         "id": "watermark",
@@ -66,7 +76,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "watermark",
         "navigate_to": "watermark",
         "tooltip_x": 260,
-        "tooltip_y": 224,
+        "tooltip_y": 272,
     },
     {
         "id": "queue",
@@ -76,7 +86,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "queue",
         "navigate_to": "queue",
         "tooltip_x": 260,
-        "tooltip_y": 272,
+        "tooltip_y": 320,
     },
     {
         "id": "settings",
@@ -86,7 +96,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "settings",
         "navigate_to": "settings",
         "tooltip_x": 260,
-        "tooltip_y": 320,
+        "tooltip_y": 368,
     },
     {
         "id": "progress",

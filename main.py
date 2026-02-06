@@ -50,7 +50,7 @@ from managers.subscription_manager import SubscriptionManager
 from ui.panels import (
     URLInputPanel, VoicePanel, QueuePanel,
     ProgressPanel, SubscriptionPanel, FontPanel, CTAPanel,
-    WatermarkPanel,
+    WatermarkPanel, ModeSelectionPanel,
 )
 from ui.panels.settings_tab import SettingsTab
 from ui.panels.topbar_panel import TopBarPanel
@@ -700,6 +700,7 @@ class VideoAnalyzerGUI(QMainWindow):
 
         # 1. Sidebar (StepNav)
         steps = [
+            ("mode", "모드 선택", "mode"),
             ("source", "소스 입력", "source"),
             ("voice", "음성 선택", "voice"),
             ("cta", "CTA 선택", "cta"),
@@ -759,6 +760,8 @@ class VideoAnalyzerGUI(QMainWindow):
         main_layout.addWidget(right_container, stretch=1)
 
         # Build pages as cards
+        self.mode_selection_panel = ModeSelectionPanel(self.stack, self, theme_manager=self.theme_manager)
+        self.mode_selection_panel.mode_selected.connect(self._on_mode_selected)
         self.url_input_panel = URLInputPanel(self.stack, self, theme_manager=self.theme_manager)
         self.voice_panel = VoicePanel(self.stack, self, theme_manager=self.theme_manager)
         self.cta_panel = CTAPanel(self.stack, self, theme_manager=self.theme_manager)
@@ -770,6 +773,7 @@ class VideoAnalyzerGUI(QMainWindow):
         self.subscription_panel = SubscriptionPanel(self.stack, self)
 
         pages = [
+            ("mode", "모드 선택", "영상 제작 방식을 선택하세요.", self.mode_selection_panel),
             ("source", "소스 입력", "숏폼으로 변환할 쇼핑몰 링크나 영상을 추가하세요.", self.url_input_panel),
             ("voice", "음성 선택", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", self.voice_panel),
             ("cta", "CTA 선택", "영상 마지막 클릭 유도 멘트를 선택하세요.", self.cta_panel),
@@ -787,7 +791,7 @@ class VideoAnalyzerGUI(QMainWindow):
             self.page_index[sid] = idx
 
         self.step_nav.step_selected.connect(self._on_step_selected)
-        self._on_step_selected("source")
+        self._on_step_selected("mode")  # Start with mode selection page
 
         # Status bar
         self.status_bar = StatusBar(self, self)
@@ -902,6 +906,12 @@ class VideoAnalyzerGUI(QMainWindow):
         card_layout.addWidget(widget)
 
         return card
+
+    def _on_mode_selected(self, mode: str):
+        """모드 선택 시 호출 - URL 입력 패널 UI 업데이트"""
+        logger.info(f"[Mode] 선택된 모드: {mode}")
+        if hasattr(self, 'url_input_panel') and hasattr(self.url_input_panel, 'refresh_mode'):
+            self.url_input_panel.refresh_mode()
 
     def _on_step_selected(self, step_id: str):
         idx = self.page_index.get(step_id, 0)

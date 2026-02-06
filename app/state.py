@@ -54,6 +54,11 @@ class AppState:
         self.dynamic_processing = False
         self.batch_processing = False
 
+        # Processing mode (single / mix)
+        self.processing_mode = "single"  # "single" or "mix"
+        self.mix_video_urls: List[str] = []  # 믹스 모드에서 사용할 영상 URL 리스트 (최대 5개)
+        self.mode_selected = False  # 모드 선택 완료 여부
+
         # Video source variables
         self.video_source = "none"
         self.local_file_path = ""
