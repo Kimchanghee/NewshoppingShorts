@@ -164,9 +164,10 @@ class SubtitleDetector:
             or None if no Chinese subtitles found
         """
         
-        # OCR reader 가용성 확인 (RapidOCR)
+        # OCR reader 가용성 확인
         ocr_reader = getattr(self.gui, "ocr_reader", None)
         if not ocr_reader:
+            logger.warning("[OCR 감지] ocr_reader가 None - 자막 감지 건너뜀 (OCR 엔진 미초기화)")
             return None
 
         video_path = getattr(self.gui, 'local_file_path', '') if getattr(self.gui, 'video_source', 'none') == 'local' else getattr(self.gui, '_temp_downloaded_file', None)

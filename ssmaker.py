@@ -11,12 +11,16 @@ from PyQt6.QtWidgets import QApplication
 # Environmental settings for HighDPI
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
-# Load environment variables from .env file
+# Load environment variables from .env file (EXE: _MEIPASS, 개발: CWD)
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    if getattr(sys, "frozen", False):
+        _env_path = os.path.join(getattr(sys, "_MEIPASS", ""), ".env")
+        load_dotenv(_env_path)
+    else:
+        load_dotenv()
 except ImportError:
-    pass  # python-dotenv might not be installed yet
+    pass
 
 # Logging setup for EXE environment
 def setup_logging():
@@ -82,8 +86,9 @@ class StartupWorker(QtCore.QThread):
             from startup.app_controller import AppController
             self.progress.emit(85)
 
-            # Stage 8: Final validation (95%)
-            self.status.emit("최종 확인 중...")
+            # Stage 8: Pre-load main app module (95%)
+            self.status.emit("메인 앱 모듈 로딩 중...")
+            import main  # Pre-import to catch ModuleNotFoundError early
             self.progress.emit(95)
             time.sleep(0.1)
 

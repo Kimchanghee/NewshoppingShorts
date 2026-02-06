@@ -31,15 +31,31 @@ logger = get_logger(__name__)
 
 def _get_api_key() -> str:
     """
-    Get API key from environment variable only (secure approach)
-
-    Security: API keys should NEVER be embedded in source code.
-    Set the GLM_OCR_API_KEY environment variable to use this client.
+    Get API key - env var → SecretsManager fallback.
+    Found key is auto-stored in SecretsManager for EXE builds.
     """
+    # 1) 환경변수 (.env 또는 시스템)
     api_key = os.getenv("GLM_OCR_API_KEY")
-    if not api_key:
-        logger.debug("[GLM-OCR] API key not configured. Set GLM_OCR_API_KEY environment variable.")
-    return api_key or ""
+    if api_key:
+        # SecretsManager에 저장 (EXE 빌드에서도 작동하도록)
+        try:
+            from utils.secrets_manager import SecretsManager
+            SecretsManager.store_api_key("glm_ocr", api_key)
+        except Exception:
+            pass
+        return api_key
+
+    # 2) SecretsManager 폴백 (EXE 빌드 시 .env 없이도 작동)
+    try:
+        from utils.secrets_manager import SecretsManager
+        stored = SecretsManager.get_api_key("glm_ocr")
+        if stored:
+            return stored
+    except Exception:
+        pass
+
+    logger.debug("[GLM-OCR] API key not configured. Set GLM_OCR_API_KEY or store via SecretsManager.")
+    return ""
 
 
 class GLMOCRClient:
@@ -149,7 +165,7 @@ class GLMOCRClient:
 
     def _build_request(self, images_b64: List[str]) -> Dict[str, Any]:
         """
-        Build API request payload
+        Build API request payload for layout_parsing endpoint
 
         Args:
             images_b64: List of base64 encoded images
@@ -157,46 +173,21 @@ class GLMOCRClient:
         Returns:
             Request payload dict
         """
-        content = []
-
-        # Add images
-        for img_b64 in images_b64:
-            content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:image/jpeg;base64,{img_b64}"
-                }
-            })
-
-        # Add prompt for OCR
-        content.append({
-            "type": "text",
-            "text": (
-                "Extract all text from the image(s) with bounding boxes. "
-                "Return JSON array format: "
-                '[{"bbox": [[x1,y1],[x2,y2],[x3,y3],[x4,y4]], "text": "detected text", "confidence": 0.95}]. '
-                "Only return the JSON array, no other text."
-            )
-        })
+        # layout_parsing API uses 'file' parameter with base64 data URI
+        # For single image (batch not directly supported, process sequentially)
+        img_b64 = images_b64[0] if images_b64 else ""
 
         return {
             "model": self._model,
-            "messages": [
-                {
-                    "role": "user",
-                    "content": content
-                }
-            ],
-            "max_tokens": 4096,
-            "temperature": 0.1
+            "file": f"data:image/jpeg;base64,{img_b64}"
         }
 
-    def _parse_response(self, response_text: str) -> List[Tuple[List[List[float]], str, float]]:
+    def _parse_response(self, response_data: Dict[str, Any]) -> List[Tuple[List[List[float]], str, float]]:
         """
-        Parse API response to OCR format
+        Parse layout_parsing API response to OCR format
 
         Args:
-            response_text: Raw response text from API
+            response_data: Parsed JSON response from API
 
         Returns:
             List of (bbox, text, confidence) tuples
@@ -204,30 +195,42 @@ class GLMOCRClient:
         results = []
 
         try:
-            # Extract JSON from response
-            text = response_text.strip()
+            # layout_parsing response format:
+            # {"layout_details": [{"bbox_2d": [x1,y1,x2,y2], "content": "text", "label": "text"}], "md_results": "..."}
+            layout_details = response_data.get("layout_details", [])
 
-            # Find JSON array in response
-            start_idx = text.find('[')
-            end_idx = text.rfind(']') + 1
+            # layout_details can be nested list or flat list
+            if layout_details and isinstance(layout_details[0], list):
+                # Nested: [[{...}, {...}]]
+                layout_details = layout_details[0]
 
-            if start_idx == -1 or end_idx == 0:
-                logger.warning("[GLM-OCR] No JSON array found in response")
-                return results
+            for item in layout_details:
+                label = item.get("label", "")
+                if label in ("text", "paragraph", "title", "paragraph_title", "table"):
+                    text_content = item.get("content", "")
+                    # Remove markdown formatting
+                    text_content = text_content.replace("## ", "").replace("# ", "").strip()
 
-            json_str = text[start_idx:end_idx]
-            items = json.loads(json_str)
+                    bbox_2d = item.get("bbox_2d", [0, 0, 0, 0])
 
-            for item in items:
-                bbox = item.get("bbox", [[0, 0], [0, 0], [0, 0], [0, 0]])
-                text_content = item.get("text", "")
-                confidence = float(item.get("confidence", 0.9))
+                    # Convert [x1,y1,x2,y2] to [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
+                    if len(bbox_2d) >= 4:
+                        x1, y1, x2, y2 = bbox_2d[:4]
+                        bbox = [
+                            [x1, y1],
+                            [x2, y1],
+                            [x2, y2],
+                            [x1, y2]
+                        ]
+                    else:
+                        bbox = [[0, 0], [0, 0], [0, 0], [0, 0]]
 
-                if text_content and confidence >= GLMOCRSettings.MIN_CONFIDENCE:
-                    results.append((bbox, text_content, confidence))
+                    # layout_parsing doesn't return confidence, use default 0.9
+                    confidence = 0.9
 
-        except json.JSONDecodeError as e:
-            logger.warning(f"[GLM-OCR] JSON parse error: {e}")
+                    if text_content and confidence >= GLMOCRSettings.MIN_CONFIDENCE:
+                        results.append((bbox, text_content, confidence))
+
         except Exception as e:
             logger.warning(f"[GLM-OCR] Response parse error: {e}")
 
@@ -264,12 +267,8 @@ class GLMOCRClient:
                 with self._state_lock:
                     self._consecutive_failures = 0
                 data = response.json()
-
-                # Extract text from OpenAI-compatible response
-                choices = data.get("choices", [])
-                if choices:
-                    message = choices[0].get("message", {})
-                    return message.get("content", "")
+                # layout_parsing returns full response object
+                return data
 
             elif response.status_code == 401:
                 logger.error("[GLM-OCR] Invalid API key")
@@ -356,10 +355,10 @@ class GLMOCRClient:
         try:
             img_b64 = self._compress_image(image)
             payload = self._build_request([img_b64])
-            response = self._call_api(payload)
+            response_data = self._call_api(payload)
 
-            if response:
-                return self._parse_response(response)
+            if response_data and isinstance(response_data, dict):
+                return self._parse_response(response_data)
 
         except Exception as e:
             logger.error(f"[GLM-OCR] Single recognition error: {e}")
@@ -372,11 +371,14 @@ class GLMOCRClient:
         batch_size: int = None
     ) -> List[List[Tuple[List[List[float]], str, float]]]:
         """
-        Recognize text in multiple images (batch processing)
+        Recognize text in multiple images (sequential processing)
+
+        Note: layout_parsing API processes one image at a time,
+        so we process images sequentially with delays.
 
         Args:
             images: List of images (numpy arrays, file paths, or bytes)
-            batch_size: Batch size (default from settings)
+            batch_size: Ignored (kept for API compatibility)
 
         Returns:
             List of results for each image
@@ -384,89 +386,54 @@ class GLMOCRClient:
         if not self.is_available():
             return [[] for _ in images]
 
-        batch_size = batch_size or GLMOCRSettings.OPTIMAL_BATCH_SIZE
-        batch_size = min(batch_size, self._max_batch)
-
         all_results = []
 
-        # Process in batches
-        for i in range(0, len(images), batch_size):
-            batch = images[i:i + batch_size]
-
+        # Process images sequentially (layout_parsing = 1 image per request)
+        for i, image in enumerate(images):
             try:
-                # Compress all images in batch
-                images_b64 = [self._compress_image(img) for img in batch]
+                result = self.recognize_single(image)
+                all_results.append(result)
 
-                # Build and send request
-                payload = self._build_request(images_b64)
-                response = self._call_api(payload)
-
-                if response:
-                    # Parse response - expect results per image
-                    batch_results = self._parse_batch_response(response, len(batch))
-                    all_results.extend(batch_results)
-                else:
-                    # API failed - return empty results for this batch
-                    all_results.extend([[] for _ in batch])
-
-                # Small delay between batches
-                if i + batch_size < len(images):
+                # Small delay between requests to avoid rate limiting
+                if i < len(images) - 1:
                     time.sleep(GLMOCRSettings.REQUEST_DELAY_MS / 1000.0)
 
             except Exception as e:
-                logger.error(f"[GLM-OCR] Batch recognition error: {e}")
-                all_results.extend([[] for _ in batch])
+                logger.error(f"[GLM-OCR] Batch item {i} error: {e}")
+                all_results.append([])
 
         return all_results
 
     def _parse_batch_response(
         self,
-        response_text: str,
+        response_data: Dict[str, Any],
         image_count: int
     ) -> List[List[Tuple[List[List[float]], str, float]]]:
         """
         Parse batch response - handles multiple images in one response
 
-        For batch requests, the model may return results grouped by image
-        or as a single flat array. This method handles both cases.
+        Note: layout_parsing API processes one image at a time,
+        so batch is processed sequentially.
 
         Args:
-            response_text: Raw response text
+            response_data: Parsed JSON response
             image_count: Number of images in the batch
 
         Returns:
             List of results for each image
         """
-        # First try to parse as single response
-        all_items = self._parse_response(response_text)
+        # layout_parsing processes one image at a time
+        all_items = self._parse_response(response_data)
 
         if not all_items:
             return [[] for _ in range(image_count)]
 
-        # If only one image, return all results for it
+        # For single image batch, return all results
         if image_count == 1:
             return [all_items]
 
-        # For multiple images, try to split results
-        # Strategy: divide results evenly (simple heuristic)
-        # Better approach would be to have the API return image indices
-        items_per_image = len(all_items) // image_count if image_count > 0 else 0
-
-        if items_per_image == 0:
-            # Very few results - assign all to first image
-            results = [[]]
-            results[0] = all_items
-            results.extend([[] for _ in range(image_count - 1)])
-            return results
-
-        # Split evenly
-        results = []
-        for i in range(image_count):
-            start = i * items_per_image
-            end = start + items_per_image if i < image_count - 1 else len(all_items)
-            results.append(all_items[start:end])
-
-        return results
+        # For multiple images (shouldn't happen with layout_parsing)
+        return [all_items] + [[] for _ in range(image_count - 1)]
 
 
 # Singleton instance with thread-safe initialization

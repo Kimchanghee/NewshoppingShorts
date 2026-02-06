@@ -7,7 +7,7 @@ Shopping Shorts Maker - PyInstaller Spec (Complete Distribution)
 """
 
 import os
-from PyInstaller.utils.hooks import collect_all, collect_submodules, collect_data_files
+from PyInstaller.utils.hooks import collect_all, collect_submodules, collect_data_files, copy_metadata
 
 print("=" * 60)
 print("[Build] SSMaker Distribution Build Starting...")
@@ -45,11 +45,32 @@ datas = [
     ('ui/panels', 'ui/panels'),
     ('ui/components', 'ui/components'),
     ('voice_profiles.py', '.'),
+    ('.env', '.'),
 ]
+
+# 패키지 메타데이터 (importlib.metadata 호환)
+for pkg_name in [
+    'imageio',
+    'imageio_ffmpeg',
+    'certifi',
+    'tqdm',
+    'colorama',
+    'pydub',
+    'edge_tts',
+    'httpx',
+    'httpcore',
+    'h11',
+]:
+    try:
+        datas += copy_metadata(pkg_name)
+        print(f"[Build] {pkg_name} metadata: OK")
+    except Exception:
+        print(f"[Build WARNING] {pkg_name} metadata not found (skipped)")
 
 # 외부 패키지 데이터 파일
 for pkg_name in [
     'certifi',
+    'imageio',
     'imageio_ffmpeg',
     'faster_whisper',
     'ctranslate2',
@@ -116,6 +137,7 @@ for dll_name in vc_runtime_dlls:
 hiddenimports = [
     # ── 내부 모듈 (앱) ──
     'config',
+    'config.constants',
     'voice_profiles',
     'main',
 
@@ -168,23 +190,77 @@ hiddenimports = [
     'managers.tiktok_manager',
     'managers.youtube_manager',
 
-    # UI
+    # UI - packages
     'ui',
-    'ui.panels',
-    'ui.windows',
-    'ui.components',
     'ui.design_system_v2',
     'ui.theme_manager',
+    'ui.login_Ui',
+    'ui.login_ui_modern',
+
+    # UI - panels (all individual modules)
+    'ui.panels',
+    'ui.panels.header_panel',
+    'ui.panels.url_input_panel',
+    'ui.panels.voice_panel',
+    'ui.panels.font_panel',
+    'ui.panels.cta_panel',
+    'ui.panels.queue_panel',
+    'ui.panels.progress_panel',
+    'ui.panels.subscription_panel',
+    'ui.panels.watermark_panel',
+    'ui.panels.url_content_panel',
+    'ui.panels.settings_tab',
+    'ui.panels.topbar_panel',
+
+    # UI - windows
+    'ui.windows',
+    'ui.windows.login_window',
+    'ui.windows.process_window',
+    'ui.windows.startup_splash',
+    'ui.windows.update_dialog',
+
+    # UI - components
+    'ui.components',
+    'ui.components.custom_dialog',
+    'ui.components.status_bar',
+    'ui.components.step_nav',
+    'ui.components.tutorial_manager',
+    'ui.components.tutorial_overlay',
+    'ui.components.tutorial_tooltip',
+    'ui.components.tutorial_spotlight',
+    'ui.components.subscription_dialog',
+    'ui.components.subscription_popup',
+    'ui.components.subscription_status',
+    'ui.components.trial_limit_dialog',
+    'ui.components.settings_modal',
+    'ui.components.settings_button',
+    'ui.components.theme_toggle',
+    'ui.components.base_widget',
+    'ui.components.rounded_widgets',
+    'ui.components.animated_progress',
+    'ui.components.loading_splash',
+    'ui.components.tab_container',
+    'ui.components.sidebar_container',
 
     # Utils
     'utils',
     'utils.logging_config',
     'utils.secrets_manager',
+    'utils.secure_config',
     'utils.auto_updater',
     'utils.ocr_backend',
+    'utils.glm_ocr_client',
     'utils.tts_config',
     'utils.korean_text_processor',
     'utils.token_cost_calculator',
+    'utils.error_handlers',
+    'utils.validators',
+    'utils.payment_client',
+    'utils.system_optimizer',
+    'utils.page_capture',
+    'utils.Tool',
+    'utils.util',
+    'utils.DriverConfig',
 
     # Startup
     'startup',
@@ -193,6 +269,7 @@ hiddenimports = [
     'startup.initializer',
     'startup.app_controller',
     'startup.constants',
+    'startup.system_check',
 
     # Caller
     'caller',
@@ -279,6 +356,11 @@ hiddenimports = [
     'colorama',
     'dotenv',
     'yt_dlp',
+
+    # Metadata
+    'importlib.metadata',
+    'importlib_metadata',
+    'packaging', 'packaging.version', 'packaging.specifiers', 'packaging.requirements',
 ]
 
 # 주요 패키지의 모든 서브모듈 자동 수집

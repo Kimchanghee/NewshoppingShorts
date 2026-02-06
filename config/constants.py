@@ -260,8 +260,8 @@ class GPUSettings:
 class GLMOCRSettings:
     """GLM-OCR API settings (Z.ai)"""
 
-    # API Configuration
-    ENDPOINT: str = "https://api.z.ai/v1/chat/completions"
+    # API Configuration - layout_parsing endpoint (not chat/completions)
+    ENDPOINT: str = "https://open.bigmodel.cn/api/paas/v4/layout_parsing"
     MODEL: str = "glm-ocr"
 
     # Request settings
