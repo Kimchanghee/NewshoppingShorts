@@ -1,0 +1,94 @@
+name: Build and Deploy
+
+on:
+  push:
+    tags:
+      - 'v*'  # v1.0.2, v1.1.0 등 버전 태그 푸시 시 실행
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Download Whisper models
+      run: python download_whisper_models.py
+
+    - name: Download fonts
+      run: python download_all_fonts.py
+
+    - name: Extract version from tag
+      id: version
+      shell: bash
+      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+    - name: Update version.json
+      shell: python
+      run: |
+        import json
+        version = "${{ steps.version.outputs.VERSION }}"
+        with open("version.json", "w", encoding="utf-8") as f:
+            json.dump({"version": version}, f)
+        print(f"Updated version.json to {version}")
+
+    - name: Build EXE
+      run: pyinstaller --clean -y ssmaker.spec
+
+    - name: Rename EXE
+      run: |
+        mv dist/ssmaker.exe dist/ssmaker_v${{ steps.version.outputs.VERSION }}.exe
+
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        files: dist/ssmaker_v${{ steps.version.outputs.VERSION }}.exe
+        name: Release v${{ steps.version.outputs.VERSION }}
+        body: |
+          ## SSMaker v${{ steps.version.outputs.VERSION }}
+
+          ### 변경 사항
+          - 자동 빌드된 버전입니다.
+
+          ### 다운로드
+          아래 파일을 다운로드하세요.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Update server version API
+      run: |
+        $version = "${{ steps.version.outputs.VERSION }}"
+        $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/v${version}/ssmaker_v${version}.exe"
+
+        $body = @{
+          version = $version
+          download_url = $downloadUrl
+          release_notes = "버전 ${version} 자동 배포"
+          is_mandatory = $false
+        } | ConvertTo-Json
+
+        try {
+          Invoke-RestMethod -Uri "https://ssmaker-auth-api-1049571775048.us-central1.run.app/app/version/update" `
+            -Method POST `
+            -Headers @{
+              "Content-Type" = "application/json"
+              "Authorization" = "Bearer ${{ secrets.ADMIN_API_KEY }}"
+            } `
+            -Body $body
+          Write-Host "Server version updated successfully"
+        } catch {
+          Write-Host "Warning: Failed to update server version API"
+          Write-Host $_.Exception.Message
+        }
