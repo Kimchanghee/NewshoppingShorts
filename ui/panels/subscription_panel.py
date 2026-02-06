@@ -30,68 +30,43 @@ logger = get_logger(__name__)
 PLANS = {
     "trial": {
         "id": "trial",
-        "name": "체험계정",
+        "name": "무료계정",
         "price": 0,
-        "price_text": "묶음",
+        "price_text": "무료",
         "period": "",
-        "description": "기본 기능을 묶으로 체험핵세요",
+        "description": "기본 기능을 무료로 체험하세요",
         "features": [
-            "월 3개 영상 생성",
+            "월 2개 영상 생성",
             "기본 음성 합성",
             "기본 자막 스타일",
             "720p 해상도",
         ],
         "not_included": [
-            "AI 콘텐츠 분석",
+            "무제한 영상 생성",
             "고급 음성 프로필",
             "우선 처리",
         ],
         "color": "#9A9A9A",
         "popular": False,
     },
-    "monthly": {
-        "id": "monthly",
-        "name": "베이식",
-        "price": 9900,
-        "price_text": "9,900",
+    "pro": {
+        "id": "pro",
+        "name": "프로 (유료계정)",
+        "price": 190000,
+        "price_text": "190,000",
         "period": "월",
-        "description": "개인 크리에이터를 위한 플랜",
-        "features": [
-            "월 30개 영상 생성",
-            "고급 음성 합성 (11labs)",
-            "AI 콘텐츠 분석",
-            "커스텀 자막 스타일",
-            "1080p 해상도",
-            "이메일 지원",
-        ],
-        "not_included": [
-            "API 접근",
-            "우선 처리",
-        ],
-        "color": "#E31639",
-        "popular": True,
-    },
-    "yearly": {
-        "id": "yearly", 
-        "name": "프로",
-        "price": 86400,
-        "price_text": "86,400",
-        "period": "년",
-        "description": "전문 크리에이터와 팀을 위한 플랜",
+        "description": "무제한 영상 생성 + 모든 기능 해제",
         "features": [
             "무제한 영상 생성",
             "모든 음성 프로필 사용",
             "AI 콘텐츠 분석",
             "커스텀 자막 스타일",
-            "4K 해상도",
+            "1080p 해상도",
             "우선 처리",
-            "API 접근",
-            "전용 지원팀",
         ],
         "not_included": [],
-        "color": "#FF4D6A",
-        "popular": False,
-        "badge": "20% 할인",
+        "color": "#E31639",
+        "popular": True,
     },
 }
 
@@ -364,14 +339,14 @@ class CurrentPlanCard(QFrame):
         
         header_layout.addStretch()
         
-        self.status_badge = QLabel("체험계정")
+        self.status_badge = QLabel("무료계정")
         self.status_badge.setObjectName("status_badge")
         header_layout.addWidget(self.status_badge)
 
         layout.addLayout(header_layout)
 
         # Plan name (large)
-        self.plan_name = QLabel("체험계정")
+        self.plan_name = QLabel("무료계정")
         self.plan_name.setObjectName("current_plan_name")
         layout.addWidget(self.plan_name)
         
@@ -429,18 +404,24 @@ class CurrentPlanCard(QFrame):
         self.current_plan = plan_id
         self.usage_used = used
         self.usage_total = total
-        
+
         plan_data = PLANS.get(plan_id, PLANS["trial"])
-        
+
         self.status_badge.setText(plan_data["name"])
         self.plan_name.setText(plan_data["name"])
-        
-        self.usage_text.setText(f"{used} / {total}")
-        self.progress_bar.setMaximum(total)
-        self.progress_bar.setValue(used)
-        
-        remaining = total - used
-        self.usage_hint.setText(f"이번 달 남은 영상 생성 횟수: {remaining}회")
+
+        is_unlimited = (total < 0) or (plan_id == "pro")
+        if is_unlimited:
+            self.usage_text.setText("무제한")
+            self.progress_bar.setMaximum(1)
+            self.progress_bar.setValue(1)
+            self.usage_hint.setText("무제한 영상 생성 가능")
+        else:
+            self.usage_text.setText(f"{used} / {total}")
+            self.progress_bar.setMaximum(max(total, 1))
+            self.progress_bar.setValue(used)
+            remaining = max(total - used, 0)
+            self.usage_hint.setText(f"이번 달 남은 영상 생성 횟수: {remaining}회")
         
         # Update badge color
         if plan_id == "trial":
@@ -564,12 +545,12 @@ class PaymentForm(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ds.spacing.space_5)
-        
+
         # Title
         title = QLabel("결제 정보")
         title.setObjectName("form_title")
         layout.addWidget(title)
-        
+
         # Form fields container
         form_container = QFrame()
         form_container.setObjectName("form_container")
@@ -581,58 +562,71 @@ class PaymentForm(QWidget):
             ds.spacing.space_5
         )
         form_layout.setSpacing(ds.spacing.space_4)
-        
+
         # Selected plan display
         plan_row = QHBoxLayout()
         plan_label = QLabel("선택한 플랜")
         plan_label.setObjectName("field_label")
         plan_row.addWidget(plan_label)
-        
+
         self.selected_plan_label = QLabel("-")
         self.selected_plan_label.setObjectName("selected_plan_value")
         plan_row.addWidget(self.selected_plan_label)
-        
+
         form_layout.addLayout(plan_row)
-        
+
         # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setObjectName("form_separator")
         form_layout.addWidget(separator)
-        
+
+        # Phone number input (PayApp 필수)
+        phone_label = QLabel("전화번호 (가상계좌 안내 수신용)")
+        phone_label.setObjectName("field_label")
+        form_layout.addWidget(phone_label)
+
+        self.phone_input = QLineEdit()
+        self.phone_input.setObjectName("phone_input")
+        self.phone_input.setPlaceholderText("010-0000-0000")
+        self.phone_input.setMaxLength(13)
+        form_layout.addWidget(self.phone_input)
+
         # Status info
-        info_label = QLabel("브라우저에서 안전하게 결제가 진행됩니다.")
+        info_label = QLabel(
+            "가상계좌가 발급되며, 입금 완료 시 자동으로 구독이 활성화됩니다."
+        )
         info_label.setObjectName("info_label")
         info_label.setWordWrap(True)
         form_layout.addWidget(info_label)
-        
+
         # Status
         self.status_label = QLabel("결제 대기 중")
         self.status_label.setObjectName("status_label")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         form_layout.addWidget(self.status_label)
-        
+
         # Buttons
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(ds.spacing.space_3)
-        
+
         self.pay_btn = QPushButton("결제 진행하기")
         self.pay_btn.setObjectName("pay_button")
         self.pay_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pay_btn.clicked.connect(self._on_submit)
         buttons_layout.addWidget(self.pay_btn)
-        
+
         self.cancel_btn = QPushButton("취소")
         self.cancel_btn.setObjectName("cancel_button")
         self.cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cancel_btn.clicked.connect(self._on_cancel)
         buttons_layout.addWidget(self.cancel_btn)
-        
+
         form_layout.addLayout(buttons_layout)
-        
+
         layout.addWidget(form_container)
         layout.addStretch()
-        
+
         self._apply_styles()
         
     def set_plan(self, plan_data: dict):
@@ -726,6 +720,18 @@ class PaymentForm(QWidget):
             
             #cancel_button:hover {{
                 background-color: {ds.colors.border};
+            }}
+
+            #phone_input {{
+                background-color: {ds.colors.surface_variant};
+                color: {ds.colors.text_primary};
+                border: 1px solid {ds.colors.border};
+                border-radius: {ds.radius.md}px;
+                padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
+                font-size: {ds.typography.size_base}px;
+            }}
+            #phone_input:focus {{
+                border-color: {ds.colors.primary};
             }}
         """)
 
@@ -872,27 +878,43 @@ class SubscriptionPanel(QWidget):
         webbrowser.open("mailto:support@shoppingmaker.com")
         
     def _checkout(self):
-        """Start checkout process"""
+        """Start PayApp checkout process"""
         if not self.selected_plan:
             QMessageBox.warning(self, "알림", "플랜을 먼저 선택해주세요.")
             return
-            
-        plan_id = self.selected_plan["id"]
-        price = self.selected_plan["price"]
-        
-        user_id = getattr(self.gui, "login_data", {}).get("user_id") if self.gui else None
-        
+
+        # Get phone number from form
+        phone = self.payment_form.phone_input.text().strip()
+        if not phone or len(phone.replace("-", "")) < 10:
+            QMessageBox.warning(self, "알림", "전화번호를 정확히 입력해주세요.")
+            return
+
+        # Extract user_id from login_data
+        user_id = None
+        if self.gui and getattr(self.gui, "login_data", None):
+            data_part = self.gui.login_data.get("data", {})
+            if isinstance(data_part, dict):
+                inner = data_part.get("data", {})
+                user_id = inner.get("id")
+            if not user_id:
+                user_id = self.gui.login_data.get("userId")
+
+        if not user_id:
+            QMessageBox.warning(self, "알림", "로그인 정보를 찾을 수 없습니다.")
+            return
+
         try:
-            data = self.payment.create_checkout(plan_id, user_id)
-            self.current_payment_id = data["payment_id"]
-            checkout_url = data["checkout_url"]
-            
+            data = self.payment.create_payapp_checkout(user_id, phone)
+            self.current_payment_id = data.get("payment_id", "")
+            payurl = data.get("payurl", "")
+
             self.payment_form.set_status("결제 페이지를 여는 중...")
-            webbrowser.open(checkout_url)
+            if payurl:
+                webbrowser.open(payurl)
             self._start_poll()
         except Exception as e:
-            logger.error(f"[Subscription] checkout create failed: {e}")
-            QMessageBox.critical(self, "오류", f"결제 세션 생성 실패:\n{e}")
+            logger.error(f"[Subscription] PayApp checkout failed: {e}")
+            QMessageBox.critical(self, "오류", f"결제 요청 실패:\n{e}")
             self.payment_form.set_status(f"오류: {e}")
             
     def _cancel_payment(self):
@@ -935,16 +957,12 @@ class SubscriptionPanel(QWidget):
             
             if status in ("paid", "success", "succeeded"):
                 self._stop_poll()
-                QMessageBox.information(self, "완료", "결제가 완료되었습니다!")
+                QMessageBox.information(self, "완료", "결제가 완료되었습니다! 구독이 활성화됩니다.")
                 self.payment_form.hide()
                 self.plans_container.hide()
-                # Update current plan display
+                # Update current plan display to pro (unlimited)
                 if self.selected_plan:
-                    self.current_plan_card.update_plan(
-                        self.selected_plan["id"], 
-                        used=0, 
-                        total=30 if self.selected_plan["id"] == "monthly" else 999
-                    )
+                    self.current_plan_card.update_plan("pro", used=0, total=999)
             elif status in ("failed", "canceled", "cancelled"):
                 self._stop_poll()
                 QMessageBox.warning(self, "실패", "결제가 실패/취소되었습니다.")

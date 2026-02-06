@@ -61,6 +61,7 @@ class CheckRequest(BaseModel):
     key: str = Field(..., min_length=10, max_length=1024, description="JWT token")
     ip: str = Field(..., max_length=45, description="Client IP (legacy)")
     current_task: Optional[str] = Field(None, max_length=200, description="Current task status")
+    app_version: Optional[str] = Field(None, max_length=20, description="Client app version")
 
 
 class UseWorkRequest(BaseModel):

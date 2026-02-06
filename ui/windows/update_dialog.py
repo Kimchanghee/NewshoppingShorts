@@ -67,6 +67,164 @@ def _release_notes_style(colors):
 
 
 # ─────────────────────────────────────────────
+# UpdateNotesDialog  (업데이트 내역 알림)
+# ─────────────────────────────────────────────
+
+class UpdateNotesDialog(QWidget):
+    """
+    업데이트 내역 알림 다이얼로그.
+    프로그램 시작 시 새로운 버전의 업데이트 내역을 보여줍니다.
+    """
+
+    closed = pyqtSignal()
+
+    # ── Fixed dimensions ──
+    WIN_W, WIN_H = 480, 420
+    PAD = 10
+    CONT_W = WIN_W - PAD * 2
+    CONT_H = WIN_H - PAD * 2
+
+    def __init__(self, version: str = "", release_notes: str = "", parent=None):
+        super().__init__(parent)
+        self._version = version
+        self._release_notes = release_notes
+
+        self.COLORS = _build_colors()
+        self._setup_window()
+        self._setup_ui()
+        _center_widget(self)
+
+    def _setup_window(self):
+        self.setWindowFlags(
+            Qt.WindowType.FramelessWindowHint |
+            Qt.WindowType.WindowStaysOnTopHint
+        )
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFixedSize(self.WIN_W, self.WIN_H)
+
+    def _setup_ui(self):
+        C = self.COLORS
+
+        # Container (fixed position)
+        self.container = QWidget(self)
+        self.container.setGeometry(self.PAD, self.PAD, self.CONT_W, self.CONT_H)
+        self.container.setStyleSheet(f"""
+            QWidget {{
+                background-color: {C['bg']};
+                border-radius: 16px;
+                border: 1px solid {C['border']};
+            }}
+        """)
+
+        layout = QVBoxLayout(self.container)
+        layout.setContentsMargins(32, 28, 32, 24)
+        layout.setSpacing(12)
+
+        # Header with icon
+        header_layout = QHBoxLayout()
+
+        icon = QLabel("🔔")
+        icon.setFont(QFont("Segoe UI Emoji", 28))
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet("background:transparent; border:none;")
+        icon.setFixedWidth(50)
+        header_layout.addWidget(icon)
+
+        # Title and version
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(4)
+
+        title = QLabel("새로운 업데이트!")
+        title.setFont(QFont("Pretendard", 20, QFont.Weight.Bold))
+        title.setStyleSheet(f"color:{C['text_primary']}; background:transparent; border:none;")
+        title_layout.addWidget(title)
+
+        if self._version:
+            ver_label = QLabel(f"v{self._version}")
+            ver_label.setFont(QFont("Pretendard", 12, QFont.Weight.Bold))
+            ver_label.setStyleSheet(f"color:{C['primary']}; background:transparent; border:none;")
+            title_layout.addWidget(ver_label)
+
+        header_layout.addLayout(title_layout)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+
+        layout.addSpacing(8)
+
+        # Release notes header
+        notes_header = QLabel("📋 업데이트 내역")
+        notes_header.setFont(QFont("Pretendard", 12, QFont.Weight.Bold))
+        notes_header.setStyleSheet(f"color:{C['text_primary']}; background:transparent; border:none;")
+        layout.addWidget(notes_header)
+
+        # Release notes content (scrollable area simulated with fixed height)
+        notes_text = self._release_notes if self._release_notes else "업데이트 내역이 없습니다."
+        notes = QLabel(notes_text)
+        notes.setFont(QFont("Pretendard", 11))
+        notes.setWordWrap(True)
+        notes.setStyleSheet(f"""
+            color: {C['text_secondary']};
+            background-color: {C['surface']};
+            padding: 16px;
+            border-radius: 10px;
+            border: 1px solid {C['border']};
+        """)
+        notes.setMinimumHeight(180)
+        notes.setMaximumHeight(200)
+        notes.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(notes)
+
+        layout.addStretch()
+
+        # Close button
+        self.close_btn = QPushButton("확인")
+        self.close_btn.setFixedSize(200, 46)
+        self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_btn.setFont(QFont("Pretendard", 13, QFont.Weight.Bold))
+        self.close_btn.setStyleSheet(f"""
+            QPushButton {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {C['gradient_start']},
+                    stop:1 {C['gradient_end']}
+                );
+                color: white;
+                border: none;
+                border-radius: 10px;
+            }}
+            QPushButton:hover {{
+                background: qlineargradient(
+                    x1:0, y1:0, x2:1, y2:0,
+                    stop:0 {C['primary']},
+                    stop:1 {C['gradient_start']}
+                );
+            }}
+        """)
+        self.close_btn.clicked.connect(self._on_close)
+
+        # Center the button
+        btn_row = QHBoxLayout()
+        btn_row.addStretch()
+        btn_row.addWidget(self.close_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+    def _on_close(self):
+        self.closed.emit()
+        self.close()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._fade_anim = _fade_in(self)
+
+    def keyPressEvent(self, event):
+        """Allow closing with Enter or Escape"""
+        if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Escape):
+            self._on_close()
+        super().keyPressEvent(event)
+
+
+# ─────────────────────────────────────────────
 # UpdateProgressDialog  (다운로드 진행)
 # ─────────────────────────────────────────────
 

@@ -69,6 +69,7 @@ class AppController:
         self._latest_version: str = ""
         self._release_notes: str = ""
         self._main_launched: bool = False
+        self._pending_update_info: Optional[Dict[str, Any]] = None  # 업데이트 내역 저장용
 
     # ── Entry point ──
 
@@ -179,12 +180,18 @@ class AppController:
         self.initializer.statusChanged.connect(self.loading_window.statusLabel.setText)
         self.initializer.checkItemChanged.connect(self.loading_window.updateCheckItem)
         self.initializer.ocrReaderReady.connect(self._on_ocr_ready)
+        self.initializer.updateInfoReady.connect(self._on_update_info_ready)
         self.initializer.finished.connect(self._on_loading_finished)
         self.thread.started.connect(self.initializer.run)
         self.thread.start()
 
     def _on_ocr_ready(self, ocr_reader: Optional[object]) -> None:
         self.ocr_reader = ocr_reader
+
+    def _on_update_info_ready(self, update_info: Dict[str, Any]) -> None:
+        """Store update info for showing popup after main app launches."""
+        self._pending_update_info = update_info
+        logger.debug(f"Update info received: {update_info}")
 
     def _on_loading_finished(self) -> None:
         try:
@@ -226,6 +233,10 @@ class AppController:
             # Close loading window AFTER main window is shown
             if self.loading_window:
                 self.loading_window.close()
+
+            # 업데이트 내역 팝업 표시 (새 버전일 때만)
+            self._show_update_notes_if_needed()
+
         except Exception as e:
             logger.error(f"Failed to launch main app: {e}", exc_info=True)
             if self.loading_window:
@@ -234,6 +245,30 @@ class AppController:
                 None, "시작 오류",
                 f"메인 앱을 시작할 수 없습니다:\n{type(e).__name__}: {e}",
             )
+
+    def _show_update_notes_if_needed(self) -> None:
+        """업데이트 내역 팝업 표시 (새 버전이거나 릴리즈 노트가 있을 때)"""
+        if not self._pending_update_info:
+            return
+
+        has_notes = self._pending_update_info.get("has_update_notes", False)
+        is_new_version = self._pending_update_info.get("is_new_version", False)
+        version = self._pending_update_info.get("version", "")
+        release_notes = self._pending_update_info.get("release_notes", "")
+
+        # 새 버전이고 릴리즈 노트가 있을 때만 팝업 표시
+        if is_new_version and has_notes and release_notes:
+            try:
+                from ui.windows.update_dialog import UpdateNotesDialog
+
+                self.update_notes_dialog = UpdateNotesDialog(
+                    version=version,
+                    release_notes=release_notes,
+                )
+                self.update_notes_dialog.show()
+                logger.info(f"Showing update notes for v{version}")
+            except Exception as e:
+                logger.warning(f"Failed to show update notes dialog: {e}")
 
     # ── Pending update persistence ──
 

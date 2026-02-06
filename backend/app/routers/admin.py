@@ -61,6 +61,7 @@ class UserResponse(BaseModel):
     is_online: bool = False
     last_heartbeat: Optional[datetime] = None
     current_task: Optional[str] = None
+    app_version: Optional[str] = None  # 사용자가 사용 중인 앱 버전
 
     class Config:
         from_attributes = True

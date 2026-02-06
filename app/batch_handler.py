@@ -151,22 +151,22 @@ class BatchHandler:
                             QTimer.singleShot(0, show_sub_dialog)
                         else:
                             # 유료 사용자: 일반 초과 알림
-                            self.app.add_log("[작업] 잔여 작업 횟수가 없습니다.")
+                            self.app.add_log("[작업] 잔여 무료 횟수가 없습니다.")
                             show_warning(
                                 self.app,
-                                "작업 횟수 초과",
-                                "잔여 작업 횟수가 없습니다.\n\n"
-                                "관리자에게 문의하여 작업 횟수를 추가해 주세요.\n\n"
+                                "무료 횟수 초과",
+                                "잔여 무료 횟수가 없습니다.\n\n"
+                                "관리자에게 문의하여 무료 횟수를 추가해 주세요.\n\n"
                                 "문의 메시지:\n"
-                                "• 작업 횟수 추가 요청\n"
+                                "• 무료 횟수 추가 요청\n"
                                 "• 유료 플랜 문의\n"
                                 "• 기타 문의사항",
                             )
                         return
                     if remaining != -1:
-                        self.app.add_log(f"[작업] 잔여 작업 횟수: {remaining}회")
+                        self.app.add_log(f"[작업] 잔여 무료 횟수: {remaining}회")
                     else:
-                        self.app.add_log("[작업] 작업 횟수: 무제한")
+                        self.app.add_log("[작업] 무료 횟수: 무제한")
         except Exception as e:
             logger.warning(f"Work count check failed (continuing): {e}")
             # 체크 실패 시 계속 진행 (네트워크 오류 등)

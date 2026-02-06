@@ -38,8 +38,34 @@ from app.schemas.registration import (
 )
 
 # 체험판 설정
-FREE_TRIAL_WORK_COUNT = 5  # 체험판 작업 횟수 (5회 무료체험)
+# 2026년 2월 8일 한국시간 이전 가입자: 5회, 이후 가입자: 2회
+EARLY_BIRD_CUTOFF_KST = datetime(2026, 2, 8, 23, 59, 59)  # 한국시간 2/8 23:59:59
+EARLY_BIRD_WORK_COUNT = 5  # 얼리버드 체험판 작업 횟수
+DEFAULT_TRIAL_WORK_COUNT = 2  # 일반 체험판 작업 횟수
 DEFAULT_TRIAL_DAYS = 365  # 체험판 유효 기간 (1년)
+
+
+def get_free_trial_work_count() -> int:
+    """
+    현재 시점 기준 무료 체험판 작업 횟수 반환.
+    한국시간 2026년 2월 8일 이전 가입: 5회
+    그 이후 가입: 2회
+    """
+    from zoneinfo import ZoneInfo
+
+    kst = ZoneInfo("Asia/Seoul")
+    now_kst = datetime.now(kst)
+    cutoff_kst = EARLY_BIRD_CUTOFF_KST.replace(tzinfo=kst)
+
+    if now_kst <= cutoff_kst:
+        return EARLY_BIRD_WORK_COUNT
+    return DEFAULT_TRIAL_WORK_COUNT
+
+
+# ⚠️ 주의: 하위 호환성 변수 - 모듈 로드 시점에 한 번만 계산됨
+# 실제 가입 처리 시에는 get_free_trial_work_count() 함수를 직접 호출해야 함
+# (submit_registration_request 함수 내에서 호출됨)
+FREE_TRIAL_WORK_COUNT = get_free_trial_work_count()
 ADMIN_LIST_RATE_LIMIT = "100/hour"
 ADMIN_ACTION_RATE_LIMIT = "50/hour"
 
@@ -128,12 +154,15 @@ async def submit_registration_request(
         # 자동 승인: 직접 User 생성 (체험판)
         subscription_expires_at = datetime.utcnow() + timedelta(days=DEFAULT_TRIAL_DAYS)
 
+        # 가입 시점 기준 무료 체험 횟수 결정
+        trial_work_count = get_free_trial_work_count()
+
         new_user = User(
             username=username_clean,
             password_hash=password_hash,
             subscription_expires_at=subscription_expires_at,
             is_active=True,
-            work_count=FREE_TRIAL_WORK_COUNT,  # 체험판 5회
+            work_count=trial_work_count,  # 날짜 기반 체험판 횟수
             work_used=0,
             user_type=UserType.TRIAL,
             email=data.email,
@@ -173,16 +202,16 @@ async def submit_registration_request(
         db.refresh(new_user)
 
         logger.info(
-            f"[Register Success] User auto-registered: id={new_user.id}, username={new_user.username}, work_count={FREE_TRIAL_WORK_COUNT}"
+            f"[Register Success] User auto-registered: id={new_user.id}, username={new_user.username}, work_count={trial_work_count}"
         )
 
         return RegistrationResponse(
             success=True,
-            message=f"회원가입이 완료되었습니다! 체험판 {FREE_TRIAL_WORK_COUNT}회를 제공합니다. 바로 로그인하세요.",
+            message=f"회원가입이 완료되었습니다! 체험판 {trial_work_count}회를 제공합니다. 바로 로그인하세요.",
             data={
                 "user_id": new_user.id,
                 "username": new_user.username,
-                "work_count": FREE_TRIAL_WORK_COUNT,
+                "work_count": trial_work_count,
                 "is_trial": True,
                 "token": token,  # JWT 토큰 추가
             },
