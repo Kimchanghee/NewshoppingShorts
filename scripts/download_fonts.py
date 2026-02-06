@@ -1,85 +1,111 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+폰트 다운로드 스크립트
+무료 한글 폰트를 fonts 폴더에 다운로드합니다.
+"""
+import logging
 import os
 import sys
+import zipfile
+from io import BytesIO
+
 import requests
 
-# Target directory
-BASE_DIR = os.getcwd()
-FONT_DIR = os.path.join(BASE_DIR, "resource", "fonts")
-os.makedirs(FONT_DIR, exist_ok=True)
+logger = logging.getLogger(__name__)
 
-# Required Fonts (from constants.py)
-REQUIRED_FONTS = [
-    "SeoulHangangB.ttf",
-    "SeoulHangangEB.ttf",
-    "SeoulHangangM.ttf",
-    "SeoulHangangL.ttf",
-    "Pretendard-ExtraBold.ttf",
-    "Pretendard-Bold.ttf",
-    "Pretendard-SemiBold.ttf",
-    "Paperlogy-9Black.ttf",
-    "Paperlogy-8ExtraBold.ttf",
-    "Paperlogy-7Bold.ttf",
-    "GmarketSansTTFBold.ttf",
-    "GmarketSansTTFMedium.ttf",
-    "GmarketSansTTFLight.ttf",
-    "UnPeople.ttf",
-]
+# Windows 콘솔 UTF-8 설정
+if sys.platform == 'win32':
+    import io
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
 
-# GitHub URLs for fonts (using reliable sources)
-# SeoulHangang: https://github.com/seoul-metro/fonts/blob/master/SeoulHangang/SeoulHangangB.ttf?raw=true
-# Pretendard: https://github.com/orioncactus/pretendard/blob/main/packages/pretendard/dist/public/static/alternative/Pretendard-Bold.ttf?raw=true
-# GmarketSans: https://github.com/Joungkyun/font-gmarketsans/blob/master/ttf/GmarketSansTTFBold.ttf?raw=true
-# UnPeople: https://github.com/fonts-kr/Un-fonts/blob/master/UnPeople.ttf?raw=true (example)
-# Paperlogy: Usually in separate repo
+FONTS_DIR = os.path.join(os.path.dirname(__file__), "fonts")
 
-# Updated URLs with high availability sources
-FONT_URLS = {
-    # SeoulHangang - Direct GitHub Raw (Verified)
-    "SeoulHangangB.ttf": "https://github.com/seoul-metro/fonts/raw/master/SeoulHangang/SeoulHangangB.ttf",
-    "SeoulHangangEB.ttf": "https://github.com/seoul-metro/fonts/raw/master/SeoulHangang/SeoulHangangEB.ttf",
-    "SeoulHangangM.ttf": "https://github.com/seoul-metro/fonts/raw/master/SeoulHangang/SeoulHangangM.ttf",
-    "SeoulHangangL.ttf": "https://github.com/seoul-metro/fonts/raw/master/SeoulHangang/SeoulHangangL.ttf",
-    # GmarketSans - Alternative CDN or different structure
-    # Trying raw.githubusercontent with correct case (if fails, we skip gracefully)
-    "GmarketSansTTFBold.ttf": "https://raw.githubusercontent.com/Joungkyun/font-gmarketsans/master/ttf/GmarketSansTTFBold.ttf",
-    "GmarketSansTTFMedium.ttf": "https://raw.githubusercontent.com/Joungkyun/font-gmarketsans/master/ttf/GmarketSansTTFMedium.ttf",
-    "GmarketSansTTFLight.ttf": "https://raw.githubusercontent.com/Joungkyun/font-gmarketsans/master/ttf/GmarketSansTTFLight.ttf",
-    # Pretendard
-    "Pretendard-ExtraBold.ttf": "https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/public/static/alternative/Pretendard-ExtraBold.ttf",
-    "Pretendard-Bold.ttf": "https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/public/static/alternative/Pretendard-Bold.ttf",
-    "Pretendard-SemiBold.ttf": "https://github.com/orioncactus/pretendard/raw/main/packages/pretendard/dist/public/static/alternative/Pretendard-SemiBold.ttf",
-    # UnFonts (Backup source)
-    "UnPeople.ttf": "https://github.com/krosmaster/UnFonts/raw/master/UnPeople.ttf",
+# 무료 한글 폰트 다운로드 URL
+FONT_SOURCES = {
+    # Pretendard (GitHub에서 직접 다운로드)
+    "Pretendard": {
+        "url": "https://github.com/orioncactus/pretendard/releases/download/v1.3.9/Pretendard-1.3.9.zip",
+        "files": ["Pretendard-ExtraBold.ttf", "Pretendard-Bold.ttf", "Pretendard-SemiBold.ttf"],
+        "zip_path": "public/static/"
+    },
 }
 
+def download_and_extract(name, info):
+    """폰트 다운로드 및 압축 해제"""
+    logger.info(f"[{name}] downloading...")
+    try:
+        response = requests.get(info["url"], timeout=120)
+        response.raise_for_status()
 
-# Add default fallbacks for missing URLs if possible, or just skip
-def download_fonts():
-    print(f"Checking fonts in {FONT_DIR}...")
-    for font_name in REQUIRED_FONTS:
-        path = os.path.join(FONT_DIR, font_name)
-        if os.path.exists(path):
-            print(f"Skipping {font_name} (exists)")
-            continue
+        with zipfile.ZipFile(BytesIO(response.content)) as zf:
+            for file in info["files"]:
+                # ZIP 내부 경로
+                zip_path = info.get("zip_path", "") + file
 
-        url = FONT_URLS.get(font_name)
-        if not url:
-            print(f"No URL for {font_name}, skipping")
-            continue
+                # 파일 찾기 (경로가 다를 수 있음)
+                for zip_name in zf.namelist():
+                    if zip_name.endswith(file):
+                        zip_path = zip_name
+                        break
 
-        print(f"Downloading {font_name}...")
+                try:
+                    with zf.open(zip_path) as src:
+                        dest_path = os.path.join(FONTS_DIR, file)
+                        with open(dest_path, 'wb') as dst:
+                            dst.write(src.read())
+                        logger.info(f"  OK: {file}")
+                except KeyError:
+                    logger.warning(f"  FAIL: {file} - not found")
+
+    except (requests.RequestException, zipfile.BadZipFile, OSError) as e:
+        logger.error(f"  ERROR: {e}")
+
+def main():
+    os.makedirs(FONTS_DIR, exist_ok=True)
+
+    logger.info("=" * 50)
+    logger.info("Font Download Script")
+    logger.info("=" * 50)
+
+    # Pretendard (GitHub)
+    download_and_extract("Pretendard", FONT_SOURCES["Pretendard"])
+
+    # Noto Sans Korean (Google Fonts - reliable)
+    logger.info("\n[NotoSansKR] downloading...")
+    noto_base = "https://fonts.gstatic.com/s/notosanskr/v36/"
+    noto_files = [
+        ("notosanskr-bold-webfont.woff2", "NotoSansKR-Bold.woff2"),
+        ("notosanskr-medium-webfont.woff2", "NotoSansKR-Medium.woff2"),
+    ]
+
+    # Use Google Fonts static files
+    noto_urls = [
+        ("https://raw.githubusercontent.com/nicennnnnnnlee/download-fonts/master/fonts/NotoSansKR-Bold.ttf", "NotoSansKR-Bold.ttf"),
+        ("https://raw.githubusercontent.com/nicennnnnnnlee/download-fonts/master/fonts/NotoSansKR-Medium.ttf", "NotoSansKR-Medium.ttf"),
+    ]
+    for url, filename in noto_urls:
         try:
-            r = requests.get(url, stream=True)
-            if r.status_code == 200:
-                with open(path, "wb") as f:
-                    for chunk in r.iter_content(chunk_size=8192):
-                        f.write(chunk)
-                print(f"Downloaded {font_name}")
-            else:
-                print(f"Failed to download {font_name}: {r.status_code}")
-        except Exception as e:
-            print(f"Error downloading {font_name}: {e}")
+            response = requests.get(url, timeout=60)
+            response.raise_for_status()
+            dest_path = os.path.join(FONTS_DIR, filename)
+            with open(dest_path, 'wb') as f:
+                f.write(response.content)
+            logger.info(f"  OK: {filename}")
+        except (requests.RequestException, OSError) as e:
+            logger.warning(f"  FAIL: {filename}: {e}")
 
+    logger.info("\n" + "=" * 50)
+    logger.info("Download complete!")
+    logger.info(f"Font location: {FONTS_DIR}")
+    logger.info("=" * 50)
+
+    # 결과 확인
+    fonts = [f for f in os.listdir(FONTS_DIR) if f.endswith(('.ttf', '.otf', '.woff2'))]
+    logger.info(f"Total {len(fonts)} font files:")
+    for f in fonts:
+        logger.info(f"  - {f}")
 
 if __name__ == "__main__":
-    download_fonts()
+    main()
