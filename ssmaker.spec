@@ -1,5 +1,6 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
 import sys
+import os
 from PyInstaller.utils.hooks import collect_submodules, collect_data_files
 
 block_cipher = None
@@ -24,8 +25,10 @@ datas = [
     ('resource', 'resource'),
     ('version.json', '.'),
     ('fonts', 'fonts'),
-    ('faster_whisper_models', 'faster_whisper_models'),
 ]
+# Only include whisper models if folder exists
+if os.path.exists('faster_whisper_models'):
+    datas.append(('faster_whisper_models', 'faster_whisper_models'))
 datas += collect_data_files('vertexai')
 datas += collect_data_files('google.cloud.aiplatform')
 datas += collect_data_files('certifi')
