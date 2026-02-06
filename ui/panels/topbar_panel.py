@@ -192,10 +192,14 @@ class TopBarPanel(QFrame):
                 remaining = info.get("remaining", 0)
                 total = info.get("total", 0)
 
-                self.gui.credits_label.setText(f"크레딧: {remaining}/{total}")
-
                 top_data = self.gui.login_data.get("data", {}).get("data", {})
                 user_type = top_data.get("user_type", "trial")
+
+                # 구독자는 "구독중", 그 외는 크레딧 표시
+                if user_type == "subscriber":
+                    self.gui.credits_label.setText("구독중")
+                else:
+                    self.gui.credits_label.setText(f"크레딧: {remaining}/{total}")
 
                 d = self.design
                 c = d.colors

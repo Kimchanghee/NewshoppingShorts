@@ -110,7 +110,11 @@ class SubscriptionManager:
                 total = status.get("work_count", 0)
                 credits_lbl = getattr(self.gui, "credits_label", None)
                 if credits_lbl is not None:
-                    credits_lbl.setText(f"크레딧: {remaining}/{total}")
+                    # 구독 중이면 "구독중" 표시, 아니면 크레딧 표시
+                    if expires_at:
+                        credits_lbl.setText("구독중")
+                    else:
+                        credits_lbl.setText(f"크레딧: {remaining}/{total}")
 
                 logger.debug(
                     f"[Subscription] Auto-refresh: expires_at={expires_at}, "
