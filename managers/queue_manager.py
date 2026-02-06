@@ -9,6 +9,7 @@ from typing import List
 from ui.components.custom_dialog import show_info, show_warning, show_error, show_question
 from utils.logging_config import get_logger
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
+from managers.settings_manager import get_settings_manager
 
 logger = get_logger(__name__)
 
@@ -92,6 +93,11 @@ class QueueManager:
             "skipped": "건너뜀",
         }
 
+        # Get auto-upload status dict from state
+        auto_upload_status = getattr(self.gui, 'url_auto_upload_status', {})
+        if not auto_upload_status and hasattr(self.gui, 'state'):
+            auto_upload_status = getattr(self.gui.state, 'url_auto_upload_status', {})
+
         for idx, url in enumerate(self.gui.url_queue, 1):
             status = self.gui.url_status.get(url, "waiting")
             order_label = "진행" if status == "processing" else "대기"
@@ -101,13 +107,24 @@ class QueueManager:
                 status_text = step_msg if step_msg else "진행 중"
             else:
                 status_text = status_labels.get(status, status)
+
+            # Auto-upload status column
+            auto_upload_text = auto_upload_status.get(url, "")
+            if not auto_upload_text:
+                # Determine based on settings
+                settings = get_settings_manager()
+                if settings.get_youtube_auto_upload() and settings.get_youtube_connected():
+                    auto_upload_text = "YouTube"
+                else:
+                    auto_upload_text = "비활성"
+
             remarks_text = ""
             if status == "completed":
                 remarks_text = self.gui.url_remarks.get(url, "")
             elif status in ("failed", "skipped"):
                 remarks_text = self.gui.url_status_message.get(url, "")
 
-            item = QTreeWidgetItem([order_text, url, status_text, remarks_text])
+            item = QTreeWidgetItem([order_text, url, status_text, auto_upload_text, remarks_text])
             tree.addTopLevelItem(item)
 
         processed_items = [
@@ -118,8 +135,20 @@ class QueueManager:
         for url, status in processed_items:
             order_text = "완료" if status == "completed" else "건너뜀" if status == "skipped" else "실패"
             status_text = status_labels.get(status, status)
+
+            # Auto-upload status for completed items
+            auto_upload_text = auto_upload_status.get(url, "")
+            if not auto_upload_text and status == "completed":
+                settings = get_settings_manager()
+                if settings.get_youtube_auto_upload() and settings.get_youtube_connected():
+                    auto_upload_text = "YouTube"
+                else:
+                    auto_upload_text = "비활성"
+            elif not auto_upload_text:
+                auto_upload_text = "-"
+
             remarks_text = self.gui.url_remarks.get(url, "") if status == "completed" else self.gui.url_status_message.get(url, "")
-            item = QTreeWidgetItem([order_text, url, status_text, remarks_text])
+            item = QTreeWidgetItem([order_text, url, status_text, auto_upload_text, remarks_text])
             tree.addTopLevelItem(item)
 
         self.update_queue_count()

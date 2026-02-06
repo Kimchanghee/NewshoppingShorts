@@ -29,6 +29,7 @@ from ui.panels import (
     WatermarkPanel,
     ModeSelectionPanel,
 )
+from ui.panels.upload_panel import UploadPanel
 from ui.panels.settings_tab import SettingsTab
 from ui.panels.topbar_panel import TopBarPanel
 from ui.components.status_bar import StatusBar
@@ -88,6 +89,7 @@ class UIInitializer:
             ("cta", "CTA 선택", "cta"),
             ("font", "폰트 선택", "font"),
             ("watermark", "워터마크", "watermark"),
+            ("upload", "자동 업로드", "upload"),
             ("queue", "대기/진행", "queue"),
             ("settings", "설정", "settings"),
         ]
@@ -148,6 +150,7 @@ class UIInitializer:
         cta_panel = CTAPanel(stack, gui, theme_manager=self.theme_manager)
         font_panel = FontPanel(stack, gui, theme_manager=self.theme_manager)
         watermark_panel = WatermarkPanel(stack, gui, theme_manager=self.theme_manager)
+        upload_panel = UploadPanel(stack, gui, theme_manager=self.theme_manager)
         queue_panel = QueuePanel(stack, gui, theme_manager=self.theme_manager)
         settings_tab = SettingsTab(stack, gui, theme_manager=self.theme_manager)
         subscription_panel = SubscriptionPanel(stack, gui)
@@ -159,6 +162,7 @@ class UIInitializer:
             ("cta", "CTA 선택", "영상 마지막 클릭 유도 멘트를 선택하세요.", cta_panel),
             ("font", "폰트 선택", "자막에 사용할 폰트를 선택하세요.", font_panel),
             ("watermark", "워터마크 설정", "영상에 표시할 워터마크를 설정하세요.", watermark_panel),
+            ("upload", "자동 업로드", "완성된 영상을 소셜 미디어에 자동 업로드합니다.", upload_panel),
             ("queue", "대기/진행", "작업 대기열 및 진행 상황을 관리합니다.", queue_panel),
             ("settings", "설정", "앱 설정 및 API 키를 관리합니다.", settings_tab),
             ("subscription", "구독 관리", "구독 상태 및 플랜을 관리합니다.", subscription_panel),
@@ -189,6 +193,7 @@ class UIInitializer:
             "cta_panel": cta_panel,
             "font_panel": font_panel,
             "watermark_panel": watermark_panel,
+            "upload_panel": upload_panel,
             "queue_panel": queue_panel,
             "settings_tab": settings_tab,
             "subscription_panel": subscription_panel,

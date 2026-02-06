@@ -106,6 +106,7 @@ class ModeCard(QFrame):
                 ds.typography.font_family_primary,
                 ds.typography.size_xs
             ))
+            feature_label.setStyleSheet(f"color: {get_color('text_secondary')};")
             feature_label.setWordWrap(True)
             feature_row.addWidget(feature_label, 1)
 
@@ -173,6 +174,7 @@ class ModeCard(QFrame):
 
     def _get_style(self, hover: bool = False) -> str:
         ds = self.ds
+        text_color = get_color('text_primary')
 
         if self.is_selected:
             bg = get_color('surface_variant')
@@ -192,6 +194,11 @@ class ModeCard(QFrame):
                 background-color: {bg};
                 border: {border_width}px solid {border};
                 border-radius: {ds.radius.lg}px;
+                color: {text_color};
+            }}
+            ModeCard QLabel {{
+                color: {text_color};
+                background: transparent;
             }}
         """
 
@@ -211,6 +218,16 @@ class ModeSelectionPanel(QWidget):
 
     def _setup_ui(self):
         ds = self.ds
+
+        # Panel styling
+        self.setStyleSheet(f"""
+            ModeSelectionPanel {{
+                background-color: {get_color('background')};
+            }}
+            ModeSelectionPanel QLabel {{
+                color: {get_color('text_primary')};
+            }}
+        """)
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(

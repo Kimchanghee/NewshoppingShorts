@@ -198,9 +198,19 @@ class YouTubeManager:
         """Check if YouTube channel is connected"""
         return self._channel is not None and self._channel.channel_id != ""
 
-    def get_channel_info(self) -> Optional[YouTubeChannel]:
-        """Get connected channel info"""
-        return self._channel
+    def get_channel_info(self) -> Dict[str, Any]:
+        """Get connected channel info as dictionary"""
+        if self._channel is None:
+            return {}
+        return {
+            "id": self._channel.channel_id,
+            "title": self._channel.channel_name,
+            "channel_name": self._channel.channel_name,
+            "thumbnail_url": self._channel.thumbnail_url,
+            "subscriber_count": self._channel.subscriber_count,
+            "video_count": self._channel.video_count,
+            "connected_at": self._channel.connected_at,
+        }
 
     def connect_channel(self, client_secrets_file: str = None) -> bool:
         """

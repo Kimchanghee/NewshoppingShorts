@@ -168,3 +168,22 @@ class AppState:
         self._resize_timer = None
         self._login_watch_stop = False
         self._current_processing_url = ""
+
+        # ============ Upload Settings ============
+        # YouTube
+        self.youtube_connected = False
+        self.youtube_channel_info: Optional[Dict[str, Any]] = None  # {name, thumbnail, subscriber_count}
+        self.youtube_auto_upload = False
+        self.youtube_upload_interval_minutes = 60  # 1-4 hours (60, 120, 180, 240)
+        self.youtube_max_daily_uploads = 6
+        self.youtube_daily_upload_count = 0
+        self.youtube_last_upload_reset: Optional[datetime] = None
+
+        # Other platforms (COMING SOON)
+        self.tiktok_connected = False
+        self.instagram_connected = False
+        self.threads_connected = False
+        self.x_connected = False
+
+        # URL-based auto-upload status tracking
+        self.url_auto_upload_status: Dict[str, str] = {}  # url -> "비활성" | "YouTube" | etc.
