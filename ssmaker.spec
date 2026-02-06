@@ -24,6 +24,7 @@ datas = [
     ('resource', 'resource'),
     ('version.json', '.'),
     ('fonts', 'fonts'),
+    ('faster_whisper_models', 'faster_whisper_models'),
 ]
 datas += collect_data_files('vertexai')
 datas += collect_data_files('google.cloud.aiplatform')
