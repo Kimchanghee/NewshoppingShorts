@@ -64,6 +64,9 @@ build/
 dist/
 # ssmaker.spec은 빌드 설정 파일이므로 포함
 
+# Whisper 모델 (빌드 시 자동 다운로드됨)
+faster_whisper_models/
+
 # TTS 출력 폴더
 tts_output/
 
