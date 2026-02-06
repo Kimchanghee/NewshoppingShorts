@@ -18,7 +18,7 @@ AdminDashboard는 다음과 같이 서버와 동기화됩니다:
 import sys
 import os
 from PyQt6.QtWidgets import QApplication
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QIcon
 from PyQt6.QtCore import QTimer
 from ui.components.admin_loading_splash import AdminLoadingSplash
 
@@ -64,6 +64,11 @@ def main():
     logging.info("Admin Dashboard starting...")
 
     app = QApplication(sys.argv)
+
+    # 앱 아이콘 설정
+    icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resource", "admin_icon.ico")
+    if os.path.exists(icon_path):
+        app.setWindowIcon(QIcon(icon_path))
 
     # 폰트 설정
     font = QFont(FONT_FAMILY, 10)
