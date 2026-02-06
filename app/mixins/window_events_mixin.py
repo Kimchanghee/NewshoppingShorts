@@ -51,7 +51,10 @@ class WindowEventsMixin:
 
     def resizeEvent(self, event):
         """Pause non-essential updates during resize."""
-        super().resizeEvent(event)
+        # Call parent's resizeEvent if it exists (mixin pattern)
+        parent_resize = getattr(super(), 'resizeEvent', None)
+        if parent_resize:
+            parent_resize(event)
         if not self._is_resizing:
             self._is_resizing = True
             self.subscription_manager.pause_countdown()
@@ -64,7 +67,10 @@ class WindowEventsMixin:
 
     def showEvent(self, event):
         """Show tutorial on first launch + check for previous session."""
-        super().showEvent(event)
+        # Call parent's showEvent if it exists (mixin pattern)
+        parent_show = getattr(super(), 'showEvent', None)
+        if parent_show:
+            parent_show(event)
         if not getattr(self, "_show_event_handled", False):
             self._show_event_handled = True
             if (

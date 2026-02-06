@@ -99,8 +99,8 @@ class DarkColorPalette:
 
     # Text - 고대비 텍스트 (가독성 향상)
     text_primary: str = "#FFFFFF"      # 순백
-    text_secondary: str = "#A0A0A0"    # 밝은 회색
-    text_muted: str = "#6B7280"        # 중간 회색
+    text_secondary: str = "#B8B8B8"    # 밝은 회색 (더 선명)
+    text_muted: str = "#9CA3AF"        # 중간 회색 (더 밝음)
     text_on_primary: str = "#FFFFFF"   # Primary 색상 위의 텍스트
 
     # Borders - 더 섬세한 경계선 (STITCH 디자인 적용)

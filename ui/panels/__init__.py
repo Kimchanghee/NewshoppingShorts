@@ -13,6 +13,7 @@ from .url_content_panel import URLContentPanel
 from .subscription_panel import SubscriptionPanel
 from .watermark_panel import WatermarkPanel
 from .mode_selection_panel import ModeSelectionPanel
+from .upload_panel import UploadPanel
 
 __all__ = [
     'HeaderPanel',
@@ -22,6 +23,7 @@ __all__ = [
     'FontPanel',
     'CTAPanel',
     'WatermarkPanel',
+    'UploadPanel',
     'QueuePanel',
     'ProgressPanel',
     'URLContentPanel',

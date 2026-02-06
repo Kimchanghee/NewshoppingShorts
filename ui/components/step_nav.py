@@ -20,6 +20,7 @@ STEP_ICONS = {
     "cta": "▶",         # Play/action
     "font": "A",        # Font
     "watermark": "◈",   # Watermark
+    "upload": "⬆",      # Upload arrow
     "queue": "≡",       # List/queue
     "settings": "⚙",   # Settings gear
 }

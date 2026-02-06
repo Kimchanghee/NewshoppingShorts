@@ -31,6 +31,17 @@ class SettingsManager:
         "watermark_position": "bottom_right",  # 위치: top_left, top_right, bottom_left, bottom_right
         "watermark_font_id": "pretendard",  # 워터마크 폰트 ID
         "watermark_font_size": "medium",  # 워터마크 크기: small, medium, large
+        # 소셜 미디어 연결 설정
+        "youtube_connected": False,
+        "youtube_channel_id": "",
+        "youtube_channel_name": "",
+        "youtube_auto_upload": False,
+        "youtube_upload_interval": 60,  # 분 단위 (60, 120, 180, 240)
+        # COMING SOON 플랫폼
+        "tiktok_connected": False,
+        "instagram_connected": False,
+        "threads_connected": False,
+        "x_connected": False,
     }
 
     def __init__(self, settings_file: str = "ui_preferences.json"):
@@ -356,6 +367,68 @@ class SettingsManager:
             "position": self.get_watermark_position(),
             "font_id": self.get_watermark_font_id(),
             "font_size": self.get_watermark_font_size(),
+        }
+
+    # ============ Social Media Connection Settings ============
+
+    def get_youtube_connected(self) -> bool:
+        """Get YouTube connection status"""
+        return self._settings.get("youtube_connected", False)
+
+    def set_youtube_connected(self, connected: bool, channel_id: str = "", channel_name: str = "") -> bool:
+        """Save YouTube connection status"""
+        with self._lock:
+            self._settings["youtube_connected"] = bool(connected)
+            self._settings["youtube_channel_id"] = channel_id
+            self._settings["youtube_channel_name"] = channel_name
+        return self._save_settings()
+
+    def get_youtube_channel_info(self) -> Dict[str, str]:
+        """Get YouTube channel info"""
+        return {
+            "channel_id": self._settings.get("youtube_channel_id", ""),
+            "channel_name": self._settings.get("youtube_channel_name", ""),
+        }
+
+    def get_youtube_auto_upload(self) -> bool:
+        """Get YouTube auto-upload enabled status"""
+        return self._settings.get("youtube_auto_upload", False)
+
+    def set_youtube_auto_upload(self, enabled: bool) -> bool:
+        """Save YouTube auto-upload setting"""
+        with self._lock:
+            self._settings["youtube_auto_upload"] = bool(enabled)
+        return self._save_settings()
+
+    def get_youtube_upload_interval(self) -> int:
+        """Get YouTube upload interval in minutes"""
+        return self._settings.get("youtube_upload_interval", 60)
+
+    def set_youtube_upload_interval(self, interval_minutes: int) -> bool:
+        """Save YouTube upload interval (60, 120, 180, 240 minutes)"""
+        valid_intervals = (60, 120, 180, 240)
+        if interval_minutes not in valid_intervals:
+            interval_minutes = 60
+        with self._lock:
+            self._settings["youtube_upload_interval"] = interval_minutes
+        return self._save_settings()
+
+    def get_social_connection_status(self, platform: str) -> bool:
+        """Get connection status for a social platform"""
+        key = f"{platform}_connected"
+        return self._settings.get(key, False)
+
+    def get_upload_settings(self) -> Dict[str, Any]:
+        """Get all upload-related settings"""
+        return {
+            "youtube_connected": self.get_youtube_connected(),
+            "youtube_channel_info": self.get_youtube_channel_info(),
+            "youtube_auto_upload": self.get_youtube_auto_upload(),
+            "youtube_upload_interval": self.get_youtube_upload_interval(),
+            "tiktok_connected": self._settings.get("tiktok_connected", False),
+            "instagram_connected": self._settings.get("instagram_connected", False),
+            "threads_connected": self._settings.get("threads_connected", False),
+            "x_connected": self._settings.get("x_connected", False),
         }
 
     # ============ Bulk Operations ============

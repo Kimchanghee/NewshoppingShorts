@@ -47,6 +47,7 @@ from managers.progress_manager import ProgressManager
 from managers.session_manager import SessionManager
 from managers.subscription_manager import SubscriptionManager
 from managers.generated_video_manager import GeneratedVideoManager
+from managers.youtube_manager import get_youtube_manager
 from ui.theme_manager import get_theme_manager
 from ui.design_system_v2 import get_design_system
 from pathlib import Path
@@ -108,6 +109,7 @@ class VideoAnalyzerGUI(
         self.batch_handler = BatchHandler(self)
         self._video_helpers = VideoHelpers(self)
         self._generated_video_manager = GeneratedVideoManager(self)
+        self.youtube_manager = get_youtube_manager(gui=self)
 
         # Load API keys and initialize provider
         self.api_handler.load_saved_api_keys()
