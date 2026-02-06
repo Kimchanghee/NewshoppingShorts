@@ -28,7 +28,7 @@ from PyQt6.QtWidgets import (
     QAbstractItemView,
     QFrame,
 )
-from PyQt6.QtGui import QFont, QColor, QBrush
+from PyQt6.QtGui import QFont, QColor, QBrush, QIcon
 from datetime import datetime, timedelta, timezone
 import requests
 
@@ -177,6 +177,11 @@ class AdminDashboard(QMainWindow):
     def __init__(self, api_base_url: str, admin_api_key: str = None):
         super().__init__()
         self.api_base_url = api_base_url.rstrip("/")
+
+        # Set admin icon
+        icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resource", "admin_icon.ico")
+        if os.path.exists(icon_path):
+            self.setWindowIcon(QIcon(icon_path))
 
         # Environment variable fallback chain: SSMAKER_ADMIN_KEY (preferred) -> ADMIN_API_KEY -> None
         self.admin_api_key = (
