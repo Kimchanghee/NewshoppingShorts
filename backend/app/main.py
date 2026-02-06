@@ -1,8 +1,10 @@
 import logging
 import sys
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Header, HTTPException
 from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel
+from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
@@ -217,12 +219,21 @@ APP_VERSION_INFO = {
 }
 
 
+class VersionUpdateRequest(BaseModel):
+    """Request model for version update"""
+    version: str
+    download_url: str
+    release_notes: Optional[str] = None
+    is_mandatory: bool = False
+    min_required_version: Optional[str] = None
+
+
 @app.get("/app/version")
 async def get_app_version():
     """
     Get latest app version info for auto-update.
     자동 업데이트를 위한 최신 앱 버전 정보 반환.
-    
+
     Returns:
         {
             "version": "1.0.1",
@@ -233,6 +244,55 @@ async def get_app_version():
         }
     """
     return APP_VERSION_INFO
+
+
+@app.post("/app/version/update")
+async def update_app_version(
+    request: VersionUpdateRequest,
+    authorization: str = Header(None)
+):
+    """
+    Update app version info (CI/CD endpoint).
+    GitHub Actions에서 빌드 후 버전 정보를 업데이트하는 엔드포인트.
+
+    Requires Bearer token authentication.
+    """
+    global APP_VERSION_INFO
+
+    # Validate authorization
+    if not authorization:
+        raise HTTPException(status_code=401, detail="Authorization header required")
+
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Invalid authorization format")
+
+    token = authorization[7:]  # Remove "Bearer " prefix
+
+    # Check against ADMIN_API_KEY from settings
+    expected_key = settings.ADMIN_API_KEY
+    if not expected_key or token != expected_key:
+        logger.warning("Invalid API key attempt for version update")
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    # Update version info
+    APP_VERSION_INFO["version"] = request.version
+    APP_VERSION_INFO["download_url"] = request.download_url
+
+    if request.release_notes:
+        APP_VERSION_INFO["release_notes"] = request.release_notes
+
+    if request.min_required_version:
+        APP_VERSION_INFO["min_required_version"] = request.min_required_version
+
+    APP_VERSION_INFO["is_mandatory"] = request.is_mandatory
+
+    logger.info(f"App version updated to {request.version} by CI/CD")
+
+    return {
+        "success": True,
+        "message": f"Version updated to {request.version}",
+        "version_info": APP_VERSION_INFO
+    }
 
 
 @app.get("/app/version/check")
