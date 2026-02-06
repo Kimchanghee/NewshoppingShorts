@@ -34,7 +34,7 @@ edge-tts>=6.1.0
 yt-dlp>=2023.11.0
 
 # Progress
-	qdm>=4.66.0
+tqdm>=4.66.0
 
 # File type
 python-magic>=0.4.27; sys_platform != 'win32'
