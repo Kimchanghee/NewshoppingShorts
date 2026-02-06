@@ -11,6 +11,13 @@ import threading
 from datetime import datetime
 from typing import Optional
 
+# .env 파일 로드 (main.py 직접 실행 시에도 환경변수 로드)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 from PyQt6.QtCore import QTimer, pyqtSignal
 from PyQt6.QtGui import QIcon, QFont
 from PyQt6.QtWidgets import (
@@ -145,6 +152,18 @@ class VideoAnalyzerGUI(QMainWindow):
         self.last_chinese_script_text = self.state.last_chinese_script_text
         self.last_chinese_script_digest = self.state.last_chinese_script_digest
         self.ocr_reader = preloaded_ocr or self.state.ocr_reader
+
+        # OCR reader가 없으면 직접 초기화 (main.py 직접 실행 시 AppController 우회)
+        if self.ocr_reader is None:
+            try:
+                from utils.ocr_backend import create_ocr_reader
+                self.ocr_reader = create_ocr_reader()
+                if self.ocr_reader:
+                    logger.info(f"[OCR] 직접 초기화 성공: {self.ocr_reader.engine_name}")
+                else:
+                    logger.warning("[OCR] 초기화 실패: create_ocr_reader()가 None 반환")
+            except Exception as e:
+                logger.warning(f"[OCR] 초기화 실패: {e}")
 
         # --- Gemini client (direct reference for processor/analysis compat) ---
         self.genai_client = None

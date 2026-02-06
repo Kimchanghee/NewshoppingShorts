@@ -141,8 +141,9 @@ class SubtitleProcessor:
                 )
                 logger.debug(f"[BLUR MAIN] raw_positions: {len(raw_positions)}")
             else:
+                ocr_status = getattr(self.gui, 'ocr_reader', None)
                 logger.info(
-                    "[BLUR MAIN] Starting new OCR-based Chinese subtitle detection..."
+                    f"[BLUR MAIN] Starting new OCR-based Chinese subtitle detection... (ocr_reader: {type(ocr_status).__name__ if ocr_status else 'None'})"
                 )
                 # Get cached detector to avoid duplicate instantiation
                 # 캐시된 detector를 사용하여 중복 생성 방지 (40% 성능 오버헤드 제거)

@@ -187,28 +187,53 @@ class AppController:
         self.ocr_reader = ocr_reader
 
     def _on_loading_finished(self) -> None:
-        if self.thread:
-            self.thread.quit()
-            self.thread.wait()
-        if self.loading_window:
-            self.loading_window.close()
+        try:
+            if self.thread:
+                self.thread.quit()
+                self.thread.wait()
 
-        # Check for pending update notification (saved before restart)
-        pending = self._consume_pending_update()
-        if pending:
-            self._show_update_complete(pending)
-        else:
-            self.launch_main_app()
+            # Check for pending update notification (saved before restart)
+            pending = self._consume_pending_update()
+            if pending:
+                if self.loading_window:
+                    self.loading_window.close()
+                self._show_update_complete(pending)
+            else:
+                self.launch_main_app()
+        except Exception as e:
+            logger.error(f"Loading finished handler failed: {e}", exc_info=True)
+            if self.loading_window:
+                self.loading_window.close()
+            QMessageBox.critical(
+                None, "시작 오류",
+                f"앱 초기화 중 오류가 발생했습니다:\n{e}",
+            )
 
     def launch_main_app(self) -> None:
         if self._main_launched:
             return
         self._main_launched = True
-        from main import VideoAnalyzerGUI
-        self.main_gui = VideoAnalyzerGUI(
-            login_data=self.login_data, preloaded_ocr=self.ocr_reader,
-        )
-        self.main_gui.show()
+        try:
+            logger.info("Launching main application...")
+            from main import VideoAnalyzerGUI
+            logger.info("VideoAnalyzerGUI imported successfully")
+            self.main_gui = VideoAnalyzerGUI(
+                login_data=self.login_data, preloaded_ocr=self.ocr_reader,
+            )
+            logger.info("VideoAnalyzerGUI created successfully")
+            self.main_gui.show()
+            logger.info("Main window shown")
+            # Close loading window AFTER main window is shown
+            if self.loading_window:
+                self.loading_window.close()
+        except Exception as e:
+            logger.error(f"Failed to launch main app: {e}", exc_info=True)
+            if self.loading_window:
+                self.loading_window.close()
+            QMessageBox.critical(
+                None, "시작 오류",
+                f"메인 앱을 시작할 수 없습니다:\n{type(e).__name__}: {e}",
+            )
 
     # ── Pending update persistence ──
 
