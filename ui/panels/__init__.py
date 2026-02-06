@@ -12,9 +12,11 @@ from .progress_panel import ProgressPanel
 from .url_content_panel import URLContentPanel
 from .subscription_panel import SubscriptionPanel
 from .watermark_panel import WatermarkPanel
+from .mode_selection_panel import ModeSelectionPanel
 
 __all__ = [
     'HeaderPanel',
+    'ModeSelectionPanel',
     'URLInputPanel',
     'VoicePanel',
     'FontPanel',

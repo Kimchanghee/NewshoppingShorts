@@ -14,6 +14,7 @@ from ui.design_system_v2 import get_design_system, get_color
 
 # Icon mapping: step_id -> Unicode symbol (clean, minimal style)
 STEP_ICONS = {
+    "mode": "◐",        # Mode selection
     "source": "◎",      # Target/source
     "voice": "♪",       # Music/voice
     "cta": "▶",         # Play/action
