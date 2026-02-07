@@ -76,20 +76,23 @@ class TestSubscriptionEdgeCases(unittest.TestCase):
     def test_state_manager_reset_after_multiple_inconsistencies(self):
         """여러 불일치 후 상태 재설정 테스트"""
         state1 = {"success": True, "is_trial": True, "can_work": True}
+        state2 = {"success": True, "is_trial": False, "can_work": True}
 
-        # 여러 불일치 발생
+        # Baseline
+        self.state_manager.update_state(state1)
+
+        # 여러 불일치 발생: 연속으로 불일치가 누적되면 새 상태를 수용
         for i in range(4):  # max_inconsistent_before_reset = 3
-            state2 = {"success": True, "is_trial": False, "can_work": True}
-            self.state_manager.update_state(state1)
             result = self.state_manager.update_state(state2)
 
             if i < 3:
                 # 처음 3번은 이전 상태 유지
                 self.assertEqual(result, state1)
+                self.assertEqual(self.state_manager.get_last_state(), state1)
             else:
-                # 4번째는 재설정
+                # 4번째는 새 상태 수용
                 self.assertEqual(result, state2)
-                self.assertIsNone(self.state_manager.get_last_state())
+                self.assertEqual(self.state_manager.get_last_state(), state2)
 
     def test_retry_decorator_success(self):
         """재시도 데코레이터 성공 테스트"""

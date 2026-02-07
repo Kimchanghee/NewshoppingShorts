@@ -1098,8 +1098,9 @@ class SubscriptionStateManager:
             if not new_state.get("success", False):
                 return new_state
 
-            # Same state: no-op. Keep inconsistency counter (useful for flapping).
+            # Same state: stable again, clear any in-progress inconsistency counter.
             if new_state == self._last_known_state:
+                self._inconsistent_count = 0
                 return new_state
 
             # Detect inconsistent state flips (trial/subscriber etc).
@@ -1110,8 +1111,12 @@ class SubscriptionStateManager:
                 if self._inconsistent_count <= self._max_inconsistent_before_reset:
                     return self._last_known_state
 
-                # After repeated inconsistencies, reset cache and allow new state through.
-                self._reset_state()
+                # After repeated inconsistencies, accept the new state (switch) and
+                # reset the counter. This avoids leaving the cache empty and makes
+                # behavior deterministic under concurrency.
+                self._inconsistent_count = 0
+                self._log_state_changes(self._last_known_state, new_state)
+                self._last_known_state = new_state
                 return new_state
 
             # Consistent update: accept and reset inconsistency counter.
