@@ -39,7 +39,12 @@ datas = [
 binaries = []
 
 for package in packages_to_collect:
-    tmp_ret = collect_all(package)
+    try:
+        tmp_ret = collect_all(package)
+    except Exception as e:
+        # Keep CI/builds resilient when optional packages are not installed.
+        print(f"[spec] WARNING: collect_all('{package}') failed: {e!r}")
+        continue
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
     hidden_imports += tmp_ret[2]
