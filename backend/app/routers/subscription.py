@@ -11,7 +11,7 @@ Security:
 """
 import logging
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Query, Header
 from slowapi import Limiter
@@ -323,12 +323,12 @@ async def approve_subscription(
         # Update user subscription
         user.work_count = data.work_count
         user.work_used = 0  # Reset work used
-        user.subscription_expires_at = datetime.utcnow() + timedelta(days=data.subscription_days)
+        user.subscription_expires_at = datetime.now(timezone.utc) + timedelta(days=data.subscription_days)
         user.user_type = UserType.SUBSCRIBER
 
         # Update subscription request
         sub_request.status = SubscriptionRequestStatus.APPROVED
-        sub_request.reviewed_at = datetime.utcnow()
+        sub_request.reviewed_at = datetime.now(timezone.utc)
         sub_request.admin_response = data.admin_response
 
         db.commit()
@@ -390,7 +390,7 @@ async def reject_subscription(
 
         # Update subscription request
         sub_request.status = SubscriptionRequestStatus.REJECTED
-        sub_request.reviewed_at = datetime.utcnow()
+        sub_request.reviewed_at = datetime.now(timezone.utc)
         sub_request.admin_response = data.admin_response
 
         db.commit()

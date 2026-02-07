@@ -58,7 +58,16 @@ if os.path.exists(_updater_exe):
     datas.append((_updater_exe, "."))
 
 if os.path.exists('faster_whisper_models'):
-    datas.append(('faster_whisper_models', 'faster_whisper_models'))
+    # Include only materialized flat files to avoid shipping HF cache symlinks.
+    model_root = os.path.join(project_root, "faster_whisper_models")
+    for size in os.listdir(model_root):
+        size_dir = os.path.join(model_root, size)
+        if not os.path.isdir(size_dir):
+            continue
+        for fname in ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt"):
+            src = os.path.join(size_dir, fname)
+            if os.path.exists(src):
+                datas.append((src, os.path.join("faster_whisper_models", size)))
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Analysis

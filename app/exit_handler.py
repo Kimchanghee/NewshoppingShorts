@@ -49,8 +49,11 @@ class ExitHandler:
             # Attempt logout
             data = {'userId': user_id, "key": "ssmaker"}
             try:
-                rest.logOut(**data)
-                logger.info("Logout successful")
+                logout_status = rest.logOut(**data)
+                if str(logout_status).lower() == "success":
+                    logger.info("Logout successful")
+                else:
+                    logger.warning(f"Logout returned non-success status: {logout_status}")
             except Exception as e:
                 logger.warning(f"Logout failed (ignored): {e}")
 

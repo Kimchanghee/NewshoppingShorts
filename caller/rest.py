@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 # Import logging and security utilities
 from utils.logging_config import get_logger
 from utils.secrets_manager import get_secrets_manager
-from utils.validators import validate_user_id, validate_ip_address
+from utils.validators import validate_user_id, validate_user_identifier, validate_ip_address
 
 logger = get_logger(__name__)
 secrets_manager = get_secrets_manager()
@@ -373,11 +373,14 @@ def logOut(**data) -> str:
         Status string ('success' or 'error')
     """
     # Input validation
+    # NOTE: Backend user ids can be numeric (e.g. "22"), so use the broader validator.
     user_id = data.get("userId", "")
-    if not validate_user_id(user_id):
+    if not validate_user_identifier(user_id):
         logger.error(
-            f"Invalid user ID format: {_sanitize_user_id_for_logging(user_id)}"
+            f"Invalid user ID format: {_sanitize_user_id_for_logging(str(user_id))}"
         )
+        # Security: ensure local auth token is not kept on logout failure.
+        _set_auth_token(None)
         return "error"
 
     # Use stored token if available
@@ -1000,25 +1003,27 @@ def with_retry(max_retries: int = 3, backoff_factor: float = 1.0):
                     requests.exceptions.Timeout,
                     requests.exceptions.ConnectionError,
                     requests.exceptions.RequestException,
+                    TimeoutError,
+                    ConnectionError,
                 ) as e:
                     last_exception = e
 
                     if attempt < max_retries:
                         wait_time = backoff_factor * (2**attempt)
                         logger.warning(
-                            f"?? ? : {type(e).__name__}. "
-                            f"{wait_time:.1f}??????({attempt + 1}/{max_retries})"
+                            f"요청 실패: {type(e).__name__}. "
+                            f"{wait_time:.1f}초 후 재시도({attempt + 1}/{max_retries})"
                         )
                         time.sleep(wait_time)
                     else:
-                        logger.error(f"? ???? : {type(e).__name__}")
+                        logger.error(f"재시도 실패: {type(e).__name__}")
                 except Exception as e:
                     # ?? ? ? ? ??? ?
-                    raise e
+                    raise
 
             if last_exception:
                 raise last_exception
-            raise RuntimeError("??? ?")
+            raise RuntimeError("재시도 실패")
 
         return wrapper
 
@@ -1040,13 +1045,15 @@ def handle_token_expiry(func):
     def wrapper(*args, **kwargs):
         try:
             return func(*args, **kwargs)
-        except requests.exceptions.HTTPError as e:
-            if e.response.status_code == 401:
-                logger.warning("?   ?, ???")
-                raise PermissionError(
-                    "? ? ?????? ? ???"
-                )
-            raise e
+        except Exception as e:
+            # Be liberal in what we accept here: in tests/mocks we may not get
+            # a real requests.exceptions.HTTPError instance.
+            status_code = getattr(getattr(e, "response", None), "status_code", None)
+            if status_code == 401:
+                msg = "인증 토큰이 만료되었습니다. 다시 로그인해주세요."
+                logger.warning(msg)
+                raise PermissionError(msg) from e
+            raise
 
     return wrapper
 
@@ -1081,13 +1088,35 @@ class SubscriptionStateManager:
             ?
 ???? ???        """
         with self._state_lock:
+            # First observation: cache only successful state.
             if self._last_known_state is None:
-                self._last_known_state = new_state
+                if new_state.get("success", False):
+                    self._last_known_state = new_state
                 return new_state
-            
-            # Log state differences before updating
+
+            # If API call failed, do not overwrite last known good state.
+            if not new_state.get("success", False):
+                return new_state
+
+            # Same state: no-op. Keep inconsistency counter (useful for flapping).
+            if new_state == self._last_known_state:
+                return new_state
+
+            # Detect inconsistent state flips (trial/subscriber etc).
+            if self._detect_inconsistency(new_state):
+                self._inconsistent_count += 1
+
+                # Keep old state for a few inconsistent responses.
+                if self._inconsistent_count <= self._max_inconsistent_before_reset:
+                    return self._last_known_state
+
+                # After repeated inconsistencies, reset cache and allow new state through.
+                self._reset_state()
+                return new_state
+
+            # Consistent update: accept and reset inconsistency counter.
+            self._inconsistent_count = 0
             self._log_state_changes(self._last_known_state, new_state)
-            
             self._last_known_state = new_state
             return new_state
 

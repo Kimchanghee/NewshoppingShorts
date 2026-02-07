@@ -10,7 +10,7 @@ Security:
 """
 import logging
 from typing import Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, Query, HTTPException
 from slowapi import Limiter
@@ -375,7 +375,7 @@ async def get_stats(
     active_users = db.query(User).filter(User.is_active == True).count()
 
     # Users with active subscription
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     active_subscriptions = db.query(User).filter(
         User.subscription_expires_at > now,
         User.is_active == True

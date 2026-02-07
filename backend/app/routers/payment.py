@@ -14,7 +14,7 @@ import logging
 import os
 import secrets
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs
 
 import requests as http_requests
@@ -103,7 +103,7 @@ async def create_payment(
     payment_id = secrets.token_urlsafe(32)
 
     # Calculate expiration (30 minutes)
-    expires_at = datetime.utcnow() + timedelta(minutes=30)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
 
     # Get plan price
     amount = PLAN_PRICES.get(data.plan_id, 0)
@@ -162,13 +162,13 @@ async def get_payment_status(
         return PaymentStatusResponse(
             payment_id=payment_id,
             status="not_found",
-            created_at=datetime.utcnow().isoformat(),
-            updated_at=datetime.utcnow().isoformat()
+            created_at=datetime.now(timezone.utc).isoformat(),
+            updated_at=datetime.now(timezone.utc).isoformat()
         )
 
     # Check if session has expired
     if session.status == PaymentStatus.PENDING and session.expires_at:
-        if datetime.utcnow() > session.expires_at:
+        if datetime.now(timezone.utc) > session.expires_at:
             session.status = PaymentStatus.EXPIRED
             db.commit()
 
@@ -177,8 +177,8 @@ async def get_payment_status(
         status=session.status.value,
         plan_id=session.plan_id,
         user_id=session.user_id,
-        created_at=session.created_at.isoformat() if session.created_at else datetime.utcnow().isoformat(),
-        updated_at=session.updated_at.isoformat() if session.updated_at else datetime.utcnow().isoformat()
+        created_at=session.created_at.isoformat() if session.created_at else datetime.now(timezone.utc).isoformat(),
+        updated_at=session.updated_at.isoformat() if session.updated_at else datetime.now(timezone.utc).isoformat()
     )
 
 
@@ -327,7 +327,7 @@ def _activate_subscription(db: Session, user_id: str) -> None:
             return
 
         user.user_type = UserType.SUBSCRIBER
-        user.subscription_expires_at = datetime.utcnow() + timedelta(days=SUBSCRIPTION_DAYS)
+        user.subscription_expires_at = datetime.now(timezone.utc) + timedelta(days=SUBSCRIPTION_DAYS)
         user.work_count = -1  # 무제한
         user.work_used = 0
         db.commit()
@@ -351,7 +351,8 @@ async def create_payapp_payment(
     PayApp 가상계좌 결제 요청 생성
     Creates a PayApp virtual account payment request
     """
-    logger.info(f"[PayApp] Create request: user={data.user_id}, phone={data.phone}")
+    masked_phone = data.phone[:3] + "****" + data.phone[-4:] if len(data.phone) > 7 else "***"
+    logger.info(f"[PayApp] Create request: user={data.user_id}, phone={masked_phone}")
 
     if not PAYAPP_USERID:
         logger.error("[PayApp] PAYAPP_USERID not configured")
@@ -361,13 +362,13 @@ async def create_payapp_payment(
 
     # Create local payment session first
     local_payment_id = secrets.token_urlsafe(32)
-    expires_at = datetime.utcnow() + timedelta(minutes=30)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
 
     # Determine feedbackurl (backend webhook URL)
-    base_url = os.getenv(
-        "PAYMENT_API_BASE_URL",
-        "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
-    )
+    # Prefer explicit env var for production, but fall back to request base URL for local/dev.
+    base_url = os.getenv("PAYMENT_API_BASE_URL", "").rstrip("/")
+    if not base_url:
+        base_url = str(request.base_url).rstrip("/")
     feedback_url = f"{base_url}/payments/payapp/webhook"
 
     # Call PayApp API
@@ -423,10 +424,11 @@ async def create_payapp_payment(
         return PayAppCreateResponse(success=False, message="결제 서버 연결 시간 초과")
     except Exception as e:
         logger.error(f"[PayApp] API request failed: {e}", exc_info=True)
-        return PayAppCreateResponse(success=False, message=f"결제 요청 오류: {e}")
+        return PayAppCreateResponse(success=False, message="결제 요청 처리 중 오류가 발생했습니다.")
 
 
 @router.post("/payapp/webhook")
+@limiter.limit("100/minute")
 async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
     """
     PayApp 웹훅 (feedbackurl)
@@ -455,11 +457,11 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
             logger.error("[PayApp Webhook] PAYAPP_LINKKEY/LINKVAL not configured")
             return PlainTextResponse("FAIL")
 
-        if PAYAPP_LINKKEY and recv_linkkey != PAYAPP_LINKKEY:
+        if recv_linkkey != PAYAPP_LINKKEY:
             logger.warning("[PayApp Webhook] Invalid linkkey")
             return PlainTextResponse("FAIL")
 
-        if PAYAPP_LINKVAL and recv_linkval != PAYAPP_LINKVAL:
+        if recv_linkval != PAYAPP_LINKVAL:
             logger.warning("[PayApp Webhook] Invalid linkval")
             return PlainTextResponse("FAIL")
 
@@ -480,17 +482,17 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
                 session.gateway_reference = mul_no
                 db.commit()
 
-            # 구독 활성화
-            if user_id:
-                _activate_subscription(db, user_id)
+                # 구독 활성화 - 신뢰할 수 있는 session.user_id 사용 (form data가 아닌 DB 값)
+                if session.user_id:
+                    _activate_subscription(db, session.user_id)
 
         elif pay_state == "10":
             # 가상계좌 입금 대기
             logger.info(f"[PayApp Webhook] Virtual account pending: mul_no={mul_no}")
             vbank = form_data.get("vbank", "")
             vbankno = form_data.get("vbankno", "")
-            depositor = form_data.get("depositor", "")
-            logger.info(f"[PayApp Webhook] VBank: {vbank} {vbankno} ({depositor})")
+            masked_vbankno = vbankno[:4] + "****" if len(vbankno) > 4 else "****"
+            logger.info(f"[PayApp Webhook] VBank: {vbank} {masked_vbankno}")
 
         elif pay_state in ("8", "32"):
             # 요청 취소

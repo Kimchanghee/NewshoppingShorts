@@ -11,7 +11,7 @@
 """
 
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.database import SessionLocal
 from app.models.user import User
 from app.utils.password import hash_password
@@ -39,7 +39,7 @@ def create_user(username: str, password: str, subscription_days: int = None):
         # 구독 만료일 계산
         subscription_expires_at = None
         if subscription_days is not None:
-            subscription_expires_at = datetime.utcnow() + timedelta(
+            subscription_expires_at = datetime.now(timezone.utc) + timedelta(
                 days=subscription_days
             )
 
@@ -116,7 +116,7 @@ def update_password(username: str, new_password: str):
             return False
 
         user.password_hash = hash_password(new_password)
-        user.updated_at = datetime.utcnow()
+        user.updated_at = datetime.now(timezone.utc)
 
         # Security: Invalidate all active sessions on password change
         # 보안: 비밀번호 변경 시 모든 활성 세션 무효화

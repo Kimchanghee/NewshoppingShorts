@@ -1,6 +1,6 @@
 import hashlib
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -90,24 +90,24 @@ class AuthService:
         if not user:
             # User enumeration is allowed per user request for better UX
             self._record_login_attempt(username, ip_address, success=False)
-            logger.info(f"[Login Failed] User not found: username={_mask_username(username)}, ip={ip_address}")
+            logger.info(f"[Login Failed] User not found: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # User not found - masked as invalid credentials
 
         if not password_valid:
             # Record failed attempt
             self._record_login_attempt(username, ip_address, success=False)
-            logger.info(f"[Login Failed] Invalid password: username={_mask_username(username)}, ip={ip_address}")
+            logger.info(f"[Login Failed] Invalid password: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # Invalid password
 
         # Check subscription and active status (naive/aware-safe via utils)
         if user.subscription_expires_at and not is_subscription_active(user.subscription_expires_at):
             self._record_login_attempt(username, ip_address, success=False)
-            logger.info(f"[Login Failed] Subscription expired: username={_mask_username(username)}, ip={ip_address}")
+            logger.info(f"[Login Failed] Subscription expired: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU002", "message": "EU002"}  # Subscription expired
 
         if not user.is_active:
             self._record_login_attempt(username, ip_address, success=False)
-            logger.info(f"[Login Failed] User inactive: username={_mask_username(username)}, ip={ip_address}")
+            logger.info(f"[Login Failed] User inactive: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # Unified error for inactive
 
         # Check existing session
@@ -116,13 +116,13 @@ class AuthService:
             .filter(
                 SessionModel.user_id == user.id,
                 SessionModel.is_active == True,
-                SessionModel.expires_at > datetime.utcnow(),
+                SessionModel.expires_at > datetime.now(timezone.utc),
             )
             .first()
         )
 
         if existing_session and not force:
-            logger.info(f"[Login Failed] Duplicate login: username={_mask_username(username)}, ip={ip_address}")
+            logger.info(f"[Login Failed] Duplicate login: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU003", "message": "EU003"}  # Duplicate login
 
         # Force logout if needed
@@ -143,7 +143,7 @@ class AuthService:
         self.db.add(new_session)
 
         # Update user
-        user.last_login_at = datetime.utcnow()
+        user.last_login_at = datetime.now(timezone.utc)
         user.last_login_ip = ip_address
         user.login_count = (user.login_count or 0) + 1
 
@@ -244,7 +244,7 @@ class AuthService:
                 .filter(
                     SessionModel.token_jti == jti,
                     SessionModel.is_active == True,
-                    SessionModel.expires_at > datetime.utcnow(),
+                    SessionModel.expires_at > datetime.now(timezone.utc),
                 )
                 .first()
             )
@@ -254,7 +254,7 @@ class AuthService:
                 return {"status": "EU003"}  # Session invalid/expired
 
             # Update last activity in session
-            session.last_activity_at = datetime.utcnow()
+            session.last_activity_at = datetime.now(timezone.utc)
             
             # Update User heartbeat and online status
             # Ensure user_id is integer for query
@@ -266,7 +266,7 @@ class AuthService:
 
             user = self.db.query(User).filter(User.id == numeric_user_id).first()
             if user:
-                user.last_heartbeat = datetime.utcnow()
+                user.last_heartbeat = datetime.now(timezone.utc)
                 user.is_online = True
                 if current_task is not None:
                     user.current_task = current_task
@@ -290,7 +290,7 @@ class AuthService:
 
     async def _check_rate_limit(self, username: str, ip_address: str) -> dict:
         """Check if login attempts exceed rate limit - dual check (username AND IP)"""
-        cutoff_time = datetime.utcnow() - timedelta(
+        cutoff_time = datetime.now(timezone.utc) - timedelta(
             minutes=settings.LOGIN_ATTEMPT_WINDOW_MINUTES
         )
 
@@ -517,7 +517,7 @@ class AuthService:
         """
         try:
             from datetime import timedelta
-            threshold = datetime.utcnow() - timedelta(minutes=2)
+            threshold = datetime.now(timezone.utc) - timedelta(minutes=2)
             
             # Find users who are marked online but haven't sent heartbeat in 2 mins
             db_users = self.db.query(User).filter(

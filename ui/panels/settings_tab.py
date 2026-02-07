@@ -588,11 +588,13 @@ class SettingsTab(QWidget, ThemedMixin):
             key_input.clear()
 
         # SecretsManager에서 삭제
+        from utils.logging_config import get_logger
+        _logger = get_logger(__name__)
         for i in range(1, 9):
             try:
                 SecretsManager.delete_api_key(f"gemini_api_{i}")
-            except Exception:
-                pass
+            except Exception as del_err:
+                _logger.debug(f"[Settings] Failed to delete gemini_api_{i}: {del_err}")
 
         # config 초기화
         config.GEMINI_API_KEYS = {}

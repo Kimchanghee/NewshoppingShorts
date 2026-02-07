@@ -35,13 +35,9 @@ jobs:
         pip install pyinstaller
 
     - name: Download Whisper models
-      run: python download_whisper_models.py
+      run: python scripts/download_whisper_models.py
       continue-on-error: true
       timeout-minutes: 10
-
-    - name: Download fonts
-      run: python download_all_fonts.py
-      continue-on-error: true
 
     - name: Extract version from tag
       id: version
@@ -52,13 +48,28 @@ jobs:
       shell: python
       run: |
         import json
+        from datetime import date
+        from pathlib import Path
         version = "${{ steps.version.outputs.VERSION }}"
-        with open("version.json", "w", encoding="utf-8") as f:
-            json.dump({"version": version}, f)
+        p = Path("version.json")
+        data = {}
+        if p.exists():
+            try:
+                data = json.loads(p.read_text(encoding="utf-8"))
+            except Exception:
+                data = {}
+        data["version"] = version
+        data.setdefault("min_required_version", "1.0.0")
+        data.setdefault("update_channel", "stable")
+        data.setdefault("build_date", date.today().isoformat())
+        data["updated_at"] = date.today().isoformat()
+        p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"Updated version.json to {version}")
 
     - name: Build EXE
-      run: pyinstaller --clean -y ssmaker.spec
+      shell: pwsh
+      run: |
+        ./scripts/build_exe.ps1
 
     - name: Rename EXE
       run: |
