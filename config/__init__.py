@@ -49,12 +49,13 @@ VERTEX_MODEL_ID = os.getenv("VERTEX_MODEL_ID", "")
 VERTEX_JSON_KEY_PATH = os.getenv("VERTEX_JSON_KEY_PATH", "")
 
 # Payment API (web checkout + polling)
-# NOTE: This base URL is also used by some startup/version-check code paths.
-# Keep the default pointing at the production backend, but allow overrides via env var.
-PAYMENT_API_BASE_URL = os.getenv(
-    "PAYMENT_API_BASE_URL",
+# Set PAYMENT_API_BASE_URL via environment variable or .env file.
+# Default to the main API server URL so payments work out-of-the-box in dev/prod.
+_DEFAULT_API_SERVER_URL = os.getenv(
+    "API_SERVER_URL",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
-)
+).rstrip("/")
+PAYMENT_API_BASE_URL = os.getenv("PAYMENT_API_BASE_URL", _DEFAULT_API_SERVER_URL).rstrip("/")
 CHECKOUT_POLL_INTERVAL = float(os.getenv("CHECKOUT_POLL_INTERVAL", "3"))
 CHECKOUT_POLL_MAX_TRIES = int(os.getenv("CHECKOUT_POLL_MAX_TRIES", "20"))
 

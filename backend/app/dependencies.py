@@ -28,9 +28,6 @@ async def verify_admin_api_key(
         HTTPException: 401 if key is missing or invalid
     """
     if not settings.ADMIN_API_KEY:
-        # Development mode - allow if no key configured
-        if settings.ENVIRONMENT != "production":
-            return True
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Admin API key not configured on server"

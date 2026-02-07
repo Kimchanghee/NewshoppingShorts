@@ -156,9 +156,23 @@ class SystemOptimizer:
         else:
             max_parallel_workers = min(3, specs.cpu_cores // 4)  # 최대 3개
 
+        # Faster-Whisper device selection should be based on actual CUDA availability.
+        # Some Windows machines report a GPU via WMI even when CUDA is not available (e.g. Intel iGPU).
+        cuda_available = False
+        if specs.has_gpu and specs.gpu_memory_gb and specs.gpu_memory_gb >= 4:
+            try:
+                import ctranslate2
+
+                cuda_available = (
+                    getattr(ctranslate2, "get_cuda_device_count", lambda: 0)() > 0
+                )
+            except Exception as e:
+                logger.debug("Failed to probe CTranslate2 CUDA availability: %s", e)
+                cuda_available = False
+
         # Faster-Whisper 모델 선택: 기본 base (가장 균형잡힘)
-        if specs.total_memory_gb >= 16 and specs.cpu_cores >= 8 and specs.has_gpu:
-            whisper_model = "small"  # GPU + 고사양만 small
+        if specs.total_memory_gb >= 16 and specs.cpu_cores >= 8 and cuda_available:
+            whisper_model = "small"  # CUDA + 고사양만 small
         elif specs.total_memory_gb >= 8 and specs.cpu_cores >= 4:
             whisper_model = "base"  # 기본 권장 (모든 일반 PC)
         else:
@@ -175,11 +189,7 @@ class SystemOptimizer:
             whisper_threads = min(8, specs.cpu_cores // 2)  # 최대 8개
 
         # Faster-Whisper 디바이스 선택
-        # GPU 사용 가능 시 cuda, 아니면 cpu
-        if specs.has_gpu and specs.gpu_memory_gb and specs.gpu_memory_gb >= 4:
-            whisper_device = "cuda"
-        else:
-            whisper_device = "cpu"
+        whisper_device = "cuda" if cuda_available else "cpu"
 
         # Faster-Whisper compute_type 선택
         # GPU: float16, CPU: int8 (가장 빠름)

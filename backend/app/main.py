@@ -1,7 +1,7 @@
 import logging
 import sys
 import os
-from fastapi import FastAPI, Request, Header, HTTPException
+from fastapi import FastAPI, Request, Header, HTTPException, Query
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
@@ -68,7 +68,7 @@ def run_auto_migration():
             for col, type_def in columns:
                 try:
                     # Direct ALTER TABLE attempt
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col} {type_def}"))
+                    conn.execute(text(f"ALTER TABLE `{table}` ADD COLUMN `{col}` {type_def}"))
                     logger.info(f"Successfully added column {table}.{col}")
                 except Exception as e:
                     # Ignore "Duplicate column name" error (1060)
@@ -209,12 +209,13 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "")
+
 APP_VERSION_INFO = {
-    "version": "1.0.1", # Bumped for testing
+    "version": "1.3.2",
     "min_required_version": "1.0.0",
-    "download_url": "https://ssmaker-auth-api-1049571775048.us-central1.run.app/static/ssmaker_setup.exe", # Production URL
-    # "download_url": "https://storage.googleapis.com/your-bucket/ssmaker_setup.exe", # Production GCS URL
-    "release_notes": "버전 1.0.1 업데이트: 자동 업데이트 기능이 추가되었습니다.",
+    "download_url": _DEFAULT_DOWNLOAD_URL,
+    "release_notes": "버전 1.3.2 업데이트: 구독 플랜 선택 스크롤 개선 및 결제/구독 안정화.",
     "is_mandatory": False,
     "update_channel": "stable",
 }
@@ -275,17 +276,16 @@ async def update_app_version(
         logger.warning("Invalid API key attempt for version update")
         raise HTTPException(status_code=403, detail="Invalid API key")
 
-    # Update version info
-    APP_VERSION_INFO["version"] = request.version
-    APP_VERSION_INFO["download_url"] = request.download_url
-
+    # Atomic replacement - build new dict then assign
+    new_info = {**APP_VERSION_INFO}
+    new_info["version"] = request.version
+    new_info["download_url"] = request.download_url
     if request.release_notes:
-        APP_VERSION_INFO["release_notes"] = request.release_notes
-
+        new_info["release_notes"] = request.release_notes
     if request.min_required_version:
-        APP_VERSION_INFO["min_required_version"] = request.min_required_version
-
-    APP_VERSION_INFO["is_mandatory"] = request.is_mandatory
+        new_info["min_required_version"] = request.min_required_version
+    new_info["is_mandatory"] = request.is_mandatory
+    APP_VERSION_INFO = new_info
 
     logger.info(f"App version updated to {request.version} by CI/CD")
 
@@ -297,7 +297,7 @@ async def update_app_version(
 
 
 @app.get("/app/version/check")
-async def check_app_version(current_version: str):
+async def check_app_version(current_version: str = Query(..., max_length=20)):
     """
     Check if update is available.
     업데이트 가능 여부 확인.

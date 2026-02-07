@@ -670,34 +670,127 @@ class AudioPipeline:
 
         logger.info("[Whisper] 자막 타이밍 분석 시작...")
 
-        whisper_result = analyze_tts_with_whisper(
-            self.app, audio_path, script, subtitle_segments
-        )
+        try:
+            whisper_result = analyze_tts_with_whisper(
+                self.app, audio_path, script, subtitle_segments
+            )
 
-        if not whisper_result or "segments" not in whisper_result:
-            raise RuntimeError("Whisper 분석 결과가 없습니다 - 자막 싱크 불가")
+            if not whisper_result or "segments" not in whisper_result:
+                raise RuntimeError("Whisper 분석 결과가 없습니다 - 자막 싱크 불가")
 
-        whisper_segments = whisper_result["segments"]
-        voice_start = whisper_result.get("voice_start", 0)
-        voice_end = whisper_result.get("voice_end", total_duration)
+            whisper_segments = whisper_result["segments"]
+            voice_start = whisper_result.get("voice_start", 0)
+            voice_end = whisper_result.get("voice_end", total_duration)
 
-        metadata = []
-        for seg in whisper_segments:
-            idx = seg.get("index", 1) - 1
+            metadata = []
+            for seg in whisper_segments:
+                idx = seg.get("index", 1) - 1
+                metadata.append(
+                    {
+                        "idx": idx,
+                        "start": seg["start"],
+                        "end": seg["end"],
+                        "text": seg["text"],
+                        "path": audio_path,
+                        "speaker": None,  # 나중에 설정
+                        "is_narr": False,
+                    }
+                )
+
+            logger.info(f"[Whisper] {len(metadata)}개 세그먼트 분석 완료")
+            return metadata, "whisper_analysis", voice_start, voice_end
+
+        except Exception as exc:
+            # Whisper가 실패해도 전체 파이프라인이 멈추지 않도록 폴백 타이밍을 생성한다.
+            # (빌드/환경별 faster-whisper/ctranslate2 이슈, 모델 누락 등)
+            ui_controller.write_error_log(exc)
+            logger.warning("[Whisper] 분석 실패 - 폴백 타이밍 사용: %s", exc)
+
+            voice_start = 0.0
+            try:
+                from core.video.VideoTool import _detect_audio_start_offset
+
+                voice_start = _detect_audio_start_offset(audio_path)
+            except Exception:
+                voice_start = 0.0
+
+            voice_end = total_duration
+            metadata = self._create_char_proportional_metadata(
+                subtitle_segments=subtitle_segments,
+                total_duration=total_duration,
+                audio_path=audio_path,
+                start_offset=voice_start,
+            )
+            logger.info(
+                "[Whisper] 폴백 메타데이터 생성 완료: %d개 세그먼트 (offset=%.3fs)",
+                len(metadata),
+                voice_start,
+            )
+            return metadata, "char_proportional_fallback", voice_start, voice_end
+
+    def _create_char_proportional_metadata(
+        self,
+        subtitle_segments: List[str],
+        total_duration: float,
+        audio_path: str,
+        start_offset: float = 0.0,
+    ) -> List[Dict[str, Any]]:
+        """Fallback timing: distribute segment durations proportional to character counts."""
+        if not subtitle_segments or not total_duration or total_duration <= 0:
+            return []
+
+        try:
+            start_offset_val = float(start_offset or 0.0)
+        except Exception:
+            start_offset_val = 0.0
+
+        if start_offset_val < 0:
+            start_offset_val = 0.0
+        if start_offset_val > total_duration:
+            start_offset_val = 0.0
+
+        cleaned = []
+        char_counts = []
+        for seg in subtitle_segments:
+            txt = str(seg).strip()
+            cleaned.append(txt)
+            char_counts.append(max(1, len(txt)))
+
+        total_chars = sum(char_counts) or 1
+        effective_duration = max(0.1, float(total_duration) - start_offset_val)
+
+        metadata: List[Dict[str, Any]] = []
+        current_time = start_offset_val
+        num_segments = len(cleaned)
+
+        for idx, txt in enumerate(cleaned):
+            start = current_time
+            if idx == num_segments - 1:
+                end = float(total_duration)
+            else:
+                share = char_counts[idx] / total_chars
+                seg_dur = effective_duration * share
+                end = start + seg_dur
+
+            if end <= start:
+                end = min(start + 0.15, float(total_duration))
+            if end > total_duration:
+                end = float(total_duration)
+
             metadata.append(
                 {
                     "idx": idx,
-                    "start": seg["start"],
-                    "end": seg["end"],
-                    "text": seg["text"],
+                    "start": round(start, 3),
+                    "end": round(end, 3),
+                    "text": txt,
                     "path": audio_path,
-                    "speaker": None,  # 나중에 설정
+                    "speaker": None,
                     "is_narr": False,
                 }
             )
+            current_time = end
 
-        logger.info(f"[Whisper] {len(metadata)}개 세그먼트 분석 완료")
-        return metadata, "whisper_analysis", voice_start, voice_end
+        return metadata
 
     def _split_text_naturally(self, text: str) -> List[str]:
         """

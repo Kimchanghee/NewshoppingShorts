@@ -19,7 +19,7 @@ Usage:
 
 import os
 import re
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Dict, Any, List, Optional, Set
 import mimetypes
 
@@ -316,8 +316,18 @@ class PathValidator:
         Raises:
             ValidationError: If path traversal detected
         """
-        # Check for ".." in path components
-        if ".." in resolved_path.parts:
+        # Check for ".." in the *original* user input.
+        # Path.resolve() normalizes away "..", so checking resolved_path.parts
+        # would miss traversal attempts like "../../etc/passwd".
+        try:
+            has_parent_ref = (
+                ".." in PurePosixPath(original_path).parts
+                or ".." in PureWindowsPath(original_path).parts
+            )
+        except Exception:
+            has_parent_ref = ".." in str(original_path)
+
+        if has_parent_ref:
             raise ValidationError(
                 "Path traversal detected (contains ..)",
                 field="file_path",
@@ -632,6 +642,28 @@ def validate_user_id(user_id: str) -> bool:
         return False
 
     return True
+
+
+def validate_user_identifier(user_id: str) -> bool:
+    """
+    Validate a user identifier used in API calls.
+
+    This app uses two different "user id" concepts:
+    - Username (login id): typically 4-50 chars, alnum/underscore (validated by validate_user_id)
+    - Backend numeric user id: e.g. "22" (too short for validate_user_id but valid for API calls)
+
+    This helper accepts either:
+    - 1-50 digits (backend numeric ID)
+    - A valid username per validate_user_id()
+    """
+    if not user_id or not isinstance(user_id, str):
+        return False
+
+    # Backend user ids are often numeric (e.g., "22").
+    if re.fullmatch(r"\\d{1,50}", user_id):
+        return True
+
+    return validate_user_id(user_id)
 
 
 def validate_ip_address(ip: str) -> bool:

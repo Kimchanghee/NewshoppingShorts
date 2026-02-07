@@ -7,6 +7,7 @@ Tests OCR initialization, retry logic, and fallback mechanisms.
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from pathlib import Path
+import os
 
 
 class TestOCRBackend:
@@ -17,7 +18,7 @@ class TestOCRBackend:
         from utils.ocr_backend import OCRBackend
 
         reader = OCRBackend()
-        assert reader.engine_name in ["rapidocr", "tesseract"]
+        assert reader.engine_name in ["glm_ocr", "rapidocr", "tesseract"]
         assert reader.reader is not None
 
     def test_readtext_with_valid_image(self):
@@ -43,16 +44,17 @@ class TestOCRBackend:
         results = backend.readtext(Mock())
         assert results == []
 
-    @patch('utils.ocr_backend.pytesseract')
-    def test_ocr_initialization_error_raised(self, mock_pytesseract):
+    def test_ocr_initialization_error_raised(self):
         """Test OCRInitializationError raised when all engines fail"""
         from utils.ocr_backend import OCRBackend
         from utils.error_handlers import OCRInitializationError
 
-        mock_pytesseract.side_effect = ImportError("pytesseract not found")
-
-        with pytest.raises(OCRInitializationError) as exc_info:
-            backend = OCRBackend()
+        # Deterministic failure: disable GLM-OCR and force Tesseract init to fail.
+        with patch.dict(os.environ, {"GLM_OCR_DISABLED": "1"}):
+            with patch("utils.ocr_backend.time.sleep", return_value=None):
+                with patch.object(OCRBackend, "_init_tesseract", side_effect=ImportError("pytesseract not found")):
+                    with pytest.raises(OCRInitializationError) as exc_info:
+                        OCRBackend()
 
         assert "OCR engine unavailable" in str(exc_info.value)
         assert "Install Tesseract" in exc_info.value.recovery_hint
@@ -121,7 +123,7 @@ class TestOCREngineSelection:
         info = check_ocr_availability()
 
         if sys.version_info >= (3, 13):
-            assert info["recommended_engine"] in ["tesseract", None]
+            assert info["recommended_engine"] in ["glm_ocr", "tesseract", None]
             assert not info["rapidocr_available"]
 
     def test_retry_logic(self):

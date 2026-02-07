@@ -13,7 +13,7 @@ Security:
 
 import logging
 from typing import Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Query
 from slowapi import Limiter
@@ -96,9 +96,7 @@ async def submit_registration_request(
     IP당 시간당 5회로 제한하여 남용 방지.
     """
     # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
-    logger.info(
-        f"[Register Request] Filename: registration.py, Username: {data.username}, Name: {data.name}, Email: {data.email}, Contact: {data.contact}"
-    )
+    logger.info(f"[Register Request] Username: {data.username}")
     try:
         # Pre-process username
         username_clean = data.username.lower().strip()
@@ -116,7 +114,9 @@ async def submit_registration_request(
         client_ip = get_client_ip(request)
         existing_ip_user = db.query(User).filter(User.registration_ip == client_ip).first()
         if existing_ip_user:
-            logger.warning(f"[Register Fail] Duplicate IP detected: {client_ip}, existing user: {existing_ip_user.username}")
+            import hashlib
+            ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:12] if client_ip else "unknown"
+            logger.warning(f"[Register Fail] Duplicate IP detected: ip_hash={ip_hash}")
             return RegistrationResponse(
                 success=False,
                 message="⚠️ 중복 IP에서 회원가입 감지!\n\n동일한 IP에서 이미 가입된 계정이 존재합니다.\n추가 계정이 필요하시면 구독을 신청하시거나 담당자에게 문의해 주시기 바랍니다.",
@@ -152,7 +152,7 @@ async def submit_registration_request(
         password_hash = hash_password(data.password)
 
         # 자동 승인: 직접 User 생성 (체험판)
-        subscription_expires_at = datetime.utcnow() + timedelta(days=DEFAULT_TRIAL_DAYS)
+        subscription_expires_at = datetime.now(timezone.utc) + timedelta(days=DEFAULT_TRIAL_DAYS)
 
         # 가입 시점 기준 무료 체험 횟수 결정
         trial_work_count = get_free_trial_work_count()
@@ -194,7 +194,7 @@ async def submit_registration_request(
             contact=data.contact,
             email=data.email,
             status=RequestStatus.APPROVED,
-            reviewed_at=datetime.utcnow(),
+            reviewed_at=datetime.now(timezone.utc),
         )
 
         db.add(registration_request)
@@ -318,7 +318,7 @@ async def approve_registration(
         )
         if existing_user:
             reg_request.status = RequestStatus.REJECTED
-            reg_request.reviewed_at = datetime.utcnow()
+            reg_request.reviewed_at = datetime.now(timezone.utc)
             reg_request.rejection_reason = "아이디가 이미 사용 중입니다."
             db.commit()
             return RegistrationResponse(
@@ -326,7 +326,7 @@ async def approve_registration(
             )
 
         # Create the user
-        subscription_expires_at = datetime.utcnow() + timedelta(
+        subscription_expires_at = datetime.now(timezone.utc) + timedelta(
             days=data.subscription_days
         )
         logger.info(
@@ -350,7 +350,7 @@ async def approve_registration(
 
         # Update registration request status
         reg_request.status = RequestStatus.APPROVED
-        reg_request.reviewed_at = datetime.utcnow()
+        reg_request.reviewed_at = datetime.now(timezone.utc)
 
         db.commit()
 
@@ -421,7 +421,7 @@ async def reject_registration(
 
         # Update registration request status
         reg_request.status = RequestStatus.REJECTED
-        reg_request.reviewed_at = datetime.utcnow()
+        reg_request.reviewed_at = datetime.now(timezone.utc)
         reg_request.rejection_reason = data.reason
 
         db.commit()

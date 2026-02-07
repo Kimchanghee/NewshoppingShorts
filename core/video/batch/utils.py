@@ -1021,6 +1021,14 @@ def _split_text_naturally(app, text, max_chars=13):
                     split_idx = target
                     split_rule = f"6순위-강제분리(@{target}, 공백없음)"
 
+                # 고아 방지: 분리 후 나머지가 3자 이하면 분리하지 않고 전체 유지
+                right_after_split = remaining[split_idx:].strip()
+                if right_after_split and len(right_after_split) <= 3:
+                    segments.append(remaining.strip())
+                    logger.info(f"[자막 분할] 고아 방지: 전체 유지 [{len(remaining.strip())}자] '{remaining.strip()}' (나머지 '{right_after_split}'이 너무 짧음)")
+                    remaining = ""
+                    break
+
                 # 분리 실행
                 left = remaining[:split_idx].strip()
                 remaining = remaining[split_idx:].strip()
@@ -1099,8 +1107,10 @@ def _split_text_naturally(app, text, max_chars=13):
         # 이전 세그먼트가 구두점으로 끝나면 병합 금지
         prev_ends_punct = merged and merged[-1][-1] in _punct_ends
         if merged and len(seg) < min_chars and not prev_ends_punct:
-            # 이전 세그먼트와 합쳐도 hard_max 이내면 병합
-            if len(merged[-1]) + 1 + len(seg) <= hard_max:
+            # 고아 세그먼트(3자 이하)는 더 넉넉한 병합 한도 적용
+            merge_limit = hard_max + 4 if len(seg) <= 3 else hard_max
+            # 이전 세그먼트와 합쳐도 한도 이내면 병합
+            if len(merged[-1]) + 1 + len(seg) <= merge_limit:
                 prev = merged[-1]
                 merged[-1] = f"{merged[-1]} {seg}".strip()
                 logger.info(f"[자막 분할] 3단계 병합: '{prev}' + '{seg}' -> '{merged[-1]}' ({len(seg)}자 < 최소 {min_chars}자)")

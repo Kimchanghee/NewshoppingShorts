@@ -29,12 +29,8 @@ class RegistrationRequestCreate(BaseModel):
     @field_validator('name')
     @classmethod
     def validate_name(cls, v: str) -> str:
-        """이름 유효성 검증 및 XSS 방지"""
-        import html
-        # Strip whitespace
+        """이름 유효성 검증 (HTML escape는 렌더링 레이어에서 처리)"""
         cleaned = v.strip()
-        # HTML escape to prevent XSS
-        cleaned = html.escape(cleaned)
         # Only allow letters (Korean, English), numbers, spaces, dots, hyphens
         if not re.match(r'^[\w\s\.\-\u3131-\u3163\uac00-\ud7a3]+$', cleaned, re.UNICODE):
             raise ValueError('이름에 허용되지 않는 문자가 포함되어 있습니다.')
@@ -67,7 +63,7 @@ class RegistrationRequestCreate(BaseModel):
         cleaned = re.sub(r'[^0-9\-]', '', v)
         if len(cleaned) < 10:
             raise ValueError('올바른 연락처를 입력해주세요.')
-        return v
+        return cleaned
 
 
 class RegistrationRequestResponse(BaseModel):

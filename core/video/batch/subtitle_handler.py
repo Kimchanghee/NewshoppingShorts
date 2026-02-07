@@ -390,7 +390,7 @@ def _ensure_gemini_timestamps_synced(app):
     if timestamps_source in ("gemini", "scaled_fallback", "scaled_speeded",
                               "gemini_speeded", "fallback", "scaled_from_existing_speeded",
                               "scaled_no_gemini", "force_scaled_from_no_gemini", "gemini_scaled",
-                              "segment_by_segment", "whisper_analysis"):
+                              "segment_by_segment", "whisper_analysis", "char_proportional_fallback"):
         logger.debug(f"[Gemini Sync] 이미 처리됨 (source: {timestamps_source})")
         return
 

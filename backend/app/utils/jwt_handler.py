@@ -1,6 +1,6 @@
 import jwt
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from app.configuration import get_settings
 
 settings = get_settings()
@@ -12,14 +12,14 @@ def create_access_token(user_id: int, ip_address: str) -> tuple[str, str, dateti
     Returns: (token, jti, expires_at)
     """
     jti = str(uuid.uuid4())
-    expires_at = datetime.utcnow() + timedelta(hours=settings.JWT_EXPIRATION_HOURS)
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.JWT_EXPIRATION_HOURS)
 
     payload = {
         "sub": user_id,  # Subject (user ID)
         "jti": jti,  # JWT ID (for revocation)
         "ip": ip_address,  # IP binding
         "exp": expires_at,  # Expiration
-        "iat": datetime.utcnow(),  # Issued at
+        "iat": datetime.now(timezone.utc),  # Issued at
     }
 
     token = jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)

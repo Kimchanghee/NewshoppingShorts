@@ -7,6 +7,7 @@ import unittest
 from unittest.mock import Mock, patch, MagicMock
 import threading
 import time
+import requests
 
 # 테스트 대상 모듈 임포트
 import sys
@@ -141,11 +142,8 @@ class TestSubscriptionEdgeCases(unittest.TestCase):
     def test_token_expiry_decorator_401_error(self):
         """토큰 만료(401) 에러 처리 테스트"""
         mock_response = Mock(status_code=401)
-        mock_func = Mock(
-            side_effect=Mock(
-                __class__=Mock(__name__="HTTPError"), response=mock_response
-            )
-        )
+        http_err = requests.exceptions.HTTPError("401", response=mock_response)
+        mock_func = Mock(side_effect=http_err)
 
         decorated = handle_token_expiry(mock_func)
 
@@ -157,15 +155,12 @@ class TestSubscriptionEdgeCases(unittest.TestCase):
     def test_token_expiry_decorator_other_http_error(self):
         """다른 HTTP 에러는 그대로 전파"""
         mock_response = Mock(status_code=403)
-        mock_func = Mock(
-            side_effect=Mock(
-                __class__=Mock(__name__="HTTPError"), response=mock_response
-            )
-        )
+        http_err = requests.exceptions.HTTPError("403", response=mock_response)
+        mock_func = Mock(side_effect=http_err)
 
         decorated = handle_token_expiry(mock_func)
 
-        with self.assertRaises(Mock):
+        with self.assertRaises(requests.exceptions.HTTPError):
             decorated()
 
     def test_concurrent_state_updates(self):
@@ -256,53 +251,52 @@ class TestNetworkErrorScenarios(unittest.TestCase):
     """네트워크 오류 시나리오 테스트"""
 
     @patch("caller.rest._secure_session")
-    def test_subscription_status_network_timeout(self, mock_session):
+    @patch("caller.rest._get_auth_token", return_value="token")
+    def test_subscription_status_network_timeout(self, _mock_token, mock_session):
         """구독 상태 조회 네트워크 타임아웃 테스트"""
         from caller.rest import getSubscriptionStatus
 
-        mock_session.get.side_effect = Mock(
-            side_effect=Mock(__class__=Mock(__name__="Timeout"))
-        )
+        mock_session.get.side_effect = requests.exceptions.Timeout()
 
         result = getSubscriptionStatus("test_user")
 
         self.assertFalse(result["success"])
         self.assertTrue(result["is_trial"])  # 타임아웃 시 기본값
-        self.assertTrue(result["can_work"])  # 타임아웃 시 작업 허용
+        self.assertFalse(result["can_work"])  # 보안: 검증 실패 시 작업 불가
         self.assertIn("요청 시간이 초과", result["message"])
 
     @patch("caller.rest._secure_session")
-    def test_subscription_status_connection_error(self, mock_session):
+    @patch("caller.rest._get_auth_token", return_value="token")
+    def test_subscription_status_connection_error(self, _mock_token, mock_session):
         """구독 상태 조회 연결 오류 테스트"""
         from caller.rest import getSubscriptionStatus
 
-        mock_session.get.side_effect = Mock(
-            side_effect=Mock(__class__=Mock(__name__="ConnectionError"))
-        )
+        mock_session.get.side_effect = requests.exceptions.ConnectionError()
 
         result = getSubscriptionStatus("test_user")
 
         self.assertFalse(result["success"])
         self.assertTrue(result["is_trial"])
-        self.assertTrue(result["can_work"])
-        self.assertIn("서버 연결에 실패", result["message"])
+        self.assertFalse(result["can_work"])  # 보안: 검증 실패 시 작업 불가
+        self.assertIn("서버 접속이 불안정", result["message"])
 
     @patch("caller.rest._secure_session")
-    def test_subscription_request_rate_limit(self, mock_session):
+    @patch("caller.rest._get_auth_token", return_value="token")
+    def test_subscription_request_rate_limit(self, _mock_token, mock_session):
         """구독 신청 속도 제한 테스트"""
         from caller.rest import submitSubscriptionRequest
 
         mock_response = Mock()
         mock_response.status_code = 429  # Too Many Requests
-        mock_response.raise_for_status.side_effect = Mock(
-            __class__=Mock(__name__="HTTPError"), response=mock_response
+        mock_response.raise_for_status.side_effect = requests.exceptions.HTTPError(
+            "429", response=mock_response
         )
         mock_session.post.return_value = mock_response
 
         result = submitSubscriptionRequest("test_user", "테스트 메시지")
 
         self.assertFalse(result["success"])
-        self.assertIn("네트워크 오류", result["message"])
+        self.assertIn("서버 접속이 불안정", result["message"])
 
 
 if __name__ == "__main__":

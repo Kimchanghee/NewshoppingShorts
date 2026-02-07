@@ -20,6 +20,116 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def _should_disable_faster_whisper() -> bool:
+    """
+    Decide whether to skip faster-whisper entirely.
+
+    In some environments (notably Python 3.14 at the time of writing), native
+    dependencies like CTranslate2 can hard-crash the process (no Python traceback).
+    When disabled, callers still get usable timestamps via a safe fallback.
+    """
+    env = (os.environ.get("SSMAKER_DISABLE_FASTER_WHISPER") or "").strip().lower()
+    if env in ("1", "true", "yes", "on"):
+        return True
+    if env in ("0", "false", "no", "off"):
+        return False
+
+    # Conservative default until the ecosystem stabilizes.
+    return sys.version_info >= (3, 14)
+
+
+def _char_proportional_timestamps(app, tts_path: str, transcript_text: str, subtitle_segments):
+    """Safe fallback: distribute segment durations proportional to character counts."""
+    audio = AudioSegment.from_file(tts_path)
+    audio_duration = len(audio) / 1000.0
+
+    if subtitle_segments is None:
+        subtitle_segments = _split_text_naturally(app, transcript_text)
+
+    # Best-effort lead-in offset detection.
+    voice_start = 0.0
+    try:
+        from core.video.VideoTool import _detect_audio_start_offset
+
+        voice_start = float(_detect_audio_start_offset(tts_path) or 0.0)
+    except Exception:
+        voice_start = 0.0
+
+    if voice_start < 0:
+        voice_start = 0.0
+    if voice_start > audio_duration:
+        voice_start = 0.0
+
+    def _seg_len(s: str) -> int:
+        return max(1, len(re.sub(r"[^0-9A-Za-z가-힣]", "", str(s or ""))))
+
+    segs = list(subtitle_segments or [])
+    if not segs:
+        return {
+            "audio_duration": audio_duration,
+            "voice_start": voice_start,
+            "voice_end": audio_duration,
+            "segments": [],
+        }
+
+    lengths = [_seg_len(s) for s in segs]
+    total = sum(lengths)
+    available = max(0.0, audio_duration - voice_start)
+    min_dur = 0.15
+
+    # First pass allocation.
+    spans = []
+    t = voice_start
+    for i, (seg_text, seg_len) in enumerate(zip(segs, lengths), start=1):
+        dur = (available * (seg_len / total)) if total > 0 else (available / max(1, len(segs)))
+        dur = max(min_dur, float(dur))
+        spans.append((i, seg_text, t, t + dur))
+        t = t + dur
+
+    # Scale down if we overshoot.
+    last_end = spans[-1][3]
+    target_end = max(voice_start + min_dur, audio_duration - 0.005)
+    if last_end > target_end and last_end > voice_start:
+        scale = (target_end - voice_start) / (last_end - voice_start)
+        scaled = []
+        for i, seg_text, start, end in spans:
+            s2 = voice_start + (start - voice_start) * scale
+            e2 = voice_start + (end - voice_start) * scale
+            if e2 - s2 < min_dur:
+                e2 = s2 + min_dur
+            scaled.append((i, seg_text, s2, e2))
+        spans = scaled
+
+    segments = []
+    prev_end = voice_start
+    for i, seg_text, start, end in spans:
+        if start < prev_end:
+            start = prev_end + 0.005
+        if end <= start:
+            end = start + min_dur
+        if end > audio_duration:
+            end = audio_duration - 0.005
+        if start < 0:
+            start = 0.0
+        segments.append(
+            {
+                "index": i,
+                "text": seg_text,
+                "start": round(start, 3),
+                "end": round(end, 3),
+            }
+        )
+        prev_end = end
+
+    voice_end = segments[-1]["end"] if segments else audio_duration
+    return {
+        "audio_duration": audio_duration,
+        "voice_start": round(voice_start, 3),
+        "voice_end": round(voice_end, 3),
+        "segments": segments,
+    }
+
+
 def _get_runtime_base_path():
     if getattr(sys, "frozen", False):
         return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
@@ -73,6 +183,24 @@ def _find_model_in_dir(model_dir):
     return None
 
 
+def _list_available_model_sizes(model_root: str):
+    """Return model size directory names that look usable under model_root."""
+    sizes = []
+    if not model_root or not os.path.isdir(model_root):
+        return sizes
+    try:
+        for entry in os.listdir(model_root):
+            full = os.path.join(model_root, entry)
+            if not os.path.isdir(full):
+                continue
+            if _find_model_in_dir(full):
+                sizes.append(entry)
+    except Exception:
+        return []
+    # Stable ordering helps debugging; callers still apply their own preference order.
+    return sorted(set(sizes))
+
+
 def _get_model_path(model_size):
     """
     faster-whisper 모델 경로 가져오기
@@ -82,33 +210,15 @@ def _get_model_path(model_size):
       faster_whisper_models/<size>/models--Systran--faster-whisper-<size>/
         snapshots/<commit_hash>/model.bin (symlink → blobs/)
     """
-    if getattr(sys, 'frozen', False):
-        # PyInstaller 빌드인 경우
-        base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
-        bundled_model_dir = os.path.join(base_path, 'faster_whisper_models', model_size)
-
-        resolved = _find_model_in_dir(bundled_model_dir)
-        if resolved:
-            logger.info(f"[Faster-Whisper] 빌드 포함 모델 사용: {resolved}")
-            return resolved
-
-        # exe 옆 폴더도 확인 (onedir 빌드)
-        exe_model_dir = os.path.join(os.path.dirname(sys.executable), 'faster_whisper_models', model_size)
-        if exe_model_dir != bundled_model_dir:
-            resolved = _find_model_in_dir(exe_model_dir)
-            if resolved:
-                logger.info(f"[Faster-Whisper] exe 옆 모델 사용: {resolved}")
-                return resolved
-
-        raise RuntimeError(
-            f"[Faster-Whisper] 오프라인 실행 실패: 모델이 빌드에 포함되지 않았습니다.\n"
-            f"경로: {bundled_model_dir}\n"
-            f"해결방법: download_whisper_models.py를 실행하여 모델을 다운로드한 후 재빌드하세요."
-        )
-    else:
-        # 개발 환경: 로컬 모델 폴더 확인 후 없으면 자동 다운로드
+    if not getattr(sys, "frozen", False):
+        # Dev environment: prefer local bundled models if present, otherwise let faster-whisper download.
         dev_model_dir = os.path.join(
-            os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'faster_whisper_models', model_size
+            os.path.dirname(os.path.abspath(__file__)),
+            "..",
+            "..",
+            "..",
+            "faster_whisper_models",
+            model_size,
         )
         dev_model_dir = os.path.normpath(dev_model_dir)
         resolved = _find_model_in_dir(dev_model_dir)
@@ -116,6 +226,88 @@ def _get_model_path(model_size):
             logger.info(f"[Faster-Whisper] 로컬 모델 사용: {resolved}")
             return resolved
         return model_size
+
+    # Frozen (PyInstaller): offline-only, so the model must exist in the bundle.
+    base_path = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+    exe_dir = os.path.dirname(sys.executable)
+
+    roots = []
+    env_root = os.environ.get("WHISPER_MODEL_PATH")
+    if env_root:
+        roots.append(env_root)
+    roots.append(os.path.join(base_path, "faster_whisper_models"))
+    roots.append(os.path.join(exe_dir, "faster_whisper_models"))
+
+    # De-dupe while preserving order.
+    uniq_roots = []
+    for r in roots:
+        if r and r not in uniq_roots:
+            uniq_roots.append(r)
+
+    # Try requested size first, then common fallbacks.
+    size_try_order = []
+    if model_size:
+        size_try_order.append(model_size)
+    for s in ("base", "small", "tiny"):
+        if s not in size_try_order:
+            size_try_order.append(s)
+
+    available_by_root = {}
+    for root in uniq_roots:
+        if not root or not os.path.isdir(root):
+            continue
+
+        available_by_root[root] = _list_available_model_sizes(root)
+
+        # Preferred sizes first.
+        for size in size_try_order:
+            candidate_dir = os.path.join(root, size)
+            resolved = _find_model_in_dir(candidate_dir)
+            if resolved:
+                if size != model_size:
+                    logger.warning(
+                        "[Faster-Whisper] Requested model '%s' not found; using '%s' instead.",
+                        model_size,
+                        size,
+                    )
+                logger.info(f"[Faster-Whisper] 빌드 포함 모델 사용: {resolved}")
+                return resolved
+
+        # As a last resort, use any available model in the bundle.
+        for size in available_by_root[root]:
+            if size in size_try_order:
+                continue
+            candidate_dir = os.path.join(root, size)
+            resolved = _find_model_in_dir(candidate_dir)
+            if resolved:
+                logger.warning(
+                    "[Faster-Whisper] Requested model '%s' not found; using '%s' instead.",
+                    model_size,
+                    size,
+                )
+                logger.info(f"[Faster-Whisper] 빌드 포함 모델 사용: {resolved}")
+                return resolved
+
+    searched = []
+    for root in uniq_roots:
+        for size in size_try_order:
+            searched.append(os.path.join(root, size))
+
+    avail_lines = []
+    for root, sizes in available_by_root.items():
+        avail_lines.append(f"- {root}: {', '.join(sizes) if sizes else '(none)'}")
+    avail_text = "\n".join(avail_lines) if avail_lines else "(none)"
+
+    raise RuntimeError(
+        "[Faster-Whisper] 오프라인 실행 실패: 빌드에 포함된 모델을 찾을 수 없습니다.\n"
+        f"요청 모델: {model_size}\n"
+        "검색 경로:\n"
+        + "\n".join(searched[:15])
+        + ("\n..." if len(searched) > 15 else "")
+        + "\n"
+        f"사용 가능 모델:\n{avail_text}\n"
+        "해결방법: scripts/download_whisper_models.py를 실행하여 모델을 준비한 후 재빌드하세요."
+    )
 
 
 def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=None):
@@ -128,6 +320,13 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
     - 단어 단위 정밀 타임스탬프 획득
     """
     try:
+        if _should_disable_faster_whisper():
+            logger.info(
+                "[Faster-Whisper] Disabled (Python %s). Using char-proportional fallback timing.",
+                platform.python_version(),
+            )
+            return _char_proportional_timestamps(app, tts_path, transcript_text, subtitle_segments)
+
         logger.info("=" * 60)
         logger.info("[Faster-Whisper STT 분석] 시작...")
         logger.info("=" * 60)
@@ -172,24 +371,65 @@ def analyze_tts_with_whisper(app, tts_path, transcript_text, subtitle_segments=N
         cpu_threads = whisper_params.get('cpu_threads', 4)
         beam_size = whisper_params.get('beam_size', 5)
 
-        # 모델 로드
-        model_key = f"_faster_whisper_model_{model_size}"
-        if not hasattr(app, model_key) or getattr(app, model_key) is None:
-            logger.info(f"[Faster-Whisper] 모델 로딩 중 ({model_size}, {device}, {compute_type})...")
+        # If CUDA was requested but not actually available, fall back to CPU.
+        if str(device).lower() == "cuda":
+            try:
+                import ctranslate2
 
+                cuda_count = getattr(ctranslate2, "get_cuda_device_count", lambda: 0)()
+                if not cuda_count:
+                    logger.warning(
+                        "[Faster-Whisper] CUDA requested but no CUDA devices detected by CTranslate2; using CPU."
+                    )
+                    device = "cpu"
+                    compute_type = "int8"
+            except Exception as cuda_probe_err:
+                logger.warning(
+                    "[Faster-Whisper] CUDA probe failed (%s); using CPU.",
+                    cuda_probe_err,
+                )
+                device = "cpu"
+                compute_type = "int8"
+
+        # 모델 로드 (cache key includes device/compute_type to avoid mixing CPU/CUDA instances).
+        model_key = f"_faster_whisper_model_{model_size}_{device}_{compute_type}"
+        model = getattr(app, model_key, None)
+        if model is None:
+            logger.info(f"[Faster-Whisper] 모델 로딩 중 ({model_size}, {device}, {compute_type})...")
             model_path = _get_model_path(model_size)
 
-            model = WhisperModel(
-                model_path,
-                device=device,
-                compute_type=compute_type,
-                cpu_threads=cpu_threads
-            )
+            try:
+                model = WhisperModel(
+                    model_path,
+                    device=device,
+                    compute_type=compute_type,
+                    cpu_threads=cpu_threads,
+                )
+            except Exception as model_err:
+                # Common failure mode: CUDA selected on a non-CUDA machine.
+                if str(device).lower() == "cuda":
+                    logger.warning(
+                        "[Faster-Whisper] CUDA model init failed (%s); retrying on CPU.",
+                        model_err,
+                    )
+                    device = "cpu"
+                    compute_type = "int8"
+                    model_key = f"_faster_whisper_model_{model_size}_{device}_{compute_type}"
+                    model = getattr(app, model_key, None)
+                    if model is None:
+                        model = WhisperModel(
+                            model_path,
+                            device=device,
+                            compute_type=compute_type,
+                            cpu_threads=cpu_threads,
+                        )
+                else:
+                    raise
+
             setattr(app, model_key, model)
             logger.info("[Faster-Whisper] 모델 로드 완료")
         else:
             logger.debug("[Faster-Whisper] 캐시된 모델 사용")
-            model = getattr(app, model_key)
 
         # 자막 세그먼트 준비
         if subtitle_segments is None:

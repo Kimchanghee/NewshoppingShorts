@@ -160,8 +160,11 @@ class LoginHandler:
                 )
                 if user_id:
                     try:
-                        rest.logOut(userId=user_id, key="ssmaker")
-                        logger.info("[LoginHandler] Logout successful")
+                        logout_status = rest.logOut(userId=user_id, key="ssmaker")
+                        if str(logout_status).lower() == "success":
+                            logger.info("[LoginHandler] Logout successful")
+                        else:
+                            logger.warning(f"[LoginHandler] Logout returned non-success status: {logout_status}")
                     except Exception as logout_err:
                         logger.warning("Logout failed (ignored): %s", logout_err)
 

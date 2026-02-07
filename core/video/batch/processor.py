@@ -20,90 +20,17 @@ from PyQt6.QtCore import QTimer
 from utils.logging_config import get_logger
 from caller import rest
 from utils.error_handlers import TrialLimitExceededError
+from core.video.batch.api_key_recovery import (
+    show_api_key_error_and_wait,
+    try_rotate_key,
+    wait_for_user_key_retry,
+    interruptible_sleep,
+    KEY_BLOCK_DURATION_MINUTES,
+    RETRY_WAIT_MULTIPLIER_SECONDS,
+    SERVER_OVERLOAD_WAIT_MINUTES,
+)
 
 logger = get_logger(__name__)
-
-
-def _show_api_key_error_and_wait(app, step_name, key_name, error_msg, error_type="quota"):
-    """
-    API 키 오류 시 메인 스레드에서 팝업을 표시하고 사용자 응답을 기다린다.
-
-    Returns:
-        str: "retry" | "stop"
-    """
-    result_holder = {"action": "stop"}
-    wait_event = threading.Event()
-
-    def _show_dialog():
-        try:
-            from ui.windows.api_key_error_dialog import ApiKeyErrorDialog
-
-            # Close any previous dialog (avoid stacking multiple popups).
-            prev = getattr(app, "_api_key_error_dialog", None)
-            if prev is not None:
-                try:
-                    prev.close()
-                    prev.deleteLater()
-                except Exception:
-                    pass
-
-            dialog = ApiKeyErrorDialog(
-                parent=app,
-                step_name=step_name,
-                key_name=key_name,
-                error_msg=error_msg,
-                error_type=error_type,
-            )
-
-            def _on_finished(_code=None):
-                try:
-                    result_holder["action"] = getattr(dialog, "result_action", "stop")
-                finally:
-                    try:
-                        dialog.deleteLater()
-                    except Exception:
-                        pass
-                    if getattr(app, "_api_key_error_dialog", None) is dialog:
-                        app._api_key_error_dialog = None
-                    wait_event.set()
-
-            dialog.finished.connect(_on_finished)
-            dialog.show()
-            try:
-                dialog.raise_()
-                dialog.activateWindow()
-            except Exception:
-                pass
-            app._api_key_error_dialog = dialog
-        except Exception as dialog_err:
-            logger.error(f"[ApiKeyErrorDialog] Failed to show: {dialog_err}")
-            result_holder["action"] = "stop"
-            wait_event.set()
-
-    signal = getattr(app, "ui_callback_signal", None)
-    if signal is not None:
-        try:
-            signal.emit(_show_dialog)
-        except RuntimeError:
-            wait_event.set()
-            return "stop"
-    else:
-        wait_event.set()
-        return "stop"
-
-    # Wait until user chooses an action. Keep responsive to a user-initiated stop.
-    while not wait_event.is_set():
-        if not getattr(app, "batch_processing", True):
-            # If processing has been stopped, close the dialog if it's open.
-            try:
-                dlg = getattr(app, "_api_key_error_dialog", None)
-                if dlg is not None and signal is not None:
-                    signal.emit(lambda: dlg.close())
-            except Exception:
-                pass
-            return "stop"
-        wait_event.wait(timeout=0.2)
-    return result_holder["action"]
 
 
 def _safe_set_url_status(app, url: str, status: str):
@@ -499,8 +426,12 @@ def dynamic_batch_processing_thread(app):
                                 f"{str(e)}\n\n구독이 필요합니다."
                             )
 
-                    # Use QTimer to show dialog on main thread
-                    QTimer.singleShot(0, show_trial_dialog)
+                    # Use ui_callback_signal for thread-safe UI dispatch
+                    signal = getattr(app, "ui_callback_signal", None)
+                    if signal is not None:
+                        signal.emit(show_trial_dialog)
+                    else:
+                        logger.warning("ui_callback_signal not available for trial dialog")
 
                     # Break out of retry loop and stop processing
                     break
@@ -547,96 +478,42 @@ def dynamic_batch_processing_thread(app):
                         or "resource_exhausted" in error_lower
                     ):
                         retry_count += 1
-                        current_key_name = 'unknown'
+                        current_key_name = "unknown"
                         api_mgr = getattr(app, "api_key_manager", None)
                         if api_mgr:
-                            current_key_name = getattr(api_mgr, 'current_key', 'unknown')
+                            current_key_name = getattr(api_mgr, "current_key", "unknown")
+
                         if retry_count < max_retries:
-                            wait_time = retry_count * 15  # 15, 30, 45초
+                            wait_time = retry_count * RETRY_WAIT_MULTIPLIER_SECONDS
                             app.add_log(
-                                f"[WARN] API 429 할당량 초과 (키: {current_key_name}). {wait_time}초 후 다른 키로 재시도... | {error_msg[:80]}"
+                                f"[WARN] API 429 할당량 초과 (키: {current_key_name}). "
+                                f"{wait_time}초 후 다른 키로 재시도... | {error_msg[:80]}"
                             )
+                            rotated, blocked, new_name = try_rotate_key(app)
+                            if rotated:
+                                app.add_log(f"[키 교체] {blocked} -> {new_name} ({KEY_BLOCK_DURATION_MINUTES}분 차단)")
+                            else:
+                                app.add_log("[WARN] 사용 가능한 API 키 없음 - 동일 키로 재시도")
 
-                            # API 키 교체
-                            api_mgr = getattr(app, "api_key_manager", None)
-                            try:
-                                if api_mgr is not None:
-                                    blocked_key = getattr(api_mgr, 'current_key', 'unknown')
-                                    api_mgr.block_current_key(
-                                        duration_minutes=30
-                                    )
-                                    new_key = api_mgr.get_available_key()
-                                    new_key_name = getattr(api_mgr, 'current_key', 'unknown')
-                                    if new_key and app.init_client(use_specific_key=new_key):
-                                        app.add_log(f"[키 교체] {blocked_key} -> {new_key_name} (30분 차단)")
-                                    else:
-                                        app.add_log("[WARN] 사용 가능한 API 키 없음 - 동일 키로 재시도")
-                                else:
-                                    app.add_log("[WARN] API 키 관리자 미초기화 - 동일 키로 재시도")
-                            except Exception as api_key_err:
-                                logger.warning("API 키 교체 실패: %s", api_key_err)
-                                app.add_log(f"[WARN] API 키 교체 실패: {api_key_err}")
-
-                            # 대기
-                            for _ in range(wait_time):
-                                if not app.batch_processing:
-                                    break
-                                time.sleep(1)
+                            interruptible_sleep(app, wait_time)
                             continue
                         else:
-                            app.add_log(
-                                f"⚠️ {max_retries}번 재시도 실패 - 사용자 입력 대기 중..."
+                            app.add_log(f"⚠️ {max_retries}번 재시도 실패 - 사용자 입력 대기 중...")
+                            resumed = wait_for_user_key_retry(
+                                app, "영상 처리", current_key_name, error_msg, "quota"
                             )
-
-                            resumed = False
-                            while app.batch_processing:
-                                # 팝업 표시 + 일시정지
-                                user_action = _show_api_key_error_and_wait(
-                                    app,
-                                    step_name="영상 처리",
-                                    key_name=current_key_name,
-                                    error_msg=error_msg[:200],
-                                    error_type="quota",
-                                )
-
-                                if user_action != "retry":
-                                    break
-
-                                # 키 매니저에서 사용 가능한 키 재확인 (사용자가 설정에서 키 추가 후 클릭)
-                                api_mgr_retry = getattr(app, "api_key_manager", None)
-                                if not api_mgr_retry:
-                                    app.add_log("[WARN] API 키 관리자 없음 - 설정에서 키를 추가한 뒤 다시 시도해주세요.")
-                                    continue
-
-                                try:
-                                    new_key = api_mgr_retry.get_available_key()
-                                except Exception as retry_err:
-                                    app.add_log(f"[WARN] 사용 가능한 키 없음: {retry_err}")
-                                    continue
-
-                                if new_key and app.init_client(use_specific_key=new_key):
-                                    new_name = getattr(api_mgr_retry, "current_key", "unknown")
-                                    app.add_log(f"▶ 작업 재개 (키: {new_name})")
-                                    retry_count = 0  # 재시도 카운터 초기화
-                                    resumed = True
-                                    break
-
-                                app.add_log("[WARN] 키 초기화 실패 - 다시 시도해주세요.")
-
                             if resumed:
+                                retry_count = 0
                                 continue
 
-                            # stop 또는 retry 실패
-                            app.add_log(f"❌ 작업 중지됨 (API 키 소진)")
+                            app.add_log("작업 중지됨 (API 키 소진)")
                             _safe_set_url_status(app, url, "failed")
                             app.url_status_message[url] = _get_short_error_message(e)
                             failed_count += 1
-
                             try:
                                 app._auto_save_session()
                             except Exception as session_err:
                                 logger.warning("[세션] 저장 실패: %s", session_err)
-
                             break
 
                     # ★ 500 기타 서버 오류 → 1분 대기 후 재시도
@@ -668,86 +545,38 @@ def dynamic_batch_processing_thread(app):
                     else:
                         lowered = error_msg.lower()
                         permission_indicators = [
-                            "permission denied",
-                            "permission_denied",
-                            "forbidden",
-                            "403",
-                            "suspended",
-                            "invalid api key",
-                            "unauthorized",
+                            "permission denied", "permission_denied",
+                            "forbidden", "403", "suspended",
+                            "invalid api key", "unauthorized",
                         ]
-                        if any(token in lowered for token in permission_indicators):
-                            perm_key_name = 'unknown'
-                            perm_api_mgr_pre = getattr(app, "api_key_manager", None)
-                            if perm_api_mgr_pre:
-                                perm_key_name = getattr(perm_api_mgr_pre, 'current_key', 'unknown')
+                        if any(ind in lowered for ind in permission_indicators):
+                            api_mgr = getattr(app, "api_key_manager", None)
+                            perm_key_name = getattr(api_mgr, "current_key", "unknown") if api_mgr else "unknown"
                             app.add_log(
-                                f"[WARN] API 403 권한 오류 (키: {perm_key_name}). 키 차단 후 교체 중... | {error_msg[:80]}"
+                                f"[WARN] API 403 권한 오류 (키: {perm_key_name}). "
+                                f"키 차단 후 교체 중... | {error_msg[:80]}"
                             )
-                            perm_api_mgr = getattr(app, "api_key_manager", None)
-                            if perm_api_mgr is not None:
-                                blocked_key = getattr(perm_api_mgr, 'current_key', 'unknown')
-                                try:
-                                    perm_api_mgr.block_current_key(
-                                        duration_minutes=30
-                                    )
-                                except Exception as block_exc:
-                                    app.add_log(f"[WARN] 키 차단 중 오류: {block_exc}")
-                                try:
-                                    new_key = perm_api_mgr.get_available_key()
-                                    new_key_name = getattr(perm_api_mgr, 'current_key', 'unknown')
-                                    if new_key and app.init_client(use_specific_key=new_key):
-                                        app.add_log(f"[키 교체] {blocked_key} -> {new_key_name} (403 권한 오류, 30분 차단)")
-                                        continue
-                                    else:
-                                        app.add_log("[WARN] 사용 가능한 API 키 없음")
-                                        resumed = False
-                                        while app.batch_processing:
-                                            # 팝업으로 사용자 입력 대기
-                                            user_action = _show_api_key_error_and_wait(
-                                                app,
-                                                step_name="영상 처리",
-                                                key_name=blocked_key,
-                                                error_msg=error_msg[:200],
-                                                error_type="permission",
-                                            )
-                                            if user_action != "retry":
-                                                break
+                            rotated, blocked, new_name = try_rotate_key(app)
+                            if rotated:
+                                app.add_log(f"[키 교체] {blocked} -> {new_name} (403 권한 오류, {KEY_BLOCK_DURATION_MINUTES}분 차단)")
+                                continue
 
-                                            try:
-                                                nk = perm_api_mgr.get_available_key()
-                                            except Exception as retry_err:
-                                                app.add_log(f"[WARN] 사용 가능한 키 없음: {retry_err}")
-                                                continue
+                            app.add_log("[WARN] 사용 가능한 API 키 없음")
+                            resumed = wait_for_user_key_retry(
+                                app, "영상 처리", perm_key_name, error_msg, "permission"
+                            )
+                            if resumed:
+                                continue
 
-                                            if nk and app.init_client(use_specific_key=nk):
-                                                app.add_log(
-                                                    f"▶ 작업 재개 (키: {getattr(perm_api_mgr, 'current_key', '?')})"
-                                                )
-                                                resumed = True
-                                                break
-
-                                            app.add_log("[WARN] 키 초기화 실패 - 다시 시도해주세요.")
-
-                                        if resumed:
-                                            continue
-                                except Exception as switch_exc:
-                                    app.add_log(
-                                        f"[WARN] 권한 오류 후 새 API 키 확보 실패: {switch_exc}"
-                                    )
-                            else:
-                                app.add_log("[WARN] API 키 관리자 미초기화 - 키 교체 불가")
                         _safe_set_url_status(app, url, "failed")
                         app.url_status_message[url] = _get_short_error_message(e)
                         failed_count += 1
                         translated_error_msg = _translate_error_message(error_msg)
-                        app.add_log(f"❌ 실패: {translated_error_msg[:100]}")
-
+                        app.add_log(f"실패: {translated_error_msg[:100]}")
                         try:
                             app._auto_save_session()
                         except Exception as session_err:
                             logger.warning("[세션] 저장 실패: %s", session_err)
-
                         break
 
             # 정리

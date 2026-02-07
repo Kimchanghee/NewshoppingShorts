@@ -14,7 +14,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QMessageBox, QFrame, QProgressBar,
     QSpacerItem, QSizePolicy, QTextEdit, QLineEdit,
-    QGridLayout, QStackedWidget
+    QGridLayout, QStackedWidget, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
@@ -761,8 +761,20 @@ class SubscriptionPanel(QWidget):
         self._build_ui()
         
     def _build_ui(self):
-        # Main layout with scroll capability
-        main_layout = QVBoxLayout(self)
+        # Scroll area: keep the main window size stable and allow tall content to be reachable.
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        scroll = self.scroll_area = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+
+        page = QWidget()
+        main_layout = QVBoxLayout(page)
         main_layout.setContentsMargins(
             ds.spacing.space_6,
             ds.spacing.space_6,
@@ -839,6 +851,9 @@ class SubscriptionPanel(QWidget):
         content_layout.addWidget(self.payment_form, 1)
         
         main_layout.addWidget(content)
+
+        scroll.setWidget(page)
+        outer_layout.addWidget(scroll)
         
         self._apply_styles()
         
@@ -866,6 +881,12 @@ class SubscriptionPanel(QWidget):
         """Show plan selection"""
         self.plans_container.show()
         self.payment_form.hide()
+        # Ensure the newly revealed section is reachable without resizing the window.
+        QTimer.singleShot(
+            0,
+            lambda: getattr(self, "scroll_area", None)
+            and self.scroll_area.ensureWidgetVisible(self.plans_container, 0, ds.spacing.space_6),
+        )
         
     def _on_plan_selected(self, plan_data: dict):
         """Handle plan selection"""

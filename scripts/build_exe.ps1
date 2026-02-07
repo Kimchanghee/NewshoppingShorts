@@ -14,6 +14,9 @@ Write-Host "Python: $Python"
 Write-Host "`n[1/5] Cleaning build artifacts..."
 Remove-Item -Path (Join-Path $Root "build"), (Join-Path $Root "dist") -Recurse -Force -ErrorAction SilentlyContinue
 
+Write-Host "`n[1.5/5] Materializing faster-whisper models (dereference HF cache symlinks)..."
+& $Python (Join-Path $Root "scripts\\materialize_whisper_models.py")
+
 Write-Host "`n[2/5] Building updater.exe (for bundling)..."
 & $Python -m PyInstaller --noconfirm --clean (Join-Path $Root "updater.spec")
 

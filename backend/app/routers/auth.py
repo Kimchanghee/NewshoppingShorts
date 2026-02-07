@@ -1,4 +1,4 @@
-import os
+import hashlib
 import ipaddress
 import os
 import re
@@ -156,7 +156,8 @@ async def rate_limit_exceeded_handler(
 async def login(request: Request, data: LoginRequest, db: Session = Depends(get_db)):
     """Login endpoint - backward compatible with existing client"""
     client_ip = get_client_ip(request)
-    logger.info(f"[Login Request] ID: {data.id}, IP: {client_ip}, Force: {data.force}")
+    ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:12] if client_ip else "unknown"
+    logger.info(f"[Login Request] ID: {data.id}, IP_hash: {ip_hash}, Force: {data.force}")
     
     service = AuthService(db)
     result = await service.login(
@@ -206,7 +207,8 @@ async def check_username(
     username_clean = username.lower().strip()
     client_ip = get_client_ip(request)
 
-    logger.info(f"[CheckUsername] Request for: {username_clean} from IP: {client_ip}")
+    ck_ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:12] if client_ip else "unknown"
+    logger.info(f"[CheckUsername] Request for: {username_clean} from IP_hash: {ck_ip_hash}")
 
     try:
         # 유효성 검사
