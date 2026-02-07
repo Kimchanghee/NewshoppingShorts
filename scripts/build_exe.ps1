@@ -68,11 +68,10 @@ try {
 # Must-have bundle items
 $mustContain = @(
   "updater.exe",
-  "resource\\bin\\ffmpeg.exe",
-  "resource\\bin\\ffprobe.exe",
-  "fonts\\Pretendard-ExtraBold.ttf",
   "version.json",
-  "ui_preferences.json"
+  "ui_preferences.json",
+  # Ensure we ship an ffmpeg binary (we rely on imageio_ffmpeg, not a local resource/bin copy).
+  "imageio_ffmpeg\\binaries\\ffmpeg"
 )
 
 foreach ($item in $mustContain) {
