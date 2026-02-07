@@ -117,17 +117,42 @@ class ApiKeyErrorDialog(QDialog):
 
         # Info message
         info_frame = QFrame()
-        info_frame.setStyleSheet(
-            "background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 8px; padding: 12px;"
-        )
         info_layout = QVBoxLayout(info_frame)
         info_layout.setContentsMargins(12, 12, 12, 12)
-        info_text = QLabel(
-            "설정에서 새 API 키를 추가한 후 '작업 계속하기'를 누르면\n"
-            "남은 작업을 이어서 진행할 수 있습니다."
-        )
+
+        # Check if it's a Google Drive permission error
+        is_gdrive_error = False
+        if error_type == "permission" and error_msg:
+            lowered = error_msg.lower()
+            if any(x in lowered for x in ["you do not have permission to access the file", "file not found", "permission denied"]):
+                is_gdrive_error = True
+
+        if is_gdrive_error:
+            # Google Drive specific message
+            info_frame.setStyleSheet(
+                "background-color: #FFF7ED; border: 1px solid #FDBA74; border-radius: 8px; padding: 12px;"
+            )
+            info_text = QLabel(
+                "⚠️ 구글 드라이브 파일 권한 오류\n\n"
+                "이 오류는 API 키 문제가 아니라 파일 공유 설정 문제입니다.\n\n"
+                "해결 방법:\n"
+                "1. 구글 드라이브에서 해당 파일을 '링크가 있는 모든 사용자'로 공유\n"
+                "2. 또는 OAuth 인증 방식으로 전환\n"
+                "3. 또는 '작업 중지'를 눌러 해당 URL을 건너뛰기"
+            )
+            info_text.setStyleSheet("color: #9A3412; background: transparent; border: none;")
+        else:
+            # Standard message for quota errors
+            info_frame.setStyleSheet(
+                "background-color: #EFF6FF; border: 1px solid #BFDBFE; border-radius: 8px; padding: 12px;"
+            )
+            info_text = QLabel(
+                "설정에서 새 API 키를 추가한 후 '작업 계속하기'를 누르면\n"
+                "남은 작업을 이어서 진행할 수 있습니다."
+            )
+            info_text.setStyleSheet("color: #1E40AF; background: transparent; border: none;")
+
         info_text.setFont(QFont("Pretendard", 10))
-        info_text.setStyleSheet("color: #1E40AF; background: transparent; border: none;")
         info_text.setWordWrap(True)
         info_layout.addWidget(info_text)
         layout.addWidget(info_frame)

@@ -153,27 +153,68 @@ def wait_for_user_key_retry(app, step_name, key_name, error_msg, error_type="quo
     Returns:
         bool: True if successfully resumed with a new key, False if stopped
     """
+    # Detect Google Drive permission errors (file sharing issue, not API key issue)
+    is_gdrive_permission_error = False
+    if error_type == "permission":
+        lowered_msg = error_msg.lower()
+        gdrive_indicators = [
+            "you do not have permission to access the file",
+            "file not found",
+            "permission denied"
+        ]
+        # Check if it's a Google Drive file ID pattern (alphanumeric, ~33 chars)
+        if any(indicator in lowered_msg for indicator in gdrive_indicators):
+            is_gdrive_permission_error = True
+            app.add_log(
+                "[WARN] 구글 드라이브 파일 접근 권한 오류가 감지되었습니다. "
+                "이는 API 키 문제가 아니라 파일 공유 설정 문제일 수 있습니다."
+            )
+
+    retry_count = 0
+    max_retries = 3 if not is_gdrive_permission_error else 1
+
     while getattr(app, "batch_processing", True):
+        # For Google Drive permission errors, show enhanced message
+        display_msg = error_msg[:200]
+        if is_gdrive_permission_error and retry_count == 0:
+            display_msg += "\n\n💡 해결 방법: 구글 드라이브에서 해당 파일을 '링크가 있는 모든 사용자'로 공유하거나, OAuth 인증을 사용하세요."
+
         user_action = show_api_key_error_and_wait(
             app,
             step_name=step_name,
             key_name=key_name,
-            error_msg=error_msg[:200],
+            error_msg=display_msg,
             error_type=error_type,
         )
 
         if user_action != "retry":
             break
 
+        retry_count += 1
+
+        # Prevent infinite loop for Google Drive permission errors
+        if is_gdrive_permission_error and retry_count > max_retries:
+            app.add_log(
+                "[오류] 구글 드라이브 파일 권한 오류는 API 키로 해결할 수 없습니다. "
+                "파일 공유 설정을 확인하거나 해당 URL을 건너뛰세요."
+            )
+            break
+
         api_mgr = getattr(app, "api_key_manager", None)
         if not api_mgr:
             app.add_log("[WARN] API 키 관리자 없음 - 설정에서 키를 추가한 뒤 다시 시도해주세요.")
+            if retry_count >= max_retries:
+                app.add_log(f"[오류] {max_retries}번 재시도 실패 - 작업을 중지합니다.")
+                break
             continue
 
         try:
             new_key = api_mgr.get_available_key()
         except Exception as retry_err:
             app.add_log(f"[WARN] 사용 가능한 키 없음: {retry_err}")
+            if retry_count >= max_retries:
+                app.add_log(f"[오류] {max_retries}번 재시도 실패 - 작업을 중지합니다.")
+                break
             continue
 
         if new_key and app.init_client(use_specific_key=new_key):
@@ -181,7 +222,11 @@ def wait_for_user_key_retry(app, step_name, key_name, error_msg, error_type="quo
             app.add_log(f"작업 재개 (키: {new_name})")
             return True
 
-        app.add_log("[WARN] 키 초기화 실패 - 다시 시도해주세요.")
+        app.add_log(f"[WARN] 키 초기화 실패 ({retry_count}/{max_retries})")
+
+        if retry_count >= max_retries:
+            app.add_log(f"[오류] {max_retries}번 재시도 실패 - 작업을 중지합니다.")
+            break
 
     return False
 
