@@ -1,11 +1,6 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
-if ($PSVersionTable.PSVersion.Major -ge 7) {
-  # In PowerShell 7+, treat native command non-zero exit codes as terminating errors.
-  $PSNativeCommandUseErrorActionPreference = $true
-}
-
 function Invoke-Native {
   param(
     [Parameter(Mandatory = $true)][string]$Step,
@@ -14,10 +9,21 @@ function Invoke-Native {
   )
 
   Write-Host "`n$Step"
-  & $Exe @Args
+  $tail = New-Object System.Collections.Generic.List[string]
+  & $Exe @Args 2>&1 | ForEach-Object {
+    # Preserve full logs (for local runs) while keeping only the last N lines for CI annotations.
+    $_
+    $line = $_.ToString()
+    $tail.Add($line)
+    if ($tail.Count -gt 40) {
+      $tail.RemoveAt(0)
+    }
+  }
+
   $exitCode = $LASTEXITCODE
   if ($exitCode -ne 0) {
-    throw "${Step} failed with exit code ${exitCode}: ${Exe} $($Args -join ' ')"
+    $tailText = ($tail -join " | ")
+    throw "${Step} failed with exit code ${exitCode}: ${Exe} $($Args -join ' ') | tail: ${tailText}"
   }
 }
 
