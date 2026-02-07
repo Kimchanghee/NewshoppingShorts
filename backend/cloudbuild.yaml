@@ -1,0 +1,26 @@
+steps:
+  # Build the container image
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'us-central1-docker.pkg.dev/project-d0118f2c-58f4-4081-864/ssmaker-repo/ssmaker-auth-api:latest', '.']
+  
+  # Push the container image to Artifact Registry
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'us-central1-docker.pkg.dev/project-d0118f2c-58f4-4081-864/ssmaker-repo/ssmaker-auth-api:latest']
+  
+  # Deploy container image to Cloud Run
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: gcloud
+    args:
+      - 'run'
+      - 'deploy'
+      - 'ssmaker-auth-api'
+      - '--image'
+      - 'us-central1-docker.pkg.dev/project-d0118f2c-58f4-4081-864/ssmaker-repo/ssmaker-auth-api:latest'
+      - '--region'
+      - 'us-central1'
+      - '--platform'
+      - 'managed'
+      - '--allow-unauthenticated'
+
+images:
+  - 'us-central1-docker.pkg.dev/project-d0118f2c-58f4-4081-864/ssmaker-repo/ssmaker-auth-api:latest'
