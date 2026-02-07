@@ -31,7 +31,7 @@ packages_to_collect = [
 hidden_imports = []
 datas = [
     ('resource', 'resource'),
-    ('fonts', 'fonts'),
+    # Fonts are intentionally not bundled (see .gitignore). The app falls back to system fonts.
     ('version.json', '.'),
     ('ui_preferences.json', '.'),
 ]
