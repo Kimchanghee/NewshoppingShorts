@@ -235,6 +235,27 @@ class SettingsTab(QWidget, ThemedMixin):
         btn_layout.setContentsMargins(0, 8, 0, 0)
         btn_layout.setSpacing(12)
 
+        # 저장된 키 불러오기 (기본: 자동 로드하지 않음)
+        # 보안/UX: 앱 첫 실행/빌드 테스트 시 민감 정보가 "입력칸에 미리 채워진 것"처럼 보이지 않도록
+        # 사용자가 원할 때만 불러와서 표시합니다.
+        self.api_load_btn = QPushButton("저장된 키 불러오기")
+        self.api_load_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.api_load_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                padding: 10px 20px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                font-weight: 500;
+            }}
+            QPushButton:hover {{
+                background-color: {c.surface};
+            }}
+        """)
+        self.api_load_btn.clicked.connect(self._load_saved_api_keys)
+        btn_layout.addWidget(self.api_load_btn)
+
         # 저장 버튼
         self.api_save_btn = QPushButton("모든 키 저장")
         self.api_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -297,14 +318,14 @@ class SettingsTab(QWidget, ThemedMixin):
         self.api_section.content_layout.addWidget(btn_container)
 
         # 등록된 키 개수 표시
-        self.api_count_label = QLabel("등록된 키: 0개")
+        self.api_count_label = QLabel("저장된 키: 0개")
         self.api_count_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;")
         self.api_section.content_layout.addWidget(self.api_count_label)
 
         content_layout.addWidget(self.api_section)
 
-        # 저장된 키 로드
-        self._load_saved_api_keys()
+        # 저장된 키 개수만 표시 (값은 자동으로 입력칸에 채우지 않음)
+        self._update_key_count()
         
         # =================== SECTION: App Info ===================
         info_section = SettingsSection("앱 정보")
@@ -487,9 +508,18 @@ class SettingsTab(QWidget, ThemedMixin):
             logger.warning(f"[Settings] API 키 로드 실패: {e}")
 
     def _update_key_count(self):
-        """등록된 키 개수 업데이트"""
-        count = sum(1 for inp in self.api_key_inputs if inp.text().strip())
-        self.api_count_label.setText(f"등록된 키: {count}개")
+        """저장된 키 개수 업데이트 (SecretsManager 기준)."""
+        try:
+            count = 0
+            for i in range(1, 9):
+                key_value = SecretsManager.get_api_key(f"gemini_api_{i}")
+                if key_value and str(key_value).strip():
+                    count += 1
+            self.api_count_label.setText(f"저장된 키: {count}개")
+        except Exception:
+            # Fallback: UI 입력값 기준 (예외 상황에서만)
+            count = sum(1 for inp in self.api_key_inputs if inp.text().strip())
+            self.api_count_label.setText(f"저장된 키: {count}개")
 
     def _save_all_api_keys(self):
         """모든 API 키 저장 (빈칸 제거 및 당겨서 저장)"""

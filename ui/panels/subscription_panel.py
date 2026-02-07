@@ -753,6 +753,7 @@ class SubscriptionPanel(QWidget):
         self.payment = PaymentClient()
         self.current_payment_id: str | None = None
         self.poll_tries = 0
+        self._polling = False  # 중복 폴링 방지 플래그
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_status)
         self.selected_plan = None
@@ -904,21 +905,19 @@ class SubscriptionPanel(QWidget):
             QMessageBox.warning(self, "알림", "플랜을 먼저 선택해주세요.")
             return
 
-        # Get phone number from form
+        # Get phone number from form and validate Korean mobile format
+        import re as _re
         phone = self.payment_form.phone_input.text().strip()
-        if not phone or len(phone.replace("-", "")) < 10:
+        phone_digits = _re.sub(r'[^0-9]', '', phone)
+        if not phone_digits or len(phone_digits) < 10 or len(phone_digits) > 11:
             QMessageBox.warning(self, "알림", "전화번호를 정확히 입력해주세요.")
+            return
+        if not _re.match(r'^01[016789]\d{7,8}$', phone_digits):
+            QMessageBox.warning(self, "알림", "올바른 휴대폰 번호를 입력해주세요.\n(예: 010-1234-5678)")
             return
 
         # Extract user_id from login_data
-        user_id = None
-        if self.gui and getattr(self.gui, "login_data", None):
-            data_part = self.gui.login_data.get("data", {})
-            if isinstance(data_part, dict):
-                inner = data_part.get("data", {})
-                user_id = inner.get("id")
-            if not user_id:
-                user_id = self.gui.login_data.get("userId")
+        user_id = self._extract_user_id()
 
         if not user_id:
             QMessageBox.warning(self, "알림", "로그인 정보를 찾을 수 없습니다.")
@@ -935,8 +934,8 @@ class SubscriptionPanel(QWidget):
             self._start_poll()
         except Exception as e:
             logger.error(f"[Subscription] PayApp checkout failed: {e}")
-            QMessageBox.critical(self, "오류", f"결제 요청 실패:\n{e}")
-            self.payment_form.set_status(f"오류: {e}")
+            QMessageBox.critical(self, "오류", "결제 요청에 실패했습니다.\n잠시 후 다시 시도해주세요.")
+            self.payment_form.set_status("결제 요청 오류")
             
     def _cancel_payment(self):
         """Cancel payment and hide form"""
@@ -956,42 +955,112 @@ class SubscriptionPanel(QWidget):
         self.timer.stop()
         
     def _poll_status(self):
-        """Poll payment status"""
+        """Poll payment status (비동기 - UI 프리즈 방지)"""
         if not self.current_payment_id:
             self._stop_poll()
             return
-            
+
+        if self._polling:
+            return  # 이전 요청이 진행 중이면 스킵
+
         if self.poll_tries >= config.CHECKOUT_POLL_MAX_TRIES:
             self._stop_poll()
-            QMessageBox.information(self, "타임아웃", "결제 확인 시간이 초과되었습니다.")
+            QMessageBox.information(
+                self, "타임아웃",
+                "결제 확인 시간이 초과되었습니다.\n"
+                "입금을 완료하셨다면 잠시 후 앱을 재시작하면 구독이 자동으로 반영됩니다.\n"
+                "문제가 지속되면 고객센터에 문의해주세요."
+            )
             self.payment_form.set_status("시간 초과")
             return
-            
+
         self.poll_tries += 1
-        
+        self._polling = True
+
+        import threading
+        payment_id = self.current_payment_id
+
+        def _do_poll():
+            try:
+                data = self.payment.get_status(payment_id)
+                status = data.get("status", "pending")
+                # UI 콜백 (메인 스레드)
+                cb_signal = getattr(self.gui, 'ui_callback_signal', None) if self.gui else None
+                if cb_signal is not None:
+                    cb_signal.emit(lambda: self._handle_poll_result(status))
+                else:
+                    QTimer.singleShot(0, lambda: self._handle_poll_result(status))
+            except Exception as e:
+                logger.error(f"[Subscription] status poll failed: {e}")
+                cb_signal = getattr(self.gui, 'ui_callback_signal', None) if self.gui else None
+                if cb_signal is not None:
+                    cb_signal.emit(lambda: self._handle_poll_error())
+                else:
+                    QTimer.singleShot(0, self._handle_poll_error)
+            finally:
+                self._polling = False
+
+        threading.Thread(target=_do_poll, daemon=True).start()
+
+    def _handle_poll_result(self, status: str):
+        """폴링 결과 처리 (메인 스레드에서 호출)"""
+        status_text = f"상태: {status}"
+        self.payment_form.set_status(status_text)
+
+        if status in ("paid", "success", "succeeded"):
+            self._stop_poll()
+            QMessageBox.information(self, "완료", "결제가 완료되었습니다! 구독이 활성화됩니다.")
+            self.payment_form.hide()
+            self.plans_container.hide()
+            self._verify_subscription_server()
+        elif status in ("failed", "canceled", "cancelled"):
+            self._stop_poll()
+            QMessageBox.warning(self, "실패", "결제가 실패/취소되었습니다.")
+            self.payment_form.set_status("결제 실패/취소")
+
+    def _handle_poll_error(self):
+        """폴링 오류 처리 (메인 스레드에서 호출)"""
+        self.payment_form.set_status("상태 조회 오류")
+
+    def _extract_user_id(self):
+        """login_data에서 user_id를 안전하게 추출"""
+        if not self.gui or not getattr(self.gui, "login_data", None):
+            return None
+        data_part = self.gui.login_data.get("data", {})
+        if isinstance(data_part, dict):
+            inner = data_part.get("data", {})
+            user_id = inner.get("id")
+            if user_id:
+                return user_id
+        return self.gui.login_data.get("userId")
+
+    def _verify_subscription_server(self):
+        """결제 완료 후 서버에서 구독 상태를 재확인하여 UI 업데이트"""
         try:
-            data = self.payment.get_status(self.current_payment_id)
-            status = data.get("status", "pending")
-            
-            status_text = f"상태: {status}"
-            self.payment_form.set_status(status_text)
-            
-            if status in ("paid", "success", "succeeded"):
-                self._stop_poll()
-                QMessageBox.information(self, "완료", "결제가 완료되었습니다! 구독이 활성화됩니다.")
-                self.payment_form.hide()
-                self.plans_container.hide()
-                # Update current plan display to pro (unlimited)
-                if self.selected_plan:
-                    self.current_plan_card.update_plan("pro", used=0, total=999)
-            elif status in ("failed", "canceled", "cancelled"):
-                self._stop_poll()
-                QMessageBox.warning(self, "실패", "결제가 실패/취소되었습니다.")
-                self.payment_form.set_status("결제 실패/취소")
+            user_id = self._extract_user_id()
+            if not user_id:
+                # 서버 확인 불가 시 일단 pro로 표시
+                self.current_plan_card.update_plan("pro", used=0, total=999)
+                return
+            from caller import rest
+            status = rest.getSubscriptionStatus(user_id)
+            if status.get("success", True):
+                work_count = status.get("work_count", -1)
+                work_used = status.get("work_used", 0)
+                is_pro = (work_count == -1) or status.get("user_type") == "subscriber"
+                if is_pro:
+                    self.current_plan_card.update_plan("pro", used=work_used, total=999)
+                else:
+                    remaining = max(work_count - work_used, 0)
+                    self.current_plan_card.update_plan("trial", used=work_used, total=work_count)
+                logger.info(f"[Subscription] Server verification complete: pro={is_pro}")
+            else:
+                # 서버 확인 실패 시 일단 pro로 표시
+                self.current_plan_card.update_plan("pro", used=0, total=999)
         except Exception as e:
-            logger.error(f"[Subscription] status poll failed: {e}")
-            self.payment_form.set_status(f"상태 조회 오류: {e}")
-            
+            logger.error(f"[Subscription] Server verification failed: {e}")
+            self.current_plan_card.update_plan("pro", used=0, total=999)
+
     def update_usage(self, used: int, total: int, plan_id: str = "trial"):
         """Update current usage display"""
         self.current_plan_card.update_plan(plan_id, used, total)

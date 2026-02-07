@@ -22,6 +22,7 @@ from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.subscription_request import SubscriptionRequest, SubscriptionRequestStatus
 from app.models.user import User, UserType
+from app.utils.subscription_utils import is_subscription_active
 from app.schemas.subscription import (
     SubscriptionRequestCreate,
     SubscriptionRequestResponse,
@@ -89,8 +90,18 @@ async def submit_subscription_request(
                 message="사용자를 찾을 수 없습니다."
             )
 
-        # Check if user is already a subscriber
-        if user.work_count == -1:
+        # Check if user is already a subscriber (time-based).
+        user_type = getattr(user, "user_type", None)
+        user_type_value = (
+            user_type.value
+            if hasattr(user_type, "value")
+            else (str(user_type) if user_type is not None else "trial")
+        )
+        expiry = getattr(user, "subscription_expires_at", None)
+        is_paid_active = user_type_value in ("subscriber", "admin") and (
+            user_type_value == "admin" or expiry is None or is_subscription_active(expiry)
+        )
+        if is_paid_active:
             return SubscriptionResponse(
                 success=False,
                 message="이미 무제한 구독 중입니다."
@@ -180,10 +191,56 @@ async def get_my_subscription_status(
                 can_work=False
             )
 
-        # Calculate remaining
-        is_unlimited = user.work_count == -1
-        remaining = -1 if is_unlimited else max(0, user.work_count - user.work_used)
-        can_work = is_unlimited or remaining > 0
+        user_type = getattr(user, "user_type", None)
+        user_type_value = (
+            user_type.value
+            if hasattr(user_type, "value")
+            else (str(user_type) if user_type is not None else "trial")
+        )
+
+        expiry = getattr(user, "subscription_expires_at", None)
+        is_expired = expiry is not None and (not is_subscription_active(expiry))
+
+        # Auto-heal: trial user with active subscription → upgrade to subscriber
+        if user_type_value == "trial" and expiry is not None and is_subscription_active(expiry):
+            try:
+                user.user_type = "subscriber"
+                user.work_count = -1
+                db.commit()
+                user_type_value = "subscriber"
+                logger.info(f"Auto-healed user {user_id}: trial → subscriber (active subscription)")
+            except Exception:
+                db.rollback()
+                # Proceed as subscriber anyway to avoid blocking paid users
+                user_type_value = "subscriber"
+
+        # Paid accounts: period-based unlimited access during active subscription.
+        if user_type_value in ("admin", "subscriber"):
+            if user_type_value == "admin":
+                can_work = True
+                work_count = -1
+                remaining = -1
+            else:
+                can_work = (not is_expired) and (expiry is None or is_subscription_active(expiry))
+                work_count = -1 if can_work else 0
+                remaining = -1 if can_work else 0
+
+            # Best-effort: keep DB consistent for paid users.
+            if can_work and getattr(user, "work_count", None) != -1:
+                try:
+                    user.work_count = -1
+                    db.commit()
+                except Exception:
+                    db.rollback()
+
+            work_used = getattr(user, "work_used", 0)
+        else:
+            # Trial/free accounts: count-based access.
+            work_count = getattr(user, "work_count", 0)
+            work_used = getattr(user, "work_used", 0)
+            is_unlimited = work_count == -1
+            remaining = -1 if is_unlimited else max(0, work_count - work_used)
+            can_work = (not is_expired) and (is_unlimited or remaining > 0)
 
         # Check for pending subscription request
         pending_request = db.query(SubscriptionRequest).filter(
@@ -192,17 +249,22 @@ async def get_my_subscription_status(
         ).first()
 
         # Determine if trial user
-        user_type_value = user.user_type.value if hasattr(user.user_type, 'value') else str(user.user_type)
-        is_trial = user_type_value == "trial" or (user.work_count > 0 and user.work_count != -1)
+        is_trial = user_type_value == "trial"
+
+        # Only expose subscription expiry for paid accounts to avoid UI treating
+        # trial validity as "paid subscription".
+        subscription_expires_at = None
+        if user_type_value in ("admin", "subscriber"):
+            subscription_expires_at = expiry.isoformat() if expiry else None
 
         return SubscriptionStatusResponse(
             success=True,
             is_trial=is_trial,
-            work_count=user.work_count,
-            work_used=user.work_used,
+            work_count=work_count,
+            work_used=work_used,
             remaining=remaining,
             can_work=can_work,
-            subscription_expires_at=user.subscription_expires_at.isoformat() if user.subscription_expires_at else None,
+            subscription_expires_at=subscription_expires_at,
             has_pending_request=pending_request is not None
         )
 

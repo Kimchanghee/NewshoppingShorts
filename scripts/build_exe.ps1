@@ -96,7 +96,16 @@ if (-not $imageioMeta) {
 }
 
 # Make sure we are not accidentally shipping local secrets/configs.
-$mustNotContain = @(".env", ".secure_config.enc")
+# NOTE: Even if these files exist only on the build machine, bundling them would be catastrophic.
+$mustNotContain = @(
+  ".env",
+  ".secure_config.enc",
+  # SecretsManager fallback file + dev key (should never be bundled)
+  ".secrets",
+  ".encryption_key",
+  # Legacy/local remember-me file (can contain ID/PW)
+  "info.on"
+)
 foreach ($item in $mustNotContain) {
   if ($listing | Select-String -SimpleMatch $item) {
     throw "Sensitive file was bundled into ssmaker.exe: ${item}"

@@ -3,12 +3,14 @@
 import requests
 import json
 import os
+import sys
 import configparser
 import traceback
 import jwt
 import threading
 import time
 import functools
+from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 
@@ -206,7 +208,17 @@ def _get_auth_token() -> Optional[str]:
         JWT token or None if not set
     """
     try:
-        return secrets_manager.get_credential("auth_token")
+        token = secrets_manager.get_credential("auth_token")
+
+        # Fail-safe: do not keep using an expired token. This prevents
+        # confusing UX where the app looks "logged in" but all work/subscription
+        # checks silently fail (and may be misinterpreted as trial exhaustion).
+        if token and not _check_token_expiration(token):
+            logger.info("Stored JWT token is expired. Clearing local token.")
+            _set_auth_token(None)
+            return None
+
+        return token
     except Exception as e:
         logger.warning(f"Failed to retrieve auth token: {e}")
         return None
@@ -284,7 +296,8 @@ def login(**data) -> Dict[str, Any]:
         elapsed = time.time() - start_time
         
         logger.info(f"[Login] Response received in {elapsed:.2f}s, Status: {response.status_code}")
-        logger.debug(f"[Login] Raw response text: {response.text[:500]}")
+        # Raw response logged at TRACE level only (contains token)
+        logger.debug("[Login] Raw response received (length=%d)", len(response.text))
         
         # Parse response body for logging (mask sensitive data)
         try:
@@ -299,9 +312,6 @@ def login(**data) -> Dict[str, Any]:
             logger.info(f"[Login] Response body: {json.dumps(safe_log_obj, ensure_ascii=False)}")
         except Exception:
             logger.warning("[Login] Failed to parse response body for logging")
-            # JSON ? ? ??????
-
-            logger.info(f"[Login] Raw response: {response.text[:500]}")
 
         response.raise_for_status()
 
@@ -444,9 +454,11 @@ def loginCheck(**data) -> Dict[str, Any]:
 
     # Use stored token if available
     stored_token = _get_auth_token()
+    if not stored_token:
+        return {"status": "AUTH_REQUIRED", "message": "No auth token"}
     body = {
         "id": user_id,
-        "key": stored_token or data.get("key", ""),
+        "key": stored_token,
         "ip": ip_address,
         "current_task": data.get("current_task"),
         "app_version": data.get("app_version")
@@ -568,18 +580,18 @@ def submitRegistrationRequest(
         logger.info(
             f"Sending registration request to: {main_server}/user/register/request"
         )
+        masked_contact = cleaned_contact[:3] + "****" + cleaned_contact[-4:] if len(cleaned_contact) >= 7 else "****"
         logger.info(
             "Registration payload: name=%s username=%s contact=%s",
+            _sanitize_user_id_for_logging(name),
             _sanitize_user_id_for_logging(username),
-            _sanitize_user_id_for_logging(username),
-            cleaned_contact,
+            masked_contact,
         )
         response = _secure_session.post(
             f"{main_server}/user/register/request", json=body, timeout=30
         )
 
         logger.info(f"Registration response status: {response.status_code}")
-        logger.info(f"Registration response body: {response.text[:500]}")
 
         if response.status_code == 409:
             # Username already exists
@@ -739,29 +751,43 @@ def check_work_available(user_id: str) -> Dict[str, Any]:
     try:
         result = checkWorkAvailable(user_id)
 
-        # Transform response to match expected format
+        # Transform response to match expected format.
+        # NOTE: On verification failure (token expired, no token, network, etc),
+        # do NOT pretend the user used 5/5. Preserve any numeric fields when
+        # present and attach a message so callers can show a correct prompt.
         if result.get("success"):
             return {
+                "success": True,
                 "available": result.get("can_work", False),
                 "remaining": result.get("remaining", 0),
-                "total": result.get("work_count", 5),
-                "used": result.get("work_used", 0)
+                "total": result.get("work_count", 0),
+                "used": result.get("work_used", 0),
             }
-        else:
-            logger.error(f"Failed to check work availability: {result.get('message', 'Unknown error')}")
-            return {
-                "available": False,
-                "remaining": 0,
-                "total": 5,
-                "used": 5
-            }
+
+        msg = result.get("message") or "작업 가능 여부 확인에 실패했습니다. 다시 로그인해주세요."
+        logger.error(f"Failed to check work availability: {msg}")
+
+        work_count = result.get("work_count", 0)
+        work_used = result.get("work_used", 0)
+        remaining = result.get("remaining", 0)
+
+        return {
+            "success": False,
+            "available": False,
+            "remaining": remaining if isinstance(remaining, int) else 0,
+            "total": work_count if isinstance(work_count, int) else 0,
+            "used": work_used if isinstance(work_used, int) else 0,
+            "message": msg,
+        }
     except Exception as e:
         logger.error(f"Failed to check work availability: {e}")
         return {
+            "success": False,
             "available": False,
             "remaining": 0,
-            "total": 5,
-            "used": 5
+            "total": 0,
+            "used": 0,
+            "message": _ERROR_MESSAGES["unexpected"],
         }
 
 
@@ -819,9 +845,14 @@ def setPort() -> bool:
         True if successful, False otherwise
     """
     try:
-        current_dir = os.path.dirname(os.path.abspath(__file__))
-        info_file_path = os.path.join(current_dir, "..", "info.on")
-        info_file_path = os.path.normpath(info_file_path)
+        # Frozen builds must not rely on CWD or embedded file layout (onefile extraction).
+        # Use per-user location for config presence checks.
+        if bool(getattr(sys, "frozen", False)):
+            info_file_path = str((Path.home() / ".newshopping" / "info.on"))
+        else:
+            current_dir = os.path.dirname(os.path.abspath(__file__))
+            info_file_path = os.path.join(current_dir, "..", "info.on")
+            info_file_path = os.path.normpath(info_file_path)
 
         if not os.path.exists(info_file_path):
             logger.warning(f"Config file not found: {info_file_path}")

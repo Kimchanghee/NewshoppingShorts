@@ -118,6 +118,15 @@ class BatchHandler:
                 user_id = login_data.get("data", {}).get("data", {}).get("id", "")
             if user_id:
                 work_check = rest.checkWorkAvailable(user_id)
+                if not work_check.get("success") and work_check.get("message") == "No auth token":
+                    self.app.add_log("[로그인] 인증 토큰이 없습니다. 다시 로그인해주세요.")
+                    show_warning(
+                        self.app,
+                        "로그인 필요",
+                        "인증 토큰이 없거나 만료되었습니다.\n\n"
+                        "프로그램을 재시작한 뒤 다시 로그인해주세요.",
+                    )
+                    return
                 if work_check.get("success"):
                     work_count = work_check.get("work_count", -1)
                     work_used = work_check.get("work_used", 0)
@@ -133,11 +142,33 @@ class BatchHandler:
                     )
 
                     if remaining != -1 and remaining <= 0:
+                        # Double-check via subscription status API (handles auto-heal on server)
+                        try:
+                            sub_status = rest.getSubscriptionStatus(str(user_id))
+                            if sub_status.get("success"):
+                                # If subscription status says can_work, trust it (server may have auto-healed)
+                                if sub_status.get("can_work"):
+                                    self.app.add_log("[구독] 구독 활성 상태 확인됨. 작업을 계속합니다.")
+                                    remaining = -1  # treat as unlimited so we don't block below
+                                elif sub_status.get("has_pending_request"):
+                                    self.app.add_log("[구독] 구독 신청이 이미 접수되어 승인 대기 중입니다.")
+                                    show_warning(
+                                        self.app,
+                                        "구독 승인 대기",
+                                        "구독 신청이 이미 접수되어 승인 대기 중입니다.\n\n"
+                                        "관리자 승인 후 자동으로 사용 가능해집니다.\n"
+                                        "잠시 후 다시 시도하거나 앱을 재시작해 주세요.",
+                                    )
+                                    return
+                        except Exception:
+                            pass
+
+                    if remaining != -1 and remaining <= 0:
+
                         if is_trial_user:
                             # 체험판 사용자: 구독 신청 다이얼로그 표시
-                            self.app.add_log(
-                                "[작업] 체험판 5회 소진. 구독 신청 안내."
-                            )
+                            self.app.add_log("[작업] 체험판 사용량 소진. 구독 신청 안내.")
+
                             # Run dialog in main thread
                             def show_sub_dialog():
                                 try:
@@ -150,17 +181,14 @@ class BatchHandler:
 
                             QTimer.singleShot(0, show_sub_dialog)
                         else:
-                            # 유료 사용자: 일반 초과 알림
-                            self.app.add_log("[작업] 잔여 무료 횟수가 없습니다.")
+                            # 유료 사용자(또는 관리자 계정 등): 일반 초과 알림
+                            self.app.add_log("[작업] 잔여 작업 횟수가 없습니다.")
                             show_warning(
                                 self.app,
-                                "무료 횟수 초과",
-                                "잔여 무료 횟수가 없습니다.\n\n"
-                                "관리자에게 문의하여 무료 횟수를 추가해 주세요.\n\n"
-                                "문의 메시지:\n"
-                                "• 무료 횟수 추가 요청\n"
-                                "• 유료 플랜 문의\n"
-                                "• 기타 문의사항",
+                                "작업 횟수 초과",
+                                "잔여 작업 횟수가 없습니다.\n\n"
+                                "구독이 활성화되어 있다면 구독 상태를 새로고침하거나 앱을 재시작해 주세요.\n"
+                                "문제가 지속되면 관리자에게 문의해 주세요.",
                             )
                         return
                     if remaining != -1:

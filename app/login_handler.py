@@ -116,25 +116,51 @@ class LoginHandler:
                         logger.debug("[watch_loop] Check skipped (validation failed)")
                     time.sleep(5)
                     continue
+
+                if st == "AUTH_REQUIRED":
+                    logger.warning("[watch_loop] Auth token missing/expired (AUTH_REQUIRED)")
+                    cb_signal = getattr(self.app, 'ui_callback_signal', None)
+                    if cb_signal is not None:
+                        cb_signal.emit(self._on_auth_required)
+                    else:
+                        QTimer.singleShot(0, self._on_auth_required)
+                    break
                     
                 if st == "EU003":
                     logger.warning("[watch_loop] Duplicate login detected (EU003)")
-                    # PyQt6 스레드 안전 호출
-                    QTimer.singleShot(
-                        0, lambda: self.exit_program_other_place("EU003")
-                    )
+                    # 스레드 안전 UI 콜백 (ui_callback_signal 사용)
+                    cb_signal = getattr(self.app, 'ui_callback_signal', None)
+                    if cb_signal is not None:
+                        cb_signal.emit(lambda: self.exit_program_other_place("EU003"))
+                    else:
+                        QTimer.singleShot(0, lambda: self.exit_program_other_place("EU003"))
                     break
                 elif st == "EU004":
                     logger.error("[watch_loop] Force close command received (EU004)")
-                    QTimer.singleShot(
-                        0, lambda: self.error_program_force_close("EU004")
-                    )
+                    cb_signal = getattr(self.app, 'ui_callback_signal', None)
+                    if cb_signal is not None:
+                        cb_signal.emit(lambda: self.error_program_force_close("EU004"))
+                    else:
+                        QTimer.singleShot(0, lambda: self.error_program_force_close("EU004"))
                     break
             except Exception as e:
                 # 네트워크 오류 등은 무시하고 재시도 (Network errors are ignored and retried)
                 if loop_count % 12 == 0:
                     logger.debug(f"[watch_loop] Check exception: {e}")
             time.sleep(5)
+
+    def _on_auth_required(self):
+        """토큰 만료/유실 등으로 세션 확인이 불가능할 때 사용자에게 안내 후 종료."""
+        try:
+            show_warning(
+                self.app,
+                "로그인 필요",
+                "로그인 세션이 만료되었거나 인증 정보가 없습니다.\n\n"
+                "프로그램을 재시작한 뒤 다시 로그인해주세요.",
+            )
+        except Exception as e:
+            logger.warning("Failed to show auth required warning: %s", e)
+        self._safe_exit()
 
     def _safe_exit(self):
         """안전한 앱 종료 - 로그아웃 후 Qt 앱 종료 (메인 스레드에서만 호출)"""

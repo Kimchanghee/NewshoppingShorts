@@ -56,3 +56,18 @@ class PaymentSession(Base):
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     updated_at = Column(TIMESTAMP, server_default=func.current_timestamp(), onupdate=func.current_timestamp())
     expires_at = Column(TIMESTAMP, nullable=True)
+
+
+class PaymentStatusHistory(Base):
+    """
+    Payment status transition audit trail.
+    결제 상태 변경 이력 (감사 추적용).
+    """
+    __tablename__ = "payment_status_history"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    payment_id = Column(String(64), nullable=False, index=True)
+    previous_status = Column(String(20), nullable=True)
+    new_status = Column(String(20), nullable=False)
+    source = Column(String(50), nullable=False)  # "webhook", "payapp_webhook", "admin", "system"
+    created_at = Column(TIMESTAMP, server_default=func.current_timestamp())

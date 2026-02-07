@@ -1,7 +1,9 @@
 import logging
 import sys
 import os
+from uuid import uuid4
 from fastapi import FastAPI, Request, Header, HTTPException, Query
+from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
@@ -120,6 +122,90 @@ async def app_error_handler(request: Request, exc: AppError):
     )
 
 
+# Sensitive field names that must NEVER appear in validation error responses
+_SENSITIVE_FIELDS = frozenset({"pw", "password", "key", "token", "secret", "api_key"})
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error_handler(request: Request, exc: RequestValidationError):
+    """
+    Sanitize Pydantic 422 validation errors to prevent sensitive data leaks.
+    Strips 'input' values for fields like pw, password, key, token, etc.
+    Also strips non-JSON-serializable objects (e.g. ValueError in ctx).
+    """
+    safe_details = []
+    for err in exc.errors():
+        sanitized = {}
+        for k, v in err.items():
+            if k == "input":
+                continue  # handle separately below
+            if k == "ctx":
+                # ctx may contain non-serializable objects (ValueError, etc.)
+                # Only keep simple string/number values
+                try:
+                    sanitized[k] = {
+                        ck: str(cv) if not isinstance(cv, (str, int, float, bool, type(None))) else cv
+                        for ck, cv in v.items()
+                    } if isinstance(v, dict) else str(v)
+                except Exception:
+                    pass  # skip unserializable ctx entirely
+                continue
+            sanitized[k] = v
+
+        # Only include 'input' if the field is NOT sensitive
+        field_names = {str(loc).lower() for loc in err.get("loc", [])}
+        if not field_names & _SENSITIVE_FIELDS:
+            if "input" in err:
+                inp = err["input"]
+                # Ensure input is serializable
+                if isinstance(inp, (str, int, float, bool, type(None), list, dict)):
+                    sanitized["input"] = inp
+
+        safe_details.append(sanitized)
+
+    request_id = str(uuid4())
+    logger.warning(
+        f"ValidationError: request_id={request_id} path={request.url.path} "
+        f"errors={len(safe_details)}"
+    )
+
+    return JSONResponse(
+        status_code=422,
+        content={
+            "success": False,
+            "error": {
+                "code": "VALIDATION_ERROR",
+                "message": "입력값이 올바르지 않습니다.",
+                "requestId": request_id,
+                "details": safe_details,
+            },
+        },
+    )
+
+
+# Catch-all for unhandled exceptions (prevent stack trace leaks in production)
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    request_id = str(uuid4())
+    logger.error(
+        f"UnhandledException: request_id={request_id} path={request.url.path} "
+        f"error={type(exc).__name__}: {exc}",
+        exc_info=True,
+    )
+    is_production = settings.ENVIRONMENT == "production"
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "서버 오류가 발생했습니다." if is_production else str(exc),
+                "requestId": request_id,
+            },
+        },
+    )
+
+
 class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log all API requests and responses"""
 
@@ -141,24 +227,68 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
-    """Add security headers to all responses"""
+    """Add comprehensive security headers to all responses (OWASP recommended)"""
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
+        # XSS / injection prevention
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["X-XSS-Protection"] = "0"  # Modern: rely on CSP, disable legacy filter
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Cache-Control"] = "no-store"
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        response.headers["Pragma"] = "no-cache"
+        # Content Security Policy - API-only, deny all content embedding
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+        )
+        # Permissions Policy - disable all browser features
+        response.headers["Permissions-Policy"] = (
+            "camera=(), microphone=(), geolocation=(), payment=()"
+        )
+        # HSTS in production (preload-ready)
         if settings.ENVIRONMENT == "production":
             response.headers["Strict-Transport-Security"] = (
-                "max-age=31536000; includeSubDomains"
+                "max-age=63072000; includeSubDomains; preload"
             )
+        # Remove server identification headers
+        if "server" in response.headers:
+            del response.headers["server"]
+        return response
+
+
+class AuditLoggingMiddleware(BaseHTTPMiddleware):
+    """Audit log for admin/sensitive endpoints"""
+    _AUDIT_PREFIXES = ("/user/admin/", "/user/register/approve", "/user/register/reject",
+                       "/user/subscription/approve", "/user/subscription/reject",
+                       "/payments/webhook", "/payments/mock/", "/app/version/update")
+
+    async def dispatch(self, request: Request, call_next) -> Response:
+        path = request.url.path
+        needs_audit = any(path.startswith(p) for p in self._AUDIT_PREFIXES)
+        if not needs_audit:
+            return await call_next(request)
+
+        client_ip = request.client.host if request.client else "unknown"
+        audit_logger = logging.getLogger("audit")
+        audit_logger.info(
+            f"[AUDIT] {request.method} {path} | IP: {client_ip} | "
+            f"Admin-Key: {'present' if request.headers.get('x-admin-api-key') else 'absent'}"
+        )
+
+        response = await call_next(request)
+
+        audit_logger.info(
+            f"[AUDIT] {request.method} {path} | Status: {response.status_code}"
+        )
         return response
 
 
 # Security headers middleware (added first, executed last)
 app.add_middleware(SecurityHeadersMiddleware)
+
+# Audit logging middleware (before request logging to capture admin actions)
+app.add_middleware(AuditLoggingMiddleware)
 
 # Request logging middleware
 app.add_middleware(RequestLoggingMiddleware)
@@ -270,9 +400,10 @@ async def update_app_version(
 
     token = authorization[7:]  # Remove "Bearer " prefix
 
-    # Check against ADMIN_API_KEY from settings
+    # Check against ADMIN_API_KEY from settings (constant-time comparison)
+    import secrets as _secrets
     expected_key = settings.ADMIN_API_KEY
-    if not expected_key or token != expected_key:
+    if not expected_key or not _secrets.compare_digest(token, expected_key):
         logger.warning("Invalid API key attempt for version update")
         raise HTTPException(status_code=403, detail="Invalid API key")
 

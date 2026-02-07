@@ -436,6 +436,36 @@ def dynamic_batch_processing_thread(app):
                     # Break out of retry loop and stop processing
                     break
 
+                except PermissionError as e:
+                    # Auth/session verification failed - show a clearer dialog than "trial exhausted"
+                    app.add_log(f"[인증] {str(e)}")
+                    logger.warning("[Auth] Verification failed: %s", e)
+
+                    # Stop batch processing immediately
+                    app.batch_processing = False
+                    _safe_set_url_status(app, url, "failed")
+                    app.url_status_message[url] = "로그인 필요"
+
+                    def show_auth_dialog():
+                        try:
+                            show_warning(
+                                app,
+                                "로그인 필요",
+                                f"{str(e)}\n\n프로그램을 재시작한 뒤 다시 로그인해주세요.",
+                            )
+                        except Exception as dialog_err:
+                            logger.error(
+                                "Failed to show auth required dialog: %s", dialog_err
+                            )
+
+                    signal = getattr(app, "ui_callback_signal", None)
+                    if signal is not None:
+                        signal.emit(show_auth_dialog)
+                    else:
+                        QTimer.singleShot(0, show_auth_dialog)
+
+                    break
+
                 except Exception as e:
                     ui_controller.write_error_log(e)
                     error_msg = str(e)
@@ -686,13 +716,20 @@ def _process_single_video(app, url, current_number, total_urls):
         )
         if user_id:
             work_status = rest.check_work_available(user_id)
+            if not work_status.get("success", True):
+                # Auth/session problem (token expired/missing) or verification failure.
+                raise PermissionError(
+                    work_status.get("message")
+                    or "작업 가능 여부 확인에 실패했습니다. 다시 로그인해주세요."
+                )
+
             if not work_status.get("available", False):
-                used = work_status.get("used", 0)
-                total = work_status.get("total", 5)
+                used = int(work_status.get("used", 0) or 0)
+                total = int(work_status.get("total", 0) or 0)
                 raise TrialLimitExceededError(
                     f"체험판 사용 횟수를 초과했습니다 ({used}/{total}). 구독이 필요합니다.",
                     remaining=0,
-                    total=total
+                    total=total,
                 )
     except TrialLimitExceededError:
         raise

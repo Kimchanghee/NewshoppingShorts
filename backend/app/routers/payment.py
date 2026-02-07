@@ -27,7 +27,7 @@ from pydantic import BaseModel
 from app.database import get_db
 from app.utils.ip_utils import get_client_ip
 from app.dependencies import verify_admin_api_key
-from app.models.payment_session import PaymentSession, PaymentStatus
+from app.models.payment_session import PaymentSession, PaymentStatus, PaymentStatusHistory
 from app.models.user import User, UserType
 
 logger = logging.getLogger(__name__)
@@ -49,7 +49,15 @@ PLAN_PRICES = {
 PAYAPP_USERID = os.getenv("PAYAPP_USERID", "")
 PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
 PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
-PAYAPP_API_URL = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
+_PAYAPP_API_URL_RAW = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
+# SSRF prevention: only allow known PayApp domain
+from urllib.parse import urlparse as _urlparse
+_parsed = _urlparse(_PAYAPP_API_URL_RAW)
+if _parsed.hostname not in ("api.payapp.kr",):
+    logger.error(f"[SSRF] Blocked untrusted PAYAPP_API_URL domain: {_parsed.hostname}")
+    PAYAPP_API_URL = "https://api.payapp.kr/oapi/apiLoad.html"
+else:
+    PAYAPP_API_URL = _PAYAPP_API_URL_RAW
 SUBSCRIPTION_DAYS = 30
 
 
@@ -74,6 +82,20 @@ class PaymentStatusResponse(BaseModel):
     user_id: Optional[str] = None
     created_at: str
     updated_at: str
+
+
+def _record_status_change(db: Session, payment_id: str, prev: str | None, new: str, source: str):
+    """결제 상태 변경 이력 기록"""
+    try:
+        history = PaymentStatusHistory(
+            payment_id=payment_id,
+            previous_status=prev,
+            new_status=new,
+            source=source,
+        )
+        db.add(history)
+    except Exception as e:
+        logger.warning(f"[Payment] Failed to record status history: {e}")
 
 
 def _get_payment_session(db: Session, payment_id: str) -> Optional[PaymentSession]:
@@ -186,17 +208,15 @@ async def get_payment_status(
 @limiter.limit("100/minute")
 async def payment_webhook(
     request: Request,
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    _admin: bool = Depends(verify_admin_api_key)
 ):
     """
-    결제 웹훅 엔드포인트 (결제 게이트웨이에서 호출)
-    Payment webhook endpoint (called by payment gateway)
+    결제 웹훅 엔드포인트 (Admin 인증 필요)
+    Payment webhook endpoint (requires Admin API key)
 
-    This endpoint should be configured in your payment gateway dashboard.
-    결제 게이트웨이 대시보드에서 설정 필요.
-
-    Security: In production, verify webhook signature from payment gateway.
-    보안: 운영 환경에서는 결제 게이트웨이의 서명을 검증해야 합니다.
+    Security: Admin API key required to prevent unauthorized subscription activation.
+    보안: 무단 구독 활성화를 방지하기 위해 Admin API 키가 필요합니다.
     """
     try:
         # Parse webhook payload
@@ -228,10 +248,12 @@ async def payment_webhook(
         # Update session status in database
         session = _get_payment_session(db, payment_id)
         if session:
+            prev = session.status.value if session.status else None
             session.status = mapped_status
             # Store gateway reference if provided
             if payload.get("gateway_reference"):
                 session.gateway_reference = payload.get("gateway_reference")
+            _record_status_change(db, payment_id, prev, mapped_status.value, "webhook")
             db.commit()
             logger.info(f"[Payment] Status updated: {payment_id} -> {mapped_status.value}")
 
@@ -457,11 +479,11 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
             logger.error("[PayApp Webhook] PAYAPP_LINKKEY/LINKVAL not configured")
             return PlainTextResponse("FAIL")
 
-        if recv_linkkey != PAYAPP_LINKKEY:
+        if not secrets.compare_digest(str(recv_linkkey), PAYAPP_LINKKEY):
             logger.warning("[PayApp Webhook] Invalid linkkey")
             return PlainTextResponse("FAIL")
 
-        if recv_linkval != PAYAPP_LINKVAL:
+        if not secrets.compare_digest(str(recv_linkval), PAYAPP_LINKVAL):
             logger.warning("[PayApp Webhook] Invalid linkval")
             return PlainTextResponse("FAIL")
 
@@ -478,8 +500,10 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
             # 결제 완료
             logger.info(f"[PayApp Webhook] Payment completed: mul_no={mul_no}")
             if session:
+                prev = session.status.value if session.status else None
                 session.status = PaymentStatus.SUCCEEDED
                 session.gateway_reference = mul_no
+                _record_status_change(db, local_payment_id, prev, "succeeded", "payapp_webhook")
                 db.commit()
 
                 # 구독 활성화 - 신뢰할 수 있는 session.user_id 사용 (form data가 아닌 DB 값)
@@ -498,14 +522,18 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
             # 요청 취소
             logger.info(f"[PayApp Webhook] Payment request cancelled: mul_no={mul_no}")
             if session:
+                prev = session.status.value if session.status else None
                 session.status = PaymentStatus.CANCELLED
+                _record_status_change(db, local_payment_id, prev, "cancelled", "payapp_webhook")
                 db.commit()
 
         elif pay_state in ("9", "64"):
             # 승인 취소
             logger.info(f"[PayApp Webhook] Payment approval cancelled: mul_no={mul_no}")
             if session:
+                prev = session.status.value if session.status else None
                 session.status = PaymentStatus.CANCELLED
+                _record_status_change(db, local_payment_id, prev, "cancelled", "payapp_webhook")
                 db.commit()
 
         elif pay_state == "1":

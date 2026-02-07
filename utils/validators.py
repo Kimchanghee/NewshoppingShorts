@@ -660,7 +660,7 @@ def validate_user_identifier(user_id: str) -> bool:
         return False
 
     # Backend user ids are often numeric (e.g., "22").
-    if re.fullmatch(r"\\d{1,50}", user_id):
+    if re.fullmatch(r"\d{1,50}", user_id):
         return True
 
     return validate_user_id(user_id)
