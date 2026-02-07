@@ -342,10 +342,25 @@ async def health():
 _DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "")
 
 APP_VERSION_INFO = {
-    "version": "1.3.10",
+    "version": "1.3.11",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": "버전 1.3.10 업데이트: CI 빌드 안정화(로컬 설정/폰트 파일 번들 의존 제거).",
+    "release_notes": """버전 1.3.11 업데이트:
+
+🎉 새로운 기능
+• 계층별 구독 요금제 (1/6/12개월, 할인 적용)
+  - 1개월: 190,000원
+  - 6개월: 969,000원 (15% 할인)
+  - 12개월: 1,596,000원 (30% 할인)
+
+✨ 개선사항
+• 구독 관리 페이지 디자인 개선
+• 구독 상태 수동 새로고침 기능 추가 (🔄 버튼)
+• 유료 계정 동기화 문제 해결
+
+🐛 버그 수정
+• API 키 무한 팝업 루프 수정
+• 구글 드라이브 권한 오류 감지 및 안내""",
     "is_mandatory": False,
     "update_channel": "stable",
 }
