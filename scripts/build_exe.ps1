@@ -27,13 +27,9 @@ $ssmakerExe = Join-Path $Root "dist\\ssmaker.exe"
 $updaterExe = Join-Path $Root "dist\\updater.exe"
 
 Write-Host "`n[4/5] Verifying bundled contents inside ssmaker.exe..."
-$pythonDir = Split-Path $Python -Parent
-$viewer = Join-Path $pythonDir "pyi-archive_viewer.exe"
-if (-not (Test-Path $viewer)) {
-  $viewer = "pyi-archive_viewer"
-}
-
-$listing = "l`nq`n" | & $viewer $ssmakerExe
+# Use the module entrypoint instead of relying on `pyi-archive_viewer(.exe)` being on PATH.
+# On GitHub Actions, python.exe is typically in the install root while scripts are in a separate `Scripts\` dir.
+$listing = "l`nq`n" | & $Python -m PyInstaller.utils.cliutils.archive_viewer $ssmakerExe
 
 # Must-have bundle items
 $mustContain = @(
