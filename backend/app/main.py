@@ -212,10 +212,10 @@ async def health():
 _DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "")
 
 APP_VERSION_INFO = {
-    "version": "1.3.6",
+    "version": "1.3.7",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": "버전 1.3.6 업데이트: CI 의존성 설치 안정화(python -m pip 사용).",
+    "release_notes": "버전 1.3.7 업데이트: CI 빌드 오류 진단 강화(실패 원인 에러 애노테이션 출력).",
     "is_mandatory": False,
     "update_channel": "stable",
 }
