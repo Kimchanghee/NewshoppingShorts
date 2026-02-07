@@ -15,6 +15,10 @@ logger = get_logger(__name__)
 class PaymentClient:
     def __init__(self):
         self.base_url = config.PAYMENT_API_BASE_URL.rstrip("/")
+        # HTTPS 강제 (localhost 제외)
+        if not self.base_url.startswith("https://") and "localhost" not in self.base_url and "127.0.0.1" not in self.base_url:
+            logger.warning("[PaymentClient] PAYMENT_API_BASE_URL is not HTTPS: %s", self.base_url)
+            raise RuntimeError("결제 서버 URL은 HTTPS를 사용해야 합니다.")
 
     def create_checkout(self, plan_id: str, user_id: str | None = None) -> dict:
         payload = {"plan_id": plan_id, "user_id": user_id}

@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import func
-from app.models.user import User
+from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
 from app.utils.password import verify_password, get_dummy_hash
@@ -378,8 +378,64 @@ class AuthService:
                     "remaining": 0,
                 }
 
+            # Enforce subscription expiry even for already-issued tokens.
+            expiry = getattr(user, "subscription_expires_at", None)
+            if expiry is not None and not is_subscription_active(expiry):
+                # Auth is valid (token/session), but access is expired.
+                return {
+                    "success": True,
+                    "can_work": False,
+                    "work_count": 0,
+                    "work_used": getattr(user, "work_used", 0),
+                    "remaining": 0,
+                }
+
             work_count = getattr(user, "work_count", -1)
             work_used = getattr(user, "work_used", 0)
+
+            # Paid accounts are time-based (subscription period), not count-based.
+            # If the subscription is active, treat as unlimited regardless of stored work_count.
+            user_type = getattr(user, "user_type", None)
+            user_type_value = (
+                user_type.value
+                if hasattr(user_type, "value")
+                else (str(user_type) if user_type is not None else "trial")
+            )
+
+            # Auto-heal: trial user with active subscription → upgrade to subscriber
+            if user_type_value == "trial" and expiry is not None and is_subscription_active(expiry):
+                try:
+                    user.user_type = "subscriber"
+                    user.work_count = -1
+                    self.db.commit()
+                    user_type_value = "subscriber"
+                    work_count = -1
+                    logger.info(f"Auto-healed user {user_id}: trial → subscriber (active subscription)")
+                except Exception:
+                    self.db.rollback()
+                    # Proceed as subscriber anyway to avoid blocking paid users
+                    user_type_value = "subscriber"
+                    work_count = -1
+
+            if user_type_value in ("admin", "subscriber"):
+                if user_type_value == "admin" or (expiry is None or is_subscription_active(expiry)):
+                    if work_count != -1:
+                        # Auto-heal inconsistent data where paid users have finite/zero work_count.
+                        try:
+                            user.work_count = -1
+                            work_count = -1
+                            self.db.commit()
+                        except Exception:
+                            self.db.rollback()
+                            # Proceed with unlimited response anyway to avoid blocking paid users.
+                            work_count = -1
+                    return {
+                        "success": True,
+                        "can_work": True,
+                        "work_count": -1,
+                        "work_used": work_used,
+                        "remaining": -1,
+                    }
 
             # -1 means unlimited
             if work_count == -1:
@@ -460,11 +516,46 @@ class AuthService:
                     "used": None,
                 }
 
+            # Enforce subscription expiry even for already-issued tokens.
+            expiry = getattr(user, "subscription_expires_at", None)
+            if expiry is not None and not is_subscription_active(expiry):
+                return {
+                    "success": False,
+                    "message": "Subscription expired",
+                    "remaining": 0,
+                    "used": getattr(user, "work_used", 0),
+                }
+
             work_count = getattr(user, "work_count", -1)
             work_used = getattr(user, "work_used", 0)
 
+            # Paid accounts are time-based (subscription period), not count-based.
+            user_type = getattr(user, "user_type", None)
+            user_type_value = (
+                user_type.value
+                if hasattr(user_type, "value")
+                else (str(user_type) if user_type is not None else "trial")
+            )
+
+            # Auto-heal: trial user with active subscription → upgrade to subscriber
+            if user_type_value == "trial" and expiry is not None and is_subscription_active(expiry):
+                try:
+                    user.user_type = "subscriber"
+                    user_type_value = "subscriber"
+                    logger.info(f"Auto-healed user {user_id}: trial → subscriber (use_work)")
+                except Exception:
+                    user_type_value = "subscriber"
+
+            is_paid = user_type_value in ("admin", "subscriber") and (
+                user_type_value == "admin" or (expiry is None or is_subscription_active(expiry))
+            )
+            if is_paid and work_count != -1:
+                # Auto-heal inconsistent data where paid users have finite/zero work_count.
+                user.work_count = -1
+                work_count = -1
+
             # Check if work is available (unless unlimited)
-            if work_count != -1:
+            if not is_paid and work_count != -1:
                 remaining = work_count - work_used
                 if remaining <= 0:
                     return {

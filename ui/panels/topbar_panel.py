@@ -213,6 +213,25 @@ class TopBarPanel(QFrame):
             if user_id:
                 info = rest.check_work_available(user_id)
 
+                if not info.get("success", True):
+                    # Token missing/expired or server verification failed.
+                    # Do not mislead the user with fake "0/5" credits.
+                    self.gui.credits_label.setText("로그인 필요")
+                    self.gui.sub_badge.setText("로그인")
+                    d = self.design
+                    c = d.colors
+                    self.gui.sub_badge.setStyleSheet(f"""
+                        QPushButton {{
+                            background-color: {c.bg_card};
+                            color: {c.text_secondary};
+                            padding: 6px 12px;
+                            border-radius: 6px;
+                            font-weight: bold;
+                            border: 1px solid {c.border_light};
+                        }}
+                    """)
+                    return
+
                 remaining = info.get("remaining", 0)
                 total = info.get("total", 0)
 
@@ -232,12 +251,8 @@ class TopBarPanel(QFrame):
                     is_subscriber = has_expiry or is_unlimited or (is_trial_flag is False)
                     user_type = "subscriber" if is_subscriber else "trial"
 
-                    # 다른 UI 로직과 일관성을 위해 best-effort로 캐시 값도 갱신
-                    try:
-                        if isinstance(top_data, dict):
-                            top_data["user_type"] = user_type
-                    except Exception:
-                        pass
+                    # NOTE: login_data는 공유 상태이므로 직접 변경하지 않음.
+                    # 백엔드 auto-heal이 다음 요청 시 DB를 갱신함.
 
                 # 구독자는 "구독중", 그 외는 크레딧 표시
                 if user_type == "subscriber":

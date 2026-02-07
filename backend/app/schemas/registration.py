@@ -22,9 +22,19 @@ class RegistrationRequestCreate(BaseModel):
     """회원가입 요청 생성 스키마"""
     name: str = Field(..., min_length=2, max_length=100)
     username: str = Field(..., min_length=4, max_length=50)
-    password: str = Field(..., min_length=6, max_length=128)
+    password: str = Field(..., min_length=8, max_length=128)
     contact: str = Field(..., min_length=10, max_length=50)
     email: Optional[str] = Field(None, max_length=255)
+
+    @field_validator('password')
+    @classmethod
+    def validate_password_complexity(cls, v: str) -> str:
+        """비밀번호 복잡도 검증: 최소 8자, 영문+숫자 포함"""
+        if not re.search(r'[a-zA-Z]', v):
+            raise ValueError('비밀번호에 영문자를 1자 이상 포함해주세요.')
+        if not re.search(r'[0-9]', v):
+            raise ValueError('비밀번호에 숫자를 1자 이상 포함해주세요.')
+        return v
 
     @field_validator('name')
     @classmethod

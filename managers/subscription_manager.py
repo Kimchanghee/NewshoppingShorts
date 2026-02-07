@@ -16,6 +16,19 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def _extract_user_id_from_login_data(login_data) -> str | None:
+    """login_data에서 user_id를 안전하게 추출 (공통 유틸리티)"""
+    if not login_data or not isinstance(login_data, dict):
+        return None
+    data_part = login_data.get("data", {})
+    if isinstance(data_part, dict):
+        inner = data_part.get("data", {})
+        user_id = inner.get("id") if isinstance(inner, dict) else None
+        if user_id:
+            return user_id
+    return login_data.get("userId")
+
+
 class SubscriptionManager:
     """Manages subscription status polling and countdown display.
 
@@ -71,16 +84,7 @@ class SubscriptionManager:
             return
 
         try:
-            data_part = self.gui.login_data.get("data", {})
-            if isinstance(data_part, dict):
-                inner_data = data_part.get("data", {})
-                user_id = inner_data.get("id")
-            else:
-                user_id = None
-
-            if not user_id:
-                user_id = self.gui.login_data.get("userId")
-
+            user_id = _extract_user_id_from_login_data(self.gui.login_data)
             if not user_id:
                 return
 

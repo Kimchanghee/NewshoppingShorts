@@ -92,19 +92,25 @@ class Login(QMainWindow, Ui_LoginWindow):
             if res.get("status") is True:
                 self._handle_login_success(res)
             elif res.get("status") == "EU003":
-                # Handle duplicate login - Auto-resolve per user request (Fix: Unconditional popup)
-                logger.info("Duplicate login detected (EU003). Auto-forcing login to clear stale session.")
-                
-                # Automatically retry with force=True to acquire session
-                self._loginCheck(force=True)
+                # 중복 로그인 감지 - 사용자 확인 후 강제 로그인
+                logger.info("Duplicate login detected (EU003).")
+                reply = QtWidgets.QMessageBox.question(
+                    self,
+                    "중복 로그인",
+                    "다른 곳에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 여기서 로그인하시겠습니까?",
+                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
+                    QtWidgets.QMessageBox.StandardButton.No
+                )
+                if reply == QtWidgets.QMessageBox.StandardButton.Yes and not force:
+                    self._loginCheck(force=True)
             else:
                 # Use friendly message converter
                 error_msg = rest._friendly_login_message(res)
-                logger.warning(f"Login failed: {error_msg} (Raw: {res})")
+                logger.warning(f"Login failed: {error_msg} (status={res.get('status')})")
                 self.showCustomMessageBox("로그인 실패", error_msg)
         except Exception as e:
             logger.error(f"Login exception: {str(e)}", exc_info=True)
-            self.showCustomMessageBox("오류", f"로그인 처리 중 오류가 발생했습니다.\n{str(e)}")
+            self.showCustomMessageBox("오류", "로그인 처리 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.")
 
     def _handle_login_success(self, res):
         # 로그인 정보 저장 처리

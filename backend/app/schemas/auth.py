@@ -8,7 +8,7 @@ from typing import Optional, Union
 class LoginRequest(BaseModel):
     """Login request with validated inputs"""
     id: str = Field(..., min_length=3, max_length=50, description="Username")
-    pw: str = Field(..., min_length=6, max_length=128, description="Password")
+    pw: str = Field(..., min_length=4, max_length=128, description="Password")
     key: str = Field(..., max_length=256, description="API key")
     ip: str = Field(..., max_length=45, description="Client IP (legacy, server extracts actual IP)")
     force: bool = False
