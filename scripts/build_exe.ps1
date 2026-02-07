@@ -69,7 +69,6 @@ try {
 $mustContain = @(
   "updater.exe",
   "version.json",
-  "ui_preferences.json",
   # Ensure we ship an ffmpeg binary (we rely on imageio_ffmpeg, not a local resource/bin copy).
   "imageio_ffmpeg\\binaries\\ffmpeg"
 )
