@@ -217,7 +217,27 @@ class TopBarPanel(QFrame):
                 total = info.get("total", 0)
 
                 top_data = self.gui.login_data.get("data", {}).get("data", {})
-                user_type = top_data.get("user_type", "trial")
+
+                # login_data의 user_type은 결제/웹훅으로 구독이 활성화된 뒤 stale(갱신 안 됨)일 수 있습니다.
+                # 배지/표시는 구독 상태 API(/user/subscription/my-status)를 기준으로 결정합니다.
+                login_user_type = top_data.get("user_type", "trial")
+                user_type = login_user_type
+
+                # admin은 그대로 유지
+                if login_user_type != "admin":
+                    sub_status = rest.getSubscriptionStatus(str(user_id))
+                    has_expiry = bool(sub_status.get("subscription_expires_at"))
+                    is_unlimited = sub_status.get("work_count") == -1
+                    is_trial_flag = sub_status.get("is_trial")
+                    is_subscriber = has_expiry or is_unlimited or (is_trial_flag is False)
+                    user_type = "subscriber" if is_subscriber else "trial"
+
+                    # 다른 UI 로직과 일관성을 위해 best-effort로 캐시 값도 갱신
+                    try:
+                        if isinstance(top_data, dict):
+                            top_data["user_type"] = user_type
+                    except Exception:
+                        pass
 
                 # 구독자는 "구독중", 그 외는 크레딧 표시
                 if user_type == "subscriber":
