@@ -34,6 +34,7 @@ PLANS = {
         "price": 0,
         "price_text": "무료",
         "period": "",
+        "months": 0,
         "description": "기본 기능을 무료로 체험하세요",
         "features": [
             "월 2개 영상 생성",
@@ -49,12 +50,13 @@ PLANS = {
         "color": "#9A9A9A",
         "popular": False,
     },
-    "pro": {
-        "id": "pro",
-        "name": "프로 (유료계정)",
+    "pro_1month": {
+        "id": "pro_1month",
+        "name": "프로 1개월",
         "price": 190000,
         "price_text": "190,000",
         "period": "월",
+        "months": 1,
         "description": "무제한 영상 생성 + 모든 기능 해제",
         "features": [
             "무제한 영상 생성",
@@ -66,9 +68,64 @@ PLANS = {
         ],
         "not_included": [],
         "color": "#E31639",
+        "popular": False,
+        "badge": "정기 결제",
+    },
+    "pro_6months": {
+        "id": "pro_6months",
+        "name": "프로 6개월",
+        "price": 969000,
+        "price_text": "969,000",
+        "price_per_month": 161500,
+        "original_price": 1140000,
+        "discount_percent": 15,
+        "period": "6개월",
+        "months": 6,
+        "description": "6개월 일시불 · 15% 할인 혜택",
+        "features": [
+            "무제한 영상 생성",
+            "모든 음성 프로필 사용",
+            "AI 콘텐츠 분석",
+            "커스텀 자막 스타일",
+            "1080p 해상도",
+            "우선 처리",
+            "15% 할인 (월 161,500원)",
+        ],
+        "not_included": [],
+        "color": "#E31639",
         "popular": True,
+        "badge": "인기",
+    },
+    "pro_12months": {
+        "id": "pro_12months",
+        "name": "프로 12개월",
+        "price": 1596000,
+        "price_text": "1,596,000",
+        "price_per_month": 133000,
+        "original_price": 2280000,
+        "discount_percent": 30,
+        "period": "12개월",
+        "months": 12,
+        "description": "12개월 일시불 · 30% 할인 혜택",
+        "features": [
+            "무제한 영상 생성",
+            "모든 음성 프로필 사용",
+            "AI 콘텐츠 분석",
+            "커스텀 자막 스타일",
+            "1080p 해상도",
+            "우선 처리",
+            "30% 할인 (월 133,000원)",
+            "최대 절약 플랜!",
+        ],
+        "not_included": [],
+        "color": "#E31639",
+        "popular": False,
+        "badge": "최고 할인",
     },
 }
+
+# Legacy support: map "pro" to "pro_1month"
+PLANS["pro"] = PLANS["pro_1month"]
 
 
 class PlanCard(QFrame):
@@ -118,23 +175,55 @@ class PlanCard(QFrame):
         layout.addWidget(self.name_label)
         
         # Price section
-        price_layout = QHBoxLayout()
+        price_container = QWidget()
+        price_layout = QVBoxLayout(price_container)
+        price_layout.setContentsMargins(0, 0, 0, 0)
+        price_layout.setSpacing(ds.spacing.space_1)
         price_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        
+
+        # Original price (strikethrough) if discount exists
+        if self.plan_data.get("original_price"):
+            original_row = QHBoxLayout()
+            original_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+            original_price = QLabel(f"{self.plan_data['original_price']:,}원")
+            original_price.setObjectName("plan_price_original")
+            original_row.addWidget(original_price)
+
+            discount_badge = QLabel(f"-{self.plan_data.get('discount_percent', 0)}%")
+            discount_badge.setObjectName("discount_badge")
+            original_row.addWidget(discount_badge)
+
+            price_layout.addLayout(original_row)
+
+        # Current price
+        current_price_row = QHBoxLayout()
+        current_price_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
         self.price_label = QLabel(self.plan_data["price_text"])
         self.price_label.setObjectName("plan_price")
-        price_layout.addWidget(self.price_label)
-        
+        current_price_row.addWidget(self.price_label)
+
         if self.plan_data["price"] > 0:
             self.currency_label = QLabel("원")
             self.currency_label.setObjectName("plan_currency")
-            price_layout.addWidget(self.currency_label)
-            
-            self.period_label = QLabel(f"/{self.plan_data['period']}")
-            self.period_label.setObjectName("plan_period")
-            price_layout.addWidget(self.period_label)
-        
-        layout.addLayout(price_layout)
+            current_price_row.addWidget(self.currency_label)
+
+            if self.plan_data.get("months", 0) > 1:
+                self.period_label = QLabel(f" (일시불)")
+                self.period_label.setObjectName("plan_period")
+                current_price_row.addWidget(self.period_label)
+
+        price_layout.addLayout(current_price_row)
+
+        # Per-month price for multi-month plans
+        if self.plan_data.get("price_per_month"):
+            per_month = QLabel(f"월 {self.plan_data['price_per_month']:,}원")
+            per_month.setObjectName("plan_price_per_month")
+            per_month.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            price_layout.addWidget(per_month)
+
+        layout.addWidget(price_container)
         
         # Description
         self.desc_label = QLabel(self.plan_data["description"])
@@ -251,7 +340,29 @@ class PlanCard(QFrame):
                 font-size: {ds.typography.size_2xl}px;
                 font-weight: {ds.typography.weight_extrabold};
             }}
-            
+
+            #plan_price_original {{
+                color: {ds.colors.text_muted};
+                font-size: {ds.typography.size_sm}px;
+                text-decoration: line-through;
+            }}
+
+            #discount_badge {{
+                background-color: #FEE2E2;
+                color: #DC2626;
+                padding: {ds.spacing.space_1}px {ds.spacing.space_2}px;
+                border-radius: {ds.radius.sm}px;
+                font-size: {ds.typography.size_xs}px;
+                font-weight: {ds.typography.weight_bold};
+                margin-left: {ds.spacing.space_2}px;
+            }}
+
+            #plan_price_per_month {{
+                color: {ds.colors.text_secondary};
+                font-size: {ds.typography.size_sm}px;
+                font-weight: {ds.typography.weight_medium};
+            }}
+
             #plan_currency, #plan_period {{
                 color: {ds.colors.text_primary};
                 font-size: {ds.typography.size_lg}px;
@@ -330,15 +441,23 @@ class CurrentPlanCard(QFrame):
         )
         layout.setSpacing(ds.spacing.space_4)
         
-        # Header with plan name
+        # Header with plan name and refresh button
         header_layout = QHBoxLayout()
-        
+
         self.plan_label = QLabel("현재 플랜")
         self.plan_label.setObjectName("current_plan_label")
         header_layout.addWidget(self.plan_label)
-        
+
         header_layout.addStretch()
-        
+
+        # Refresh button
+        self.refresh_btn = QPushButton("🔄")
+        self.refresh_btn.setObjectName("refresh_button")
+        self.refresh_btn.setFixedSize(28, 28)
+        self.refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.refresh_btn.setToolTip("구독 상태 새로고침")
+        header_layout.addWidget(self.refresh_btn)
+
         self.status_badge = QLabel("무료계정")
         self.status_badge.setObjectName("status_badge")
         header_layout.addWidget(self.status_badge)
@@ -461,6 +580,22 @@ class CurrentPlanCard(QFrame):
                 font-size: {ds.typography.size_sm}px;
                 font-weight: {ds.typography.weight_medium};
             }}
+
+            #refresh_button {{
+                background-color: {ds.colors.surface_variant};
+                border: 1px solid {ds.colors.border};
+                border-radius: {ds.radius.full}px;
+                font-size: 14px;
+            }}
+
+            #refresh_button:hover {{
+                background-color: {ds.colors.border};
+                border-color: {ds.colors.text_muted};
+            }}
+
+            #refresh_button:pressed {{
+                background-color: {ds.colors.text_muted};
+            }}
             
             #current_plan_name {{
                 color: {ds.colors.text_primary};
@@ -546,10 +681,16 @@ class PaymentForm(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ds.spacing.space_5)
 
-        # Title
+        # Title with icon
+        title_container = QHBoxLayout()
+        title_icon = QLabel("💳")
+        title_icon.setFont(QFont("Segoe UI Emoji", 20))
+        title_container.addWidget(title_icon)
+
         title = QLabel("결제 정보")
         title.setObjectName("form_title")
-        layout.addWidget(title)
+        title_container.addWidget(title, 1)
+        layout.addLayout(title_container)
 
         # Form fields container
         form_container = QFrame()
@@ -563,17 +704,28 @@ class PaymentForm(QWidget):
         )
         form_layout.setSpacing(ds.spacing.space_4)
 
-        # Selected plan display
-        plan_row = QHBoxLayout()
-        plan_label = QLabel("선택한 플랜")
-        plan_label.setObjectName("field_label")
-        plan_row.addWidget(plan_label)
+        # Selected plan display - enhanced with background
+        plan_card = QFrame()
+        plan_card.setObjectName("selected_plan_card")
+        plan_card_layout = QVBoxLayout(plan_card)
+        plan_card_layout.setContentsMargins(
+            ds.spacing.space_4,
+            ds.spacing.space_4,
+            ds.spacing.space_4,
+            ds.spacing.space_4
+        )
+        plan_card_layout.setSpacing(ds.spacing.space_2)
 
-        self.selected_plan_label = QLabel("-")
+        plan_header = QLabel("선택한 플랜")
+        plan_header.setObjectName("plan_card_header")
+        plan_card_layout.addWidget(plan_header)
+
+        self.selected_plan_label = QLabel("플랜을 선택해주세요")
         self.selected_plan_label.setObjectName("selected_plan_value")
-        plan_row.addWidget(self.selected_plan_label)
+        self.selected_plan_label.setWordWrap(True)
+        plan_card_layout.addWidget(self.selected_plan_label)
 
-        form_layout.addLayout(plan_row)
+        form_layout.addWidget(plan_card)
 
         # Separator
         separator = QFrame()
@@ -631,10 +783,26 @@ class PaymentForm(QWidget):
         
     def set_plan(self, plan_data: dict):
         """Set the selected plan"""
-        price_text = f"{plan_data['price_text']}원"
-        if plan_data['price'] > 0:
-            price_text += f"/{plan_data['period']}"
-        self.selected_plan_label.setText(f"{plan_data['name']} - {price_text}")
+        # Build detailed plan description
+        plan_name = plan_data['name']
+        price = plan_data['price']
+        price_text = f"{price:,}원"
+
+        # Add period information
+        months = plan_data.get('months', 1)
+        if months > 1:
+            price_text += f" (일시불 · {months}개월)"
+            if plan_data.get('price_per_month'):
+                per_month = f"월 {plan_data['price_per_month']:,}원"
+                price_text = f"{price_text}\n{per_month}"
+
+        # Add discount information
+        if plan_data.get('discount_percent'):
+            discount_info = f"\n💰 {plan_data['discount_percent']}% 할인 적용"
+            price_text += discount_info
+
+        full_text = f"{plan_name}\n{price_text}"
+        self.selected_plan_label.setText(full_text)
         
     def set_status(self, status: str):
         """Update status text"""
@@ -655,24 +823,40 @@ class PaymentForm(QWidget):
                 font-size: {ds.typography.size_xl}px;
                 font-weight: {ds.typography.weight_bold};
             }}
-            
+
             #form_container {{
                 background-color: {ds.colors.surface};
-                border: 1px solid {ds.colors.border};
+                border: 2px solid {ds.colors.border};
                 border-radius: {ds.radius.lg}px;
             }}
-            
+
+            #selected_plan_card {{
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                    stop:0 #FEF2F2, stop:1 #FEE2E2);
+                border: 2px solid #FCA5A5;
+                border-radius: {ds.radius.md}px;
+            }}
+
+            #plan_card_header {{
+                color: #991B1B;
+                font-size: {ds.typography.size_xs}px;
+                font-weight: {ds.typography.weight_bold};
+                text-transform: uppercase;
+                letter-spacing: 1px;
+            }}
+
             #field_label {{
                 color: {ds.colors.text_secondary};
                 font-size: {ds.typography.size_sm}px;
+                font-weight: {ds.typography.weight_medium};
             }}
-            
+
             #selected_plan_value {{
-                color: {ds.colors.primary};
-                font-size: {ds.typography.size_base}px;
-                font-weight: {ds.typography.weight_semibold};
+                color: #DC2626;
+                font-size: {ds.typography.size_lg}px;
+                font-weight: {ds.typography.weight_bold};
             }}
-            
+
             #form_separator {{
                 color: {ds.colors.border};
             }}
@@ -767,14 +951,30 @@ class SubscriptionPanel(QWidget):
         outer_layout.setContentsMargins(0, 0, 0, 0)
         outer_layout.setSpacing(0)
 
+        # Set proper background color for the panel
+        self.setAutoFillBackground(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+
         scroll = self.scroll_area = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {ds.colors.background};
+                border: none;
+            }}
+        """)
 
         page = QWidget()
+        page.setObjectName("subscription_page")
+        page.setStyleSheet(f"""
+            QWidget#subscription_page {{
+                background-color: {ds.colors.background};
+            }}
+        """)
+
         main_layout = QVBoxLayout(page)
         main_layout.setContentsMargins(
             ds.spacing.space_6,
@@ -783,13 +983,8 @@ class SubscriptionPanel(QWidget):
             ds.spacing.space_6
         )
         main_layout.setSpacing(ds.spacing.space_6)
-        
-        # Page title
-        title = QLabel("구독 관리")
-        title.setObjectName("page_title")
-        main_layout.addWidget(title)
-        
-        # Subtitle
+
+        # Subtitle (removed duplicate title)
         subtitle = QLabel("쇼핑 숏츠 메이커의 모든 기능을 해제하세요")
         subtitle.setObjectName("page_subtitle")
         main_layout.addWidget(subtitle)
@@ -812,6 +1007,7 @@ class SubscriptionPanel(QWidget):
         self.current_plan_card = CurrentPlanCard()
         self.current_plan_card.upgrade_btn.clicked.connect(self._show_plans)
         self.current_plan_card.contact_btn.clicked.connect(self._contact_support)
+        self.current_plan_card.refresh_btn.clicked.connect(self._manual_refresh)
         left_layout.addWidget(self.current_plan_card)
         
         # Plans section (hidden by default, shown when upgrade clicked)
@@ -828,10 +1024,12 @@ class SubscriptionPanel(QWidget):
         plans_row = QHBoxLayout()
         plans_row.setSpacing(ds.spacing.space_4)
         
-        # Create plan cards
+        # Create plan cards for all pro tiers
         self.plan_cards = []
-        for plan_id, plan_data in PLANS.items():
-            if plan_id != "trial":  # Don't show trial in selection
+        pro_plan_ids = ["pro_1month", "pro_6months", "pro_12months"]
+        for plan_id in pro_plan_ids:
+            if plan_id in PLANS:
+                plan_data = PLANS[plan_id]
                 card = PlanCard(plan_data, on_select=self._on_plan_selected)
                 self.plan_cards.append(card)
                 plans_row.addWidget(card)
@@ -898,6 +1096,33 @@ class SubscriptionPanel(QWidget):
     def _contact_support(self):
         """Open support contact"""
         webbrowser.open("mailto:support@shoppingmaker.com")
+
+    def _manual_refresh(self):
+        """Manually refresh subscription status"""
+        self.current_plan_card.refresh_btn.setEnabled(False)
+        self.current_plan_card.refresh_btn.setText("⏳")
+
+        def _do_refresh():
+            success = self.refresh_from_server()
+
+            def _restore_button():
+                self.current_plan_card.refresh_btn.setEnabled(True)
+                self.current_plan_card.refresh_btn.setText("🔄")
+                if success:
+                    QMessageBox.information(self, "완료", "구독 상태가 새로고침되었습니다.")
+                else:
+                    QMessageBox.warning(self, "오류", "구독 상태를 새로고침하지 못했습니다.")
+
+            # Run in main thread
+            cb_signal = getattr(self.gui, 'ui_callback_signal', None) if self.gui else None
+            if cb_signal is not None:
+                cb_signal.emit(_restore_button)
+            else:
+                QTimer.singleShot(0, _restore_button)
+
+        # Run refresh in background thread
+        import threading
+        threading.Thread(target=_do_refresh, daemon=True).start()
         
     def _checkout(self):
         """Start PayApp checkout process"""
@@ -1064,3 +1289,55 @@ class SubscriptionPanel(QWidget):
     def update_usage(self, used: int, total: int, plan_id: str = "trial"):
         """Update current usage display"""
         self.current_plan_card.update_plan(plan_id, used, total)
+
+    def refresh_from_server(self):
+        """Force refresh subscription status from server"""
+        try:
+            user_id = self._extract_user_id()
+            if not user_id:
+                logger.warning("[Subscription] Cannot refresh - no user_id")
+                return
+
+            from caller import rest
+            status = rest.getSubscriptionStatus(user_id)
+
+            if status.get("success", True):
+                work_count = status.get("work_count", -1)
+                work_used = status.get("work_used", 0)
+                expires_at = status.get("subscription_expires_at")
+
+                # Determine plan type based on subscription status
+                is_pro = (work_count == -1) or (expires_at is not None) or status.get("user_type") == "subscriber"
+
+                if is_pro:
+                    self.current_plan_card.update_plan("pro", used=work_used, total=999)
+                    logger.info(f"[Subscription] Refreshed: PRO account (expires_at={expires_at})")
+                else:
+                    remaining = max(work_count - work_used, 0)
+                    self.current_plan_card.update_plan("trial", used=work_used, total=work_count)
+                    logger.info(f"[Subscription] Refreshed: TRIAL account ({work_used}/{work_count})")
+
+                # Update parent GUI if available
+                if self.gui:
+                    # Update credits label
+                    credits_lbl = getattr(self.gui, "credits_label", None)
+                    if credits_lbl is not None:
+                        if is_pro:
+                            credits_lbl.setText("구독중")
+                        else:
+                            credits_lbl.setText(f"크레딧: {remaining}/{work_count}")
+
+                return True
+            else:
+                logger.warning(f"[Subscription] Server returned failure: {status}")
+                return False
+
+        except Exception as e:
+            logger.error(f"[Subscription] Refresh failed: {e}")
+            return False
+
+    def showEvent(self, event):
+        """Called when panel becomes visible - refresh subscription status"""
+        super().showEvent(event)
+        # Refresh subscription status when panel is shown
+        QTimer.singleShot(100, self.refresh_from_server)
