@@ -33,7 +33,6 @@ datas = [
     ('resource', 'resource'),
     # Fonts are intentionally not bundled (see .gitignore). The app falls back to system fonts.
     ('version.json', '.'),
-    ('ui_preferences.json', '.'),
 ]
 
 binaries = []

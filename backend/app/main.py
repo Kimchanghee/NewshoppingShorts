@@ -212,10 +212,10 @@ async def health():
 _DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "")
 
 APP_VERSION_INFO = {
-    "version": "1.3.9",
+    "version": "1.3.10",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": "버전 1.3.9 업데이트: CI 빌드 안정화(폰트 번들 필수 의존 제거, ffmpeg는 imageio_ffmpeg 사용).",
+    "release_notes": "버전 1.3.10 업데이트: CI 빌드 안정화(로컬 설정/폰트 파일 번들 의존 제거).",
     "is_mandatory": False,
     "update_channel": "stable",
 }
