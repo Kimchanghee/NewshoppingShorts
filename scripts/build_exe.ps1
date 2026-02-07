@@ -10,14 +10,24 @@ function Invoke-Native {
 
   Write-Host "`n$Step"
   $tail = New-Object System.Collections.Generic.List[string]
-  & $Exe @Args 2>&1 | ForEach-Object {
-    # Preserve full logs (for local runs) while keeping only the last N lines for CI annotations.
-    $_
-    $line = $_.ToString()
-    $tail.Add($line)
-    if ($tail.Count -gt 40) {
-      $tail.RemoveAt(0)
+
+  # Some native tools (including PyInstaller) write INFO logs to stderr.
+  # In Windows PowerShell 5.x, merging stderr into the pipeline can produce non-terminating
+  # error records; with $ErrorActionPreference='Stop' this aborts the script prematurely.
+  $oldEAP = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & $Exe @Args 2>&1 | ForEach-Object {
+      # Preserve full logs (for local runs) while keeping only the last N lines for CI annotations.
+      $_
+      $line = $_.ToString()
+      $tail.Add($line)
+      if ($tail.Count -gt 40) {
+        $tail.RemoveAt(0)
+      }
     }
+  } finally {
+    $ErrorActionPreference = $oldEAP
   }
 
   $exitCode = $LASTEXITCODE
