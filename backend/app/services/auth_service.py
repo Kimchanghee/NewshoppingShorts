@@ -8,6 +8,7 @@ from app.models.user import User
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
 from app.utils.password import verify_password, get_dummy_hash
+from app.utils.subscription_utils import is_subscription_active
 from app.utils.jwt_handler import create_access_token, decode_access_token
 from app.configuration import get_settings
 
@@ -98,11 +99,8 @@ class AuthService:
             logger.info(f"[Login Failed] Invalid password: username={_mask_username(username)}, ip={ip_address}")
             return {"status": "EU001", "message": "EU001"}  # Invalid password
 
-        # Check subscription and active status
-        if (
-            user.subscription_expires_at
-            and user.subscription_expires_at < datetime.utcnow()
-        ):
+        # Check subscription and active status (naive/aware-safe via utils)
+        if user.subscription_expires_at and not is_subscription_active(user.subscription_expires_at):
             self._record_login_attempt(username, ip_address, success=False)
             logger.info(f"[Login Failed] Subscription expired: username={_mask_username(username)}, ip={ip_address}")
             return {"status": "EU002", "message": "EU002"}  # Subscription expired

@@ -11,14 +11,46 @@ from PyQt6.QtWidgets import QApplication
 # Environmental settings for HighDPI
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
+# Windows DPI awareness (must be called before QApplication)
+try:
+    from startup.environment import setup_dpi_awareness
+    setup_dpi_awareness()
+except Exception:
+    pass
+
+# 빌드 환경(Frozen)에서 리소스 경로 처리
+if getattr(sys, "frozen", False):
+    _base_path = getattr(sys, "_MEIPASS", "")
+    
+    # 1. ffmpeg 경로 설정
+    _ffmpeg_dir = os.path.join(_base_path, "resource", "bin")
+    if os.path.exists(_ffmpeg_dir):
+        os.environ["PATH"] = _ffmpeg_dir + os.pathsep + os.environ.get("PATH", "")
+        _ffmpeg_exe = os.path.join(_ffmpeg_dir, "ffmpeg.exe")
+        # Ensure MoviePy/imageio-ffmpeg uses the bundled ffmpeg instead of trying to download/find one.
+        if os.path.exists(_ffmpeg_exe):
+            os.environ.setdefault("IMAGEIO_FFMPEG_EXE", _ffmpeg_exe)
+    
+    # 2. Whisper 모델 경로 환경변수 (필요 시)
+    _whisper_path = os.path.join(_base_path, "faster_whisper_models")
+    if os.path.exists(_whisper_path):
+        os.environ["WHISPER_MODEL_PATH"] = _whisper_path
+
 # Load environment variables from .env file (EXE: _MEIPASS, 개발: CWD)
 try:
     from dotenv import load_dotenv
     if getattr(sys, "frozen", False):
-        _env_path = os.path.join(getattr(sys, "_MEIPASS", ""), ".env")
-        load_dotenv(_env_path)
+        _exe_dir = os.path.dirname(sys.executable)
+        _candidates = [
+            os.path.join(_exe_dir, ".env"),
+            os.path.join(os.path.expanduser("~"), ".ssmaker", ".env"),
+        ]
+        for _p in _candidates:
+            if os.path.exists(_p):
+                load_dotenv(_p, override=False)
+                break
     else:
-        load_dotenv()
+        load_dotenv(override=False)
 except ImportError:
     pass
 

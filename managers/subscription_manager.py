@@ -157,6 +157,9 @@ class SubscriptionManager:
                 sub_label.setText("구독 만료됨")
                 sub_label.setStyleSheet("color: #EF4444; font-weight: bold;")
                 sub_label.show()
+                # 만료 시 구독하기 버튼 표시
+                if subscribe_btn is not None:
+                    subscribe_btn.show()
                 self._countdown_timer.stop()
                 return
 

@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Dict, Any
 
 from PyQt6.QtGui import QIcon, QFont
 from PyQt6.QtWidgets import (
+    QApplication,
     QWidget,
     QVBoxLayout,
     QHBoxLayout,
@@ -60,7 +61,25 @@ class UIInitializer:
         icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resource", "mainTrayIcon.png")
         if os.path.exists(icon_path):
             gui.setWindowIcon(QIcon(icon_path))
-        gui.resize(1440, 960)
+
+        # Screen-aware window sizing: fit within available screen area
+        screen = QApplication.primaryScreen()
+        if screen:
+            available = screen.availableGeometry()
+            # Use 85% of available screen, capped at 1440x960
+            target_w = min(1440, int(available.width() * 0.85))
+            target_h = min(960, int(available.height() * 0.85))
+            # Minimum usable size
+            target_w = max(1024, target_w)
+            target_h = max(680, target_h)
+            gui.resize(target_w, target_h)
+            # Center on screen
+            gui.move(
+                available.x() + (available.width() - target_w) // 2,
+                available.y() + (available.height() - target_h) // 2,
+            )
+        else:
+            gui.resize(1280, 800)
 
         central = QWidget()
         central.setObjectName("CentralWidget")

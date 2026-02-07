@@ -253,6 +253,14 @@ def main():
     sys.excepthook = global_exception_handler
     AppLogger.setup(Path("logs"), level="INFO")
 
+    # DPI awareness (must be before QApplication)
+    os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+    try:
+        from startup.environment import setup_dpi_awareness
+        setup_dpi_awareness()
+    except Exception:
+        pass
+
     app = QApplication(sys.argv)
     gui = VideoAnalyzerGUI()
     gui.show()

@@ -242,12 +242,9 @@ async def check_username(
                 return {"available": False, "message": "승인 대기 중인 아이디입니다."}
             elif existing_reg.status == RequestStatus.APPROVED:
                 # 이미 승인되었는데 User 테이블에 없으면 (데이터 불일치 혹은 삭제)
-                # 이 경우 available: True를 주되, 나중에 registration에서 삭제 후 재등록하도록 처리됨
+                # registration.py에서 기존 요청 삭제 후 재등록 허용하므로 True 반환
                 logger.warning(f"[CheckUsername] Warning: Approved request without User record: {username_clean}")
-                # return {"available": True, "message": "사용 가능한 아이디입니다."} 
-                # (보수적으로 가기 위해 일단 APPROVED도 사용 불가로 처리할 수도 있지만, 
-                # registration.py에서 삭제 로직이 있으므로 True 반환 가능)
-                pass
+                return {"available": True, "message": "사용 가능한 아이디입니다."}
 
         logger.info(f"[CheckUsername] Success: Username {username_clean} is available")
         return {"available": True, "message": "사용 가능한 아이디입니다."}

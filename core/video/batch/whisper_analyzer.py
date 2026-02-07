@@ -45,30 +45,76 @@ def _get_whisper_model_params(app):
         }
 
 
+def _find_model_in_dir(model_dir):
+    """
+    모델 디렉토리에서 model.bin을 찾는다.
+    1) 플랫 구조: model_dir/model.bin
+    2) HuggingFace 캐시: model_dir/models--*/snapshots/*/model.bin
+    """
+    if not os.path.isdir(model_dir):
+        return None
+
+    # Case 1: 플랫 구조
+    if os.path.exists(os.path.join(model_dir, 'model.bin')):
+        return model_dir
+
+    # Case 2: HuggingFace 캐시 구조
+    for entry in os.listdir(model_dir):
+        if not entry.startswith('models--'):
+            continue
+        snapshots_dir = os.path.join(model_dir, entry, 'snapshots')
+        if not os.path.isdir(snapshots_dir):
+            continue
+        for snapshot in os.listdir(snapshots_dir):
+            snapshot_path = os.path.join(snapshots_dir, snapshot)
+            if os.path.isdir(snapshot_path) and os.path.exists(os.path.join(snapshot_path, 'model.bin')):
+                return snapshot_path
+
+    return None
+
+
 def _get_model_path(model_size):
     """
     faster-whisper 모델 경로 가져오기
     빌드 환경에서는 번들된 모델 사용, 개발 환경에서는 자동 다운로드
+
+    HuggingFace 캐시 구조 지원:
+      faster_whisper_models/<size>/models--Systran--faster-whisper-<size>/
+        snapshots/<commit_hash>/model.bin (symlink → blobs/)
     """
     if getattr(sys, 'frozen', False):
         # PyInstaller 빌드인 경우
         base_path = getattr(sys, '_MEIPASS', os.path.dirname(sys.executable))
         bundled_model_dir = os.path.join(base_path, 'faster_whisper_models', model_size)
 
-        if os.path.isdir(bundled_model_dir):
-            model_file = os.path.join(bundled_model_dir, 'model.bin')
-            if os.path.exists(model_file):
-                logger.info(f"[Faster-Whisper] 빌드 포함 모델 사용: {bundled_model_dir}")
-                return bundled_model_dir
+        resolved = _find_model_in_dir(bundled_model_dir)
+        if resolved:
+            logger.info(f"[Faster-Whisper] 빌드 포함 모델 사용: {resolved}")
+            return resolved
 
-        # 번들에 없으면 에러
+        # exe 옆 폴더도 확인 (onedir 빌드)
+        exe_model_dir = os.path.join(os.path.dirname(sys.executable), 'faster_whisper_models', model_size)
+        if exe_model_dir != bundled_model_dir:
+            resolved = _find_model_in_dir(exe_model_dir)
+            if resolved:
+                logger.info(f"[Faster-Whisper] exe 옆 모델 사용: {resolved}")
+                return resolved
+
         raise RuntimeError(
             f"[Faster-Whisper] 오프라인 실행 실패: 모델이 빌드에 포함되지 않았습니다.\n"
             f"경로: {bundled_model_dir}\n"
             f"해결방법: download_whisper_models.py를 실행하여 모델을 다운로드한 후 재빌드하세요."
         )
     else:
-        # 개발 환경: 모델 이름만 반환 (자동 다운로드)
+        # 개발 환경: 로컬 모델 폴더 확인 후 없으면 자동 다운로드
+        dev_model_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), '..', '..', '..', 'faster_whisper_models', model_size
+        )
+        dev_model_dir = os.path.normpath(dev_model_dir)
+        resolved = _find_model_in_dir(dev_model_dir)
+        if resolved:
+            logger.info(f"[Faster-Whisper] 로컬 모델 사용: {resolved}")
+            return resolved
         return model_size
 
 

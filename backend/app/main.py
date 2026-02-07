@@ -56,7 +56,8 @@ def run_auto_migration():
                 ("user_type", "ENUM('trial', 'subscriber', 'admin') DEFAULT 'trial'"),
                 ("current_task", "VARCHAR(255) NULL"),
                 ("is_online", "BOOLEAN DEFAULT FALSE"),
-                ("last_heartbeat", "TIMESTAMP NULL")
+                ("last_heartbeat", "TIMESTAMP NULL"),
+                ("app_version", "VARCHAR(20) NULL"),
             ],
             "registration_requests": [
                 ("email", "VARCHAR(255) NULL")

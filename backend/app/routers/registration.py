@@ -140,7 +140,7 @@ async def submit_registration_request(
                 # 대기 중인 요청이 있음
                 logger.info(f"[Register Fail] Pending request exists: {username_clean}")
                 return RegistrationResponse(
-                    success=False, message="승인 대기 중인 아이디입니다. 관라자 승인을 기다려주세요."
+                    success=False, message="승인 대기 중인 아이디입니다. 관리자 승인을 기다려주세요."
                 )
             
             # 그 외 상태 (REJECTED 등)는 기존 요청 삭제 후 재시도 허용

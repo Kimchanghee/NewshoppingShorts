@@ -33,10 +33,12 @@ CHECKOUT_POLL_INTERVAL = 5.0  # seconds - 결제 상태 확인 주기 (5초)
 CHECKOUT_POLL_MAX_TRIES = 60  # 최대 확인 횟수 (5분 = 60 * 5초)
 
 # PayApp 결제 연동 설정
-PAYAPP_USERID = os.getenv("PAYAPP_USERID", "yumc")
-PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "HZv+goDnY69SypcNztTi0u1DPJnCCRVaOgT+oqg6zaM=")
-PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "HZv+goDnY69SypcNztTi0sVFzyDowNDrzkW1J98377U=")
-PAYAPP_API_URL = "https://api.payapp.kr/oapi/apiLoad.html"
+# IMPORTANT: Never ship real PayApp credentials inside the client.
+# These must be provided via environment variables in the backend/runtime.
+PAYAPP_USERID = os.getenv("PAYAPP_USERID", "")
+PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
+PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
+PAYAPP_API_URL = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
 
 # 구독 설정
 SUBSCRIPTION_PRICE = 190000  # KRW - 프로 구독 월 가격
