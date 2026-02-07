@@ -48,6 +48,17 @@ class RegistrationRequestCreate(BaseModel):
             raise ValueError('아이디는 영문, 숫자, 밑줄(_)만 사용할 수 있습니다.')
         return v.lower()
 
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        """이메일 유효성 검증"""
+        if v is None or v.strip() == '':
+            return None
+        v = v.strip()
+        if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', v):
+            raise ValueError('올바른 이메일 주소를 입력해주세요.')
+        return v
+
     @field_validator('contact')
     @classmethod
     def validate_contact(cls, v: str) -> str:

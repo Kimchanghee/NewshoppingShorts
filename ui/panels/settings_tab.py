@@ -411,7 +411,35 @@ class SettingsTab(QWidget, ThemedMixin):
         tutorial_section.content_layout.addWidget(self.replay_tutorial_btn)
 
         content_layout.addWidget(tutorial_section)
-        
+
+        # =================== SECTION: Subscription ===================
+        sub_section = SettingsSection("구독 관리")
+
+        sub_desc = QLabel("구독 상태 확인 및 플랜을 변경할 수 있습니다.")
+        sub_desc.setWordWrap(True)
+        sub_desc.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        sub_section.content_layout.addWidget(sub_desc)
+
+        self.subscription_btn = QPushButton("구독 관리 페이지로 이동")
+        self.subscription_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.subscription_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: white;
+                padding: 12px 24px;
+                border-radius: {ds.radius.sm}px;
+                font-weight: bold;
+                font-size: {ds.typography.size_sm}px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.primary_hover};
+            }}
+        """)
+        self.subscription_btn.clicked.connect(self._go_to_subscription)
+        sub_section.content_layout.addWidget(self.subscription_btn)
+
+        content_layout.addWidget(sub_section)
+
         # Spacer
         content_layout.addStretch()
         
@@ -587,6 +615,11 @@ class SettingsTab(QWidget, ThemedMixin):
         """튜토리얼 재실행"""
         if self.gui and hasattr(self.gui, 'show_tutorial_manual'):
             self.gui.show_tutorial_manual()
+
+    def _go_to_subscription(self):
+        """구독 관리 페이지로 이동"""
+        if self.gui and hasattr(self.gui, '_on_step_selected'):
+            self.gui._on_step_selected("subscription")
 
     def _connect_youtube(self, platform_id: str):
         """Connect YouTube channel via OAuth"""

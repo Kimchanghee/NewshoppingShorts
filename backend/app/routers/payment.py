@@ -44,10 +44,12 @@ PLAN_PRICES = {
 }
 
 # PayApp Configuration (from environment)
-PAYAPP_USERID = os.getenv("PAYAPP_USERID", "yumc")
-PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "HZv+goDnY69SypcNztTi0u1DPJnCCRVaOgT+oqg6zaM=")
-PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "HZv+goDnY69SypcNztTi0sVFzyDowNDrzkW1J98377U=")
-PAYAPP_API_URL = "https://api.payapp.kr/oapi/apiLoad.html"
+# IMPORTANT: Never ship real PayApp credentials in the repository defaults.
+# Configure these via environment variables / secrets manager in production.
+PAYAPP_USERID = os.getenv("PAYAPP_USERID", "")
+PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
+PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
+PAYAPP_API_URL = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
 SUBSCRIPTION_DAYS = 30
 
 
@@ -449,6 +451,10 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
         )
 
         # 인증 검증
+        if not PAYAPP_LINKKEY or not PAYAPP_LINKVAL:
+            logger.error("[PayApp Webhook] PAYAPP_LINKKEY/LINKVAL not configured")
+            return PlainTextResponse("FAIL")
+
         if PAYAPP_LINKKEY and recv_linkkey != PAYAPP_LINKKEY:
             logger.warning("[PayApp Webhook] Invalid linkkey")
             return PlainTextResponse("FAIL")

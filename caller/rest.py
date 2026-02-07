@@ -539,7 +539,7 @@ def submitRegistrationRequest(
 
     # 연락처: 숫자/하이픈만 허용되므로 미리 정제
     import re
-    cleaned_contact = re.sub(r"[^0-9\\-]", "", contact or "")
+    cleaned_contact = re.sub(r"[^0-9\-]", "", contact or "")
     if not cleaned_contact or len(cleaned_contact) < 10:
         return {
             "success": False,

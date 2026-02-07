@@ -220,10 +220,13 @@ def _analyze_video_for_batch(app):
 
                 if is_quota_error or is_permission_error:
                     blocked_key = getattr(api_mgr, 'current_key', 'unknown') if api_mgr else 'unknown'
+                    short_err = str(e)[:80]
                     if is_quota_error:
                         logger.warning(f"[배치 분석] API 키 할당량 초과(429) 감지. 현재 키: {blocked_key}")
+                        app.add_log(f"[분석] API 429 할당량 초과 (키: {blocked_key}) - {short_err}")
                     else:
                         logger.warning(f"[배치 분석] API 키 권한 오류(403) 감지. 현재 키: {blocked_key}")
+                        app.add_log(f"[분석] API 403 권한 오류 (키: {blocked_key}) - {short_err}")
 
                     if api_mgr:
                         try:

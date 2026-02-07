@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS registration_requests (
     username VARCHAR(50) NOT NULL UNIQUE COMMENT '요청 아이디',
     password_hash VARCHAR(255) NOT NULL COMMENT '해시된 비밀번호',
     contact VARCHAR(50) NOT NULL COMMENT '연락처',
+    email VARCHAR(255) NULL COMMENT '이메일',
     status ENUM('pending', 'approved', 'rejected') NOT NULL DEFAULT 'pending' COMMENT '상태',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP COMMENT '생성 일시',
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '수정 일시',

@@ -612,17 +612,42 @@ def _generate_tts_for_batch_legacy(app, voice):
                     logger.warning(f"[TTS 오류] ({tts_retry}/{max_tts_retry}): {error_str[:60]}")
 
                     if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
+                        blocked_key = 'unknown'
                         try:
                             if hasattr(app, 'api_key_manager') and app.api_key_manager:
+                                blocked_key = getattr(app.api_key_manager, 'current_key', 'unknown')
+                                app.add_log(f"[TTS] API 429 할당량 초과 (키: {blocked_key}) - {error_str[:80]}")
                                 app.api_key_manager.block_current_key(duration_minutes=5)
                                 if hasattr(app, 'init_client') and app.init_client():
-                                    logger.info("[API 키 전환] 완료")
+                                    new_key = getattr(app.api_key_manager, 'current_key', 'unknown')
+                                    app.add_log(f"[TTS] 키 교체: {blocked_key} -> {new_key}")
                                 else:
+                                    app.add_log(f"[TTS] 사용 가능한 API 키 없음 - 60초 대기")
                                     time.sleep(60)
+                            else:
+                                app.add_log(f"[TTS] API 429 오류 - 키 관리자 없음, 60초 대기")
+                                time.sleep(60)
                         except Exception as key_err:
                             logger.warning(f"[API 키 전환 오류] {key_err}")
+                            app.add_log(f"[TTS] 키 교체 실패: {key_err}")
                             time.sleep(60)
+                    elif "403" in error_str or "PERMISSION_DENIED" in error_str:
+                        try:
+                            if hasattr(app, 'api_key_manager') and app.api_key_manager:
+                                blocked_key = getattr(app.api_key_manager, 'current_key', 'unknown')
+                                app.add_log(f"[TTS] API 403 권한 오류 (키: {blocked_key}) - {error_str[:80]}")
+                                app.api_key_manager.block_current_key(duration_minutes=30)
+                                if hasattr(app, 'init_client') and app.init_client():
+                                    new_key = getattr(app.api_key_manager, 'current_key', 'unknown')
+                                    app.add_log(f"[TTS] 키 교체: {blocked_key} -> {new_key}")
+                                else:
+                                    app.add_log(f"[TTS] 사용 가능한 API 키 없음")
+                        except Exception as key_err:
+                            logger.warning(f"[API 키 전환 오류] {key_err}")
+                            app.add_log(f"[TTS] 키 교체 실패: {key_err}")
+                        time.sleep(2)
                     else:
+                        app.add_log(f"[TTS] 오류 ({tts_retry}/{max_tts_retry}): {error_str[:60]}")
                         time.sleep(2)
 
             if not tts_success:

@@ -2,8 +2,20 @@
 Subscription Utility Functions
 구독 관련 유틸리티 함수
 """
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
+
+
+def _utcnow() -> datetime:
+    """Timezone-aware UTC now."""
+    return datetime.now(timezone.utc)
+
+
+def _ensure_aware(dt: datetime) -> datetime:
+    """naive datetime을 UTC aware로 변환."""
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt
 
 
 def calculate_subscription_expiry(
@@ -21,16 +33,16 @@ def calculate_subscription_expiry(
         current_expiry: Current expiration date (optional)
 
     Returns:
-        New expiration datetime (UTC)
+        New expiration datetime (UTC, timezone-aware)
     """
-    now = datetime.utcnow()
+    now = _utcnow()
 
-    if current_expiry and current_expiry > now:
-        # Extend from current expiry
-        return current_expiry + timedelta(days=days)
-    else:
-        # Extend from now
-        return now + timedelta(days=days)
+    if current_expiry:
+        current_expiry = _ensure_aware(current_expiry)
+        if current_expiry > now:
+            return current_expiry + timedelta(days=days)
+
+    return now + timedelta(days=days)
 
 
 def is_subscription_active(expiry_date: Optional[datetime]) -> bool:
@@ -46,7 +58,7 @@ def is_subscription_active(expiry_date: Optional[datetime]) -> bool:
     if not expiry_date:
         return False
 
-    return expiry_date > datetime.utcnow()
+    return _ensure_aware(expiry_date) > _utcnow()
 
 
 def days_until_expiry(expiry_date: Optional[datetime]) -> int:
@@ -60,7 +72,7 @@ def days_until_expiry(expiry_date: Optional[datetime]) -> int:
         Days until expiry (negative if already expired)
     """
     if not expiry_date:
-        return -999  # Sentinel value
+        return -999
 
-    delta = expiry_date - datetime.utcnow()
+    delta = _ensure_aware(expiry_date) - _utcnow()
     return delta.days

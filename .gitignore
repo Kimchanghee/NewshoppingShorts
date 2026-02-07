@@ -91,3 +91,11 @@ nul
 
 # Security sensitive test files
 backend/test_conn.py
+backend/test_payapp.json
+
+# Local build/test artifacts (do not commit)
+updater.log
+tmp_updater_test/
+.tmp_update_test_*/
+q
+resource/bin/

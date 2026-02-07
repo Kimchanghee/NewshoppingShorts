@@ -17,6 +17,20 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+def _find_model_files(model_dir: Path):
+    """모델 디렉토리에서 model.bin 위치를 찾는다 (플랫 / HF 캐시 구조 모두 지원)."""
+    if (model_dir / "model.bin").exists():
+        return model_dir
+    for entry in model_dir.iterdir():
+        if entry.name.startswith("models--") and entry.is_dir():
+            snapshots = entry / "snapshots"
+            if snapshots.is_dir():
+                for snap in snapshots.iterdir():
+                    if snap.is_dir() and (snap / "model.bin").exists():
+                        return snap
+    return None
+
+
 def download_and_bundle_models():
     """Faster-Whisper 모델들을 다운로드하고 로컬로 복사"""
     logger.info("=" * 60)
@@ -53,24 +67,17 @@ def download_and_bundle_models():
                 download_root=str(local_model_path)
             )
             
-            # 2. 파일 확인
-            # download_root를 쓰면 해당 경로에 직접 파일들이 배치됨
-            expected_files = ["model.bin", "config.json", "vocabulary.txt", "tokenizer.json"]
-            all_exist = True
-            for f in expected_files:
-                if not (local_model_path / f).exists():
-                    all_exist = False
-                    break
-            
-            if all_exist:
-                logger.info(f"  ✅ {model_name} 모델이 {local_model_path}에 준비되었습니다.")
+            # 2. 파일 확인 (플랫 구조 또는 HuggingFace 캐시 구조)
+            resolved_path = _find_model_files(local_model_path)
+            if resolved_path:
+                logger.info(f"  ✅ {model_name} 모델 확인됨: {resolved_path}")
             else:
-                logger.warning(f"  ⚠️ {model_name} 모델 파일이 일부 누락되었을 수 있습니다.")
+                logger.warning(f"  ⚠️ {model_name} 모델 파일(model.bin)을 찾을 수 없습니다.")
                 
             del model
 
         except Exception as e:
-            logger.error(f"  ❌ {model_name} 모델 처리패 실패: {e}")
+            logger.error(f"  ❌ {model_name} 모델 처리 실패: {e}")
             return False
 
     logger.info("\n" + "=" * 60)
