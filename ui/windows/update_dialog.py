@@ -334,11 +334,13 @@ class UpdateProgressDialog(QWidget):
             notes_header.setStyleSheet(f"color:{C['text_primary']}; background:transparent; border:none;")
             layout.addWidget(notes_header)
 
-            notes = QLabel(self._release_notes[:200] + ("..." if len(self._release_notes) > 200 else ""))
+            notes = QLabel(self._release_notes[:350] + ("..." if len(self._release_notes) > 350 else ""))
             notes.setFont(QFont("Pretendard", 10))
             notes.setWordWrap(True)
             notes.setStyleSheet(_release_notes_style(C))
-            notes.setFixedHeight(60)
+            notes.setMinimumHeight(100)
+            notes.setMaximumHeight(120)
+            notes.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
             layout.addWidget(notes)
 
         # Status text
