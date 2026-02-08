@@ -60,6 +60,7 @@ def run_auto_migration():
                 ("is_online", "BOOLEAN DEFAULT FALSE"),
                 ("last_heartbeat", "TIMESTAMP NULL"),
                 ("app_version", "VARCHAR(20) NULL"),
+                ("trial_cycle_started_at", "TIMESTAMP NULL"),
             ],
             "registration_requests": [
                 ("email", "VARCHAR(255) NULL")
@@ -339,21 +340,23 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.15/ssmaker.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.16/ssmaker.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.15",
+    "version": "1.3.16",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.15 업데이트:
+    "release_notes": """버전 1.3.16 업데이트:
 
-✅ 자동 업데이트 재시작 문제 완전 해결!
-• 배치 파일 방식으로 100% 확실한 재시작 보장
-• Windows 환경에서 완벽하게 작동합니다
-• 업데이트 다운로드 → 파일 교체 → 자동 재시작
-• 더 이상 수동으로 프로그램을 다시 실행할 필요 없음
+📜 업데이트 내역이 이제 완전히 보입니다!
+• 스크롤 가능한 업데이트 내역 영역 추가
+• 다이얼로그 높이 증가로 더 많은 정보 표시
+• 더 이상 내용이 잘리지 않습니다
+• 세련된 스크롤바 디자인
 
-이제 업데이트가 완전 자동화되었습니다!""",
+✅ 포함된 기능
+• 배치 파일 방식 자동 재시작
+• 구독 요금제 월 단위 가격 표시""",
     "is_mandatory": False,
     "update_channel": "stable",
 }

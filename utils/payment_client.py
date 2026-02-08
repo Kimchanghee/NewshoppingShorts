@@ -20,10 +20,17 @@ class PaymentClient:
             logger.warning("[PaymentClient] PAYMENT_API_BASE_URL is not HTTPS: %s", self.base_url)
             raise RuntimeError("결제 서버 URL은 HTTPS를 사용해야 합니다.")
 
-    def create_checkout(self, plan_id: str, user_id: str | None = None) -> dict:
+    def create_checkout(
+        self, plan_id: str, user_id: str | None = None, token: str | None = None
+    ) -> dict:
+        if not user_id or not token:
+            raise RuntimeError("결제 세션 생성에는 사용자 인증 정보가 필요합니다.")
         payload = {"plan_id": plan_id, "user_id": user_id}
+        headers = {}
+        headers["X-User-ID"] = str(user_id)
+        headers["Authorization"] = f"Bearer {token}"
         resp = requests.post(
-            f"{self.base_url}/payments/create", json=payload, timeout=10
+            f"{self.base_url}/payments/create", json=payload, headers=headers, timeout=10
         )
         resp.raise_for_status()
         data = resp.json()

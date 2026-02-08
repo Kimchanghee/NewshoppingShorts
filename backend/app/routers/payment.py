@@ -150,6 +150,8 @@ def _validate_authenticated_user(db: Session, user_id: str, authorization: str) 
 async def create_payment(
     request: Request,
     data: CreatePaymentRequest,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    authorization: str = Header(..., alias="Authorization"),
     db: Session = Depends(get_db)
 ):
     """
@@ -160,8 +162,17 @@ async def create_payment(
     - pro_1month: 프로 1개월
     - pro_6months: 프로 6개월
     - pro_12months: 프로 12개월
+
+    Security:
+    - Requires Authorization + X-User-ID headers
+    - Header user must match optional body user_id
     """
-    logger.info(f"[Payment] Create request: plan={data.plan_id}, user={data.user_id}")
+    _validate_authenticated_user(db, str(x_user_id), authorization)
+    if data.user_id is not None and str(data.user_id) != str(x_user_id):
+        raise HTTPException(status_code=403, detail="User mismatch")
+
+    user_id = str(x_user_id)
+    logger.info(f"[Payment] Create request: plan={data.plan_id}, user={user_id}")
 
     # Generate unique payment ID
     payment_id = secrets.token_urlsafe(32)
@@ -178,7 +189,7 @@ async def create_payment(
     session = PaymentSession(
         payment_id=payment_id,
         plan_id=data.plan_id,
-        user_id=data.user_id,
+        user_id=user_id,
         status=PaymentStatus.PENDING,
         amount=amount,
         expires_at=expires_at,

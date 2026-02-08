@@ -35,6 +35,8 @@ class User(Base):
     # 작업 횟수 관리 (-1 = 무제한)
     work_count = Column(Integer, default=-1, nullable=False)
     work_used = Column(Integer, default=0, nullable=False)
+    # Trial monthly free cycle start timestamp (UTC)
+    trial_cycle_started_at = Column(TIMESTAMP, nullable=True)
     # 사용자 유형 (trial=체험판, subscriber=구독자, admin=관리자)
     user_type = Column(
         SQLEnum(UserType, values_callable=lambda x: [e.value for e in x]),

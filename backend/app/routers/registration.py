@@ -27,6 +27,7 @@ from app.models.registration_request import RegistrationRequest, RequestStatus
 from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.utils.jwt_handler import create_access_token
+from app.utils.subscription_utils import get_trial_cycle_start
 from app.schemas.registration import (
     RegistrationRequestCreate,
     RegistrationRequestResponse,
@@ -37,12 +38,13 @@ from app.schemas.registration import (
     RequestStatusEnum,
 )
 
-# 체험판 설정
-# 2026년 2월 8일 한국시간 이전 가입자: 5회, 이후 가입자: 2회
-EARLY_BIRD_CUTOFF_KST = datetime(2026, 2, 8, 23, 59, 59)  # 한국시간 2/8 23:59:59
-EARLY_BIRD_WORK_COUNT = 5  # 얼리버드 체험판 작업 횟수
-DEFAULT_TRIAL_WORK_COUNT = 2  # 일반 체험판 작업 횟수
-DEFAULT_TRIAL_DAYS = 365  # 체험판 유효 기간 (1년)
+# Trial policy
+# Users registered on/before 2026-02-08 23:59:59 KST get 5 free uses.
+# Users registered after that get 2 free uses.
+EARLY_BIRD_CUTOFF_KST = datetime(2026, 2, 8, 23, 59, 59)
+EARLY_BIRD_WORK_COUNT = 5
+DEFAULT_TRIAL_WORK_COUNT = 2
+DEFAULT_TRIAL_DAYS = 365
 
 
 def get_free_trial_work_count() -> int:
@@ -53,7 +55,11 @@ def get_free_trial_work_count() -> int:
     """
     from zoneinfo import ZoneInfo
 
-    kst = ZoneInfo("Asia/Seoul")
+    try:
+        kst = ZoneInfo("Asia/Seoul")
+    except Exception:
+        # Fallback for environments without tzdata (fixed KST offset)
+        kst = timezone(timedelta(hours=9))
     now_kst = datetime.now(kst)
     cutoff_kst = EARLY_BIRD_CUTOFF_KST.replace(tzinfo=kst)
 
@@ -164,6 +170,7 @@ async def submit_registration_request(
             is_active=True,
             work_count=trial_work_count,  # 날짜 기반 체험판 횟수
             work_used=0,
+            trial_cycle_started_at=get_trial_cycle_start(),
             user_type=UserType.TRIAL,
             email=data.email,
             phone=data.contact,
@@ -340,6 +347,8 @@ async def approve_registration(
             is_active=True,
             work_count=data.work_count,  # -1 = 무제한
             work_used=0,
+            trial_cycle_started_at=get_trial_cycle_start(),
+            user_type=UserType.SUBSCRIBER if data.work_count == -1 else UserType.TRIAL,
             email=reg_request.email,
             phone=reg_request.contact,
             name=reg_request.name,
@@ -521,3 +530,4 @@ async def check_registration_status(
             else None,
         },
     )
+
