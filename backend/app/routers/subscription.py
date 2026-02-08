@@ -199,16 +199,23 @@ async def get_my_subscription_status(
         )
 
         expiry = getattr(user, "subscription_expires_at", None)
+        work_count = getattr(user, "work_count", 0)
         is_expired = expiry is not None and (not is_subscription_active(expiry))
 
-        # Auto-heal: trial user with active subscription → upgrade to subscriber
-        if user_type_value == "trial" and expiry is not None and is_subscription_active(expiry):
+        # Auto-heal: only upgrade trial when already marked as paid-unlimited data.
+        if (
+            user_type_value == "trial"
+            and work_count == -1
+            and (expiry is None or is_subscription_active(expiry))
+        ):
             try:
                 user.user_type = UserType.SUBSCRIBER
                 user.work_count = -1
                 db.commit()
                 user_type_value = "subscriber"
-                logger.info(f"Auto-healed user {user_id}: trial → subscriber (active subscription)")
+                logger.info(
+                    f"Auto-healed user {user_id}: trial -> subscriber (paid entitlement)"
+                )
             except Exception:
                 db.rollback()
                 # Proceed as subscriber anyway to avoid blocking paid users

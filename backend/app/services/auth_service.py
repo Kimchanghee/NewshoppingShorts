@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
-from sqlalchemy import func
+from sqlalchemy import func, update
 from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
@@ -14,6 +14,17 @@ from app.configuration import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+def _has_paid_entitlement(user_type_value: str, work_count: int, expiry: Optional[datetime]) -> bool:
+    """Return True when the account should be treated as paid."""
+    if user_type_value == "admin":
+        return True
+    if user_type_value == "subscriber":
+        return expiry is None or is_subscription_active(expiry)
+    if user_type_value == "trial" and work_count == -1:
+        return expiry is None or is_subscription_active(expiry)
+    return False
 
 
 def _mask_username(username: str) -> str:
@@ -100,10 +111,14 @@ class AuthService:
             return {"status": "EU001", "message": "EU001"}  # Invalid password
 
         # Check subscription and active status (naive/aware-safe via utils)
-        if user.subscription_expires_at and not is_subscription_active(user.subscription_expires_at):
-            self._record_login_attempt(username, ip_address, success=False)
-            logger.info(f"[Login Failed] Subscription expired: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
-            return {"status": "EU002", "message": "EU002"}  # Subscription expired
+        # Only block login for expired PAID subscribers, not trial users
+        if user.user_type == UserType.SUBSCRIBER and user.subscription_expires_at and not is_subscription_active(user.subscription_expires_at):
+            # Revert expired subscriber to trial
+            user.user_type = UserType.TRIAL
+            user.work_count = 0  # No free works left
+            user.work_used = 0
+            self.db.commit()
+            # Allow login to continue (don't return EU002)
 
         if not user.is_active:
             self._record_login_attempt(username, ip_address, success=False)
@@ -356,7 +371,11 @@ class AuthService:
             jti = payload.get("jti")
             session = (
                 self.db.query(SessionModel)
-                .filter(SessionModel.token_jti == jti, SessionModel.is_active == True)
+                .filter(
+                    SessionModel.token_jti == jti,
+                    SessionModel.is_active == True,
+                    SessionModel.expires_at > datetime.now(timezone.utc),
+                )
                 .first()
             )
             if not session:
@@ -378,23 +397,10 @@ class AuthService:
                     "remaining": 0,
                 }
 
-            # Enforce subscription expiry even for already-issued tokens.
             expiry = getattr(user, "subscription_expires_at", None)
-            if expiry is not None and not is_subscription_active(expiry):
-                # Auth is valid (token/session), but access is expired.
-                return {
-                    "success": True,
-                    "can_work": False,
-                    "work_count": 0,
-                    "work_used": getattr(user, "work_used", 0),
-                    "remaining": 0,
-                }
-
             work_count = getattr(user, "work_count", -1)
             work_used = getattr(user, "work_used", 0)
 
-            # Paid accounts are time-based (subscription period), not count-based.
-            # If the subscription is active, treat as unlimited regardless of stored work_count.
             user_type = getattr(user, "user_type", None)
             user_type_value = (
                 user_type.value
@@ -402,20 +408,49 @@ class AuthService:
                 else (str(user_type) if user_type is not None else "trial")
             )
 
-            # Auto-heal: trial user with active subscription → upgrade to subscriber
-            if user_type_value == "trial" and expiry is not None and is_subscription_active(expiry):
+            # Auto-heal FIRST (before early expiry return)
+            # subscriber with expired subscription → revert to trial
+            if user_type_value == "subscriber" and expiry is not None and not is_subscription_active(expiry):
                 try:
-                    user.user_type = "subscriber"
+                    user.user_type = UserType.TRIAL
+                    user.work_count = 0
+                    user.work_used = 0
+                    self.db.commit()
+                    user_type_value = "trial"
+                    work_count = 0
+                    work_used = 0
+                    logger.info(f"Auto-healed user {user_id}: subscriber → trial (expired subscription)")
+                except Exception:
+                    self.db.rollback()
+
+            # Upgrade only when trial account already has paid entitlement markers.
+            if user_type_value == "trial" and _has_paid_entitlement(
+                user_type_value, work_count, expiry
+            ):
+                try:
+                    user.user_type = UserType.SUBSCRIBER
                     user.work_count = -1
                     self.db.commit()
                     user_type_value = "subscriber"
                     work_count = -1
-                    logger.info(f"Auto-healed user {user_id}: trial → subscriber (active subscription)")
+                    logger.info(
+                        f"Auto-healed user {user_id}: trial -> subscriber (paid entitlement)"
+                    )
                 except Exception:
                     self.db.rollback()
                     # Proceed as subscriber anyway to avoid blocking paid users
                     user_type_value = "subscriber"
                     work_count = -1
+
+            # NOW check if trial user has expired validity period
+            if user_type_value == "trial" and expiry is not None and not is_subscription_active(expiry):
+                return {
+                    "success": True,
+                    "can_work": False,
+                    "work_count": 0,
+                    "work_used": work_used,
+                    "remaining": 0,
+                }
 
             if user_type_value in ("admin", "subscriber"):
                 if user_type_value == "admin" or (expiry is None or is_subscription_active(expiry)):
@@ -496,7 +531,11 @@ class AuthService:
             jti = payload.get("jti")
             session = (
                 self.db.query(SessionModel)
-                .filter(SessionModel.token_jti == jti, SessionModel.is_active == True)
+                .filter(
+                    SessionModel.token_jti == jti,
+                    SessionModel.is_active == True,
+                    SessionModel.expires_at > datetime.now(timezone.utc),
+                )
                 .first()
             )
             if not session:
@@ -516,20 +555,10 @@ class AuthService:
                     "used": None,
                 }
 
-            # Enforce subscription expiry even for already-issued tokens.
             expiry = getattr(user, "subscription_expires_at", None)
-            if expiry is not None and not is_subscription_active(expiry):
-                return {
-                    "success": False,
-                    "message": "Subscription expired",
-                    "remaining": 0,
-                    "used": getattr(user, "work_used", 0),
-                }
-
             work_count = getattr(user, "work_count", -1)
             work_used = getattr(user, "work_used", 0)
 
-            # Paid accounts are time-based (subscription period), not count-based.
             user_type = getattr(user, "user_type", None)
             user_type_value = (
                 user_type.value
@@ -537,14 +566,47 @@ class AuthService:
                 else (str(user_type) if user_type is not None else "trial")
             )
 
-            # Auto-heal: trial user with active subscription → upgrade to subscriber
-            if user_type_value == "trial" and expiry is not None and is_subscription_active(expiry):
+            # Auto-heal FIRST (before early expiry return)
+            # subscriber with expired subscription → revert to trial
+            if user_type_value == "subscriber" and expiry is not None and not is_subscription_active(expiry):
                 try:
-                    user.user_type = "subscriber"
-                    user_type_value = "subscriber"
-                    logger.info(f"Auto-healed user {user_id}: trial → subscriber (use_work)")
+                    user.user_type = UserType.TRIAL
+                    user.work_count = 0
+                    user.work_used = 0
+                    self.db.commit()
+                    user_type_value = "trial"
+                    work_count = 0
+                    work_used = 0
+                    logger.info(f"Auto-healed user {user_id}: subscriber → trial (expired subscription in use_work)")
                 except Exception:
+                    self.db.rollback()
+
+            # Upgrade only when trial account already has paid entitlement markers.
+            if user_type_value == "trial" and _has_paid_entitlement(
+                user_type_value, work_count, expiry
+            ):
+                try:
+                    user.user_type = UserType.SUBSCRIBER
+                    user.work_count = -1
+                    self.db.commit()
                     user_type_value = "subscriber"
+                    work_count = -1
+                    logger.info(
+                        f"Auto-healed user {user_id}: trial -> subscriber (use_work paid entitlement)"
+                    )
+                except Exception:
+                    self.db.rollback()
+                    user_type_value = "subscriber"
+                    work_count = -1
+
+            # NOW check if trial user has expired validity period
+            if user_type_value == "trial" and expiry is not None and not is_subscription_active(expiry):
+                return {
+                    "success": False,
+                    "message": "Subscription expired",
+                    "remaining": 0,
+                    "used": work_used,
+                }
 
             is_paid = user_type_value in ("admin", "subscriber") and (
                 user_type_value == "admin" or (expiry is None or is_subscription_active(expiry))
@@ -554,10 +616,27 @@ class AuthService:
                 user.work_count = -1
                 work_count = -1
 
-            # Check if work is available (unless unlimited)
-            if not is_paid and work_count != -1:
-                remaining = work_count - work_used
-                if remaining <= 0:
+            # Atomic check-and-increment to prevent race conditions
+            if is_paid or work_count == -1:
+                # Unlimited - just increment
+                stmt = update(User).where(User.id == int(user_id)).values(
+                    work_used=User.work_used + 1
+                )
+                result = self.db.execute(stmt)
+                self.db.commit()
+            else:
+                # Trial user - atomic check-and-increment
+                stmt = update(User).where(
+                    User.id == int(user_id),
+                    User.work_used < User.work_count  # Only increment if under limit
+                ).values(
+                    work_used=User.work_used + 1
+                )
+                result = self.db.execute(stmt)
+                self.db.commit()
+
+                if result.rowcount == 0:
+                    # Limit reached (or user not found)
                     return {
                         "success": False,
                         "message": "No remaining work count",
@@ -565,9 +644,7 @@ class AuthService:
                         "used": work_used,
                     }
 
-            # Increment work_used
-            user.work_used = work_used + 1
-            self.db.commit()
+            self.db.refresh(user)
 
             new_remaining = (
                 -1 if work_count == -1 else max(0, work_count - user.work_used)
