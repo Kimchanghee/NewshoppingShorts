@@ -369,47 +369,68 @@ class AppController:
         self.download_worker.start()
 
     def _run_updater(self, new_exe_path: str) -> None:
-        """Launch the separate updater process and exit."""
+        """Launch update process using batch file and exit."""
         import subprocess
+        import tempfile
 
         if hasattr(self, "update_progress_dialog") and self.update_progress_dialog:
             self.update_progress_dialog.set_status("앱을 재시작합니다...")
 
         try:
             if getattr(sys, "frozen", False):
-                base_dir = os.path.dirname(sys.executable)
                 current_exe = sys.executable
-                updater_exe = os.path.join(base_dir, "updater.exe")
-
-                # updater.exe가 EXE 옆에 없으면 _MEIPASS 번들에서 추출
-                if not os.path.exists(updater_exe):
-                    meipass = getattr(sys, '_MEIPASS', None)
-                    if meipass:
-                        bundled_updater = os.path.join(meipass, "updater.exe")
-                        if os.path.exists(bundled_updater):
-                            import shutil
-                            shutil.copy2(bundled_updater, updater_exe)
-                            logger.info(f"Extracted updater.exe from bundle to {updater_exe}")
-
-                if not os.path.exists(updater_exe):
-                    if hasattr(self, "update_progress_dialog"):
-                        self.update_progress_dialog.close()
-                    QMessageBox.critical(
-                        None, "오류",
-                        "updater.exe를 찾을 수 없습니다.\n다시 설치해 주세요.",
-                    )
-                    if self._update_is_mandatory:
-                        sys.exit(1)
-                    self._proceed_to_loading()
-                    return
+                current_pid = os.getpid()
 
                 # Save update info BEFORE restarting so post-restart can show complete dialog
                 self._save_pending_update(self._latest_version, self._release_notes)
 
-                args = [updater_exe, new_exe_path, current_exe, current_exe, str(os.getpid())]
-                logger.info(f"Launching updater: {args}")
-                subprocess.Popen(args)
-                sys.exit(0)
+                # Create a batch file for update process
+                # This is more reliable than updater.exe on Windows
+                batch_content = f"""@echo off
+REM Wait for main process to exit
+timeout /t 2 /nobreak >nul
+
+REM Kill process if still running
+taskkill /F /PID {current_pid} >nul 2>&1
+
+REM Wait a bit more
+timeout /t 1 /nobreak >nul
+
+REM Backup current exe
+if exist "{current_exe}.bak" del /F "{current_exe}.bak"
+move /Y "{current_exe}" "{current_exe}.bak" >nul 2>&1
+
+REM Copy new exe
+copy /Y "{new_exe_path}" "{current_exe}" >nul
+
+REM Wait for file system to sync
+timeout /t 2 /nobreak >nul
+
+REM Start new version
+start "" "{current_exe}"
+
+REM Clean up
+del /F "{new_exe_path}" >nul 2>&1
+del /F "%~f0" >nul 2>&1
+"""
+
+                batch_path = os.path.join(tempfile.gettempdir(), "ssmaker_update.bat")
+                with open(batch_path, 'w', encoding='utf-8') as f:
+                    f.write(batch_content)
+
+                logger.info(f"Created update batch file: {batch_path}")
+                logger.info(f"Launching update process...")
+
+                # Run batch file in background
+                subprocess.Popen(
+                    [batch_path],
+                    shell=True,
+                    creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS
+                )
+
+                # Exit immediately
+                QtCore.QTimer.singleShot(500, lambda: sys.exit(0))
+
             else:
                 base_dir = os.getcwd()
                 logger.info("Development mode: Restarting application...")
