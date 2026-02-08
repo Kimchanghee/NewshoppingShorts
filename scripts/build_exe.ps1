@@ -50,20 +50,32 @@ if (-not (Test-Path $Python)) {
 try {
   Write-Host "Project root: $Root"
   Write-Host "Python: $Python"
+  Push-Location $Root
 
   Write-Host "`n[1/5] Cleaning build artifacts..."
-  Remove-Item -Path (Join-Path $Root "build"), (Join-Path $Root "dist") -Recurse -Force -ErrorAction SilentlyContinue
+  Remove-Item -Path `
+    (Join-Path $Root "build"), `
+    (Join-Path $Root "dist"), `
+    (Join-Path $Root "scripts\\build"), `
+    (Join-Path $Root "scripts\\dist") `
+    -Recurse -Force -ErrorAction SilentlyContinue
 
   Invoke-Native "[1.5/5] Materializing faster-whisper models (dereference HF cache symlinks)..." $Python @(
     (Join-Path $Root "scripts\\materialize_whisper_models.py")
   )
 
   Invoke-Native "[2/5] Building updater.exe (for bundling)..." $Python @(
-    "-m", "PyInstaller", "--noconfirm", "--clean", (Join-Path $Root "updater.spec")
+    "-m", "PyInstaller", "--noconfirm", "--clean",
+    "--distpath", (Join-Path $Root "dist"),
+    "--workpath", (Join-Path $Root "build"),
+    (Join-Path $Root "updater.spec")
   )
 
   Invoke-Native "[3/5] Building ssmaker.exe..." $Python @(
-    "-m", "PyInstaller", "--noconfirm", "--clean", (Join-Path $Root "ssmaker.spec")
+    "-m", "PyInstaller", "--noconfirm", "--clean",
+    "--distpath", (Join-Path $Root "dist"),
+    "--workpath", (Join-Path $Root "build"),
+    (Join-Path $Root "ssmaker.spec")
   )
 
   $ssmakerExe = Join-Path $Root "dist\\ssmaker.exe"
@@ -107,7 +119,12 @@ $mustNotContain = @(
   ".secrets",
   ".encryption_key",
   # Legacy/local remember-me file (can contain ID/PW)
-  "info.on"
+  "info.on",
+  # Credential / key files (must never ship)
+  "temp_pw.txt",
+  "vertex-credentials",
+  ".pem",
+  ".key"
 )
 foreach ($item in $mustNotContain) {
   if ($listing | Select-String -SimpleMatch $item) {
@@ -132,4 +149,6 @@ Write-Host " - $ssmakerExe"
   Write-Host "::error::build_exe.ps1 failed: $msg"
   Write-Host "::error::python=$Python last_exit_code=$LASTEXITCODE"
   throw
+} finally {
+  Pop-Location
 }

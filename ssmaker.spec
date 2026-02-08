@@ -127,5 +127,5 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon='resource/app_icon.ico' if os.path.exists('resource/app_icon.ico') else None,
-    uac_admin=True,
+    uac_admin=False,
 )
