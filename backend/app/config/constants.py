@@ -4,7 +4,9 @@ Application Constants and Configuration
 """
 
 # Trial/Registration Settings
-FREE_TRIAL_WORK_COUNT = 5  # 체험판 작업 수
+EARLY_BIRD_WORK_COUNT = 5  # 얼리버드 체험판 작업 수
+FREE_TRIAL_WORK_COUNT = 2  # 기본 체험판 작업 수 (registration.py와 동기화)
+DEFAULT_TRIAL_WORK_COUNT = 2  # 기본 체험판 작업 수
 DEFAULT_TRIAL_DAYS = 365   # 체험판 유효 기간 (일)
 
 # Security Settings
