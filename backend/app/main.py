@@ -77,17 +77,6 @@ def run_auto_migration():
                     # Ignore "Duplicate column name" error (1060)
                     if "1060" in str(e) or "Duplicate column" in str(e):
                         logger.info(f"Column {table}.{col} already exists, skipping.")
-                    else:
-                        logger.warning(f"Failed to add column {table}.{col}: {e}")
-        
-        # Cleanup: Drop deprecated password_plain columns (Security)
-        try:
-            conn.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS password_plain"))
-            conn.execute(text("ALTER TABLE registration_requests DROP COLUMN IF EXISTS password_plain"))
-            logger.info("Executed cleanup of deprecated password_plain columns.")
-        except Exception as e:
-            logger.warning(f"Failed to drop password_plain columns: {e}")
-
         conn.commit()
     logger.info("Schema auto-migration finished.")
 
