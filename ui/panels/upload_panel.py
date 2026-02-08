@@ -376,9 +376,16 @@ class UploadPanel(QFrame, ThemedMixin):
         desc.setWordWrap(True)
         content_layout.addWidget(desc)
 
-        # YouTube section
-        self.youtube_section = YouTubeUploadSection(self.gui, content)
-        content_layout.addWidget(self.youtube_section)
+        # YouTube section (COMING SOON)
+        youtube_section = PlatformUploadSection(
+            platform_id="youtube",
+            platform_name="YouTube",
+            platform_icon="▶",
+            platform_color="#FF0000",
+            coming_soon=True,
+            parent=content
+        )
+        content_layout.addWidget(youtube_section)
 
         # TikTok section (COMING SOON)
         tiktok_section = PlatformUploadSection(
@@ -435,5 +442,4 @@ class UploadPanel(QFrame, ThemedMixin):
 
     def refresh(self):
         """Refresh the panel when navigated to"""
-        if hasattr(self, 'youtube_section'):
-            self.youtube_section.refresh()
+        return
