@@ -15,8 +15,10 @@ import shutil
 import subprocess
 import logging
 
-# Setup basic logging to a file in the temp directory or same dir
-log_file = os.path.join(os.getcwd(), 'updater.log')
+# Setup basic logging in user profile to avoid permission/path issues.
+log_dir = os.path.join(os.path.expanduser("~"), ".ssmaker", "logs")
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, "updater.log")
 logging.basicConfig(
     filename=log_file,
     level=logging.INFO,
@@ -102,17 +104,22 @@ def main():
             # Wait a bit to ensure all file handles are released
             time.sleep(2)
 
+            target = execute_after if os.path.exists(execute_after) else dest_path
+            target_dir = os.path.dirname(os.path.abspath(target)) or os.getcwd()
+            flags = int(getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0))
+            flags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
+
             if os.path.exists(execute_after):
                 logging.info(f"Launching: {execute_after}")
-                # Use shell=True and appropriate creation flags for Windows
                 if sys.platform == "win32":
                     subprocess.Popen(
                         [execute_after],
+                        cwd=target_dir,
                         shell=False,
-                        creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
+                        creationflags=flags,
                     )
                 else:
-                    subprocess.Popen([execute_after])
+                    subprocess.Popen([execute_after], cwd=target_dir)
                 logging.info("Application restarted successfully.")
             else:
                 logging.error(f"Execute path does not exist: {execute_after}")
@@ -122,11 +129,12 @@ def main():
                     if sys.platform == "win32":
                         subprocess.Popen(
                             [dest_path],
+                            cwd=target_dir,
                             shell=False,
-                            creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
+                            creationflags=flags,
                         )
                     else:
-                        subprocess.Popen([dest_path])
+                        subprocess.Popen([dest_path], cwd=target_dir)
                     logging.info("Application restarted successfully (using dest_path).")
                 else:
                     logging.error(f"Both execute_after and dest_path do not exist!")
