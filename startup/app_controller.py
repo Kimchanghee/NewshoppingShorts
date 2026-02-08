@@ -65,6 +65,7 @@ class AppController:
         self.initializer: Optional[Initializer] = None
         self.init_issues: List[Tuple[str, str, str]] = []
         self.splash: Optional[Any] = None
+        self.ocr_init_attempted: bool = False
         self._update_is_mandatory: bool = False
         self._latest_version: str = ""
         self._release_notes: str = ""
@@ -186,6 +187,7 @@ class AppController:
         self.thread.start()
 
     def _on_ocr_ready(self, ocr_reader: Optional[object]) -> None:
+        self.ocr_init_attempted = True
         self.ocr_reader = ocr_reader
 
     def _on_update_info_ready(self, update_info: Dict[str, Any]) -> None:
@@ -198,6 +200,9 @@ class AppController:
             if self.thread:
                 self.thread.quit()
                 self.thread.wait()
+
+            # OCR init step was executed during loading even if reader is None.
+            self.ocr_init_attempted = True
 
             # Check for pending update notification (saved before restart)
             pending = self._consume_pending_update()
@@ -225,7 +230,9 @@ class AppController:
             from main import VideoAnalyzerGUI
             logger.info("VideoAnalyzerGUI imported successfully")
             self.main_gui = VideoAnalyzerGUI(
-                login_data=self.login_data, preloaded_ocr=self.ocr_reader,
+                login_data=self.login_data,
+                preloaded_ocr=self.ocr_reader,
+                ocr_init_attempted=self.ocr_init_attempted,
             )
             logger.info("VideoAnalyzerGUI created successfully")
             self.main_gui.show()

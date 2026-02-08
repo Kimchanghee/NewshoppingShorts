@@ -76,10 +76,11 @@ class VideoAnalyzerGUI(
     log_signal = pyqtSignal(str, str)
     ui_callback_signal = pyqtSignal(object)
 
-    def __init__(self, parent=None, login_data=None, preloaded_ocr=None):
+    def __init__(self, parent=None, login_data=None, preloaded_ocr=None, ocr_init_attempted: bool = False):
         super().__init__(parent)
         self.login_data = login_data
         self.preloaded_ocr = preloaded_ocr
+        self.ocr_init_attempted = ocr_init_attempted
         self.config = config
 
         # Core state and design
@@ -89,7 +90,7 @@ class VideoAnalyzerGUI(
 
         # Setup state aliases (from StateBridgeMixin)
         self._setup_state_aliases()
-        self._setup_ocr_reader(preloaded_ocr)
+        self._setup_ocr_reader(preloaded_ocr, allow_fallback=not ocr_init_attempted)
 
         # Processing state
         self.api_key_manager = None
