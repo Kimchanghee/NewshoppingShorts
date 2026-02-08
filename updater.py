@@ -108,7 +108,7 @@ def main():
                 if sys.platform == "win32":
                     subprocess.Popen(
                         [execute_after],
-                        shell=True,
+                        shell=False,
                         creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
                     )
                 else:
@@ -122,7 +122,7 @@ def main():
                     if sys.platform == "win32":
                         subprocess.Popen(
                             [dest_path],
-                            shell=True,
+                            shell=False,
                             creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
                         )
                     else:

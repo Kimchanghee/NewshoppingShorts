@@ -13,6 +13,7 @@ import functools
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 # Import logging and security utilities
 from utils.logging_config import get_logger
@@ -43,6 +44,77 @@ main_server = os.getenv(
 # Production environment detection
 # ? ? ?
 _IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() == "production"
+
+# DNS failure backoff for transient resolver outages.
+_API_HOST = urlparse(main_server).hostname or ""
+_DNS_BACKOFF_BASE_SECONDS = max(
+    1, int(os.getenv("API_DNS_BACKOFF_BASE_SECONDS", "5"))
+)
+_DNS_BACKOFF_MAX_SECONDS = max(
+    _DNS_BACKOFF_BASE_SECONDS,
+    int(os.getenv("API_DNS_BACKOFF_MAX_SECONDS", "60")),
+)
+_dns_failure_count = 0
+_dns_backoff_until = 0.0
+_dns_state_lock = threading.RLock()
+
+
+def _is_dns_resolution_error(exc: Exception) -> bool:
+    """Return True when exception text indicates DNS resolution failure."""
+    text = str(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "nameresolutionerror",
+            "failed to resolve",
+            "getaddrinfo failed",
+            "temporary failure in name resolution",
+        )
+    )
+
+
+def _get_dns_retry_after_seconds() -> int:
+    """Return remaining DNS backoff time in whole seconds."""
+    with _dns_state_lock:
+        remaining = int(max(0, _dns_backoff_until - time.time()))
+    return remaining
+
+
+def _is_dns_backoff_active() -> bool:
+    """Return True when DNS backoff is active."""
+    return _get_dns_retry_after_seconds() > 0
+
+
+def _record_dns_failure(context: str, exc: Exception) -> None:
+    """Increase DNS failure counter and activate exponential backoff."""
+    global _dns_failure_count, _dns_backoff_until
+    with _dns_state_lock:
+        _dns_failure_count += 1
+        delay = min(
+            _DNS_BACKOFF_MAX_SECONDS,
+            _DNS_BACKOFF_BASE_SECONDS * (2 ** (_dns_failure_count - 1)),
+        )
+        _dns_backoff_until = max(_dns_backoff_until, time.time() + delay)
+        retry_after = int(max(1, _dns_backoff_until - time.time()))
+        host_text = _API_HOST or main_server
+    logger.warning(
+        "[%s] DNS resolution failed for %s. Backing off for %ss (failure #%s): %s",
+        context,
+        host_text,
+        retry_after,
+        _dns_failure_count,
+        str(exc)[:160],
+    )
+
+
+def _reset_dns_failure_state() -> None:
+    """Clear DNS backoff state after a successful API round-trip."""
+    global _dns_failure_count, _dns_backoff_until
+    with _dns_state_lock:
+        if _dns_failure_count == 0 and _dns_backoff_until <= time.time():
+            return
+        _dns_failure_count = 0
+        _dns_backoff_until = 0.0
 
 
 def _sanitize_user_id_for_logging(user_id: str) -> str:
@@ -464,10 +536,19 @@ def loginCheck(**data) -> Dict[str, Any]:
         "app_version": data.get("app_version")
     }
 
+    if _is_dns_backoff_active():
+        return {
+            "status": "error",
+            "message": _ERROR_MESSAGES["connection"],
+            "transient": True,
+            "retry_after": _get_dns_retry_after_seconds(),
+        }
+
     try:
         response = _secure_session.post(
             f"{main_server}/user/login/god/check", json=body, timeout=60
         )
+        _reset_dns_failure_state()
         response.raise_for_status()
         loginObject = json.loads(response.text)
         return loginObject
@@ -475,7 +556,10 @@ def loginCheck(**data) -> Dict[str, Any]:
         logger.error("Login check request timed out")
         return {"status": "error", "message": _ERROR_MESSAGES["timeout"]}
     except requests.exceptions.ConnectionError as e:
-        logger.error(f"Login check connection error: {e}")
+        if _is_dns_resolution_error(e):
+            _record_dns_failure("loginCheck", e)
+        else:
+            logger.error(f"Login check connection error: {e}")
         return {"status": "error", "message": _ERROR_MESSAGES["connection"]}
     except requests.exceptions.RequestException as e:
         logger.error(f"Login check network error: {str(e)[:100]}")
@@ -703,10 +787,20 @@ def checkWorkAvailable(user_id: str) -> Dict[str, Any]:
 
     body = {"user_id": str(user_id), "token": stored_token}
 
+    if _is_dns_backoff_active():
+        return {
+            "success": False,
+            "can_work": False,  # Security: deny access on verification failure
+            "message": _ERROR_MESSAGES["connection"],
+            "transient": True,
+            "retry_after": _get_dns_retry_after_seconds(),
+        }
+
     try:
         response = _secure_session.post(
             f"{main_server}/user/work/check", json=body, timeout=10
         )
+        _reset_dns_failure_state()
         response.raise_for_status()
         result = response.json()
         return result
@@ -718,7 +812,10 @@ def checkWorkAvailable(user_id: str) -> Dict[str, Any]:
             "message": _ERROR_MESSAGES["timeout"],
         }
     except requests.exceptions.ConnectionError as e:
-        logger.error(f"Work check connection error: {e}")
+        if _is_dns_resolution_error(e):
+            _record_dns_failure("checkWorkAvailable", e)
+        else:
+            logger.error(f"Work check connection error: {e}")
         return {
             "success": False,
             "can_work": False,  # Security: deny access on verification failure
@@ -911,10 +1008,21 @@ def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
 
     headers = {"X-User-ID": str(user_id), "Authorization": f"Bearer {stored_token}"}
 
+    if _is_dns_backoff_active():
+        return {
+            "success": False,
+            "is_trial": True,
+            "can_work": False,  # Security: deny access on verification failure
+            "message": _ERROR_MESSAGES["connection"],
+            "transient": True,
+            "retry_after": _get_dns_retry_after_seconds(),
+        }
+
     try:
         response = _secure_session.get(
             f"{main_server}/user/subscription/my-status", headers=headers, timeout=10
         )
+        _reset_dns_failure_state()
         response.raise_for_status()
         result = response.json()
         return result
@@ -927,7 +1035,10 @@ def getSubscriptionStatus(user_id: str) -> Dict[str, Any]:
             "message": _ERROR_MESSAGES["timeout"],
         }
     except requests.exceptions.ConnectionError as e:
-        logger.error(f"Subscription status connection error: {e}")
+        if _is_dns_resolution_error(e):
+            _record_dns_failure("getSubscriptionStatus", e)
+        else:
+            logger.error(f"Subscription status connection error: {e}")
         return {
             "success": False,
             "is_trial": True,
