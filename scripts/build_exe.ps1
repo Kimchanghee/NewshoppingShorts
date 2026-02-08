@@ -39,7 +39,10 @@ function Invoke-Native {
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
-$Python = Join-Path $Root "venv314\\Scripts\\python.exe"
+$Python = Join-Path $Root "venv311\\Scripts\\python.exe"
+if (-not (Test-Path $Python)) {
+  $Python = Join-Path $Root "venv314\\Scripts\\python.exe"
+}
 if (-not (Test-Path $Python)) {
   $Python = "python"
 }

@@ -64,6 +64,8 @@ if os.path.exists(_updater_exe):
 if os.path.exists('faster_whisper_models'):
     # Include only materialized flat files to avoid shipping HF cache symlinks.
     model_root = os.path.join(project_root, "faster_whisper_models")
+    print(f"[spec] Including faster_whisper_models from: {model_root}")
+    model_files_added = 0
     for size in os.listdir(model_root):
         size_dir = os.path.join(model_root, size)
         if not os.path.isdir(size_dir):
@@ -71,7 +73,14 @@ if os.path.exists('faster_whisper_models'):
         for fname in ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt"):
             src = os.path.join(size_dir, fname)
             if os.path.exists(src):
-                datas.append((src, os.path.join("faster_whisper_models", size)))
+                size_mb = os.path.getsize(src) / (1024 * 1024)
+                dst_path = os.path.join("faster_whisper_models", size)
+                print(f"[spec]   Adding: {fname} ({size_mb:.1f}MB) -> {dst_path}")
+                datas.append((src, dst_path))
+                model_files_added += 1
+    print(f"[spec] Total faster_whisper model files added: {model_files_added}")
+else:
+    print("[spec] WARNING: faster_whisper_models directory not found!")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Analysis
