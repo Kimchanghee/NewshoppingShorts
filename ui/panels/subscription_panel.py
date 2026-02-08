@@ -27,6 +27,30 @@ from ui.design_system_v2 import get_design_system, get_color, ds
 logger = get_logger(__name__)
 
 # Plan definitions with features
+def format_price_korean(amount: int) -> str:
+    """
+    Format price in Korean style with 만원 units
+    Examples:
+        190000 -> "19만원"
+        161500 -> "161,500원"
+        133000 -> "133,000원"
+        50000 -> "5만원"
+    """
+    if amount == 0:
+        return "무료"
+
+    if amount >= 10000:
+        # If clean 만원 unit (no remainder), use 만원
+        if amount % 10000 == 0:
+            man = amount // 10000
+            return f"{man}만원"
+        # Otherwise use full number with comma separator
+        return f"{amount:,}원"
+    else:
+        # For amounts less than 10,000
+        return f"{amount:,}원"
+
+
 PLANS = {
     "trial": {
         "id": "trial",
@@ -54,7 +78,7 @@ PLANS = {
         "id": "pro_1month",
         "name": "프로 1개월",
         "price": 190000,
-        "price_text": "190,000",
+        "price_text": format_price_korean(190000),
         "period": "월",
         "months": 1,
         "description": "무제한 영상 생성 + 모든 기능 해제",
@@ -75,13 +99,13 @@ PLANS = {
         "id": "pro_6months",
         "name": "프로 6개월",
         "price": 969000,
-        "price_text": "969,000",
+        "price_text": format_price_korean(161500),  # Show per-month price
         "price_per_month": 161500,
         "original_price": 1140000,
         "discount_percent": 15,
         "period": "6개월",
         "months": 6,
-        "description": "6개월 일시불 · 15% 할인 혜택",
+        "description": "15% 할인 혜택",
         "features": [
             "무제한 영상 생성",
             "모든 음성 프로필 사용",
@@ -89,7 +113,6 @@ PLANS = {
             "커스텀 자막 스타일",
             "1080p 해상도",
             "우선 처리",
-            "15% 할인 (월 161,500원)",
         ],
         "not_included": [],
         "color": "#E31639",
@@ -100,13 +123,13 @@ PLANS = {
         "id": "pro_12months",
         "name": "프로 12개월",
         "price": 1596000,
-        "price_text": "1,596,000",
+        "price_text": format_price_korean(133000),  # Show per-month price
         "price_per_month": 133000,
         "original_price": 2280000,
         "discount_percent": 30,
         "period": "12개월",
         "months": 12,
-        "description": "12개월 일시불 · 30% 할인 혜택",
+        "description": "30% 할인 혜택",
         "features": [
             "무제한 영상 생성",
             "모든 음성 프로필 사용",
@@ -114,7 +137,6 @@ PLANS = {
             "커스텀 자막 스타일",
             "1080p 해상도",
             "우선 처리",
-            "30% 할인 (월 133,000원)",
             "최대 절약 플랜!",
         ],
         "not_included": [],
@@ -196,32 +218,21 @@ class PlanCard(QFrame):
 
             price_layout.addLayout(original_row)
 
-        # Current price
+        # Current price with "월" prefix
         current_price_row = QHBoxLayout()
         current_price_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Show "월" prefix
+        if self.plan_data["price"] > 0:
+            self.month_prefix = QLabel("월")
+            self.month_prefix.setObjectName("plan_month_prefix")
+            current_price_row.addWidget(self.month_prefix)
 
         self.price_label = QLabel(self.plan_data["price_text"])
         self.price_label.setObjectName("plan_price")
         current_price_row.addWidget(self.price_label)
 
-        if self.plan_data["price"] > 0:
-            self.currency_label = QLabel("원")
-            self.currency_label.setObjectName("plan_currency")
-            current_price_row.addWidget(self.currency_label)
-
-            if self.plan_data.get("months", 0) > 1:
-                self.period_label = QLabel(f" (일시불)")
-                self.period_label.setObjectName("plan_period")
-                current_price_row.addWidget(self.period_label)
-
         price_layout.addLayout(current_price_row)
-
-        # Per-month price for multi-month plans
-        if self.plan_data.get("price_per_month"):
-            per_month = QLabel(f"월 {self.plan_data['price_per_month']:,}원")
-            per_month.setObjectName("plan_price_per_month")
-            per_month.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            price_layout.addWidget(per_month)
 
         layout.addWidget(price_container)
         
@@ -335,9 +346,16 @@ class PlanCard(QFrame):
                 font-weight: {ds.typography.weight_bold};
             }}
             
+            #plan_month_prefix {{
+                color: {ds.colors.text_secondary};
+                font-size: {ds.typography.size_lg}px;
+                font-weight: {ds.typography.weight_semibold};
+                margin-right: {ds.spacing.space_1}px;
+            }}
+
             #plan_price {{
                 color: {primary_color};
-                font-size: {ds.typography.size_2xl}px;
+                font-size: {ds.typography.size_3xl}px;
                 font-weight: {ds.typography.weight_extrabold};
             }}
 
@@ -355,18 +373,6 @@ class PlanCard(QFrame):
                 font-size: {ds.typography.size_xs}px;
                 font-weight: {ds.typography.weight_bold};
                 margin-left: {ds.spacing.space_2}px;
-            }}
-
-            #plan_price_per_month {{
-                color: {ds.colors.text_secondary};
-                font-size: {ds.typography.size_sm}px;
-                font-weight: {ds.typography.weight_medium};
-            }}
-
-            #plan_currency, #plan_period {{
-                color: {ds.colors.text_primary};
-                font-size: {ds.typography.size_lg}px;
-                font-weight: {ds.typography.weight_medium};
             }}
             
             #plan_description {{
@@ -786,22 +792,23 @@ class PaymentForm(QWidget):
         # Build detailed plan description
         plan_name = plan_data['name']
         price = plan_data['price']
-        price_text = f"{price:,}원"
-
-        # Add period information
         months = plan_data.get('months', 1)
+
+        # Show total price with period information
+        price_text = f"{price:,}원"
         if months > 1:
-            price_text += f" (일시불 · {months}개월)"
-            if plan_data.get('price_per_month'):
-                per_month = f"월 {plan_data['price_per_month']:,}원"
-                price_text = f"{price_text}\n{per_month}"
+            price_text += f" ({months}개월분)"
+
+        # Show per-month price
+        per_month_price = plan_data.get('price_per_month', price)
+        per_month_text = f"월 {format_price_korean(per_month_price)}"
 
         # Add discount information
+        discount_info = ""
         if plan_data.get('discount_percent'):
             discount_info = f"\n💰 {plan_data['discount_percent']}% 할인 적용"
-            price_text += discount_info
 
-        full_text = f"{plan_name}\n{price_text}"
+        full_text = f"{plan_name}\n{per_month_text}\n총액: {price_text}{discount_info}"
         self.selected_plan_label.setText(full_text)
         
     def set_status(self, status: str):
