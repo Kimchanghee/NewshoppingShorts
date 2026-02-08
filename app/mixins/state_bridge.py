@@ -30,6 +30,9 @@ class StateBridgeMixin:
         self.url_status_message = state.url_status_message
         self.url_timestamps = state.url_timestamps
         self.url_remarks = state.url_remarks
+        self.processing_mode = state.processing_mode
+        self.mix_video_urls = state.mix_video_urls
+        self.mix_jobs = state.mix_jobs
 
         # --- Output folder ---
         self.output_folder_path = state.output_folder_path
@@ -69,6 +72,7 @@ class StateBridgeMixin:
         self.tiktok_douyin_url = state.tiktok_douyin_url
         self.source_video = state.source_video
         self._temp_downloaded_file = state._temp_downloaded_file
+        self._temp_downloaded_files = state._temp_downloaded_files
 
         # --- TTS voice aliases ---
         self.fixed_tts_voice = state.fixed_tts_voice
@@ -79,6 +83,7 @@ class StateBridgeMixin:
         self.mirror_video = state.mirror_video
         self.add_subtitles = state.add_subtitles
         self.apply_blur = state.apply_blur
+        self.max_final_video_duration = state.max_final_video_duration
         self.cached_video_width = state.cached_video_width
         self.cached_video_height = state.cached_video_height
 

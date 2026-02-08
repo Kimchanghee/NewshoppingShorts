@@ -56,7 +56,8 @@ class AppState:
 
         # Processing mode (single / mix)
         self.processing_mode = "single"  # "single" or "mix"
-        self.mix_video_urls: List[str] = []  # 믹스 모드에서 사용할 영상 URL 리스트 (최대 5개)
+        self.mix_video_urls: List[str] = []
+        self.mix_jobs: Dict[str, List[str]] = {}
         self.mode_selected = False  # 모드 선택 완료 여부
 
         # Video source variables
@@ -64,6 +65,7 @@ class AppState:
         self.local_file_path = ""
         self.tiktok_douyin_url = ""
         self._temp_downloaded_file = None
+        self._temp_downloaded_files: List[str] = []
         self.source_video = ""
 
         # TTS voice configuration
@@ -163,6 +165,7 @@ class AppState:
         self.add_subtitles = True
         self.output_quality = "medium"
         self.apply_blur = True
+        self.max_final_video_duration = 35.0
         self._current_job_header = None
         self._stage_message_cache: Dict[str, str] = {}
         self._resize_timer = None

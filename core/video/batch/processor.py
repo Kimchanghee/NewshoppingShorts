@@ -8,13 +8,14 @@ import os
 import re
 import gc
 import time
+import random
 import shutil
 import tempfile
 import threading
 import traceback
 import subprocess
 from datetime import datetime
-from typing import List
+from typing import Dict, List, Optional, Tuple
 
 from PyQt6.QtCore import QTimer
 from utils.logging_config import get_logger
@@ -31,6 +32,13 @@ from core.video.batch.api_key_recovery import (
 )
 
 logger = get_logger(__name__)
+
+MIX_JOB_PREFIX = "mix://job/"
+MIX_MIN_URLS = 2
+MIX_MAX_URLS = 5
+MAX_FINAL_VIDEO_DURATION = 35.0
+MIX_MIN_SEGMENT_SECONDS = 2.0
+MIX_MAX_SEGMENT_SECONDS = 8.0
 
 
 def _safe_set_url_status(app, url: str, status: str):
@@ -82,6 +90,192 @@ def _set_processing_step(app, url: str, step: str):
             QTimer.singleShot(0, update_fn)
 
 
+def _get_mix_job_urls(app, job_key: str) -> List[str]:
+    """Return normalized mix source URLs for a mix queue key."""
+    if not isinstance(job_key, str) or not job_key.startswith(MIX_JOB_PREFIX):
+        return []
+
+    raw_urls: List[str] = []
+
+    queue_manager = getattr(app, "queue_manager", None)
+    if queue_manager is not None and hasattr(queue_manager, "get_mix_job_urls"):
+        try:
+            raw_urls = queue_manager.get_mix_job_urls(job_key) or []
+        except Exception as e:
+            logger.debug("[Mix] Failed to read mix URLs from queue manager: %s", e)
+
+    if not raw_urls:
+        mix_jobs = getattr(app, "mix_jobs", {})
+        if isinstance(mix_jobs, dict):
+            raw_urls = mix_jobs.get(job_key, []) or []
+
+    if not isinstance(raw_urls, list):
+        return []
+
+    normalized = []
+    for url in raw_urls[:MIX_MAX_URLS]:
+        if not isinstance(url, str):
+            continue
+        clean = url.strip()
+        if clean.startswith("http://") or clean.startswith("https://"):
+            normalized.append(clean)
+    return normalized
+
+
+def _get_job_display_source(app, source_key: str) -> str:
+    queue_manager = getattr(app, "queue_manager", None)
+    if queue_manager is not None and hasattr(queue_manager, "get_display_url"):
+        try:
+            return queue_manager.get_display_url(source_key)
+        except Exception:
+            pass
+    return source_key
+
+
+def _register_temp_download_files(app, paths: List[str]) -> None:
+    if not hasattr(app, "_temp_downloaded_files") or not isinstance(
+        getattr(app, "_temp_downloaded_files", None), list
+    ):
+        app._temp_downloaded_files = []
+
+    for path in paths:
+        if not isinstance(path, str) or not path:
+            continue
+        if path not in app._temp_downloaded_files:
+            app._temp_downloaded_files.append(path)
+
+
+def _download_mix_sources(app, mix_urls: List[str]) -> List[str]:
+    downloaded = []
+    total = len(mix_urls)
+
+    for idx, source_url in enumerate(mix_urls, 1):
+        app.add_log(f"[Mix] Downloading source {idx}/{total}...")
+        path = DouyinExtract.download_tiktok_douyin_video(source_url)
+        downloaded.append(path)
+        _register_temp_download_files(app, [path])
+        app.add_log(f"[Mix] Source {idx} ready: {os.path.basename(path)}")
+
+    return downloaded
+
+
+def _build_mix_source_video(app, source_paths: List[str]) -> Tuple[str, float]:
+    """Create a randomized mixed source clip from downloaded source files."""
+    clips: List[VideoFileClip] = []
+    segments = []
+    mixed_clip: Optional[VideoFileClip] = None
+    rng = random.Random()
+    target_duration = float(
+        getattr(app, "max_final_video_duration", MAX_FINAL_VIDEO_DURATION)
+        or MAX_FINAL_VIDEO_DURATION
+    )
+    target_duration = max(5.0, min(target_duration, MAX_FINAL_VIDEO_DURATION))
+
+    try:
+        for path in source_paths:
+            clip = VideoFileClip(path)
+            if clip.duration and clip.duration > 0.4:
+                clips.append(clip)
+            else:
+                clip.close()
+
+        if len(clips) < MIX_MIN_URLS:
+            raise RuntimeError("Not enough valid clips for mix mode.")
+
+        source_order = list(range(len(clips)))
+        rng.shuffle(source_order)
+        max_segments = max(4, len(clips) * 3)
+        total_duration = 0.0
+
+        while total_duration < target_duration - 0.05 and len(segments) < max_segments:
+            if not source_order:
+                source_order = list(range(len(clips)))
+                rng.shuffle(source_order)
+
+            clip_index = source_order.pop(0)
+            clip = clips[clip_index]
+            remaining = target_duration - total_duration
+            if remaining <= 0.15:
+                break
+
+            seg_max = min(MIX_MAX_SEGMENT_SECONDS, clip.duration, remaining)
+            if seg_max <= 0.4:
+                continue
+
+            seg_min = min(MIX_MIN_SEGMENT_SECONDS, seg_max)
+            if seg_max - seg_min > 0.25:
+                seg_duration = rng.uniform(seg_min, seg_max)
+            else:
+                seg_duration = seg_max
+
+            max_start = max(0.0, clip.duration - seg_duration)
+            start = rng.uniform(0.0, max_start) if max_start > 0.05 else 0.0
+            end = start + seg_duration
+
+            segment = clip.subclip(start, end)
+            segments.append(segment)
+            total_duration += max(0.0, float(segment.duration or 0.0))
+
+        if not segments:
+            raise RuntimeError("No segments created for mix mode.")
+
+        mixed_clip = concatenate_videoclips(segments, method="compose")
+        if mixed_clip.duration > target_duration + 0.01:
+            mixed_clip = mixed_clip.subclip(0, target_duration)
+
+        mix_dir = tempfile.mkdtemp(prefix="mix_source_")
+        output_path = os.path.join(
+            mix_dir,
+            f"mix_source_{datetime.now().strftime('%Y%m%d_%H%M%S_%f')[:21]}.mp4",
+        )
+
+        mixed_clip.write_videofile(
+            output_path,
+            codec="libx264",
+            audio_codec="aac",
+            fps=30,
+            preset="veryfast",
+            threads=2,
+            logger=None,
+            verbose=False,
+        )
+        return output_path, float(mixed_clip.duration or 0.0)
+    finally:
+        if mixed_clip is not None:
+            try:
+                mixed_clip.close()
+            except Exception:
+                pass
+
+        for seg in segments:
+            try:
+                seg.close()
+            except Exception:
+                pass
+
+        for clip in clips:
+            try:
+                clip.close()
+            except Exception:
+                pass
+
+
+def _prepare_mix_source_video(app, job_key: str) -> Tuple[str, float]:
+    mix_urls = _get_mix_job_urls(app, job_key)
+    if len(mix_urls) < MIX_MIN_URLS:
+        raise RuntimeError("Mix job has fewer than 2 source URLs.")
+
+    app.add_log(f"[Mix] Building mix source from {len(mix_urls)} URLs.")
+    downloaded = _download_mix_sources(app, mix_urls)
+
+    mix_source_path, mix_duration = _build_mix_source_video(app, downloaded)
+    _register_temp_download_files(app, [mix_source_path])
+    app.add_log(
+        f"[Mix] Mixed source ready: {os.path.basename(mix_source_path)} ({mix_duration:.1f}s)"
+    )
+    return mix_source_path, mix_duration
+
+
 from ui.components.custom_dialog import (
     show_info,
     show_warning,
@@ -104,7 +298,6 @@ from moviepy.editor import (
 )
 
 
-from utils import Tool
 from core.video import VideoTool
 from core.download import DouyinExtract
 from .utils import (
@@ -611,8 +804,7 @@ def dynamic_batch_processing_thread(app):
 
             # 정리
             try:
-                if Tool is not None:
-                    Tool.cleanup_temp_files(getattr(app, "_temp_downloaded_file", None))
+                app.cleanup_temp_files()
             except Exception as cleanup_err:
                 logger.debug(
                     "[정리] 임시 파일 정리 실패 (무시됨): %s", str(cleanup_err)[:50]
@@ -738,15 +930,19 @@ def _process_single_video(app, url, current_number, total_urls):
 
     app.reset_progress_states()
     if hasattr(app, "set_active_job"):
-        app.set_active_job(url, current_number, total_urls)
+        app.set_active_job(_get_job_display_source(app, url), current_number, total_urls)
 
     # ★★★ 로그 캡처 시작 ★★★
     # 이 URL 처리에 대한 모든 로그를 저장
     app._url_log_buffer = []
     _start_log_capture(app)
+    if not hasattr(app, "_temp_downloaded_files") or not isinstance(
+        getattr(app, "_temp_downloaded_files", None), list
+    ):
+        app._temp_downloaded_files = []
 
     # Store URL and timestamp for per-URL folder organization
-    app._current_processing_url = url
+    app._current_processing_url = _get_job_display_source(app, url)
 
     # URL별 타임스탬프 관리 (세션 복구 시 폴더명 일관성 유지)
     if not hasattr(app, "url_timestamps"):
@@ -769,6 +965,7 @@ def _process_single_video(app, url, current_number, total_urls):
         )
 
     current_step = "download"
+    display_source = _get_job_display_source(app, url)
     _stage_times = {}  # Track elapsed time per stage
 
     try:
@@ -782,27 +979,38 @@ def _process_single_video(app, url, current_number, total_urls):
         )
         app.update_step_progress("download", 20)
         logger.info("=" * 70)
-        logger.info("[STAGE 1/5] 다운로드 시작 - [%d/%d] %s", current_number, total_urls, url[:80])
+        logger.info(
+            "[STAGE 1/5] 다운로드 시작 - [%d/%d] %s",
+            current_number,
+            total_urls,
+            display_source[:80],
+        )
         logger.info("=" * 70)
         app.add_log(f"[다운로드] [{current_number}/{total_urls}] 영상 다운로드 중...")
 
-        # 저장 폴더 변경 시나 기존 다운로드 파일이 없으면 재다운로드
-        need_redownload = (
-            not hasattr(app, "_temp_downloaded_file")
-            or app._temp_downloaded_file is None
-            or not os.path.exists(app._temp_downloaded_file)
-        )
-
-        if need_redownload:
-            downloaded_path = DouyinExtract.download_tiktok_douyin_video(url)
-            app._temp_downloaded_file = downloaded_path
-            app.add_log(
-                f"[다운로드] 새로 다운로드 완료: {os.path.basename(downloaded_path)}"
-            )
+        mix_urls = _get_mix_job_urls(app, url)
+        if len(mix_urls) >= MIX_MIN_URLS:
+            mixed_path, _ = _prepare_mix_source_video(app, url)
+            app._temp_downloaded_file = mixed_path
         else:
-            app.add_log(
-                f"[다운로드] 기존 파일 사용: {os.path.basename(app._temp_downloaded_file)}"
+            # 저장 폴더 변경 시나 기존 다운로드 파일이 없으면 재다운로드
+            need_redownload = (
+                not hasattr(app, "_temp_downloaded_file")
+                or app._temp_downloaded_file is None
+                or not os.path.exists(app._temp_downloaded_file)
             )
+
+            if need_redownload:
+                downloaded_path = DouyinExtract.download_tiktok_douyin_video(url)
+                app._temp_downloaded_file = downloaded_path
+                _register_temp_download_files(app, [downloaded_path])
+                app.add_log(
+                    f"[다운로드] 새로 다운로드 완료: {os.path.basename(downloaded_path)}"
+                )
+            else:
+                app.add_log(
+                    f"[다운로드] 기존 파일 사용: {os.path.basename(app._temp_downloaded_file)}"
+                )
 
         # Measure the original duration so later steps can adjust pacing.
         original_video_duration = app.get_video_duration_helper()
@@ -1318,9 +1526,20 @@ def _create_final_video_for_batch(
             sync_info.get("speed_ratio", 1.0),
         )
 
+        max_final_duration = float(
+            getattr(app, "max_final_video_duration", MAX_FINAL_VIDEO_DURATION)
+            or MAX_FINAL_VIDEO_DURATION
+        )
+        max_final_duration = max(10.0, min(max_final_duration, MAX_FINAL_VIDEO_DURATION))
+
         # Keep last captions visible: audio length + 1.0s margin
-        desired_cut = actual_tts_duration + 1.0
+        desired_cut = min(actual_tts_duration + 1.0, max_final_duration)
         logger.info("  Target sync length: %.3fs (audio + 1.0s buffer)", desired_cut)
+        if desired_cut < actual_tts_duration + 1.0:
+            logger.info(
+                "  Sync target clamped to %.1fs by max final duration.",
+                max_final_duration,
+            )
         shortage = actual_tts_duration - original_duration
         if (
             shortage > original_duration * 0.5
@@ -1396,7 +1615,7 @@ def _create_final_video_for_batch(
         # Target video duration = max(오디오 끝, 마지막 자막 끝) + 1.0초
         # 오디오와 자막 모두 끝까지 나온 후 1.0초 여유
         content_end = max(real_audio_dur, last_subtitle_end)
-        target_video_duration = content_end + 1.0
+        target_video_duration = min(content_end + 1.0, max_final_duration)
         timestamps_source = sync_info.get("timestamps_source", "unknown")
         logger.info("  [영상 길이 계산]")
         logger.info("    타임스탬프 소스: %s", timestamps_source)
@@ -1405,6 +1624,11 @@ def _create_final_video_for_batch(
         logger.info(
             "    Target video duration: %.3fs (콘텐츠 + 1.0s)", target_video_duration
         )
+        if target_video_duration < content_end + 1.0:
+            logger.info(
+                "    Final duration capped at %.1fs.",
+                max_final_duration,
+            )
 
         # Match video length to target (extend with freeze frame or trim)
         if video.duration + eps < target_video_duration:
@@ -2025,6 +2249,7 @@ def clear_all_previous_results(app):
 
     # 5. 중요: 임시 다운로드 파일 참조 초기화
     app._temp_downloaded_file = None
+    app._temp_downloaded_files = []
 
     # 6. 분석 결과 데이터 초기화
     app.analysis_result = {}
