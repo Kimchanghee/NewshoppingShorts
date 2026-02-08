@@ -15,7 +15,7 @@ class SubscriptionRequestDialog(QDialog):
     
     subscriptionRequested = pyqtSignal(str)  # message
 
-    def __init__(self, parent=None, work_used=0, work_count=5):
+    def __init__(self, parent=None, work_used=0, work_count=2):
         super().__init__(parent)
         self.work_used = work_used
         self.work_count = work_count

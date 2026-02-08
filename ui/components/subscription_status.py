@@ -16,7 +16,7 @@ class SubscriptionStatusWidget(QWidget):
         self.ds = get_design_system()
         self._on_request_subscription = on_request_subscription
         self._is_trial = True
-        self._work_count = 3
+        self._work_count = 2
         self._work_used = 0
         self._can_work = True
         self._has_pending_request = False
@@ -41,7 +41,7 @@ class SubscriptionStatusWidget(QWidget):
         self.count_label.setStyleSheet(f"color: {get_color('text_secondary')};")
         layout.addWidget(self.count_label)
         
-        self.count_value = QLabel("3/3")
+        self.count_value = QLabel("2/2")
         self.count_value.setStyleSheet(f"font-weight: bold; color: {get_color('primary')};")
         layout.addWidget(self.count_value)
         
@@ -74,7 +74,7 @@ class SubscriptionStatusWidget(QWidget):
             self._on_request_subscription()
         self.requestSubscription.emit()
 
-    def update_status(self, is_trial=True, work_count=3, work_used=0, can_work=True, has_pending_request=False):
+    def update_status(self, is_trial=True, work_count=2, work_used=0, can_work=True, has_pending_request=False):
         self._is_trial = is_trial
         self._work_count = work_count
         self._work_used = work_used
@@ -121,11 +121,11 @@ class SubscriptionStatusWidget(QWidget):
         Get color and pulse flag based on remaining trial count.
         Returns (color_hex, should_pulse)
         """
-        if remaining >= 3:
-            # Green - healthy status (3-5 uses remaining)
+        if remaining >= 2:
+            # Green - healthy status (2+ uses remaining)
             return get_color('success'), False
         elif remaining >= 1:
-            # Yellow/Orange - warning (1-2 uses remaining)
+            # Yellow/Orange - warning (1 use remaining)
             return get_color('warning'), False
         else:
             # Red - critical (0 uses remaining)
