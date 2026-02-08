@@ -146,6 +146,23 @@ _SENSITIVE_FIELDS = frozenset(
 )
 
 
+def _contains_sensitive_keys(value) -> bool:
+    """
+    Recursively detect whether a payload contains sensitive field names.
+    Used to prevent reflected 422 inputs from leaking card/auth secrets.
+    """
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if str(k).lower() in _SENSITIVE_FIELDS:
+                return True
+            if _contains_sensitive_keys(v):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_contains_sensitive_keys(item) for item in value)
+    return False
+
+
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, exc: RequestValidationError):
     """
@@ -174,7 +191,11 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
 
         # Only include 'input' if the field is NOT sensitive
         field_names = {str(loc).lower() for loc in err.get("loc", [])}
-        if not field_names & _SENSITIVE_FIELDS:
+        is_sensitive_location = bool(field_names & _SENSITIVE_FIELDS)
+        is_body_level_error = "body" in field_names
+        input_has_sensitive_keys = _contains_sensitive_keys(err.get("input"))
+
+        if not is_sensitive_location and not is_body_level_error and not input_has_sensitive_keys:
             if "input" in err:
                 inp = err["input"]
                 # Ensure input is serializable

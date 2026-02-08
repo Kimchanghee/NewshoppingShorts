@@ -140,6 +140,18 @@ def _parse_int_value(value: str | None) -> Optional[int]:
     return int(value)
 
 
+def _force_masked_card_number(value: str | None, fallback_mask: str) -> str:
+    """
+    Never trust upstream masking format.
+    Always return a local masked form (first4 + **** + last4) when possible.
+    """
+    raw = (value or "").strip()
+    digits = re.sub(r"\D", "", raw)
+    if len(digits) >= 8:
+        return f"{digits[:4]}****{digits[-4:]}"
+    return fallback_mask
+
+
 def _resolve_payment_base_url(request: Request) -> str:
     """
     Resolve public backend base URL used in feedbackurl.
@@ -610,7 +622,10 @@ def _call_payapp_api(params: dict) -> dict:
         resp.raise_for_status()
         result = {k: v[0] for k, v in parse_qs(resp.text, keep_blank_values=True).items()}
         if "state" not in result:
-            logger.warning(f"[PayApp] API response missing state: {resp.text[:200]}")
+            safe_keys = ",".join(sorted(result.keys()))[:120]
+            logger.warning(
+                f"[PayApp] API response missing state (keys={safe_keys or 'none'})"
+            )
         return result
     except http_requests.exceptions.Timeout:
         logger.error("[PayApp] API request timed out")
@@ -1080,7 +1095,10 @@ async def register_card(
             except RuntimeError as e:
                 logger.error(f"[PayApp Card] Billing key encryption failed: {e}")
                 return {"success": False, "message": "결제 보안 설정 오류로 카드 등록에 실패했습니다."}
-            card_no_masked = result.get("cardno", masked_card)
+            card_no_masked = _force_masked_card_number(
+                result.get("cardno", ""),
+                masked_card,
+            )
             card_name = result.get("cardname", "")
 
             # DB??鍮뚮쭅?????(Save billing key to DB)
