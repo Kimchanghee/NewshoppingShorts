@@ -362,13 +362,11 @@ class SettingsTab(QWidget, ThemedMixin):
 
         self.youtube_card = SocialAuthCard(
             platform_id="youtube",
-            is_connected=self._social_settings.get_youtube_connected(),
-            channel_info=self._social_settings.get_youtube_channel_info(),
-            coming_soon=False,
+            is_connected=False,
+            channel_info=None,
+            coming_soon=True,
             parent=self
         )
-        self.youtube_card.connect_clicked.connect(self._connect_youtube)
-        self.youtube_card.disconnect_clicked.connect(self._disconnect_youtube)
         social_section.content_layout.addWidget(self.youtube_card)
 
         # TikTok (COMING SOON)
