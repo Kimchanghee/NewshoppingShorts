@@ -339,24 +339,19 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.12/ssmaker.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.13/ssmaker.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.12",
+    "version": "1.3.13",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.12 업데이트:
+    "release_notes": """버전 1.3.13 업데이트:
 
-🎨 UI/UX 개선
-• 구독 요금제 가격 표시 개선
-  - 월 단위 가격으로 변경: "월 19만원", "월 161,500원", "월 133,000원"
-  - "일시불" 표시 제거로 더 깔끔하고 직관적인 UI
-  - 한국식 만원 단위 가격 표시로 가독성 향상
-  - 요금제 비교가 더 쉬워짐
-
-✨ 기능 개선
-• 월 단위 가격을 강조하여 장기 구독의 가치 명확화
-• 결제 폼에서도 월 단위 가격 우선 표시""",
+🐛 버그 수정
+• 업데이트 다운로드 화면 개선
+  - 업데이트 내역이 잘리지 않고 전체 내용 표시
+  - 릴리즈 노트 영역 높이 증가
+  - 더 많은 업데이트 정보를 한눈에 확인 가능""",
     "is_mandatory": False,
     "update_channel": "stable",
 }
