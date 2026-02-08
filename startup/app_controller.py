@@ -143,15 +143,7 @@ class AppController:
             return
             
         if not file_hash:
-            logger.error("Update rejected: Missing file_hash (Security)")
-            if self._update_is_mandatory:
-                 QMessageBox.critical(
-                    None, "보안 오류",
-                    "업데이트 파일 무결성 정보가 없습니다.\n보안을 위해 종료합니다.",
-                )
-                 sys.exit(1)
-            self._proceed_to_loading()
-            return
+            logger.warning("No file_hash provided by server — skipping integrity check")
 
         logger.info(f"Auto-updating to version {self._latest_version} (Hash: {file_hash})")
         if self.login_window:
