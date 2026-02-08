@@ -361,22 +361,22 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.19/ssmaker_v1.3.19.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.20/ssmaker_v1.3.20.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.19",
+    "version": "1.3.20",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.19 업데이트:
+    "release_notes": """버전 1.3.20 업데이트:
 
-📜 업데이트 내역이 이제 완전히 보입니다!
-• 스크롤 가능한 업데이트 내역 영역 추가
-• 다이얼로그 높이 증가로 더 많은 정보 표시
-• 더 이상 내용이 잘리지 않습니다
-• 세련된 스크롤바 디자인
+🔄 자동 업데이트 안정화
+• 이전 버전에서 최신 버전으로 자동 업데이트가 안 되던 문제 수정
+• 파일 해시 검증을 선택적으로 변경 (해시 있으면 검증, 없으면 경고만)
+• 업데이트 다운로드 및 재시작 안정성 개선
 
 ✅ 포함된 기능
-• 배치 파일 방식 자동 재시작
+• 게임 스타일 자동 업데이트 (사용자 확인 불필요)
+• 업데이트 완료 후 릴리즈 노트 표시
 • 구독 요금제 월 단위 가격 표시""",
     "is_mandatory": False,
     "update_channel": "stable",
