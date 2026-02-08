@@ -2,7 +2,7 @@
 Registration Request Router
 회원가입 요청 라우터
 
-사용자 회원가입 - 자동 승인 방식 (체험판 5회 제공)
+사용자 회원가입 - 자동 승인 방식 (정책 기반 체험 횟수 제공)
 
 Security:
 - Admin endpoints require X-Admin-API-Key header
@@ -89,8 +89,8 @@ async def submit_registration_request(
     request: Request, data: RegistrationRequestCreate, db: Session = Depends(get_db)
 ):
     """
-    회원가입 - 자동 승인 (체험판 5회 제공)
-    Auto-approved registration with 5 free trial uses
+    회원가입 - 자동 승인 (정책 기반 체험 횟수 제공)
+    Auto-approved registration with policy-based free trial uses
 
     Rate limited to 5 requests per hour per IP to prevent abuse.
     IP당 시간당 5회로 제한하여 남용 방지.

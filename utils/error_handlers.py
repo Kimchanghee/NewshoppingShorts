@@ -124,7 +124,7 @@ class DependencyError(AppException):
 
 class TrialLimitExceededError(Exception):
     """Raised when user exceeds trial usage limit"""
-    def __init__(self, message: str, remaining: int = 0, total: int = 5):
+    def __init__(self, message: str, remaining: int = 0, total: int = 2):
         super().__init__(message)
         self.remaining = remaining
         self.total = total

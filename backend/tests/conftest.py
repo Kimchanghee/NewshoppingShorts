@@ -66,8 +66,8 @@ def sample_payment_data():
     """Sample payment session data for tests"""
     return {
         "payment_id": "test_payment_abc123",
-        "plan_id": "monthly",
+        "plan_id": "pro_1month",
         "user_id": "user_123",
         "status": "pending",
-        "amount": 9900,
+        "amount": 190000,
     }

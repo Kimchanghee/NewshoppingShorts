@@ -465,7 +465,7 @@ class CurrentPlanCard(QFrame):
         self.ds = get_design_system()
         self.current_plan = "trial"  # Default
         self.usage_used = 0
-        self.usage_total = 3
+        self.usage_total = 2
         self._build_ui()
         
     def _build_ui(self):
@@ -518,7 +518,7 @@ class CurrentPlanCard(QFrame):
         
         usage_header.addStretch()
         
-        self.usage_text = QLabel("0 / 3")
+        self.usage_text = QLabel("0 / 2")
         self.usage_text.setObjectName("usage_text")
         usage_header.addWidget(self.usage_text)
         
@@ -534,7 +534,7 @@ class CurrentPlanCard(QFrame):
         layout.addWidget(self.progress_bar)
         
         # Usage hint
-        self.usage_hint = QLabel("남은 영상 생성 횟수: 3회")
+        self.usage_hint = QLabel("남은 영상 생성 횟수: 2회")
         self.usage_hint.setObjectName("usage_hint")
         layout.addWidget(self.usage_hint)
         
@@ -558,7 +558,7 @@ class CurrentPlanCard(QFrame):
         
         self._apply_styles()
         
-    def update_plan(self, plan_id: str, used: int = 0, total: int = 3, expires_at_str: str = None):
+    def update_plan(self, plan_id: str, used: int = 0, total: int = 2, expires_at_str: str = None):
         """Update current plan display
 
         Args:
