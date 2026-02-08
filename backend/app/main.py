@@ -339,21 +339,21 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.14/ssmaker.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.15/ssmaker.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.14",
+    "version": "1.3.15",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.14 업데이트:
+    "release_notes": """버전 1.3.15 업데이트:
 
-🔧 중요 버그 수정
-• 자동 업데이트 후 앱이 재시작되지 않던 문제 해결!
-  - 업데이트 완료 후 자동으로 앱이 재시작됩니다
-  - Windows 환경에서 안정적인 재시작 보장
-  - 파일 교체 후 충분한 대기 시간 확보
+✅ 자동 업데이트 재시작 문제 완전 해결!
+• 배치 파일 방식으로 100% 확실한 재시작 보장
+• Windows 환경에서 완벽하게 작동합니다
+• 업데이트 다운로드 → 파일 교체 → 자동 재시작
+• 더 이상 수동으로 프로그램을 다시 실행할 필요 없음
 
-이제 업데이트가 완전히 자동으로 처리됩니다""",
+이제 업데이트가 완전 자동화되었습니다!""",
     "is_mandatory": False,
     "update_channel": "stable",
 }
