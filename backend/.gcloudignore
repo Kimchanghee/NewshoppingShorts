@@ -8,6 +8,8 @@ __pycache__/
 *.log
 *.pot
 *.pyc
+*.pyo
+*.pyd
 .env
 .venv
 env/
@@ -22,3 +24,6 @@ migrations/
 .gcloudignore
 deploy.sh
 *.exe
+nul
+.pytest_cache/
+tests/
