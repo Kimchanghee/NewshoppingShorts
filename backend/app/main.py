@@ -122,7 +122,28 @@ async def app_error_handler(request: Request, exc: AppError):
 
 
 # Sensitive field names that must NEVER appear in validation error responses
-_SENSITIVE_FIELDS = frozenset({"pw", "password", "key", "token", "secret", "api_key"})
+_SENSITIVE_FIELDS = frozenset(
+    {
+        "pw",
+        "password",
+        "key",
+        "token",
+        "secret",
+        "api_key",
+        "authorization",
+        "card_no",
+        "cardpw",
+        "card_pw",
+        "enc_bill",
+        "linkkey",
+        "linkval",
+        "buyer_auth_no",
+        "buyer_phone",
+        "exp_month",
+        "exp_year",
+        "rebill_no",
+    }
+)
 
 
 @app.exception_handler(RequestValidationError)
@@ -260,7 +281,9 @@ class AuditLoggingMiddleware(BaseHTTPMiddleware):
     """Audit log for admin/sensitive endpoints"""
     _AUDIT_PREFIXES = ("/user/admin/", "/user/register/approve", "/user/register/reject",
                        "/user/subscription/approve", "/user/subscription/reject",
-                       "/payments/webhook", "/payments/mock/", "/app/version/update")
+                       "/payments/webhook", "/payments/mock/", "/payments/payapp/webhook",
+                       "/payments/payapp/card/", "/payments/payapp/subscribe/",
+                       "/app/version/update")
 
     async def dispatch(self, request: Request, call_next) -> Response:
         path = request.url.path
@@ -338,13 +361,13 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.16/ssmaker.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.18/ssmaker.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.16",
+    "version": "1.3.18",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.16 업데이트:
+    "release_notes": """버전 1.3.18 업데이트:
 
 📜 업데이트 내역이 이제 완전히 보입니다!
 • 스크롤 가능한 업데이트 내역 영역 추가
