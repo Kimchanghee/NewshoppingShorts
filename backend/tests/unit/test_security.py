@@ -118,6 +118,26 @@ class TestValidationErrorSanitization:
         body = response.json()
         assert body["error"]["code"] == "VALIDATION_ERROR"
 
+    def test_body_level_422_does_not_echo_payload_with_sensitive_keys(self, client):
+        """When body-level validation fails, full payload must not be reflected."""
+        response = client.post(
+            "/payments/payapp/card/register",
+            headers={
+                "X-User-ID": "1",
+                "Authorization": "Bearer fake",
+            },
+            json={
+                "user_id": "1",
+                "card_no": "4518123412341111",
+                "card_pw": "12",
+                "buyer_auth_no": "900101",
+            },
+        )
+        assert response.status_code == 422
+        body_str = str(response.json())
+        assert "4518123412341111" not in body_str
+        assert '"input"' not in body_str.lower()
+
 
 # ===== 2. Security Headers =====
 
@@ -396,6 +416,20 @@ class TestPayAppContract:
         # PayApp docs/examples reference multiple cancel codes by section.
         for code in ("8", "9", "16", "31", "32", "64"):
             assert code in _PAYAPP_CANCEL_STATES
+
+    def test_card_number_is_locally_masked_even_if_gateway_returns_plain_pan(self):
+        from app.routers.payment import _force_masked_card_number
+
+        masked = _force_masked_card_number("4518123412341111", "4518****")
+        assert masked == "4518****1111"
+        assert "12341234" not in masked
+
+    def test_card_number_mask_falls_back_when_gateway_value_invalid(self):
+        from app.routers.payment import _force_masked_card_number
+
+        fallback = "4518****"
+        assert _force_masked_card_number("", fallback) == fallback
+        assert _force_masked_card_number("abcd", fallback) == fallback
 
 
 class TestAuditTargets:
