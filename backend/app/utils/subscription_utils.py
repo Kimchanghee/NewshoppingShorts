@@ -4,6 +4,14 @@ Subscription Utility Functions
 """
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from zoneinfo import ZoneInfo
+
+
+try:
+    TRIAL_RESET_TIMEZONE = ZoneInfo("Asia/Seoul")
+except Exception:
+    # Fallback for environments without tzdata (fixed KST offset)
+    TRIAL_RESET_TIMEZONE = timezone(timedelta(hours=9))
 
 
 def _utcnow() -> datetime:
@@ -76,3 +84,25 @@ def days_until_expiry(expiry_date: Optional[datetime]) -> int:
 
     delta = _ensure_aware(expiry_date) - _utcnow()
     return delta.days
+
+
+def get_trial_cycle_start(reference_dt: Optional[datetime] = None) -> datetime:
+    """
+    Return trial monthly cycle start as UTC datetime.
+
+    Cycle boundary uses Asia/Seoul month start (00:00 on day 1).
+    """
+    base = _ensure_aware(reference_dt) if reference_dt else _utcnow()
+    local = base.astimezone(TRIAL_RESET_TIMEZONE)
+    local_cycle_start = local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return local_cycle_start.astimezone(timezone.utc)
+
+
+def is_new_trial_cycle(stored_cycle_start: Optional[datetime], now: Optional[datetime] = None) -> bool:
+    """
+    Check whether stored trial cycle start is older than current cycle start.
+    """
+    if stored_cycle_start is None:
+        return False
+    current_cycle_start = get_trial_cycle_start(now)
+    return _ensure_aware(stored_cycle_start) < current_cycle_start

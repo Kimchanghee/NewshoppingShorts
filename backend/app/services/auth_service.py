@@ -8,7 +8,11 @@ from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
 from app.utils.password import verify_password, get_dummy_hash
-from app.utils.subscription_utils import is_subscription_active
+from app.utils.subscription_utils import (
+    is_subscription_active,
+    get_trial_cycle_start,
+    is_new_trial_cycle,
+)
 from app.utils.jwt_handler import create_access_token, decode_access_token
 from app.configuration import get_settings
 
@@ -119,6 +123,9 @@ class AuthService:
             user.work_used = 0
             self.db.commit()
             # Allow login to continue (don't return EU002)
+
+        # Trial monthly cycle reset (e.g. monthly free quota).
+        self.apply_trial_monthly_reset(user)
 
         if not user.is_active:
             self._record_login_attempt(username, ip_address, success=False)
@@ -346,6 +353,57 @@ class AuthService:
         self.db.add(attempt)
         self.db.commit()  # Commit immediately to ensure rate limiting works
 
+    def apply_trial_monthly_reset(self, user: User) -> None:
+        """
+        Apply monthly reset for trial users (e.g., 월 2회 무료).
+
+        Reset rule:
+        - Only trial users with finite positive work_count
+        - If a new monthly cycle has started, reset work_used to 0
+        """
+        user_type = getattr(user, "user_type", None)
+        user_type_value = (
+            user_type.value
+            if hasattr(user_type, "value")
+            else (str(user_type) if user_type is not None else "trial")
+        )
+        if user_type_value != "trial":
+            return
+
+        work_count = getattr(user, "work_count", 0)
+        if work_count is None or work_count <= 0 or work_count == -1:
+            return
+
+        current_cycle_start = get_trial_cycle_start()
+        stored_cycle_start = getattr(user, "trial_cycle_started_at", None)
+        changed = False
+
+        # Initialize cycle start for legacy users from created_at month.
+        if stored_cycle_start is None:
+            created_at = getattr(user, "created_at", None)
+            user.trial_cycle_started_at = get_trial_cycle_start(created_at)
+            stored_cycle_start = user.trial_cycle_started_at
+            changed = True
+
+        if is_new_trial_cycle(stored_cycle_start):
+            user.work_used = 0
+            user.trial_cycle_started_at = current_cycle_start
+            changed = True
+            logger.info(f"Trial monthly quota reset applied: user_id={user.id}")
+
+        # Ensure normalized current cycle is persisted if missing/stale.
+        if getattr(user, "trial_cycle_started_at", None) is None:
+            user.trial_cycle_started_at = current_cycle_start
+            changed = True
+
+        if not changed:
+            return
+
+        try:
+            self.db.commit()
+        except Exception:
+            self.db.rollback()
+
     async def check_work_available(self, user_id: str, token: str) -> dict:
         """
         Check if user can perform work (has remaining work count).
@@ -396,6 +454,8 @@ class AuthService:
                     "work_used": 0,
                     "remaining": 0,
                 }
+
+            self.apply_trial_monthly_reset(user)
 
             expiry = getattr(user, "subscription_expires_at", None)
             work_count = getattr(user, "work_count", -1)
@@ -554,6 +614,8 @@ class AuthService:
                     "remaining": None,
                     "used": None,
                 }
+
+            self.apply_trial_monthly_reset(user)
 
             expiry = getattr(user, "subscription_expires_at", None)
             work_count = getattr(user, "work_count", -1)

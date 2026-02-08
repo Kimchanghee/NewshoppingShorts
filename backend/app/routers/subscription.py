@@ -191,6 +191,9 @@ async def get_my_subscription_status(
                 can_work=False
             )
 
+        # Apply trial monthly reset before status calculation.
+        service.apply_trial_monthly_reset(user)
+
         user_type = getattr(user, "user_type", None)
         user_type_value = (
             user_type.value
