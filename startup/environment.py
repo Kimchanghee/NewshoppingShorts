@@ -23,6 +23,12 @@ def setup_dpi_awareness() -> None:
     if sys.platform != "win32":
         return
 
+    # Qt6 (PyQt6/PySide6) already handles DPI awareness internally.
+    # Forcing Win32 DPI APIs here can cause Qt warning logs like:
+    # "SetProcessDpiAwarenessContext() failed".
+    if os.getenv("SSMAKER_FORCE_DPI_AWARE", "0") != "1":
+        return
+
     try:
         # Windows 8.1+: SetProcessDpiAwareness
         ctypes.windll.shcore.SetProcessDpiAwareness(2)

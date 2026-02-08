@@ -97,16 +97,17 @@ class StateBridgeMixin:
         self.last_chinese_script_text = state.last_chinese_script_text
         self.last_chinese_script_digest = state.last_chinese_script_digest
 
-    def _setup_ocr_reader(self, preloaded_ocr):
+    def _setup_ocr_reader(self, preloaded_ocr, allow_fallback: bool = True):
         """Initialize OCR reader with fallback to direct creation.
 
         Args:
             preloaded_ocr: Pre-loaded OCR reader from AppController, or None
+            allow_fallback: If False, skip local fallback initialization
         """
         self.ocr_reader = preloaded_ocr or self.state.ocr_reader
 
         # OCR reader가 없으면 직접 초기화 (main.py 직접 실행 시 AppController 우회)
-        if self.ocr_reader is None:
+        if self.ocr_reader is None and allow_fallback:
             try:
                 from utils.ocr_backend import create_ocr_reader
                 self.ocr_reader = create_ocr_reader()

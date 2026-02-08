@@ -15,6 +15,7 @@ import sys
 import io
 import shutil
 import time
+import threading
 from typing import List, Tuple, Any, Optional
 
 # Logging and error handling
@@ -22,6 +23,11 @@ from utils.logging_config import get_logger
 from utils.error_handlers import OCRInitializationError, GLMOCROfflineError
 
 logger = get_logger(__name__)
+
+_OCR_CACHE_LOCK = threading.Lock()
+_OCR_CACHED_BACKEND = None
+_OCR_INIT_ATTEMPTED = False
+_OCR_LAST_ERROR: Optional[str] = None
 
 # GLM-OCR 사용 가능 여부 플래그
 GLM_OCR_AVAILABLE = False
@@ -104,6 +110,8 @@ class OCRBackend:
                     logger.warning(
                         f"{engine_name} initialization attempt {attempt + 1}/{max_retries} failed: {e}"
                     )
+                    if not self._should_retry_init(engine_name, e):
+                        break
                     if attempt < max_retries - 1:
                         time.sleep(0.5)  # Wait before retry
 
@@ -119,6 +127,38 @@ class OCRBackend:
             message=msg,
             recovery_hint="Install Tesseract OCR:\nWindows: winget install UB-Mannheim.TesseractOCR\nmacOS: brew install tesseract tesseract-lang\nLinux: sudo apt install tesseract-ocr tesseract-ocr-kor tesseract-ocr-chi-sim"
         )
+
+    @staticmethod
+    def _should_retry_init(engine_name: str, error: Exception) -> bool:
+        """
+        Decide whether init failure is likely transient and worth retrying.
+        """
+        msg = str(error)
+        msg_lower = msg.lower()
+
+        # Non-retryable: GLM API disabled/offline
+        if engine_name == "glm_ocr":
+            if "glmocrofflineerror" in msg_lower or "api not available" in msg_lower:
+                return False
+
+        # Non-retryable: RapidOCR package missing
+        if engine_name == "rapidocr":
+            if "import" in msg_lower and ("no module named" in msg_lower or "실패" in msg):
+                return False
+
+        # Non-retryable: Tesseract executable or package missing
+        if engine_name == "tesseract":
+            non_retry_markers = [
+                "찾을 수 없습니다",
+                "미설치",
+                "not found",
+                "no such file",
+                "no module named",
+            ]
+            if any(marker in msg_lower for marker in [m.lower() for m in non_retry_markers]):
+                return False
+
+        return True
 
     def _init_glm_ocr(self):
         """Initialize GLM-OCR API client"""
@@ -497,12 +537,33 @@ def create_ocr_reader() -> Optional[OCRBackend]:
     Returns:
         OCRBackend instance or None if initialization fails
     """
+    global _OCR_CACHED_BACKEND, _OCR_INIT_ATTEMPTED, _OCR_LAST_ERROR
+
+    with _OCR_CACHE_LOCK:
+        if _OCR_CACHED_BACKEND is not None:
+            return _OCR_CACHED_BACKEND
+
+        # Avoid repeated full init attempts/log spam in the same process.
+        if _OCR_INIT_ATTEMPTED:
+            if _OCR_LAST_ERROR:
+                logger.debug("[OCR] Skipping re-init after previous failure: %s", _OCR_LAST_ERROR)
+            return None
+
+        _OCR_INIT_ATTEMPTED = True
+
     try:
         backend = OCRBackend()
         if backend.reader is not None:
+            with _OCR_CACHE_LOCK:
+                _OCR_CACHED_BACKEND = backend
+                _OCR_LAST_ERROR = None
             return backend
+        with _OCR_CACHE_LOCK:
+            _OCR_LAST_ERROR = "OCR backend initialized without active reader"
         return None
     except Exception as e:
+        with _OCR_CACHE_LOCK:
+            _OCR_LAST_ERROR = str(e)
         _safe_print(f"[OCR] OCRBackend creation failed: {e}")
         return None
 
