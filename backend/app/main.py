@@ -339,7 +339,7 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.11/ssmaker.exe")
 
 APP_VERSION_INFO = {
     "version": "1.3.11",
