@@ -43,6 +43,12 @@ class Settings(BaseSettings):
     MAX_LOGIN_ATTEMPTS: int = 3
     MAX_IP_ATTEMPTS: int = 10  # Higher threshold for IP-based limiting
     LOGIN_ATTEMPT_WINDOW_MINUTES: int = 15
+    # Session considered stale when heartbeat is older than this threshold.
+    # Helps recover from client crashes where logout is never sent.
+    # Prefer seconds for tighter duplicate-login recovery; keep minutes for
+    # backward compatibility with older deployments.
+    SESSION_STALE_SECONDS: int = 30
+    SESSION_STALE_MINUTES: int = 2
 
     # API Key for client authentication
     SSMAKER_API_KEY: str = ""

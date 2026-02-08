@@ -65,6 +65,50 @@ def _hash_ip(ip_address: str) -> str:
     return hashlib.sha256(ip_address.encode()).hexdigest()[:12]
 
 
+def _normalize_datetime_for_reference(
+    dt: Optional[datetime],
+    *,
+    reference_now: datetime,
+) -> Optional[datetime]:
+    """
+    Normalize datetime awareness to match a reference timestamp.
+
+    DB drivers can return naive datetimes depending on configuration.
+    For robust stale-session checks, comparisons must use the same
+    awareness model (naive vs aware).
+    """
+    if dt is None:
+        return None
+
+    # Reference is naive -> compare naive values.
+    if reference_now.tzinfo is None:
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    # Reference is aware -> compare aware values.
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc).astimezone(reference_now.tzinfo)
+    return dt.astimezone(reference_now.tzinfo)
+
+
+def _is_session_stale(
+    session: SessionModel,
+    *,
+    now_ref: datetime,
+    stale_seconds: int,
+) -> bool:
+    """Return True when a session heartbeat is old enough to be considered stale."""
+    threshold_seconds = max(10, int(stale_seconds or 10))
+    last_seen = _normalize_datetime_for_reference(
+        getattr(session, "last_activity_at", None) or getattr(session, "created_at", None),
+        reference_now=now_ref,
+    )
+    if last_seen is None:
+        return False
+    return last_seen <= now_ref - timedelta(seconds=threshold_seconds)
+
+
 class AuthService:
     def __init__(self, db: Session) -> None:
         self.db = db
@@ -132,24 +176,94 @@ class AuthService:
             logger.info(f"[Login Failed] User inactive: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # Unified error for inactive
 
-        # Check existing session
-        existing_session = (
+        # Check existing active sessions.
+        db_now = self.db.query(func.current_timestamp()).scalar()
+        if not isinstance(db_now, datetime):
+            db_now = datetime.now(timezone.utc)
+
+        active_sessions = (
             self.db.query(SessionModel)
             .filter(
                 SessionModel.user_id == user.id,
                 SessionModel.is_active == True,
-                SessionModel.expires_at > datetime.now(timezone.utc),
+                SessionModel.expires_at > db_now,
             )
-            .first()
+            .all()
         )
 
-        if existing_session and not force:
-            logger.info(f"[Login Failed] Duplicate login: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
-            return {"status": "EU003", "message": "EU003"}  # Duplicate login
+        session_changes = False
+        stale_sessions = []
+        same_ip_sessions = []
+        other_ip_sessions = []
+        configured_stale_seconds = int(getattr(settings, "SESSION_STALE_SECONDS", 0) or 0)
+        if configured_stale_seconds <= 0:
+            configured_stale_seconds = max(
+                60, int(getattr(settings, "SESSION_STALE_MINUTES", 2)) * 60
+            )
 
-        # Force logout if needed
-        if existing_session and force:
-            existing_session.is_active = False
+        for session in active_sessions:
+            if _is_session_stale(
+                session,
+                now_ref=db_now,
+                stale_seconds=configured_stale_seconds,
+            ):
+                stale_sessions.append(session)
+                continue
+            if session.ip_address == ip_address:
+                same_ip_sessions.append(session)
+            else:
+                other_ip_sessions.append(session)
+
+        if stale_sessions:
+            for session in stale_sessions:
+                session.is_active = False
+            session_changes = True
+            logger.info(
+                "[Login] Cleared %d stale session(s): username=%s, ip_hash=%s",
+                len(stale_sessions),
+                _mask_username(username),
+                _hash_ip(ip_address),
+            )
+
+        if force:
+            force_target_sessions = same_ip_sessions + other_ip_sessions
+            if force_target_sessions:
+                for session in force_target_sessions:
+                    session.is_active = False
+                session_changes = True
+                logger.info(
+                    "[Login] Force login deactivated %d active session(s): username=%s, ip_hash=%s",
+                    len(force_target_sessions),
+                    _mask_username(username),
+                    _hash_ip(ip_address),
+                )
+        else:
+            # Same-IP active sessions are auto-reclaimed to avoid false EU003 after
+            # client crash or abrupt process termination.
+            if same_ip_sessions:
+                for session in same_ip_sessions:
+                    session.is_active = False
+                session_changes = True
+                logger.info(
+                    "[Login] Reclaimed %d same-IP session(s): username=%s, ip_hash=%s",
+                    len(same_ip_sessions),
+                    _mask_username(username),
+                    _hash_ip(ip_address),
+                )
+
+            # Other-IP fresh sessions are treated as true duplicate login.
+            if other_ip_sessions:
+                if session_changes:
+                    self.db.commit()
+                logger.info(
+                    "[Login Failed] Duplicate login: username=%s, ip_hash=%s, other_ip_sessions=%d",
+                    _mask_username(username),
+                    _hash_ip(ip_address),
+                    len(other_ip_sessions),
+                )
+                return {"status": "EU003", "message": "EU003"}  # Duplicate login
+
+        if session_changes:
             self.db.commit()
 
         # Create JWT token

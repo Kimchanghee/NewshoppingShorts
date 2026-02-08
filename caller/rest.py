@@ -22,6 +22,7 @@ from utils.validators import validate_user_id, validate_user_identifier, validat
 
 logger = get_logger(__name__)
 secrets_manager = get_secrets_manager()
+_in_memory_auth_token: Optional[str] = None
 
 # Generic error messages for client responses (don't expose internals)
 # ???????? ?  (?? ? ? ?)
@@ -279,7 +280,16 @@ def _get_auth_token() -> Optional[str]:
     Returns:
         JWT token or None if not set
     """
+    global _in_memory_auth_token
     try:
+        # Fast path: use in-memory cache first (prevents keyring/file hiccups
+        # from breaking logout/session-check in the same app run).
+        token = _in_memory_auth_token
+        if token and _check_token_expiration(token):
+            return token
+        if token and not _check_token_expiration(token):
+            _in_memory_auth_token = None
+
         token = secrets_manager.get_credential("auth_token")
 
         # Fail-safe: do not keep using an expired token. This prevents
@@ -290,10 +300,11 @@ def _get_auth_token() -> Optional[str]:
             _set_auth_token(None)
             return None
 
+        _in_memory_auth_token = token or None
         return token
     except Exception as e:
         logger.warning(f"Failed to retrieve auth token: {e}")
-        return None
+        return _in_memory_auth_token
 
 
 def _set_auth_token(token: Optional[str]) -> None:
@@ -304,6 +315,8 @@ def _set_auth_token(token: Optional[str]) -> None:
     Args:
         token: JWT token to store, or None to clear
     """
+    global _in_memory_auth_token
+    _in_memory_auth_token = token or None
     try:
         if token:
             secrets_manager.set_credential("auth_token", token)
@@ -465,10 +478,19 @@ def logOut(**data) -> str:
         _set_auth_token(None)
         return "error"
 
-    # Use stored token if available
-    # ?? ? ?????
-    stored_token = _get_auth_token()
-    body = {"id": user_id, "key": stored_token or data.get("key", "")}
+    # Prefer explicit token (e.g., login_data token on graceful app close),
+    # then fallback to locally stored token.
+    explicit_token = str(data.get("key", "") or "").strip()
+    stored_token = _get_auth_token() or ""
+    explicit_token_valid = len(explicit_token) >= 10 and _check_token_expiration(
+        explicit_token
+    )
+    logout_token = explicit_token if explicit_token_valid else stored_token
+    if not logout_token:
+        logger.warning("Logout skipped - no valid auth token available")
+        _set_auth_token(None)
+        return "error"
+    body = {"id": user_id, "key": logout_token}
 
     try:
         response = _secure_session.post(
@@ -502,6 +524,65 @@ def logOut(**data) -> str:
         logger.exception(f"Unexpected logout error: {e}")
         _set_auth_token(None)
         return "error"
+
+
+def cleanup_local_session() -> bool:
+    """
+    Best-effort startup cleanup for stale local sessions.
+
+    When the app terminates abruptly, server-side logout may be skipped,
+    which can trigger a false EU003 on next login. This method attempts
+    one silent logout using the locally stored JWT.
+    """
+    stored_token = _get_auth_token()
+    if not stored_token:
+        return False
+
+    try:
+        payload = jwt.decode(
+            stored_token,
+            options={"verify_signature": False, "verify_exp": False},
+        )
+        token_user_id = str(payload.get("sub") or "").strip()
+        if not validate_user_identifier(token_user_id):
+            logger.info("[StartupLogout] Invalid token subject. Clearing local token.")
+            _set_auth_token(None)
+            return False
+
+        body = {"id": token_user_id, "key": stored_token}
+        status_text = "error"
+        try:
+            response = _secure_session.post(
+                f"{main_server}/user/logout/god",
+                json=body,
+                timeout=(3, 10),
+            )
+            response.raise_for_status()
+            try:
+                obj = json.loads(response.text)
+                status_text = str(obj.get("status", "error"))
+            except Exception:
+                status_text = "success"
+        except Exception as e:
+            logger.warning("[StartupLogout] Logout request failed: %s", e)
+
+        # Only clear local token when it is still the same startup token.
+        # This avoids racing with a newly issued token from a fresh login.
+        current_token = _get_auth_token()
+        if current_token == stored_token:
+            _set_auth_token(None)
+
+        if status_text.lower() == "success":
+            logger.info("[StartupLogout] Previous local session closed.")
+            return True
+
+        logger.warning("[StartupLogout] Logout request returned status=%s", status_text)
+        return False
+    except Exception as e:
+        logger.warning("[StartupLogout] Failed to cleanup local session: %s", e)
+        if _get_auth_token() == stored_token:
+            _set_auth_token(None)
+        return False
 
 
 def loginCheck(**data) -> Dict[str, Any]:

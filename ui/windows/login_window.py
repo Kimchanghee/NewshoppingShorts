@@ -72,6 +72,9 @@ class Login(QMainWindow, Ui_LoginWindow):
 
     def _warmup_server(self):
         threading.Thread(target=rest.getVersion, daemon=True).start()
+        # Best-effort stale-session cleanup to reduce false EU003 after
+        # abrupt app termination where logout was not sent.
+        threading.Thread(target=rest.cleanup_local_session, daemon=True).start()
 
     def _get_local_ip(self) -> str:
         try:
