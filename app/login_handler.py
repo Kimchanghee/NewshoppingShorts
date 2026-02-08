@@ -37,7 +37,7 @@ class LoginHandler:
             return
 
         # 신규 사용자 자동 체험판 신청 로직
-        # 로그인 직후 work_count가 없거나 -1인 경우 (서버 데이터 기준)
+        # 로그인 직후 work_count가 없거나 0인 경우 (서버 데이터 기준)
         try:
             user_data = self.app.login_data.get("data", {}).get("data", {})
             user_id = user_data.get("id")
@@ -45,8 +45,8 @@ class LoginHandler:
             
             logger.info(f"[LoginHandler] Starting watch for user: {user_id}, initial work_count: {work_count}")
 
-            # 신규 가입자(또는 work_count가 초기 상태인 사용자)라면 3회 신청
-            if user_id and (work_count <= 0 or work_count is None):
+            # 신규 가입자(또는 work_count가 초기 상태인 사용자)라면 자동 체험판 신청
+            if user_id and (work_count is None or work_count == 0):
                 logger.info(f"[LoginHandler] Triggering auto-trial request for new user: {user_id}")
                 threading.Thread(
                     target=self._auto_request_trial, args=(user_id,), daemon=True
@@ -61,7 +61,7 @@ class LoginHandler:
         t.start()
 
     def _auto_request_trial(self, user_id):
-        """신규 사용자를 위한 자동 체험판 신청 (5회)"""
+        """신규 사용자를 위한 자동 체험판 신청"""
         try:
             logger.info(f"[AutoTrial] Requesting trial for user: {user_id}")
             # 이미 신청 대기 중인지 확인 (SubscriptionWidget 로직 참조)
@@ -70,10 +70,10 @@ class LoginHandler:
                 logger.info(f"[AutoTrial] User {user_id} already has pending request, skipping")
                 return
 
-            # 신청 API 호출 (5회로 변경)
+            # 신청 API 호출
             logger.info(f"[AutoTrial] Sending subscription request API call...")
             res = rest.safe_subscription_request(
-                user_id, "신규 가입 자동 체험판 신청 (5회)"
+                user_id, "신규 가입 자동 체험판 신청"
             )
             
             if res.get("success"):

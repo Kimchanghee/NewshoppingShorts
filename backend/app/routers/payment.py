@@ -18,7 +18,7 @@ from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs
 
 import requests as http_requests
-from fastapi import APIRouter, Depends, Request, Query, Form
+from fastapi import APIRouter, Depends, HTTPException, Request, Query, Header
 from fastapi.responses import PlainTextResponse
 from slowapi import Limiter
 from sqlalchemy.orm import Session
@@ -26,8 +26,11 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.utils.ip_utils import get_client_ip
+from app.utils.subscription_utils import calculate_subscription_expiry, _ensure_aware
+from app.utils.jwt_handler import decode_access_token
 from app.dependencies import verify_admin_api_key
 from app.models.payment_session import PaymentSession, PaymentStatus, PaymentStatusHistory
+from app.models.session import SessionModel
 from app.models.user import User, UserType
 
 logger = logging.getLogger(__name__)
@@ -40,7 +43,16 @@ router = APIRouter(prefix="/payments", tags=["payment"])
 # Plan pricing (KRW)
 PLAN_PRICES = {
     "trial": 0,
-    "pro": 190000,
+    "pro_1month": 190000,
+    "pro_6months": 969000,
+    "pro_12months": 1596000,
+}
+
+# Plan durations (days)
+PLAN_DAYS = {
+    "pro_1month": 30,
+    "pro_6months": 180,
+    "pro_12months": 365,
 }
 
 # PayApp Configuration (from environment)
@@ -58,7 +70,6 @@ if _parsed.hostname not in ("api.payapp.kr",):
     PAYAPP_API_URL = "https://api.payapp.kr/oapi/apiLoad.html"
 else:
     PAYAPP_API_URL = _PAYAPP_API_URL_RAW
-SUBSCRIPTION_DAYS = 30
 
 
 class CreatePaymentRequest(BaseModel):
@@ -103,6 +114,37 @@ def _get_payment_session(db: Session, payment_id: str) -> Optional[PaymentSessio
     return db.query(PaymentSession).filter(PaymentSession.payment_id == payment_id).first()
 
 
+def _validate_authenticated_user(db: Session, user_id: str, authorization: str) -> None:
+    """Validate Authorization token/session and ensure it belongs to user_id."""
+    token = authorization[7:] if authorization.startswith("Bearer ") else authorization
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing auth token")
+
+    try:
+        payload = decode_access_token(token)
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail="Invalid auth token") from e
+
+    token_user_id = payload.get("sub")
+    jti = payload.get("jti")
+    if str(token_user_id) != str(user_id):
+        raise HTTPException(status_code=403, detail="Token/user mismatch")
+    if not jti:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+
+    active_session = (
+        db.query(SessionModel)
+        .filter(
+            SessionModel.token_jti == jti,
+            SessionModel.is_active == True,
+            SessionModel.expires_at > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if not active_session:
+        raise HTTPException(status_code=401, detail="Session expired or revoked")
+
+
 @router.post("/create", response_model=CreatePaymentResponse)
 @limiter.limit("10/minute")
 async def create_payment(
@@ -115,9 +157,9 @@ async def create_payment(
     Create payment session
 
     Plans:
-    - trial: 체험판 (무료)
-    - monthly: 베이식 월간 (9,900원)
-    - yearly: 프로 연간 (86,400원)
+    - pro_1month: 프로 1개월
+    - pro_6months: 프로 6개월
+    - pro_12months: 프로 12개월
     """
     logger.info(f"[Payment] Create request: plan={data.plan_id}, user={data.user_id}")
 
@@ -127,8 +169,10 @@ async def create_payment(
     # Calculate expiration (30 minutes)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
 
-    # Get plan price
-    amount = PLAN_PRICES.get(data.plan_id, 0)
+    # Get plan price and validate
+    amount = PLAN_PRICES.get(data.plan_id)
+    if amount is None:
+        raise HTTPException(status_code=400, detail=f"Invalid plan_id: {data.plan_id}")
 
     # Create payment session in database
     session = PaymentSession(
@@ -188,9 +232,10 @@ async def get_payment_status(
             updated_at=datetime.now(timezone.utc).isoformat()
         )
 
-    # Check if session has expired
+    # Check if session has expired (use timezone-aware comparison)
     if session.status == PaymentStatus.PENDING and session.expires_at:
-        if datetime.now(timezone.utc) > session.expires_at:
+        expires_at_aware = _ensure_aware(session.expires_at)
+        if datetime.now(timezone.utc) > expires_at_aware:
             session.status = PaymentStatus.EXPIRED
             db.commit()
 
@@ -248,6 +293,11 @@ async def payment_webhook(
         # Update session status in database
         session = _get_payment_session(db, payment_id)
         if session:
+            # Idempotency check - if already completed, skip
+            if session.status == PaymentStatus.SUCCEEDED:
+                logger.info(f"[Payment] Payment already completed (idempotent): {payment_id}")
+                return {"success": True, "payment_id": payment_id, "note": "already_completed"}
+
             prev = session.status.value if session.status else None
             session.status = mapped_status
             # Store gateway reference if provided
@@ -259,7 +309,7 @@ async def payment_webhook(
 
             # 결제 완료 시 구독 활성화
             if mapped_status == PaymentStatus.SUCCEEDED and session.user_id:
-                _activate_subscription(db, session.user_id)
+                _activate_subscription(db, session.user_id, session.plan_id)
 
             return {"success": True, "payment_id": payment_id}
         else:
@@ -291,6 +341,11 @@ async def mock_complete_payment(
     if session:
         session.status = PaymentStatus.SUCCEEDED
         db.commit()
+
+        # Activate subscription after marking payment complete
+        if session.user_id:
+            _activate_subscription(db, session.user_id, session.plan_id)
+
         return {"success": True, "message": "Payment completed (mock)"}
 
     return {"success": False, "message": "Payment not found"}
@@ -329,6 +384,7 @@ class PayAppCreateRequest(BaseModel):
     """PayApp 결제 생성 요청"""
     user_id: str
     phone: str  # 수신자 전화번호 (PayApp 필수)
+    plan_id: str = "pro_1month"  # Added: which plan to purchase
 
 
 class PayAppCreateResponse(BaseModel):
@@ -340,26 +396,36 @@ class PayAppCreateResponse(BaseModel):
     message: str = ""
 
 
-def _activate_subscription(db: Session, user_id: str) -> None:
+def _activate_subscription(db: Session, user_id: str, plan_id: str) -> None:
     """결제 완료 후 사용자 구독 활성화"""
     try:
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
-            logger.warning(f"[PayApp] User not found for subscription activation: {user_id}")
+            logger.warning(f"[Payment] User not found for subscription activation: {user_id}")
             return
 
+        # Fail closed: unknown plan_id must never activate subscription.
+        plan_days = PLAN_DAYS.get(plan_id)
+        if plan_days is None:
+            logger.error(f"[Payment] Unknown plan_id for activation: user={user_id}, plan={plan_id}")
+            return
+
+        # Calculate new expiry date, extending from current expiry if it exists
+        current_expiry = user.subscription_expires_at
+        new_expiry = calculate_subscription_expiry(plan_days, current_expiry)
+
         user.user_type = UserType.SUBSCRIBER
-        user.subscription_expires_at = datetime.now(timezone.utc) + timedelta(days=SUBSCRIPTION_DAYS)
+        user.subscription_expires_at = new_expiry
         user.work_count = -1  # 무제한
         user.work_used = 0
         db.commit()
         logger.info(
-            f"[PayApp] Subscription activated: user={user_id}, "
-            f"expires_at={user.subscription_expires_at}"
+            f"[Payment] Subscription activated: user={user_id}, plan={plan_id}, "
+            f"days={plan_days}, expires_at={user.subscription_expires_at}"
         )
     except Exception as e:
         db.rollback()
-        logger.error(f"[PayApp] Failed to activate subscription: {e}", exc_info=True)
+        logger.error(f"[Payment] Failed to activate subscription: {e}", exc_info=True)
 
 
 @router.post("/payapp/create", response_model=PayAppCreateResponse)
@@ -367,14 +433,28 @@ def _activate_subscription(db: Session, user_id: str) -> None:
 async def create_payapp_payment(
     request: Request,
     data: PayAppCreateRequest,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    authorization: str = Header(..., alias="Authorization"),
     db: Session = Depends(get_db)
 ):
     """
     PayApp 가상계좌 결제 요청 생성
     Creates a PayApp virtual account payment request
+
+    Security:
+    - Requires Authorization + X-User-ID headers
+    - Header user must match body user_id
     """
+    _validate_authenticated_user(db, str(x_user_id), authorization)
+    if str(data.user_id) != str(x_user_id):
+        logger.warning(
+            f"[PayApp] Body/header user mismatch: body_user={data.user_id}, header_user={x_user_id}"
+        )
+        raise HTTPException(status_code=403, detail="User mismatch")
+
+    user_id = str(x_user_id)
     masked_phone = data.phone[:3] + "****" + data.phone[-4:] if len(data.phone) > 7 else "***"
-    logger.info(f"[PayApp] Create request: user={data.user_id}, phone={masked_phone}")
+    logger.info(f"[PayApp] Create request: user={user_id}, phone={masked_phone}")
 
     if not PAYAPP_USERID:
         logger.error("[PayApp] PAYAPP_USERID not configured")
@@ -393,18 +473,30 @@ async def create_payapp_payment(
         base_url = str(request.base_url).rstrip("/")
     feedback_url = f"{base_url}/payments/payapp/webhook"
 
-    # Call PayApp API
+    # Get plan info
+    plan_price = PLAN_PRICES.get(data.plan_id)
+    if plan_price is None or plan_price <= 0:
+        return PayAppCreateResponse(success=False, message=f"유효하지 않은 플랜입니다: {data.plan_id}")
+
+    plan_names = {
+        "pro_1month": "프로 구독 (1개월)",
+        "pro_6months": "프로 구독 (6개월)",
+        "pro_12months": "프로 구독 (12개월)",
+    }
+    good_name = f"쇼핑숏폼메이커 {plan_names.get(data.plan_id, '프로 구독')}"
+
+    # Call PayApp API with dynamic plan_id
     payapp_params = {
         "cmd": "payrequest",
         "userid": PAYAPP_USERID,
-        "goodname": "쇼핑숏폼메이커 프로 구독 (1개월)",
-        "price": str(PLAN_PRICES["pro"]),
+        "goodname": good_name,
+        "price": str(plan_price),
         "recvphone": data.phone.replace("-", ""),
         "openpaytype": "vbank",
         "smsuse": "n",
         "feedbackurl": feedback_url,
         "var1": local_payment_id,
-        "var2": data.user_id,
+        "var2": user_id,
         "checkretry": "y",
     }
 
@@ -416,13 +508,13 @@ async def create_payapp_payment(
             mul_no = result.get("mul_no", "")
             payurl = result.get("payurl", "")
 
-            # Save payment session to DB
+            # Save payment session to DB with dynamic plan_id
             session = PaymentSession(
                 payment_id=local_payment_id,
-                plan_id="pro",
-                user_id=data.user_id,
+                plan_id=data.plan_id,
+                user_id=user_id,
                 status=PaymentStatus.PENDING,
-                amount=PLAN_PRICES["pro"],
+                amount=plan_price,
                 gateway_reference=mul_no,
                 expires_at=expires_at,
             )
@@ -487,19 +579,25 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
             logger.warning("[PayApp Webhook] Invalid linkval")
             return PlainTextResponse("FAIL")
 
-        # 금액 검증
-        expected_price = str(PLAN_PRICES["pro"])
-        if price and price != expected_price:
-            logger.warning(f"[PayApp Webhook] Price mismatch: expected={expected_price}, got={price}")
-            return PlainTextResponse("FAIL")
-
         # DB에서 결제 세션 조회
         session = _get_payment_session(db, local_payment_id) if local_payment_id else None
+
+        # 금액 검증 - Verify price matches the session's plan
+        if session and price:
+            expected_price = str(session.amount)
+            if price != expected_price:
+                logger.warning(f"[PayApp Webhook] Price mismatch: expected={expected_price}, got={price}")
+                return PlainTextResponse("FAIL")
 
         if pay_state == "4":
             # 결제 완료
             logger.info(f"[PayApp Webhook] Payment completed: mul_no={mul_no}")
             if session:
+                # Idempotency check - if already completed, skip
+                if session.status == PaymentStatus.SUCCEEDED:
+                    logger.info(f"[PayApp Webhook] Payment already completed (idempotent): {local_payment_id}")
+                    return PlainTextResponse("SUCCESS")
+
                 prev = session.status.value if session.status else None
                 session.status = PaymentStatus.SUCCEEDED
                 session.gateway_reference = mul_no
@@ -508,7 +606,7 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
 
                 # 구독 활성화 - 신뢰할 수 있는 session.user_id 사용 (form data가 아닌 DB 값)
                 if session.user_id:
-                    _activate_subscription(db, session.user_id)
+                    _activate_subscription(db, session.user_id, session.plan_id)
 
         elif pay_state == "10":
             # 가상계좌 입금 대기

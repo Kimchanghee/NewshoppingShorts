@@ -346,7 +346,7 @@ class RegistrationRequestDialog(QWidget):
         self.subtitleLabel.setGeometry(QtCore.QRect(30, 100, 340, 40))
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.subtitleLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
-        self.subtitleLabel.setText("가입 정보를 입력해주세요.\n가입 후 바로 로그인 가능합니다. (체험판 5회)")
+        self.subtitleLabel.setText("가입 정보를 입력해주세요.\n가입 후 바로 로그인 가능합니다. (체험판 제공)")
 
         # 가입자 명
         self.nameLabel = QLabel(self)
