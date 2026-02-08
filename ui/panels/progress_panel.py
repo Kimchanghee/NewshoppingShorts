@@ -52,10 +52,10 @@ class ProgressPanel(QFrame, ThemedMixin):
         # Section header
         overall_header = QHBoxLayout()
         overall_icon = QLabel("📊")
-        overall_icon.setStyleSheet("font-size: 13px; background: transparent; border: none;")
+        overall_icon.setStyleSheet("font-size: 9px; background: transparent; border: none;")
         overall_header.addWidget(overall_icon)
         overall_title = QLabel("전체 영상 진행률")
-        overall_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #E2E8F0; background: transparent; border: none;")
+        overall_title.setStyleSheet("font-size: 9px; font-weight: bold; color: #E2E8F0; background: transparent; border: none;")
         overall_header.addWidget(overall_title)
         overall_header.addStretch()
         overall_layout.addLayout(overall_header)
@@ -98,14 +98,14 @@ class ProgressPanel(QFrame, ThemedMixin):
         # Section header with status icon
         current_header = QHBoxLayout()
         self.status_icon = QLabel("⏳")
-        self.status_icon.setStyleSheet("font-size: 13px; color: #FACC15; background: transparent; border: none;")
+        self.status_icon.setStyleSheet("font-size: 9px; color: #FACC15; background: transparent; border: none;")
         current_header.addWidget(self.status_icon)
         self.current_section_title = QLabel("현재 영상 진행율")
-        self.current_section_title.setStyleSheet("font-size: 13px; font-weight: bold; color: #E2E8F0; background: transparent; border: none;")
+        self.current_section_title.setStyleSheet("font-size: 9px; font-weight: bold; color: #E2E8F0; background: transparent; border: none;")
         current_header.addWidget(self.current_section_title)
         current_header.addStretch()
         self.status_title = QLabel("대기 중")
-        self.status_title.setStyleSheet("font-size: 11px; color: #94A3B8; font-weight: bold; background: transparent; border: none;")
+        self.status_title.setStyleSheet("font-size: 8px; color: #94A3B8; font-weight: bold; background: transparent; border: none;")
         current_header.addWidget(self.status_title)
         current_layout.addLayout(current_header)
 
@@ -269,8 +269,8 @@ class ProgressPanel(QFrame, ThemedMixin):
         """Update current task display with status icon"""
         self.gui.current_task_label.setText(task_text)
 
-        base_style = "font-size: 13px; background: transparent; border: none;"
-        title_style = "font-size: 11px; font-weight: bold; background: transparent; border: none;"
+        base_style = "font-size: 9px; background: transparent; border: none;"
+        title_style = "font-size: 8px; font-weight: bold; background: transparent; border: none;"
 
         if status == 'active':
             self.status_icon.setText("⏳")

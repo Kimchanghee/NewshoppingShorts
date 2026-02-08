@@ -6,7 +6,7 @@ Modern Update Dialogs for PyQt6
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
-    QPushButton, QApplication
+    QPushButton, QApplication, QScrollArea, QTextEdit
 )
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont
@@ -234,7 +234,7 @@ class UpdateProgressDialog(QWidget):
     cancelled = pyqtSignal()
 
     # ── Fixed dimensions ──
-    WIN_W, WIN_H = 460, 400
+    WIN_W, WIN_H = 460, 500
     PAD = 10
     CONT_W = WIN_W - PAD * 2
     CONT_H = WIN_H - PAD * 2
@@ -327,20 +327,46 @@ class UpdateProgressDialog(QWidget):
         self.percent_label.setStyleSheet(f"color:{C['primary']}; background:transparent; border:none;")
         layout.addWidget(self.percent_label)
 
-        # Release notes (if available)
+        # Release notes (if available) - using QTextEdit for scrolling
         if self._release_notes:
             notes_header = QLabel("업데이트 내역")
             notes_header.setFont(QFont("Pretendard", 11, QFont.Weight.Bold))
             notes_header.setStyleSheet(f"color:{C['text_primary']}; background:transparent; border:none;")
             layout.addWidget(notes_header)
 
-            notes = QLabel(self._release_notes[:350] + ("..." if len(self._release_notes) > 350 else ""))
+            notes = QTextEdit()
+            notes.setPlainText(self._release_notes)
             notes.setFont(QFont("Pretendard", 10))
-            notes.setWordWrap(True)
-            notes.setStyleSheet(_release_notes_style(C))
-            notes.setMinimumHeight(100)
-            notes.setMaximumHeight(120)
-            notes.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            notes.setReadOnly(True)
+            notes.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            notes.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            notes.setStyleSheet(f"""
+                QTextEdit {{
+                    color: {C['text_secondary']};
+                    background-color: {C['surface']};
+                    border: 1px solid {C['border']};
+                    border-radius: 8px;
+                    padding: 12px;
+                }}
+                QTextEdit:focus {{
+                    border: 1px solid {C['border']};
+                    outline: none;
+                }}
+                QScrollBar:vertical {{
+                    background: {C['surface']};
+                    width: 8px;
+                    border-radius: 4px;
+                }}
+                QScrollBar::handle:vertical {{
+                    background: {C['border']};
+                    border-radius: 4px;
+                    min-height: 20px;
+                }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                    height: 0px;
+                }}
+            """)
+            notes.setFixedHeight(140)
             layout.addWidget(notes)
 
         # Status text
@@ -399,7 +425,7 @@ class UpdateCompleteDialog(QWidget):
     confirmed = pyqtSignal()
 
     # ── Fixed dimensions ──
-    WIN_W, WIN_H = 460, 420
+    WIN_W, WIN_H = 460, 520
     PAD = 10
     CONT_W = WIN_W - PAD * 2
     CONT_H = WIN_H - PAD * 2
@@ -471,18 +497,46 @@ class UpdateCompleteDialog(QWidget):
             ver_label.setStyleSheet(f"color:{C['primary']}; background:transparent; border:none;")
             layout.addWidget(ver_label)
 
-        # Release notes
+        # Release notes - using QTextEdit for scrolling
         if self._release_notes:
             notes_header = QLabel("업데이트 내역")
             notes_header.setFont(QFont("Pretendard", 11, QFont.Weight.Bold))
             notes_header.setStyleSheet(f"color:{C['text_primary']}; background:transparent; border:none;")
             layout.addWidget(notes_header)
 
-            notes = QLabel(self._release_notes[:300] + ("..." if len(self._release_notes) > 300 else ""))
+            notes = QTextEdit()
+            notes.setPlainText(self._release_notes)
             notes.setFont(QFont("Pretendard", 10))
-            notes.setWordWrap(True)
-            notes.setStyleSheet(_release_notes_style(C))
-            notes.setFixedHeight(80)
+            notes.setReadOnly(True)
+            notes.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            notes.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            notes.setStyleSheet(f"""
+                QTextEdit {{
+                    color: {C['text_secondary']};
+                    background-color: {C['surface']};
+                    border: 1px solid {C['border']};
+                    border-radius: 8px;
+                    padding: 12px;
+                }}
+                QTextEdit:focus {{
+                    border: 1px solid {C['border']};
+                    outline: none;
+                }}
+                QScrollBar:vertical {{
+                    background: {C['surface']};
+                    width: 8px;
+                    border-radius: 4px;
+                }}
+                QScrollBar::handle:vertical {{
+                    background: {C['border']};
+                    border-radius: 4px;
+                    min-height: 20px;
+                }}
+                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                    height: 0px;
+                }}
+            """)
+            notes.setFixedHeight(140)
             layout.addWidget(notes)
 
         layout.addStretch()

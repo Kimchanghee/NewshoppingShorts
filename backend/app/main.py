@@ -79,6 +79,15 @@ def run_auto_migration():
                         logger.info(f"Column {table}.{col} already exists, skipping.")
                     else:
                         logger.warning(f"Failed to add column {table}.{col}: {e}")
+        
+        # Cleanup: Drop deprecated password_plain columns (Security)
+        try:
+            conn.execute(text("ALTER TABLE users DROP COLUMN IF EXISTS password_plain"))
+            conn.execute(text("ALTER TABLE registration_requests DROP COLUMN IF EXISTS password_plain"))
+            logger.info("Executed cleanup of deprecated password_plain columns.")
+        except Exception as e:
+            logger.warning(f"Failed to drop password_plain columns: {e}")
+
         conn.commit()
     logger.info("Schema auto-migration finished.")
 
@@ -485,4 +494,5 @@ async def check_app_version(current_version: str = Query(..., max_length=20)):
         "download_url": APP_VERSION_INFO.get("download_url"),
         "release_notes": APP_VERSION_INFO.get("release_notes", ""),
         "is_mandatory": is_mandatory,
+        "file_hash": APP_VERSION_INFO.get("file_hash", ""),
     }

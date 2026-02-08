@@ -20,6 +20,12 @@ _PENDING_UPDATE_PATH = os.path.join(
     os.path.expanduser("~"), ".ssmaker", "pending_update.json"
 )
 
+# Keep API endpoint overridable in local/dev network environments.
+API_SERVER_URL = os.getenv(
+    "API_SERVER_URL",
+    "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
+).rstrip("/")
+
 
 class UpdateCheckWorker(QtCore.QThread):
     """Background worker to check for updates after login."""
@@ -33,10 +39,9 @@ class UpdateCheckWorker(QtCore.QThread):
 
     def run(self):
         import requests
-        base_url = "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
         try:
             response = requests.get(
-                f"{base_url}/app/version/check",
+                f"{API_SERVER_URL}/app/version/check",
                 params={"current_version": self.current_version},
                 timeout=5,
             )
@@ -124,6 +129,7 @@ class AppController:
         self._update_is_mandatory = update_data.get("is_mandatory", False)
         self._latest_version = update_data.get("latest_version", "")
         self._release_notes = update_data.get("release_notes", "")
+        file_hash = update_data.get("file_hash", "")
 
         if not download_url:
             logger.warning("Update available but no download URL provided")
@@ -135,11 +141,22 @@ class AppController:
                 sys.exit(1)
             self._proceed_to_loading()
             return
+            
+        if not file_hash:
+            logger.error("Update rejected: Missing file_hash (Security)")
+            if self._update_is_mandatory:
+                 QMessageBox.critical(
+                    None, "보안 오류",
+                    "업데이트 파일 무결성 정보가 없습니다.\n보안을 위해 종료합니다.",
+                )
+                 sys.exit(1)
+            self._proceed_to_loading()
+            return
 
-        logger.info(f"Auto-updating to version {self._latest_version}")
+        logger.info(f"Auto-updating to version {self._latest_version} (Hash: {file_hash})")
         if self.login_window:
             self.login_window.hide()
-        self.perform_update(download_url)
+        self.perform_update(download_url, file_hash)
 
     def _on_update_check_failed(self, error: str) -> None:
         logger.warning(f"Update check failed: {error}")
@@ -329,7 +346,7 @@ class AppController:
 
     # ── Update download & install ──
 
-    def perform_update(self, download_url: str) -> None:
+    def perform_update(self, download_url: str, file_hash: str) -> None:
         """Auto-download and install update (game-like, no confirmation)."""
         from ui.windows.update_dialog import UpdateProgressDialog
 
@@ -353,7 +370,7 @@ class AppController:
         )
         self.update_progress_dialog.show()
 
-        self.download_worker = DownloadWorker(download_url, new_exe_path)
+        self.download_worker = DownloadWorker(download_url, new_exe_path, file_hash)
         self.download_worker.progress.connect(self.update_progress_dialog.set_progress)
 
         def on_download_finished(success: bool, result: str):
@@ -363,11 +380,11 @@ class AppController:
                 QtCore.QTimer.singleShot(500, lambda: self._run_updater(result))
             else:
                 self.update_progress_dialog.close()
-                logger.error(f"Update download failed: {result}")
+                logger.error(f"Update verification failed: {result}")
                 if self._update_is_mandatory:
                     QMessageBox.critical(
                         None, "업데이트 실패",
-                        f"필수 업데이트 다운로드에 실패했습니다:\n{result}\n\n프로그램을 종료합니다.",
+                        f"업데이트 검증 실패:\n{result}\n\n프로그램을 종료합니다.",
                     )
                     sys.exit(1)
                 self._proceed_to_loading()
@@ -428,11 +445,12 @@ del /F "%~f0" >nul 2>&1
                 logger.info(f"Created update batch file: {batch_path}")
                 logger.info(f"Launching update process...")
 
-                # Run batch file in background
+                # Run batch file using cmd.exe /c to avoid shell=True
+                # Using CREATE_NO_WINDOW if possible, or DETACHED_PROCESS
                 subprocess.Popen(
-                    [batch_path],
-                    shell=True,
-                    creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS
+                    ["cmd.exe", "/c", batch_path],
+                    creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.DETACHED_PROCESS,
+                    shell=False
                 )
 
                 # Exit immediately
@@ -446,6 +464,7 @@ del /F "%~f0" >nul 2>&1
 
                 python_exe = sys.executable
                 script_path = os.path.join(base_dir, "ssmaker.py")
+                # Removed shell=True (default is False)
                 subprocess.Popen([python_exe, script_path], cwd=base_dir)
                 logger.info("Exiting current process for restart...")
                 sys.exit(0)
@@ -467,14 +486,17 @@ class DownloadWorker(QtCore.QThread):
     progress = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(bool, str)  # success, file_path_or_error
 
-    def __init__(self, url: str, dest_path: str):
+    def __init__(self, url: str, dest_path: str, expected_hash: str):
         super().__init__()
         self.url = url
         self.dest_path = dest_path
+        self.expected_hash = expected_hash
 
     def run(self):
         import requests
+        import hashlib
         try:
+            sha256 = hashlib.sha256()
             with requests.get(self.url, stream=True, timeout=(10, 120)) as r:
                 r.raise_for_status()
                 total_size = int(r.headers.get("content-length", 0))
@@ -483,10 +505,17 @@ class DownloadWorker(QtCore.QThread):
                     for chunk in r.iter_content(chunk_size=8192):
                         if chunk:
                             f.write(chunk)
+                            sha256.update(chunk)
                             downloaded += len(chunk)
                             if total_size > 0:
                                 prog = int((downloaded / total_size) * 100)
                                 self.progress.emit(prog)
+            
+            # Verify hash
+            file_hash = sha256.hexdigest().lower()
+            if self.expected_hash and file_hash != self.expected_hash.lower():
+                raise ValueError(f"Hash mismatch! Expected {self.expected_hash}, got {file_hash}")
+                
             self.finished.emit(True, self.dest_path)
         except Exception as e:
             self.finished.emit(False, str(e))

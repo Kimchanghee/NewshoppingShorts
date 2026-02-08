@@ -1152,7 +1152,7 @@ class SubscriptionPanel(QWidget):
         
     def _contact_support(self):
         """Open support contact"""
-        webbrowser.open("mailto:support@shoppingmaker.com")
+        webbrowser.open("https://open.kakao.com/o/sVkZPsfi")
 
     def _manual_refresh(self):
         """Manually refresh subscription status"""

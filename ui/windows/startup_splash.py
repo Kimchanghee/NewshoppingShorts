@@ -7,50 +7,44 @@ import os
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QLabel, QProgressBar, QApplication
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve, QRect, QPoint
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
 from PyQt6.QtGui import QFont, QColor, QPainter, QLinearGradient, QPen, QFontDatabase
 
 from ui.theme_manager import get_theme_manager
 
 class AnimatedLogo(QLabel):
-    """Custom animated logo widget with rotation and pulse effects"""
+    """Minimal brand badge with subtle pulse animation."""
     def __init__(self, parent=None):
         super().__init__(parent)
-        self.rotation_angle = 0
-        self.scale_factor = 1.0
+        self._pulse = 0.0
         self.pulse_direction = 1
 
-        self.setText("🚀")
-        self.setFont(QFont("Segoe UI Emoji", 42))
+        self.setText("SS")
+        self.setFont(QFont("Pretendard", 24, QFont.Weight.Bold))
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setFixedSize(80, 80)
-
-        # Rotation animation
-        self.rotation_timer = QTimer(self)
-        self.rotation_timer.timeout.connect(self._animate_rotation)
-        self.rotation_timer.start(30)
+        self.setFixedSize(72, 72)
+        self.setStyleSheet(
+            "background-color: #E31639; color: white; border: 1px solid #F1A5B5; border-radius: 36px;"
+        )
 
         # Pulse animation
         self.pulse_timer = QTimer(self)
         self.pulse_timer.timeout.connect(self._animate_pulse)
-        self.pulse_timer.start(50)
-
-        # Glow effect removed for cleaner UI
-
-    def _animate_rotation(self):
-        self.rotation_angle = (self.rotation_angle + 1) % 360
-        if self.rotation_angle % 120 == 0:
-            self.update()
+        self.pulse_timer.start(60)
 
     def _animate_pulse(self):
-        self.scale_factor += 0.015 * self.pulse_direction
-        if self.scale_factor >= 1.15:
+        self._pulse += 0.06 * self.pulse_direction
+        if self._pulse >= 1.0:
             self.pulse_direction = -1
-        elif self.scale_factor <= 0.95:
+        elif self._pulse <= 0.0:
             self.pulse_direction = 1
 
-        # Glow effect removed
-        self.update()
+        fill_alpha = int(220 + (self._pulse * 25))
+        border_alpha = int(30 + (self._pulse * 40))
+        self.setStyleSheet(
+            f"background-color: rgba(227, 22, 57, {fill_alpha}); "
+            f"color: white; border: 1px solid rgba(241, 165, 181, {border_alpha}); border-radius: 36px;"
+        )
 
 class GradientWidget(QWidget):
     """Custom widget with animated gradient background"""

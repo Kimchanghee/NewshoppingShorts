@@ -1,5 +1,3 @@
 USE ssmaker_auth;
-ALTER TABLE users ADD COLUMN password_plain VARCHAR(255) NULL;
 ALTER TABLE users ADD COLUMN is_online BOOLEAN NOT NULL DEFAULT FALSE;
 ALTER TABLE users ADD COLUMN last_heartbeat TIMESTAMP NULL;
-ALTER TABLE registration_requests ADD COLUMN password_plain VARCHAR(255) NULL;

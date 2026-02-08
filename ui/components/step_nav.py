@@ -48,19 +48,20 @@ class StepButton(QPushButton):
         )
         layout.setSpacing(self.ds.spacing.space_3)  # 12px 간격
 
-        # Icon - STITCH: 크기 증가
+        # Icon
         icon_char = STEP_ICONS.get(icon_key, "•")
         self.icon_label = QLabel(icon_char)
-        self.icon_label.setFont(QFont("Segoe UI Symbol", 16))  # 14 → 16 (STITCH)
+        self.icon_label.setFont(QFont("Segoe UI Symbol", 11))
         self.icon_label.setStyleSheet("background: transparent; border: none;")
-        self.icon_label.setFixedWidth(24)
+        self.icon_label.setFixedWidth(18)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        # Text - STITCH: 폰트 크기 증가
+        # Text
+        menu_font_size = max(9, int(round(self.ds.typography.size_sm * 0.7)))
         self.text_label = QLabel(label)
         self.text_label.setFont(QFont(
-            self.ds.typography.font_family_body,  # Manrope 사용
-            self.ds.typography.size_sm,           # 14px (STITCH)
+            self.ds.typography.font_family_body,
+            menu_font_size,
             QFont.Weight.Medium
         ))
         self.text_label.setStyleSheet("background: transparent; border: none;")
