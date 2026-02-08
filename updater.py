@@ -98,11 +98,40 @@ def main():
 
         # 3. Restart the application
         logging.info(f"Restarting application: {execute_after}")
-        if os.path.exists(execute_after):
-            subprocess.Popen([execute_after])
-        else:
-            # Maybe dest_path IS the execute_after
-            subprocess.Popen([dest_path])
+        try:
+            # Wait a bit to ensure all file handles are released
+            time.sleep(2)
+
+            if os.path.exists(execute_after):
+                logging.info(f"Launching: {execute_after}")
+                # Use shell=True and appropriate creation flags for Windows
+                if sys.platform == "win32":
+                    subprocess.Popen(
+                        [execute_after],
+                        shell=True,
+                        creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
+                    )
+                else:
+                    subprocess.Popen([execute_after])
+                logging.info("Application restarted successfully.")
+            else:
+                logging.error(f"Execute path does not exist: {execute_after}")
+                # Try dest_path as fallback
+                if os.path.exists(dest_path):
+                    logging.info(f"Trying dest_path: {dest_path}")
+                    if sys.platform == "win32":
+                        subprocess.Popen(
+                            [dest_path],
+                            shell=True,
+                            creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
+                        )
+                    else:
+                        subprocess.Popen([dest_path])
+                    logging.info("Application restarted successfully (using dest_path).")
+                else:
+                    logging.error(f"Both execute_after and dest_path do not exist!")
+        except Exception as e:
+            logging.error(f"Failed to restart application: {e}", exc_info=True)
 
     except Exception as e:
         logging.error(f"Unexpected error: {e}", exc_info=True)
