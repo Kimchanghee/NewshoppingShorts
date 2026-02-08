@@ -24,7 +24,7 @@ def _should_disable_faster_whisper() -> bool:
     """
     Decide whether to skip faster-whisper entirely.
 
-    In some environments (notably Python 3.14 at the time of writing), native
+    In some environments (notably Python 3.13+ at the time of writing), native
     dependencies like CTranslate2 can hard-crash the process (no Python traceback).
     When disabled, callers still get usable timestamps via a safe fallback.
     """
@@ -35,7 +35,8 @@ def _should_disable_faster_whisper() -> bool:
         return False
 
     # Conservative default until the ecosystem stabilizes.
-    return sys.version_info >= (3, 14)
+    # Python 3.13+ has shown native crashes in some ctranslate2/faster-whisper builds.
+    return sys.version_info >= (3, 13)
 
 
 def _char_proportional_timestamps(app, tts_path: str, transcript_text: str, subtitle_segments):
