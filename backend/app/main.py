@@ -339,19 +339,21 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.13/ssmaker.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.14/ssmaker.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.13",
+    "version": "1.3.14",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.13 업데이트:
+    "release_notes": """버전 1.3.14 업데이트:
 
-🐛 버그 수정
-• 업데이트 다운로드 화면 개선
-  - 업데이트 내역이 잘리지 않고 전체 내용 표시
-  - 릴리즈 노트 영역 높이 증가
-  - 더 많은 업데이트 정보를 한눈에 확인 가능""",
+🔧 중요 버그 수정
+• 자동 업데이트 후 앱이 재시작되지 않던 문제 해결!
+  - 업데이트 완료 후 자동으로 앱이 재시작됩니다
+  - Windows 환경에서 안정적인 재시작 보장
+  - 파일 교체 후 충분한 대기 시간 확보
+
+이제 업데이트가 완전히 자동으로 처리됩니다""",
     "is_mandatory": False,
     "update_channel": "stable",
 }
