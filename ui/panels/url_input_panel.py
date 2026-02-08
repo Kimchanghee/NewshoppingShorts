@@ -351,7 +351,7 @@ class URLInputPanel(QWidget):
             self.add_url_btn.setText("+ URL 추가")
 
     def _add_mix_to_queue(self):
-        """믹스 영상을 대기열에 추가"""
+        """Add a mix job to the queue."""
         urls = [e.get_url() for e in self._mix_entries if e.get_url()]
 
         if len(urls) < MIN_MIX_URLS:
@@ -359,19 +359,25 @@ class URLInputPanel(QWidget):
             show_warning(self, "URL 부족", f"믹스 모드는 최소 {MIN_MIX_URLS}개 이상의 영상 URL이 필요합니다.")
             return
 
-        # Store mix URLs in state
-        if hasattr(self.gui, 'state'):
-            self.gui.state.mix_video_urls = urls
+        if hasattr(self.gui, "state"):
+            self.gui.state.mix_video_urls = list(urls)
 
-        # Create a special mix entry in queue
-        mix_identifier = f"[믹스] {len(urls)}개 영상"
-        if hasattr(self.gui, 'queue_manager'):
-            self.gui.queue_manager.add_url_to_queue(mix_identifier)
+        queue_manager = getattr(self.gui, "queue_manager", None)
+        if queue_manager is None or not hasattr(queue_manager, "add_mix_job"):
+            from ui.components.custom_dialog import show_warning
+            show_warning(self, "오류", "믹스 작업을 등록할 수 없습니다.")
+            return
+
+        try:
+            queue_manager.add_mix_job(urls)
+        except Exception as exc:
+            from ui.components.custom_dialog import show_warning
+            show_warning(self, "오류", f"믹스 대기열 추가 실패: {exc}")
+            return
 
         from ui.components.custom_dialog import show_success
-        show_success(self, "추가 완료", f"{len(urls)}개 영상이 믹스 대기열에 추가되었습니다.")
+        show_success(self, "추가 완료", f"{len(urls)}개 영상을 믹스 대기열에 추가했습니다.")
 
-        # Clear entries
         self._clear_mix_entries()
 
     def _clear_mix_entries(self):

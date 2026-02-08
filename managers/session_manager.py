@@ -138,6 +138,12 @@ class SessionManager:
                 'current_processing_index': self.gui.current_processing_index,
                 'batch_processing': self.gui.batch_processing,
                 'dynamic_processing': self.gui.dynamic_processing,
+                'processing_mode': getattr(
+                    getattr(self.gui, 'state', None),
+                    'processing_mode',
+                    getattr(self.gui, 'processing_mode', 'single'),
+                ),
+                'mix_jobs': dict(getattr(self.gui, 'mix_jobs', {})),
 
                 # 음성 선택 정보
                 'selected_voices': [
@@ -196,7 +202,8 @@ class SessionManager:
             if not isinstance(url_queue, list):
                 logger.warning(f"[세션] 경고: url_queue가 list가 아님 (타입: {type(url_queue).__name__}) - 빈 리스트로 초기화")
                 url_queue = []
-            self.gui.url_queue = url_queue
+            self.gui.url_queue.clear()
+            self.gui.url_queue.extend(url_queue)
 
             # url_status: null이나 잘못된 타입이면 빈 dict로 대체
             # Thread-safe access to url_status
@@ -204,18 +211,52 @@ class SessionManager:
             url_status_lock = getattr(self.gui, 'url_status_lock', None)
             if url_status_lock is not None:
                 with url_status_lock:
-                    self.gui.url_status = url_status if isinstance(url_status, dict) else {}
+                    self.gui.url_status.clear()
+                    self.gui.url_status.update(url_status if isinstance(url_status, dict) else {})
             else:
-                self.gui.url_status = url_status if isinstance(url_status, dict) else {}
+                self.gui.url_status.clear()
+                self.gui.url_status.update(url_status if isinstance(url_status, dict) else {})
 
             # url_status_message: null이나 잘못된 타입이면 빈 dict로 대체
             url_status_msg = session_data.get('url_status_message', {})
-            self.gui.url_status_message = url_status_msg if isinstance(url_status_msg, dict) else {}
+            self.gui.url_status_message.clear()
+            self.gui.url_status_message.update(url_status_msg if isinstance(url_status_msg, dict) else {})
 
             # url_remarks: null이나 잘못된 타입이면 빈 dict로 대체
             url_remarks = session_data.get('url_remarks', {})
-            self.gui.url_remarks = url_remarks if isinstance(url_remarks, dict) else {}
+            self.gui.url_remarks.clear()
+            self.gui.url_remarks.update(url_remarks if isinstance(url_remarks, dict) else {})
             self.gui.current_processing_index = session_data.get('current_processing_index', -1)
+            self.gui.processing_mode = session_data.get('processing_mode', 'single')
+
+            # mix job metadata restore
+            saved_mix_jobs = session_data.get('mix_jobs', {})
+            normalized_mix_jobs = {}
+            if isinstance(saved_mix_jobs, dict):
+                for key, urls in saved_mix_jobs.items():
+                    if not isinstance(key, str):
+                        continue
+                    if not isinstance(urls, list):
+                        continue
+                    normalized = [u for u in urls if isinstance(u, str) and u.strip()]
+                    if normalized:
+                        normalized_mix_jobs[key] = normalized
+
+            if isinstance(getattr(self.gui, 'mix_jobs', None), dict):
+                self.gui.mix_jobs.clear()
+                self.gui.mix_jobs.update(normalized_mix_jobs)
+            else:
+                self.gui.mix_jobs = dict(normalized_mix_jobs)
+            queue_manager = getattr(self.gui, 'queue_manager', None)
+            if queue_manager is not None and hasattr(queue_manager, '_ensure_mix_store'):
+                store = queue_manager._ensure_mix_store()
+                store.clear()
+                store.update(normalized_mix_jobs)
+                self.gui.mix_jobs = store
+
+            if hasattr(self.gui, 'state'):
+                self.gui.state.processing_mode = self.gui.processing_mode
+                self.gui.state.mix_jobs = self.gui.mix_jobs
 
             # 처리 중이던 URL만 waiting으로 변경 (실패/건너뜀은 상태 유지)
             # None 상태값도 waiting으로 정규화
@@ -355,6 +396,9 @@ class SessionManager:
             refresh_output_folder_display = getattr(self.gui, 'refresh_output_folder_display', None)
             if refresh_output_folder_display is not None:
                 refresh_output_folder_display()
+            url_input_panel = getattr(self.gui, 'url_input_panel', None)
+            if url_input_panel is not None and hasattr(url_input_panel, 'refresh_mode'):
+                url_input_panel.refresh_mode()
 
             # 추가 동기화: voice_manager가 초기화된 후 한 번 더 TTS 목록 동기화
             voice_mgr = getattr(self.gui, 'voice_manager', None)

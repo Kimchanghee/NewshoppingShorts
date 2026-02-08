@@ -155,11 +155,34 @@ class VideoHelpers:
 
     def cleanup_temp_files(self):
         """Clean up temporary downloaded files."""
+        temp_paths = []
+
         temp_file = getattr(self.app, "_temp_downloaded_file", None)
-        if temp_file and os.path.exists(temp_file):
+        if isinstance(temp_file, str) and temp_file:
+            temp_paths.append(temp_file)
+
+        temp_files = getattr(self.app, "_temp_downloaded_files", None)
+        if isinstance(temp_files, list):
+            for path in temp_files:
+                if isinstance(path, str) and path:
+                    temp_paths.append(path)
+
+        for path in dict.fromkeys(temp_paths):
+            if not os.path.exists(path):
+                continue
             try:
-                os.remove(temp_file)
-                logger.debug(f"[정리] 임시 파일 삭제: {temp_file}")
+                os.remove(path)
+                logger.debug(f"[정리] 임시 파일 삭제: {path}")
+                parent = os.path.dirname(path)
+                if parent:
+                    parent_name = os.path.basename(parent)
+                    if parent_name.startswith(("mix_source_", "tiktok_douyin_")):
+                        try:
+                            os.rmdir(parent)
+                        except Exception:
+                            pass
             except Exception as e:
                 logger.debug(f"[정리] 삭제 실패 (무시됨): {e}")
+
         self.app._temp_downloaded_file = None
+        self.app._temp_downloaded_files = []
