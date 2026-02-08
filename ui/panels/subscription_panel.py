@@ -1270,10 +1270,12 @@ class SubscriptionPanel(QWidget):
 
         import threading
         payment_id = self.current_payment_id
+        user_id = self._extract_user_id()
+        auth_token = self._extract_auth_token()
 
         def _do_poll():
             try:
-                data = self.payment.get_status(payment_id)
+                data = self.payment.get_status(payment_id, user_id=user_id or "", token=auth_token or "")
                 status = data.get("status", "pending")
                 # UI 콜백 (메인 스레드)
                 cb_signal = getattr(self.gui, 'ui_callback_signal', None) if self.gui else None

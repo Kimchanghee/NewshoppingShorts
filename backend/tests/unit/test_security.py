@@ -34,6 +34,7 @@ _TEST_ENV = {
     "JWT_SECRET_KEY": "a" * 64,
     "ADMIN_API_KEY": "b" * 64,
     "SSMAKER_API_KEY": "c" * 32,
+    "BILLING_KEY_ENCRYPTION_KEY": "uKVciQZlzUKtZPwuiKHl3wVCJJhQrWL6TqrFRClcEOI=",
     "ENVIRONMENT": "production",
     "ALLOWED_ORIGINS": "https://example.com",
 }
@@ -376,3 +377,28 @@ class TestSensitiveFieldSet:
         from app.main import _SENSITIVE_FIELDS
         for field in ("pw", "password", "key", "token", "secret"):
             assert field in _SENSITIVE_FIELDS
+
+    def test_sensitive_fields_include_payment_card_fields(self):
+        from app.main import _SENSITIVE_FIELDS
+        for field in ("card_no", "card_pw", "buyer_auth_no", "enc_bill"):
+            assert field in _SENSITIVE_FIELDS
+
+    def test_sensitive_fields_include_payapp_link_fields(self):
+        from app.main import _SENSITIVE_FIELDS
+        for field in ("linkkey", "linkval"):
+            assert field in _SENSITIVE_FIELDS
+
+
+class TestPayAppContract:
+    def test_payapp_cancel_states_cover_documented_values(self):
+        from app.routers.payment import _PAYAPP_CANCEL_STATES
+
+        # PayApp docs/examples reference multiple cancel codes by section.
+        for code in ("8", "9", "16", "31", "32", "64"):
+            assert code in _PAYAPP_CANCEL_STATES
+
+
+class TestAuditTargets:
+    def test_payapp_webhook_is_audited(self):
+        from app.main import AuditLoggingMiddleware
+        assert "/payments/payapp/webhook" in AuditLoggingMiddleware._AUDIT_PREFIXES

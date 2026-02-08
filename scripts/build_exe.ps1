@@ -123,12 +123,31 @@ $mustNotContain = @(
   # Credential / key files (must never ship)
   "temp_pw.txt",
   "vertex-credentials",
-  ".pem",
   ".key"
 )
 foreach ($item in $mustNotContain) {
   if ($listing | Select-String -SimpleMatch $item) {
     throw "Sensitive file was bundled into ssmaker.exe: ${item}"
+  }
+}
+
+# certifi CA bundle is required for TLS verification at runtime.
+# Block all other .pem files.
+$allowedPem = @(
+  "certifi\\cacert.pem"
+)
+$pemHits = $listing | Select-String -SimpleMatch ".pem"
+foreach ($hit in $pemHits) {
+  $line = $hit.ToString()
+  $isAllowed = $false
+  foreach ($allow in $allowedPem) {
+    if ($line -like "*$allow*") {
+      $isAllowed = $true
+      break
+    }
+  }
+  if (-not $isAllowed) {
+    throw "Sensitive file was bundled into ssmaker.exe: $line"
   }
 }
 Write-Host "OK: bundle contents verified."

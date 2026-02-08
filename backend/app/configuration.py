@@ -55,13 +55,31 @@ class Settings(BaseSettings):
     @classmethod
     def validate_admin_api_key(cls, v, info):
         """Admin API key validation - required in production"""
-        # Get environment from values if available
         env = (
-            info.data.get("ENVIRONMENT", "development") if info.data else "development"
+            (info.data.get("ENVIRONMENT") if info.data else None)
+            or os.getenv("ENVIRONMENT", "development")
         )
         if env == "production" and (not v or len(v) < 32):
             raise ValueError(
                 "ADMIN_API_KEY must be at least 32 characters in production"
+            )
+        return v
+
+    # Billing key encryption (Fernet key)
+    # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+    BILLING_KEY_ENCRYPTION_KEY: str = ""
+
+    @field_validator("BILLING_KEY_ENCRYPTION_KEY")
+    @classmethod
+    def validate_billing_key_encryption_key(cls, v, info):
+        """Billing key encryption key is mandatory in production."""
+        env = (
+            (info.data.get("ENVIRONMENT") if info.data else None)
+            or os.getenv("ENVIRONMENT", "development")
+        )
+        if env == "production" and not v:
+            raise ValueError(
+                "BILLING_KEY_ENCRYPTION_KEY is required in production"
             )
         return v
 
