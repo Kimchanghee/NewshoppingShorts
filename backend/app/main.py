@@ -382,13 +382,17 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.21/ssmaker_v1.3.21.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.22/ssmaker_v1.3.22.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.21",
+    "version": "1.3.22",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.21 업데이트:
+    "release_notes": """버전 1.3.22 업데이트:
+
+🔄 결제 UX 정리
+• 카드결제는 카드 등록 없이 새 창 결제 페이지에서 진행
+• 가상계좌 안내 문구를 축약해 결제 화면 높이/폭 부담 완화
 
 🔄 자동 업데이트 안정화
 • 이전 버전에서 최신 버전으로 자동 업데이트가 안 되던 문제 수정
