@@ -10,14 +10,14 @@ Features:
 """
 
 import webbrowser
+from datetime import datetime, timezone
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QMessageBox, QFrame, QProgressBar,
     QSpacerItem, QSizePolicy, QTextEdit, QLineEdit,
     QGridLayout, QStackedWidget, QScrollArea
 )
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
 
 import config
 from utils.logging_config import get_logger
@@ -51,6 +51,24 @@ def format_price_korean(amount: int) -> str:
         return f"{amount:,}원"
 
 
+def parse_utc_datetime(value):
+    """Parse an ISO datetime to timezone-aware UTC datetime."""
+    if value is None:
+        return None
+    try:
+        if isinstance(value, str):
+            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        elif isinstance(value, datetime):
+            dt = value
+        else:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
+    except Exception:
+        return None
+
+
 PLANS = {
     "trial": {
         "id": "trial",
@@ -61,7 +79,7 @@ PLANS = {
         "months": 0,
         "description": "기본 기능을 무료로 체험하세요",
         "features": [
-            "월 2개 영상 생성",
+            "총 2개 영상 생성",
             "기본 음성 합성",
             "기본 자막 스타일",
             "720p 해상도",
@@ -101,6 +119,7 @@ PLANS = {
         "price": 969000,
         "price_text": format_price_korean(161500),  # Show per-month price
         "price_per_month": 161500,
+        "original_price_per_month": 190000,
         "original_price": 1140000,
         "discount_percent": 15,
         "period": "6개월",
@@ -125,6 +144,7 @@ PLANS = {
         "price": 1596000,
         "price_text": format_price_korean(133000),  # Show per-month price
         "price_per_month": 133000,
+        "original_price_per_month": 190000,
         "original_price": 2280000,
         "discount_percent": 30,
         "period": "12개월",
@@ -204,17 +224,19 @@ class PlanCard(QFrame):
         price_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Original price (strikethrough) if discount exists
-        if self.plan_data.get("original_price"):
+        original_price_text = self._get_original_price_text()
+        if original_price_text:
             original_row = QHBoxLayout()
             original_row.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-            original_price = QLabel(f"{self.plan_data['original_price']:,}원")
+            original_price = QLabel(original_price_text)
             original_price.setObjectName("plan_price_original")
             original_row.addWidget(original_price)
 
-            discount_badge = QLabel(f"-{self.plan_data.get('discount_percent', 0)}%")
-            discount_badge.setObjectName("discount_badge")
-            original_row.addWidget(discount_badge)
+            if self.plan_data.get("discount_percent"):
+                discount_badge = QLabel(f"-{self.plan_data.get('discount_percent', 0)}%")
+                discount_badge.setObjectName("discount_badge")
+                original_row.addWidget(discount_badge)
 
             price_layout.addLayout(original_row)
 
@@ -301,6 +323,18 @@ class PlanCard(QFrame):
         layout.addWidget(label, 1)
         
         return row
+
+    def _get_original_price_text(self) -> str:
+        """Return strike-through price text for comparison."""
+        original_per_month = self.plan_data.get("original_price_per_month")
+        if original_per_month:
+            return f"월 {format_price_korean(original_per_month)}"
+
+        original_total = self.plan_data.get("original_price")
+        if original_total:
+            return f"{original_total:,}원"
+
+        return ""
     
     def _on_select(self):
         if self.on_select:
@@ -500,7 +534,7 @@ class CurrentPlanCard(QFrame):
         layout.addWidget(self.progress_bar)
         
         # Usage hint
-        self.usage_hint = QLabel("이번 달 남은 영상 생성 횟수: 3회")
+        self.usage_hint = QLabel("남은 영상 생성 횟수: 3회")
         self.usage_hint.setObjectName("usage_hint")
         layout.addWidget(self.usage_hint)
         
@@ -524,18 +558,41 @@ class CurrentPlanCard(QFrame):
         
         self._apply_styles()
         
-    def update_plan(self, plan_id: str, used: int = 0, total: int = 3):
-        """Update current plan display"""
+    def update_plan(self, plan_id: str, used: int = 0, total: int = 3, expires_at_str: str = None):
+        """Update current plan display
+
+        Args:
+            plan_id: Plan identifier (e.g., "pro_1month", "pro_6months", "trial")
+            used: Number of works used
+            total: Total work count (-1 for unlimited)
+            expires_at_str: ISO format expiry date string for dynamic plan detection
+        """
         self.current_plan = plan_id
         self.usage_used = used
         self.usage_total = total
+
+        # Try to determine specific plan from expiry date if generic "pro" is passed
+        if plan_id == "pro" and expires_at_str:
+            expires_dt = parse_utc_datetime(expires_at_str)
+            if expires_dt is not None:
+                now = datetime.now(timezone.utc)
+                days_remaining = (expires_dt - now).days
+
+                # Determine plan based on days remaining (with some tolerance)
+                if days_remaining >= 335:  # ~11 months (12개월 plan)
+                    plan_id = "pro_12months"
+                elif days_remaining >= 155:  # ~5 months (6개월 plan)
+                    plan_id = "pro_6months"
+                elif days_remaining >= 15:  # ~1 month (1개월 plan)
+                    plan_id = "pro_1month"
+                # else: keep as "pro"
 
         plan_data = PLANS.get(plan_id, PLANS["trial"])
 
         self.status_badge.setText(plan_data["name"])
         self.plan_name.setText(plan_data["name"])
 
-        is_unlimited = (total < 0) or (plan_id == "pro")
+        is_unlimited = (total < 0) or str(plan_id).startswith("pro")
         if is_unlimited:
             self.usage_text.setText("무제한")
             self.progress_bar.setMaximum(1)
@@ -546,7 +603,7 @@ class CurrentPlanCard(QFrame):
             self.progress_bar.setMaximum(max(total, 1))
             self.progress_bar.setValue(used)
             remaining = max(total - used, 0)
-            self.usage_hint.setText(f"이번 달 남은 영상 생성 횟수: {remaining}회")
+            self.usage_hint.setText(f"남은 영상 생성 횟수: {remaining}회")
         
         # Update badge color
         if plan_id == "trial":
@@ -687,16 +744,10 @@ class PaymentForm(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ds.spacing.space_5)
 
-        # Title with icon
-        title_container = QHBoxLayout()
-        title_icon = QLabel("💳")
-        title_icon.setFont(QFont("Segoe UI Emoji", 20))
-        title_container.addWidget(title_icon)
-
+        # Title
         title = QLabel("결제 정보")
         title.setObjectName("form_title")
-        title_container.addWidget(title, 1)
-        layout.addLayout(title_container)
+        layout.addWidget(title)
 
         # Form fields container
         form_container = QFrame()
@@ -806,10 +857,18 @@ class PaymentForm(QWidget):
         # Add discount information
         discount_info = ""
         if plan_data.get('discount_percent'):
-            discount_info = f"\n💰 {plan_data['discount_percent']}% 할인 적용"
+            discount_info = f"\n할인율: {plan_data['discount_percent']}%"
 
         full_text = f"{plan_name}\n{per_month_text}\n총액: {price_text}{discount_info}"
         self.selected_plan_label.setText(full_text)
+
+    def reset_selection(self):
+        """Reset selected plan display."""
+        self.selected_plan_label.setText("플랜을 선택해주세요")
+
+    def set_submit_enabled(self, enabled: bool):
+        """Enable/disable submit button based on plan selection."""
+        self.pay_btn.setEnabled(enabled)
         
     def set_status(self, status: str):
         """Update status text"""
@@ -827,29 +886,28 @@ class PaymentForm(QWidget):
         self.setStyleSheet(f"""
             #form_title {{
                 color: {ds.colors.text_primary};
-                font-size: {ds.typography.size_xl}px;
+                font-size: {ds.typography.size_lg}px;
                 font-weight: {ds.typography.weight_bold};
+                letter-spacing: 0.4px;
             }}
 
             #form_container {{
                 background-color: {ds.colors.surface};
-                border: 2px solid {ds.colors.border};
+                border: 1px solid {ds.colors.border};
                 border-radius: {ds.radius.lg}px;
             }}
 
             #selected_plan_card {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-                    stop:0 #FEF2F2, stop:1 #FEE2E2);
-                border: 2px solid #FCA5A5;
+                background-color: {ds.colors.surface_variant};
+                border: 1px solid {ds.colors.border};
                 border-radius: {ds.radius.md}px;
             }}
 
             #plan_card_header {{
-                color: #991B1B;
+                color: {ds.colors.text_secondary};
                 font-size: {ds.typography.size_xs}px;
                 font-weight: {ds.typography.weight_bold};
-                text-transform: uppercase;
-                letter-spacing: 1px;
+                letter-spacing: 0.6px;
             }}
 
             #field_label {{
@@ -859,9 +917,9 @@ class PaymentForm(QWidget):
             }}
 
             #selected_plan_value {{
-                color: #DC2626;
-                font-size: {ds.typography.size_lg}px;
-                font-weight: {ds.typography.weight_bold};
+                color: {ds.colors.text_primary};
+                font-size: {ds.typography.size_md}px;
+                font-weight: {ds.typography.weight_semibold};
             }}
 
             #form_separator {{
@@ -874,16 +932,16 @@ class PaymentForm(QWidget):
             }}
             
             #status_label {{
-                color: {ds.colors.text_muted};
+                color: {ds.colors.text_secondary};
                 font-size: {ds.typography.size_sm}px;
                 padding: {ds.spacing.space_3}px;
                 background-color: {ds.colors.surface_variant};
+                border: 1px solid {ds.colors.border};
                 border-radius: {ds.radius.md}px;
             }}
             
             #pay_button {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #E31639, stop:1 #FF4D6A);
+                background-color: {ds.colors.primary};
                 color: white;
                 border: none;
                 border-radius: {ds.radius.md}px;
@@ -894,8 +952,13 @@ class PaymentForm(QWidget):
             }}
             
             #pay_button:hover {{
-                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, 
-                    stop:0 #C41230, stop:1 #E63D5A);
+                background-color: #C41230;
+            }}
+
+            #pay_button:disabled {{
+                background: {ds.colors.surface_variant};
+                color: {ds.colors.text_muted};
+                border: 1px solid {ds.colors.border};
             }}
             
             #cancel_button {{
@@ -911,6 +974,7 @@ class PaymentForm(QWidget):
             
             #cancel_button:hover {{
                 background-color: {ds.colors.border};
+                border-color: {ds.colors.text_muted};
             }}
 
             #phone_input {{
@@ -998,24 +1062,12 @@ class SubscriptionPanel(QWidget):
         
         main_layout.addSpacing(ds.spacing.space_4)
         
-        # Content container
-        content = QWidget()
-        content_layout = QHBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(ds.spacing.space_6)
-        
-        # Left side: Current plan + Plans
-        left_panel = QWidget()
-        left_layout = QVBoxLayout(left_panel)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(ds.spacing.space_6)
-        
         # Current plan card
         self.current_plan_card = CurrentPlanCard()
         self.current_plan_card.upgrade_btn.clicked.connect(self._show_plans)
         self.current_plan_card.contact_btn.clicked.connect(self._contact_support)
         self.current_plan_card.refresh_btn.clicked.connect(self._manual_refresh)
-        left_layout.addWidget(self.current_plan_card)
+        main_layout.addWidget(self.current_plan_card)
         
         # Plans section (hidden by default, shown when upgrade clicked)
         self.plans_container = QWidget()
@@ -1043,20 +1095,17 @@ class SubscriptionPanel(QWidget):
         
         plans_layout.addLayout(plans_row)
         self.plans_container.hide()
-        left_layout.addWidget(self.plans_container)
-        
-        left_layout.addStretch()
-        content_layout.addWidget(left_panel, 2)
-        
-        # Right side: Payment form
+        main_layout.addWidget(self.plans_container)
+
+        # Payment form under plans (no right-side split layout)
         self.payment_form = PaymentForm(
             on_submit=self._checkout,
             on_cancel=self._cancel_payment
         )
         self.payment_form.hide()
-        content_layout.addWidget(self.payment_form, 1)
-        
-        main_layout.addWidget(content)
+        self.payment_form.set_submit_enabled(False)
+        main_layout.addWidget(self.payment_form)
+        main_layout.addStretch()
 
         scroll.setWidget(page)
         outer_layout.addWidget(scroll)
@@ -1086,7 +1135,7 @@ class SubscriptionPanel(QWidget):
     def _show_plans(self):
         """Show plan selection"""
         self.plans_container.show()
-        self.payment_form.hide()
+        self.payment_form.show()
         # Ensure the newly revealed section is reachable without resizing the window.
         QTimer.singleShot(
             0,
@@ -1098,7 +1147,8 @@ class SubscriptionPanel(QWidget):
         """Handle plan selection"""
         self.selected_plan = plan_data
         self.payment_form.set_plan(plan_data)
-        self.payment_form.show()
+        self.payment_form.set_submit_enabled(True)
+        self.payment_form.set_status("결제 대기 중")
         
     def _contact_support(self):
         """Open support contact"""
@@ -1150,13 +1200,20 @@ class SubscriptionPanel(QWidget):
 
         # Extract user_id from login_data
         user_id = self._extract_user_id()
+        auth_token = self._extract_auth_token()
 
         if not user_id:
             QMessageBox.warning(self, "알림", "로그인 정보를 찾을 수 없습니다.")
             return
+        if not auth_token:
+            QMessageBox.warning(self, "로그인 필요", "결제를 위해 다시 로그인해주세요.")
+            return
 
         try:
-            data = self.payment.create_payapp_checkout(user_id, phone)
+            plan_id = self.selected_plan.get("id", "pro_1month")
+            data = self.payment.create_payapp_checkout(
+                user_id, phone, plan_id=plan_id, token=auth_token
+            )
             self.current_payment_id = data.get("payment_id", "")
             payurl = data.get("payurl", "")
 
@@ -1170,10 +1227,12 @@ class SubscriptionPanel(QWidget):
             self.payment_form.set_status("결제 요청 오류")
             
     def _cancel_payment(self):
-        """Cancel payment and hide form"""
+        """Cancel current payment flow and reset form state."""
         self._stop_poll()
-        self.payment_form.hide()
         self.selected_plan = None
+        self.payment_form.reset_selection()
+        self.payment_form.set_submit_enabled(False)
+        self.payment_form.set_status("결제 대기 중")
         
     def _start_poll(self):
         """Start payment status polling"""
@@ -1266,36 +1325,70 @@ class SubscriptionPanel(QWidget):
                 return user_id
         return self.gui.login_data.get("userId")
 
+    def _extract_auth_token(self):
+        """login_data에서 인증 토큰을 안전하게 추출"""
+        if not self.gui or not getattr(self.gui, "login_data", None):
+            try:
+                from caller import rest
+                getter = getattr(rest, "_get_auth_token", None)
+                if callable(getter):
+                    return getter()
+            except Exception:
+                pass
+            return None
+        data_part = self.gui.login_data.get("data", {})
+        if isinstance(data_part, dict):
+            token = data_part.get("token")
+            if token:
+                return token
+        try:
+            from caller import rest
+            getter = getattr(rest, "_get_auth_token", None)
+            if callable(getter):
+                return getter()
+        except Exception:
+            pass
+        return None
+
     def _verify_subscription_server(self):
         """결제 완료 후 서버에서 구독 상태를 재확인하여 UI 업데이트"""
         try:
             user_id = self._extract_user_id()
             if not user_id:
-                # 서버 확인 불가 시 일단 pro로 표시
-                self.current_plan_card.update_plan("pro", used=0, total=999)
+                # 서버 확인 불가 시 trial로 표시
+                self.current_plan_card.update_plan("trial", used=0, total=0, expires_at_str=None)
                 return
             from caller import rest
             status = rest.getSubscriptionStatus(user_id)
             if status.get("success", True):
                 work_count = status.get("work_count", -1)
                 work_used = status.get("work_used", 0)
-                is_pro = (work_count == -1) or status.get("user_type") == "subscriber"
+
+                # Check if subscription is actually active
+                expires_at_str = status.get("subscription_expires_at") or status.get("data", {}).get("subscription_expires_at")
+                expires_dt = parse_utc_datetime(expires_at_str)
+                is_active_subscription = bool(
+                    expires_dt and expires_dt > datetime.now(timezone.utc)
+                )
+
+                is_pro = (work_count == -1) and is_active_subscription
+
                 if is_pro:
-                    self.current_plan_card.update_plan("pro", used=work_used, total=999)
+                    self.current_plan_card.update_plan("pro", used=work_used, total=-1, expires_at_str=expires_at_str)
                 else:
                     remaining = max(work_count - work_used, 0)
-                    self.current_plan_card.update_plan("trial", used=work_used, total=work_count)
+                    self.current_plan_card.update_plan("trial", used=work_used, total=work_count, expires_at_str=None)
                 logger.info(f"[Subscription] Server verification complete: pro={is_pro}")
             else:
-                # 서버 확인 실패 시 일단 pro로 표시
-                self.current_plan_card.update_plan("pro", used=0, total=999)
+                # 서버 확인 실패 시 trial로 표시 (권한 불일치 방지)
+                self.current_plan_card.update_plan("trial", used=0, total=0, expires_at_str=None)
         except Exception as e:
             logger.error(f"[Subscription] Server verification failed: {e}")
-            self.current_plan_card.update_plan("pro", used=0, total=999)
+            self.current_plan_card.update_plan("trial", used=0, total=0, expires_at_str=None)
 
-    def update_usage(self, used: int, total: int, plan_id: str = "trial"):
+    def update_usage(self, used: int, total: int, plan_id: str = "trial", expires_at_str: str = None):
         """Update current usage display"""
-        self.current_plan_card.update_plan(plan_id, used, total)
+        self.current_plan_card.update_plan(plan_id, used, total, expires_at_str=expires_at_str)
 
     def refresh_from_server(self):
         """Force refresh subscription status from server"""
@@ -1311,17 +1404,22 @@ class SubscriptionPanel(QWidget):
             if status.get("success", True):
                 work_count = status.get("work_count", -1)
                 work_used = status.get("work_used", 0)
-                expires_at = status.get("subscription_expires_at")
 
-                # Determine plan type based on subscription status
-                is_pro = (work_count == -1) or (expires_at is not None) or status.get("user_type") == "subscriber"
+                # Check if subscription is actually active
+                expires_at_str = status.get("subscription_expires_at") or status.get("data", {}).get("subscription_expires_at")
+                expires_dt = parse_utc_datetime(expires_at_str)
+                is_active_subscription = bool(
+                    expires_dt and expires_dt > datetime.now(timezone.utc)
+                )
+
+                is_pro = (work_count == -1) and is_active_subscription
 
                 if is_pro:
-                    self.current_plan_card.update_plan("pro", used=work_used, total=999)
-                    logger.info(f"[Subscription] Refreshed: PRO account (expires_at={expires_at})")
+                    self.current_plan_card.update_plan("pro", used=work_used, total=-1, expires_at_str=expires_at_str)
+                    logger.info(f"[Subscription] Refreshed: PRO account (expires_at={expires_at_str})")
                 else:
                     remaining = max(work_count - work_used, 0)
-                    self.current_plan_card.update_plan("trial", used=work_used, total=work_count)
+                    self.current_plan_card.update_plan("trial", used=work_used, total=work_count, expires_at_str=None)
                     logger.info(f"[Subscription] Refreshed: TRIAL account ({work_used}/{work_count})")
 
                 # Update parent GUI if available

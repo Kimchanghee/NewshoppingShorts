@@ -22,7 +22,7 @@ from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.subscription_request import SubscriptionRequest, SubscriptionRequestStatus
 from app.models.user import User, UserType
-from app.utils.subscription_utils import is_subscription_active
+from app.utils.subscription_utils import is_subscription_active, calculate_subscription_expiry
 from app.schemas.subscription import (
     SubscriptionRequestCreate,
     SubscriptionRequestResponse,
@@ -204,7 +204,7 @@ async def get_my_subscription_status(
         # Auto-heal: trial user with active subscription → upgrade to subscriber
         if user_type_value == "trial" and expiry is not None and is_subscription_active(expiry):
             try:
-                user.user_type = "subscriber"
+                user.user_type = UserType.SUBSCRIBER
                 user.work_count = -1
                 db.commit()
                 user_type_value = "subscriber"
@@ -213,6 +213,18 @@ async def get_my_subscription_status(
                 db.rollback()
                 # Proceed as subscriber anyway to avoid blocking paid users
                 user_type_value = "subscriber"
+
+        # Auto-heal: subscriber with expired subscription → revert to trial
+        if user.user_type == UserType.SUBSCRIBER and user.subscription_expires_at and not is_subscription_active(user.subscription_expires_at):
+            try:
+                user.user_type = UserType.TRIAL
+                user.work_count = 0
+                user.work_used = 0
+                db.commit()
+                user_type_value = "trial"
+                logger.info(f"Auto-healed user {user_id}: subscriber → trial (expired subscription)")
+            except Exception:
+                db.rollback()
 
         # Paid accounts: period-based unlimited access during active subscription.
         if user_type_value in ("admin", "subscriber"):
@@ -382,10 +394,17 @@ async def approve_subscription(
                 message="사용자를 찾을 수 없습니다."
             )
 
+        # Paid subscription policy: count-unlimited during active period.
+        effective_work_count = -1
+        if data.work_count != -1:
+            logger.info(
+                f"Override work_count to unlimited for paid subscription: requested={data.work_count}"
+            )
+
         # Update user subscription
-        user.work_count = data.work_count
+        user.work_count = effective_work_count
         user.work_used = 0  # Reset work used
-        user.subscription_expires_at = datetime.now(timezone.utc) + timedelta(days=data.subscription_days)
+        user.subscription_expires_at = calculate_subscription_expiry(data.subscription_days, user.subscription_expires_at)
         user.user_type = UserType.SUBSCRIBER
 
         # Update subscription request
@@ -395,16 +414,18 @@ async def approve_subscription(
 
         db.commit()
 
-        logger.info(f"Subscription approved: user_id={user.id}, work_count={data.work_count}")
+        logger.info(
+            f"Subscription approved: user_id={user.id}, work_count={effective_work_count}"
+        )
 
-        work_count_str = "무제한" if data.work_count == -1 else f"{data.work_count}회"
+        work_count_str = "무제한"
         return SubscriptionResponse(
             success=True,
             message=f"구독이 승인되었습니다. (작업: {work_count_str}, 기간: {data.subscription_days}일)",
             data={
                 "user_id": user.id,
                 "username": user.username,
-                "work_count": data.work_count,
+                "work_count": effective_work_count,
                 "subscription_days": data.subscription_days
             }
         )

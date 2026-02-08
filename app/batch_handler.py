@@ -132,20 +132,23 @@ class BatchHandler:
                     work_used = work_check.get("work_used", 0)
                     remaining = work_check.get("remaining", -1)
 
-                    # 체험판 사용자 확인 (work_count == 5 이거나 user_type == "trial")
+                    # 체험판 사용자 확인 (user_type == "trial")
                     is_trial_user = (
-                        work_count == 5
-                        or self.app.login_data.get("data", {})
+                        self.app.login_data.get("data", {})
                         .get("data", {})
                         .get("user_type", "")
                         == "trial"
                     )
+                    effective_is_trial_user = is_trial_user
 
                     if remaining != -1 and remaining <= 0:
                         # Double-check via subscription status API (handles auto-heal on server)
                         try:
                             sub_status = rest.getSubscriptionStatus(str(user_id))
                             if sub_status.get("success"):
+                                effective_is_trial_user = bool(
+                                    sub_status.get("is_trial", is_trial_user)
+                                )
                                 # If subscription status says can_work, trust it (server may have auto-healed)
                                 if sub_status.get("can_work"):
                                     self.app.add_log("[구독] 구독 활성 상태 확인됨. 작업을 계속합니다.")
@@ -165,7 +168,7 @@ class BatchHandler:
 
                     if remaining != -1 and remaining <= 0:
 
-                        if is_trial_user:
+                        if effective_is_trial_user:
                             # 체험판 사용자: 구독 신청 다이얼로그 표시
                             self.app.add_log("[작업] 체험판 사용량 소진. 구독 신청 안내.")
 

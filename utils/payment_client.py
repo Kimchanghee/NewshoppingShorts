@@ -31,17 +31,24 @@ class PaymentClient:
             raise RuntimeError("payment_id or checkout_url missing in response")
         return data
 
-    def create_payapp_checkout(self, user_id: str, phone: str) -> dict:
+    def create_payapp_checkout(
+        self, user_id: str, phone: str, plan_id: str = "pro_1month", token: str | None = None
+    ) -> dict:
         """PayApp 가상계좌 결제 요청 생성.
 
         Returns dict with keys: success, payment_id, payurl, mul_no, message.
         Raises RuntimeError on server/network failure.
         """
-        payload = {"user_id": user_id, "phone": phone}
+        payload = {"user_id": user_id, "phone": phone, "plan_id": plan_id}
+        headers = {}
+        if token:
+            headers["X-User-ID"] = str(user_id)
+            headers["Authorization"] = f"Bearer {token}"
         try:
             resp = requests.post(
                 f"{self.base_url}/payments/payapp/create",
                 json=payload,
+                headers=headers,
                 timeout=30,
             )
             resp.raise_for_status()
