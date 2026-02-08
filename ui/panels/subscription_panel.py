@@ -1,4 +1,4 @@
-"""
+﻿"""
 Modern Subscription Panel - SaaS-style pricing page design
 
 Features:
@@ -15,7 +15,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QMessageBox, QFrame, QProgressBar,
     QSpacerItem, QSizePolicy, QTextEdit, QLineEdit,
-    QGridLayout, QStackedWidget, QScrollArea
+    QGridLayout, QStackedWidget, QScrollArea, QComboBox,
+    QButtonGroup
 )
 from PyQt6.QtCore import Qt, QTimer
 
@@ -730,26 +731,34 @@ class CurrentPlanCard(QFrame):
 
 
 class PaymentForm(QWidget):
-    """Modern payment form"""
-    
-    def __init__(self, parent=None, on_submit=None, on_cancel=None):
+    """Payment form with virtual-account and card modes."""
+
+    def __init__(
+        self,
+        parent=None,
+        on_submit=None,
+        on_cancel=None,
+        on_refresh_cards=None,
+        on_method_changed=None,
+    ):
         super().__init__(parent)
         self.on_submit = on_submit
         self.on_cancel = on_cancel
+        self.on_refresh_cards = on_refresh_cards
+        self.on_method_changed = on_method_changed
         self.ds = get_design_system()
+        self._payment_method = "vbank"
         self._build_ui()
-        
+
     def _build_ui(self):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ds.spacing.space_5)
 
-        # Title
         title = QLabel("결제 정보")
         title.setObjectName("form_title")
         layout.addWidget(title)
 
-        # Form fields container
         form_container = QFrame()
         form_container.setObjectName("form_container")
         form_layout = QVBoxLayout(form_container)
@@ -757,11 +766,10 @@ class PaymentForm(QWidget):
             ds.spacing.space_5,
             ds.spacing.space_5,
             ds.spacing.space_5,
-            ds.spacing.space_5
+            ds.spacing.space_5,
         )
         form_layout.setSpacing(ds.spacing.space_4)
 
-        # Selected plan display - enhanced with background
         plan_card = QFrame()
         plan_card.setObjectName("selected_plan_card")
         plan_card_layout = QVBoxLayout(plan_card)
@@ -769,7 +777,7 @@ class PaymentForm(QWidget):
             ds.spacing.space_4,
             ds.spacing.space_4,
             ds.spacing.space_4,
-            ds.spacing.space_4
+            ds.spacing.space_4,
         )
         plan_card_layout.setSpacing(ds.spacing.space_2)
 
@@ -781,17 +789,141 @@ class PaymentForm(QWidget):
         self.selected_plan_label.setObjectName("selected_plan_value")
         self.selected_plan_label.setWordWrap(True)
         plan_card_layout.addWidget(self.selected_plan_label)
-
         form_layout.addWidget(plan_card)
 
-        # Separator
         separator = QFrame()
         separator.setFrameShape(QFrame.Shape.HLine)
         separator.setObjectName("form_separator")
         form_layout.addWidget(separator)
 
-        # Phone number input (PayApp 필수)
-        phone_label = QLabel("전화번호 (가상계좌 안내 수신용)")
+        method_label = QLabel("결제 수단")
+        method_label.setObjectName("field_label")
+        form_layout.addWidget(method_label)
+
+        method_row = QHBoxLayout()
+        method_row.setSpacing(ds.spacing.space_2)
+        self.method_vbank_btn = QPushButton("가상계좌")
+        self.method_vbank_btn.setObjectName("method_button")
+        self.method_vbank_btn.setCheckable(True)
+        self.method_vbank_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        method_row.addWidget(self.method_vbank_btn)
+
+        self.method_card_btn = QPushButton("카드결제")
+        self.method_card_btn.setObjectName("method_button")
+        self.method_card_btn.setCheckable(True)
+        self.method_card_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        method_row.addWidget(self.method_card_btn)
+        form_layout.addLayout(method_row)
+
+        self.method_group = QButtonGroup(self)
+        self.method_group.setExclusive(True)
+        self.method_group.addButton(self.method_vbank_btn)
+        self.method_group.addButton(self.method_card_btn)
+        self.method_vbank_btn.clicked.connect(lambda: self.set_payment_method("vbank"))
+        self.method_card_btn.clicked.connect(lambda: self.set_payment_method("card"))
+
+        self.method_stack = QStackedWidget()
+        self.method_stack.setObjectName("method_stack")
+
+        vbank_page = QWidget()
+        vbank_layout = QVBoxLayout(vbank_page)
+        vbank_layout.setContentsMargins(0, 0, 0, 0)
+        self.vbank_info_label = QLabel(
+            "가상계좌가 발급되며, 입금 완료 시 자동으로 구독이 활성화됩니다."
+        )
+        self.vbank_info_label.setObjectName("info_label")
+        self.vbank_info_label.setWordWrap(True)
+        vbank_layout.addWidget(self.vbank_info_label)
+        self.method_stack.addWidget(vbank_page)
+
+        card_page = QWidget()
+        card_layout = QVBoxLayout(card_page)
+        card_layout.setContentsMargins(0, 0, 0, 0)
+        card_layout.setSpacing(ds.spacing.space_3)
+
+        card_label = QLabel("등록된 카드")
+        card_label.setObjectName("field_label")
+        card_layout.addWidget(card_label)
+
+        card_select_row = QHBoxLayout()
+        card_select_row.setSpacing(ds.spacing.space_2)
+        self.card_select = QComboBox()
+        self.card_select.setObjectName("card_select")
+        self.card_select.currentIndexChanged.connect(self._toggle_card_input_visibility)
+        card_select_row.addWidget(self.card_select, 1)
+
+        self.card_refresh_btn = QPushButton("카드 불러오기")
+        self.card_refresh_btn.setObjectName("card_refresh_btn")
+        self.card_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.card_refresh_btn.clicked.connect(self._on_refresh_cards_clicked)
+        card_select_row.addWidget(self.card_refresh_btn)
+        card_layout.addLayout(card_select_row)
+
+        self.card_input_container = QFrame()
+        self.card_input_container.setObjectName("card_input_container")
+        card_input_layout = QGridLayout(self.card_input_container)
+        card_input_layout.setContentsMargins(
+            ds.spacing.space_3,
+            ds.spacing.space_3,
+            ds.spacing.space_3,
+            ds.spacing.space_3,
+        )
+        card_input_layout.setHorizontalSpacing(ds.spacing.space_2)
+        card_input_layout.setVerticalSpacing(ds.spacing.space_2)
+
+        self.card_holder_input = QLineEdit()
+        self.card_holder_input.setObjectName("card_input")
+        self.card_holder_input.setPlaceholderText("카드 소유자명")
+        card_input_layout.addWidget(QLabel("소유자명"), 0, 0)
+        card_input_layout.addWidget(self.card_holder_input, 0, 1, 1, 3)
+
+        self.card_no_input = QLineEdit()
+        self.card_no_input.setObjectName("card_input")
+        self.card_no_input.setPlaceholderText("카드번호 (숫자만)")
+        self.card_no_input.setMaxLength(23)
+        card_input_layout.addWidget(QLabel("카드번호"), 1, 0)
+        card_input_layout.addWidget(self.card_no_input, 1, 1, 1, 3)
+
+        self.exp_month_input = QLineEdit()
+        self.exp_month_input.setObjectName("card_input")
+        self.exp_month_input.setPlaceholderText("MM")
+        self.exp_month_input.setMaxLength(2)
+        card_input_layout.addWidget(QLabel("유효월"), 2, 0)
+        card_input_layout.addWidget(self.exp_month_input, 2, 1)
+
+        self.exp_year_input = QLineEdit()
+        self.exp_year_input.setObjectName("card_input")
+        self.exp_year_input.setPlaceholderText("YY")
+        self.exp_year_input.setMaxLength(2)
+        card_input_layout.addWidget(QLabel("유효년"), 2, 2)
+        card_input_layout.addWidget(self.exp_year_input, 2, 3)
+
+        self.buyer_auth_no_input = QLineEdit()
+        self.buyer_auth_no_input.setObjectName("card_input")
+        self.buyer_auth_no_input.setPlaceholderText("생년월일 6자리 / 사업자번호 10자리")
+        self.buyer_auth_no_input.setMaxLength(10)
+        self.buyer_auth_no_input.setEchoMode(QLineEdit.EchoMode.PasswordEchoOnEdit)
+        card_input_layout.addWidget(QLabel("인증번호"), 3, 0)
+        card_input_layout.addWidget(self.buyer_auth_no_input, 3, 1, 1, 2)
+
+        self.card_pw_input = QLineEdit()
+        self.card_pw_input.setObjectName("card_input")
+        self.card_pw_input.setPlaceholderText("앞 2자리")
+        self.card_pw_input.setMaxLength(2)
+        self.card_pw_input.setEchoMode(QLineEdit.EchoMode.Password)
+        card_input_layout.addWidget(QLabel("카드비번"), 3, 3)
+        card_input_layout.addWidget(self.card_pw_input, 3, 4)
+
+        card_layout.addWidget(self.card_input_container)
+
+        card_notice = QLabel("카드 정보는 PayApp에만 전송되며 앱/서버에 저장되지 않습니다.")
+        card_notice.setObjectName("info_label")
+        card_notice.setWordWrap(True)
+        card_layout.addWidget(card_notice)
+        self.method_stack.addWidget(card_page)
+        form_layout.addWidget(self.method_stack)
+
+        phone_label = QLabel("전화번호 (결제 안내 수신)")
         phone_label.setObjectName("field_label")
         form_layout.addWidget(phone_label)
 
@@ -801,21 +933,11 @@ class PaymentForm(QWidget):
         self.phone_input.setMaxLength(13)
         form_layout.addWidget(self.phone_input)
 
-        # Status info
-        info_label = QLabel(
-            "가상계좌가 발급되며, 입금 완료 시 자동으로 구독이 활성화됩니다."
-        )
-        info_label.setObjectName("info_label")
-        info_label.setWordWrap(True)
-        form_layout.addWidget(info_label)
-
-        # Status
         self.status_label = QLabel("결제 대기 중")
         self.status_label.setObjectName("status_label")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         form_layout.addWidget(self.status_label)
 
-        # Buttons
         buttons_layout = QHBoxLayout()
         buttons_layout.setSpacing(ds.spacing.space_3)
 
@@ -836,27 +958,25 @@ class PaymentForm(QWidget):
         layout.addWidget(form_container)
         layout.addStretch()
 
+        self.set_card_list([])
+        self.set_payment_method("vbank", notify=False)
         self._apply_styles()
-        
-    def set_plan(self, plan_data: dict):
-        """Set the selected plan"""
-        # Build detailed plan description
-        plan_name = plan_data['name']
-        price = plan_data['price']
-        months = plan_data.get('months', 1)
 
-        # Show total price with period information
+    def set_plan(self, plan_data: dict):
+        """Set the selected plan."""
+        plan_name = plan_data["name"]
+        price = plan_data["price"]
+        months = plan_data.get("months", 1)
+
         price_text = f"{price:,}원"
         if months > 1:
             price_text += f" ({months}개월분)"
 
-        # Show per-month price
-        per_month_price = plan_data.get('price_per_month', price)
+        per_month_price = plan_data.get("price_per_month", price)
         per_month_text = f"월 {format_price_korean(per_month_price)}"
 
-        # Add discount information
         discount_info = ""
-        if plan_data.get('discount_percent'):
+        if plan_data.get("discount_percent"):
             discount_info = f"\n할인율: {plan_data['discount_percent']}%"
 
         full_text = f"{plan_name}\n{per_month_text}\n총액: {price_text}{discount_info}"
@@ -865,23 +985,83 @@ class PaymentForm(QWidget):
     def reset_selection(self):
         """Reset selected plan display."""
         self.selected_plan_label.setText("플랜을 선택해주세요")
+        self.set_payment_method("vbank")
+        self.clear_sensitive_card_inputs()
 
     def set_submit_enabled(self, enabled: bool):
         """Enable/disable submit button based on plan selection."""
         self.pay_btn.setEnabled(enabled)
-        
+
     def set_status(self, status: str):
-        """Update status text"""
         self.status_label.setText(status)
-        
+
+    def set_payment_method(self, method: str, notify: bool = True):
+        normalized = "card" if method == "card" else "vbank"
+        self._payment_method = normalized
+        self.method_vbank_btn.setChecked(normalized == "vbank")
+        self.method_card_btn.setChecked(normalized == "card")
+        self.method_stack.setCurrentIndex(1 if normalized == "card" else 0)
+        if normalized == "card":
+            self._toggle_card_input_visibility()
+        if notify and callable(self.on_method_changed):
+            self.on_method_changed(normalized)
+
+    def get_payment_method(self) -> str:
+        return self._payment_method
+
+    def set_card_list(self, cards: list[dict]):
+        self.card_select.blockSignals(True)
+        self.card_select.clear()
+        self.card_select.addItem("새 카드 등록 후 결제", None)
+        for card in cards:
+            card_id = card.get("card_id")
+            if card_id is None:
+                continue
+            card_name = (card.get("card_name") or "등록카드").strip() or "등록카드"
+            masked = (card.get("card_no_masked") or "****").strip() or "****"
+            self.card_select.addItem(f"{card_name} ({masked})", int(card_id))
+        self.card_select.setCurrentIndex(0)
+        self.card_select.blockSignals(False)
+        self._toggle_card_input_visibility()
+
+    def get_selected_card_id(self):
+        return self.card_select.currentData()
+
+    def get_new_card_payload(self) -> dict:
+        import re as _re
+
+        return {
+            "buyer_name": self.card_holder_input.text().strip(),
+            "card_no": _re.sub(r"[^0-9]", "", self.card_no_input.text().strip()),
+            "exp_month": _re.sub(r"[^0-9]", "", self.exp_month_input.text().strip()),
+            "exp_year": _re.sub(r"[^0-9]", "", self.exp_year_input.text().strip()),
+            "buyer_auth_no": _re.sub(r"[^0-9]", "", self.buyer_auth_no_input.text().strip()),
+            "card_pw": _re.sub(r"[^0-9]", "", self.card_pw_input.text().strip()),
+        }
+
+    def clear_sensitive_card_inputs(self):
+        self.card_no_input.clear()
+        self.exp_month_input.clear()
+        self.exp_year_input.clear()
+        self.buyer_auth_no_input.clear()
+        self.card_pw_input.clear()
+
+    def _toggle_card_input_visibility(self):
+        using_saved_card = self.get_selected_card_id() is not None
+        self.card_input_container.setVisible(not using_saved_card)
+
+    def _on_refresh_cards_clicked(self):
+        if callable(self.on_refresh_cards):
+            self.on_refresh_cards()
+
     def _on_submit(self):
         if self.on_submit:
             self.on_submit()
-            
+
     def _on_cancel(self):
         if self.on_cancel:
             self.on_cancel()
-    
+
     def _apply_styles(self):
         self.setStyleSheet(f"""
             #form_title {{
@@ -925,12 +1105,39 @@ class PaymentForm(QWidget):
             #form_separator {{
                 color: {ds.colors.border};
             }}
-            
+
+            #method_button {{
+                background-color: {ds.colors.surface_variant};
+                color: {ds.colors.text_secondary};
+                border: 1px solid {ds.colors.border};
+                border-radius: {ds.radius.md}px;
+                padding: {ds.spacing.space_2}px {ds.spacing.space_4}px;
+                font-size: {ds.typography.size_sm}px;
+                font-weight: {ds.typography.weight_medium};
+            }}
+
+            #method_button:checked {{
+                color: white;
+                background-color: {ds.colors.primary};
+                border-color: {ds.colors.primary};
+            }}
+
+            #method_stack {{
+                border: none;
+                background: transparent;
+            }}
+
+            #card_input_container {{
+                background-color: {ds.colors.surface_variant};
+                border: 1px solid {ds.colors.border};
+                border-radius: {ds.radius.md}px;
+            }}
+
             #info_label {{
                 color: {ds.colors.text_secondary};
                 font-size: {ds.typography.size_sm}px;
             }}
-            
+
             #status_label {{
                 color: {ds.colors.text_secondary};
                 font-size: {ds.typography.size_sm}px;
@@ -939,7 +1146,7 @@ class PaymentForm(QWidget):
                 border: 1px solid {ds.colors.border};
                 border-radius: {ds.radius.md}px;
             }}
-            
+
             #pay_button {{
                 background-color: {ds.colors.primary};
                 color: white;
@@ -950,7 +1157,7 @@ class PaymentForm(QWidget):
                 font-weight: {ds.typography.weight_semibold};
                 min-height: {ds.button_sizes['md'].height}px;
             }}
-            
+
             #pay_button:hover {{
                 background-color: #C41230;
             }}
@@ -960,7 +1167,7 @@ class PaymentForm(QWidget):
                 color: {ds.colors.text_muted};
                 border: 1px solid {ds.colors.border};
             }}
-            
+
             #cancel_button {{
                 background-color: {ds.colors.surface_variant};
                 color: {ds.colors.text_primary};
@@ -971,13 +1178,13 @@ class PaymentForm(QWidget):
                 font-weight: {ds.typography.weight_medium};
                 min-height: {ds.button_sizes['md'].height}px;
             }}
-            
+
             #cancel_button:hover {{
                 background-color: {ds.colors.border};
                 border-color: {ds.colors.text_muted};
             }}
 
-            #phone_input {{
+            #phone_input, #card_select, #card_input {{
                 background-color: {ds.colors.surface_variant};
                 color: {ds.colors.text_primary};
                 border: 1px solid {ds.colors.border};
@@ -985,11 +1192,26 @@ class PaymentForm(QWidget):
                 padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
                 font-size: {ds.typography.size_base}px;
             }}
-            #phone_input:focus {{
+
+            #phone_input:focus, #card_select:focus, #card_input:focus {{
                 border-color: {ds.colors.primary};
             }}
-        """)
 
+            #card_refresh_btn {{
+                background-color: {ds.colors.surface_variant};
+                color: {ds.colors.text_primary};
+                border: 1px solid {ds.colors.border};
+                border-radius: {ds.radius.md}px;
+                padding: {ds.spacing.space_2}px {ds.spacing.space_3}px;
+                font-size: {ds.typography.size_sm}px;
+                font-weight: {ds.typography.weight_medium};
+            }}
+
+            #card_refresh_btn:hover {{
+                border-color: {ds.colors.primary};
+                color: {ds.colors.primary};
+            }}
+        """)
 
 class SubscriptionPanel(QWidget):
     """
@@ -1009,6 +1231,7 @@ class SubscriptionPanel(QWidget):
         self.current_payment_id: str | None = None
         self.poll_tries = 0
         self._polling = False  # 중복 폴링 방지 플래그
+        self._card_loading = False
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_status)
         self.selected_plan = None
@@ -1100,7 +1323,9 @@ class SubscriptionPanel(QWidget):
         # Payment form under plans (no right-side split layout)
         self.payment_form = PaymentForm(
             on_submit=self._checkout,
-            on_cancel=self._cancel_payment
+            on_cancel=self._cancel_payment,
+            on_refresh_cards=self._refresh_saved_cards,
+            on_method_changed=self._on_payment_method_changed,
         )
         self.payment_form.hide()
         self.payment_form.set_submit_enabled(False)
@@ -1149,6 +1374,85 @@ class SubscriptionPanel(QWidget):
         self.payment_form.set_plan(plan_data)
         self.payment_form.set_submit_enabled(True)
         self.payment_form.set_status("결제 대기 중")
+        if self.payment_form.get_payment_method() == "card":
+            self._refresh_saved_cards()
+
+    def _on_payment_method_changed(self, method: str):
+        """Fetch card list on demand when user switches to card payment."""
+        if method == "card":
+            self._refresh_saved_cards()
+
+    def _refresh_saved_cards(self):
+        """Load saved cards asynchronously and update card selector."""
+        if self._card_loading:
+            return
+
+        user_id = self._extract_user_id()
+        auth_token = self._extract_auth_token()
+        if not user_id or not auth_token:
+            self.payment_form.set_card_list([])
+            if self.payment_form.get_payment_method() == "card":
+                self.payment_form.set_status("카드 조회를 위해 다시 로그인해주세요.")
+            return
+
+        self._card_loading = True
+        if self.payment_form.get_payment_method() == "card":
+            self.payment_form.set_status("등록된 카드 조회 중...")
+
+        import threading
+
+        def _worker():
+            cards = []
+            error_message = None
+            try:
+                data = self.payment.list_cards(user_id=str(user_id), token=auth_token)
+                if data.get("success"):
+                    cards = data.get("cards", []) or []
+                else:
+                    error_message = data.get("message", "카드 목록 조회 실패")
+            except Exception as e:
+                logger.warning(f"[Subscription] card list fetch failed: {e}")
+                error_message = str(e)
+
+            def _apply():
+                self._card_loading = False
+                self.payment_form.set_card_list(cards)
+                if self.payment_form.get_payment_method() != "card":
+                    return
+                if error_message:
+                    self.payment_form.set_status("카드 목록 조회 실패")
+                elif cards:
+                    self.payment_form.set_status(f"등록 카드 {len(cards)}개 조회됨")
+                else:
+                    self.payment_form.set_status("등록 카드가 없습니다. 새 카드 정보를 입력하세요.")
+
+            cb_signal = getattr(self.gui, "ui_callback_signal", None) if self.gui else None
+            if cb_signal is not None:
+                cb_signal.emit(_apply)
+            else:
+                QTimer.singleShot(0, _apply)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _validate_new_card_payload(self, payload: dict) -> str | None:
+        """Return validation error message for new card fields, or None."""
+        import re as _re
+
+        if not payload.get("buyer_name"):
+            return "카드 소유자명을 입력해주세요."
+        if not _re.fullmatch(r"\d{13,19}", payload.get("card_no", "")):
+            return "카드번호는 숫자 13~19자리로 입력해주세요."
+        if not _re.fullmatch(r"\d{2}", payload.get("exp_month", "")):
+            return "유효월(MM)을 2자리로 입력해주세요."
+        if not (1 <= int(payload["exp_month"]) <= 12):
+            return "유효월(MM)은 01~12 범위여야 합니다."
+        if not _re.fullmatch(r"\d{2}", payload.get("exp_year", "")):
+            return "유효년(YY)을 2자리로 입력해주세요."
+        if not _re.fullmatch(r"(\d{6}|\d{10})", payload.get("buyer_auth_no", "")):
+            return "인증번호는 생년월일 6자리 또는 사업자번호 10자리입니다."
+        if not _re.fullmatch(r"\d{2}", payload.get("card_pw", "")):
+            return "카드 비밀번호 앞 2자리를 입력해주세요."
+        return None
         
     def _contact_support(self):
         """Open support contact"""
@@ -1182,28 +1486,27 @@ class SubscriptionPanel(QWidget):
         threading.Thread(target=_do_refresh, daemon=True).start()
         
     def _checkout(self):
-        """Start PayApp checkout process"""
+        """Start PayApp checkout process."""
         if not self.selected_plan:
             QMessageBox.warning(self, "알림", "플랜을 먼저 선택해주세요.")
             return
 
-        # Get phone number from form and validate Korean mobile format
         import re as _re
+
         phone = self.payment_form.phone_input.text().strip()
-        phone_digits = _re.sub(r'[^0-9]', '', phone)
+        phone_digits = _re.sub(r"[^0-9]", "", phone)
         if not phone_digits or len(phone_digits) < 10 or len(phone_digits) > 11:
             QMessageBox.warning(self, "알림", "전화번호를 정확히 입력해주세요.")
             return
-        if not _re.match(r'^01[016789]\d{7,8}$', phone_digits):
+        if not _re.match(r"^01[016789]\d{7,8}$", phone_digits):
             QMessageBox.warning(self, "알림", "올바른 휴대폰 번호를 입력해주세요.\n(예: 010-1234-5678)")
             return
 
-        # Extract user_id from login_data
         user_id = self._extract_user_id()
         auth_token = self._extract_auth_token()
 
         if not user_id:
-            QMessageBox.warning(self, "알림", "로그인 정보를 찾을 수 없습니다.")
+            QMessageBox.warning(self, "알림", "로그인 사용자 정보를 찾을 수 없습니다.")
             return
         if not auth_token:
             QMessageBox.warning(self, "로그인 필요", "결제를 위해 다시 로그인해주세요.")
@@ -1211,8 +1514,52 @@ class SubscriptionPanel(QWidget):
 
         try:
             plan_id = self.selected_plan.get("id", "pro_1month")
+            payment_method = self.payment_form.get_payment_method()
+
+            if payment_method == "card":
+                self.payment_form.set_status("카드 결제 준비 중...")
+                card_id = self.payment_form.get_selected_card_id()
+
+                if card_id is None:
+                    card_payload = self.payment_form.get_new_card_payload()
+                    validation_error = self._validate_new_card_payload(card_payload)
+                    if validation_error:
+                        QMessageBox.warning(self, "알림", validation_error)
+                        return
+
+                    registered = self.payment.register_card(
+                        user_id=str(user_id),
+                        card_no=card_payload["card_no"],
+                        exp_month=card_payload["exp_month"],
+                        exp_year=card_payload["exp_year"],
+                        buyer_auth_no=card_payload["buyer_auth_no"],
+                        card_pw=card_payload["card_pw"],
+                        buyer_phone=phone_digits,
+                        buyer_name=card_payload["buyer_name"],
+                        token=auth_token,
+                    )
+                    card_id = registered.get("card_id")
+                    if not card_id:
+                        raise RuntimeError("카드 등록 응답에 card_id가 없습니다.")
+                    self.payment_form.clear_sensitive_card_inputs()
+                    self._refresh_saved_cards()
+
+                data = self.payment.pay_with_card(
+                    user_id=str(user_id),
+                    card_id=int(card_id),
+                    plan_id=plan_id,
+                    phone=phone_digits,
+                    token=auth_token,
+                )
+                self.current_payment_id = data.get("payment_id", "")
+                if not self.current_payment_id:
+                    raise RuntimeError("카드 결제 응답에 payment_id가 없습니다.")
+                self.payment_form.set_status("카드 승인 요청 완료. 결제 상태 확인 중...")
+                self._start_poll()
+                return
+
             data = self.payment.create_payapp_checkout(
-                user_id, phone, plan_id=plan_id, token=auth_token
+                str(user_id), phone_digits, plan_id=plan_id, token=auth_token
             )
             self.current_payment_id = data.get("payment_id", "")
             payurl = data.get("payurl", "")
@@ -1225,10 +1572,11 @@ class SubscriptionPanel(QWidget):
             logger.error(f"[Subscription] PayApp checkout failed: {e}")
             QMessageBox.critical(self, "오류", "결제 요청에 실패했습니다.\n잠시 후 다시 시도해주세요.")
             self.payment_form.set_status("결제 요청 오류")
-            
+
     def _cancel_payment(self):
         """Cancel current payment flow and reset form state."""
         self._stop_poll()
+        self.current_payment_id = None
         self.selected_plan = None
         self.payment_form.reset_selection()
         self.payment_form.set_submit_enabled(False)
@@ -1448,3 +1796,5 @@ class SubscriptionPanel(QWidget):
         super().showEvent(event)
         # Refresh subscription status when panel is shown
         QTimer.singleShot(100, self.refresh_from_server)
+
+
