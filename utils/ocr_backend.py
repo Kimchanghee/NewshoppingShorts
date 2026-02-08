@@ -315,6 +315,26 @@ class OCRBackend:
 
         return None
 
+    def _find_tessdata_dir(self) -> Optional[str]:
+        """Find tessdata directory for language packs."""
+        env_dir = os.environ.get("TESSDATA_PREFIX")
+        candidates = []
+        if env_dir:
+            candidates.append(env_dir)
+
+        candidates.extend(
+            [
+                os.path.join(os.path.expandvars(r"%LOCALAPPDATA%"), "Tesseract-OCR", "tessdata"),
+                r"C:\Program Files\Tesseract-OCR\tessdata",
+                r"C:\Program Files (x86)\Tesseract-OCR\tessdata",
+            ]
+        )
+
+        for candidate in candidates:
+            if candidate and os.path.isdir(candidate):
+                return candidate
+        return None
+
     def _init_tesseract(self):
         """Tesseract OCR 초기화"""
         try:
@@ -330,6 +350,9 @@ class OCRBackend:
         pytesseract.pytesseract.tesseract_cmd = cmd
         self._pytesseract = pytesseract
         self._tesseract_output = Output
+        tessdata_dir = self._find_tessdata_dir()
+        if tessdata_dir:
+            os.environ["TESSDATA_PREFIX"] = tessdata_dir
         
         # 한국어+영어 기본, 없으면 영어만
         self._tesseract_lang = self._detect_available_languages()
@@ -341,7 +364,13 @@ class OCRBackend:
     def _detect_available_languages(self) -> str:
         """사용 가능한 Tesseract 언어 감지"""
         try:
-            langs = self._pytesseract.get_languages()
+            langs_raw = self._pytesseract.get_languages()
+            # Some environments return values like "tessdata/kor".
+            langs = {
+                str(lang).replace("\\", "/").split("/")[-1].strip()
+                for lang in (langs_raw or [])
+                if str(lang).strip()
+            }
             if "kor" in langs and "eng" in langs:
                 return "kor+eng"
             elif "kor" in langs:
@@ -351,7 +380,7 @@ class OCRBackend:
             elif "eng" in langs:
                 return "eng"
             else:
-                return langs[0] if langs else "eng"
+                return next(iter(langs), "eng")
         except Exception:
             return os.environ.get("TESSERACT_LANG", "eng")
 
