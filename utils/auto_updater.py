@@ -25,7 +25,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # 현재 앱 버전 (빌드 시 이 값을 업데이트)
-CURRENT_VERSION = "1.3.15"
+CURRENT_VERSION = "1.3.17"
 
 # 버전 확인 API 엔드포인트
 UPDATE_CHECK_URL = os.getenv(
@@ -196,6 +196,7 @@ class UpdateChecker:
                 result["download_url"] = data.get("download_url")
                 result["release_notes"] = data.get("release_notes", "")
                 result["is_mandatory"] = data.get("is_mandatory", False)
+                result["file_hash"] = data.get("file_hash")  # SHA256 hash for integrity verification
                 
                 # 버전 비교
                 comparison = compare_versions(self.current_version, latest_version)
@@ -278,6 +279,23 @@ class UpdateChecker:
                             progress_callback(downloaded_size, total_size)
             
             logger.info(f"Download complete: {download_path}")
+
+            # Verify file integrity with SHA256 hash
+            expected_hash = self._update_info.get("file_hash") if self._update_info else None
+            if expected_hash:
+                sha256 = hashlib.sha256()
+                with open(download_path, "rb") as f:
+                    for block in iter(lambda: f.read(8192), b""):
+                        sha256.update(block)
+                actual_hash = sha256.hexdigest()
+                if actual_hash.lower() != expected_hash.lower():
+                    logger.error(f"Hash mismatch! Expected: {expected_hash[:16]}..., Got: {actual_hash[:16]}...")
+                    download_path.unlink(missing_ok=True)
+                    return None
+                logger.info("File integrity verified (SHA256)")
+            else:
+                logger.warning("No file_hash provided by server - skipping integrity check")
+
             return download_path
             
         except Exception as e:
@@ -306,7 +324,6 @@ class UpdateChecker:
                 # 현재 프로그램 종료 후 설치 프로그램 실행
                 subprocess.Popen(
                     [str(installer_path)],
-                    shell=True,
                     creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
                 )
                 return True

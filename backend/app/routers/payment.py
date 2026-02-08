@@ -216,6 +216,8 @@ async def create_payment(
 async def get_payment_status(
     request: Request,
     payment_id: str = Query(..., description="결제 ID"),
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    authorization: str = Header(..., alias="Authorization"),
     db: Session = Depends(get_db)
 ):
     """
@@ -229,6 +231,7 @@ async def get_payment_status(
     - cancelled: 결제 취소
     - expired: 만료됨
     """
+    _validate_authenticated_user(db, str(x_user_id), authorization)
     logger.info(f"[Payment] Status check: {payment_id}")
 
     session = _get_payment_session(db, payment_id)
@@ -242,6 +245,10 @@ async def get_payment_status(
             created_at=datetime.now(timezone.utc).isoformat(),
             updated_at=datetime.now(timezone.utc).isoformat()
         )
+
+    # Verify the authenticated user owns this payment session
+    if str(session.user_id) != str(x_user_id):
+        raise HTTPException(status_code=403, detail="Access denied")
 
     # Check if session has expired (use timezone-aware comparison)
     if session.status == PaymentStatus.PENDING and session.expires_at:

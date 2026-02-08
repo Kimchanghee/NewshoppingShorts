@@ -10,6 +10,9 @@ _archive/
 # 빌드 로그
 build_log.txt
 error_log.txt
+build_*.log
+build*.log
+scripts/build.log
 
 # API Keys (절대 푸시 금지!)
 api_keys.json
@@ -31,6 +34,8 @@ config/*-vertex.json
 
 # 로그인 정보 (절대 푸시 금지!)
 info.on
+temp_pw.txt
+*temp_pw*
 
 # 세션 데이터 (작업 데이터 파일)
 session_data.json
@@ -99,3 +104,6 @@ tmp_updater_test/
 .tmp_update_test_*/
 q
 resource/bin/
+
+# Virtual environments
+venv*/

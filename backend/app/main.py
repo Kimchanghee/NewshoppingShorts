@@ -359,6 +359,7 @@ APP_VERSION_INFO = {
 • 구독 요금제 월 단위 가격 표시""",
     "is_mandatory": False,
     "update_channel": "stable",
+    "file_hash": "",
 }
 
 
@@ -369,6 +370,7 @@ class VersionUpdateRequest(BaseModel):
     release_notes: Optional[str] = None
     is_mandatory: bool = False
     min_required_version: Optional[str] = None
+    file_hash: Optional[str] = None  # SHA256 hash of the download file
 
 
 @app.get("/app/version")
@@ -427,6 +429,8 @@ async def update_app_version(
     if request.min_required_version:
         new_info["min_required_version"] = request.min_required_version
     new_info["is_mandatory"] = request.is_mandatory
+    if request.file_hash:
+        new_info["file_hash"] = request.file_hash
     APP_VERSION_INFO = new_info
 
     logger.info(f"App version updated to {request.version} by CI/CD")
