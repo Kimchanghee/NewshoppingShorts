@@ -361,13 +361,13 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.20/ssmaker_v1.3.20.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.21/ssmaker_v1.3.21.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.20",
+    "version": "1.3.21",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.20 업데이트:
+    "release_notes": """버전 1.3.21 업데이트:
 
 🔄 자동 업데이트 안정화
 • 이전 버전에서 최신 버전으로 자동 업데이트가 안 되던 문제 수정

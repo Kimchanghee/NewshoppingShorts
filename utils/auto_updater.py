@@ -25,7 +25,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # 현재 앱 버전 (빌드 시 이 값을 업데이트)
-CURRENT_VERSION = "1.3.19"
+CURRENT_VERSION = "1.3.21"
 
 # 버전 확인 API 엔드포인트
 UPDATE_CHECK_URL = os.getenv(
