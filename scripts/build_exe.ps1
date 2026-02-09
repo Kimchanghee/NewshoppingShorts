@@ -95,7 +95,9 @@ $mustContain = @(
   "updater.exe",
   "version.json",
   # Ensure we ship an ffmpeg binary (we rely on imageio_ffmpeg, not a local resource/bin copy).
-  "imageio_ffmpeg\\binaries\\ffmpeg"
+  "imageio_ffmpeg\\binaries\\ffmpeg",
+  # Ensure bundled Korean font assets are present for subtitle/UI rendering.
+  "fonts\\Pretendard-ExtraBold.ttf"
 )
 
 foreach ($item in $mustContain) {

@@ -36,9 +36,14 @@ hidden_imports = [
 ]
 datas = [
     ('resource', 'resource'),
-    # Fonts are intentionally not bundled (see .gitignore). The app falls back to system fonts.
     ('version.json', '.'),
 ]
+
+_fonts_dir = os.path.join(project_root, 'fonts')
+if os.path.isdir(_fonts_dir):
+    datas.append((_fonts_dir, 'fonts'))
+else:
+    print(f"[spec] WARNING: fonts directory not found: {_fonts_dir}")
 
 binaries = []
 
