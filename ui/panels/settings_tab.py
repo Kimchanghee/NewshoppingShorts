@@ -9,7 +9,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QLineEdit, QPushButton, QScrollArea, QFileDialog
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from ui.design_system_v2 import get_design_system
 from ui.components.base_widget import ThemedMixin
@@ -91,6 +91,7 @@ class SettingsTab(QWidget, ThemedMixin):
         self.__init_themed__(theme_manager)
         self._create_widgets()
         self._apply_theme()
+        QTimer.singleShot(0, self.refresh_work_community_stats)
     
     def _create_widgets(self):
         ds = self.ds
@@ -160,6 +161,70 @@ class SettingsTab(QWidget, ThemedMixin):
         
         output_section.add_row("저장 위치", folder_container)
         content_layout.addWidget(output_section)
+
+        # =================== SECTION: Work Community ===================
+        self.work_community_section = SettingsSection("작업 커뮤니티")
+
+        self.work_community_intro = QLabel(
+            "현재까지 작업량은? 내가 만든 쇼츠 수를 확인하고 커뮤니티 레벨을 올려보세요."
+        )
+        self.work_community_intro.setWordWrap(True)
+        self.work_community_intro.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent;"
+        )
+        self.work_community_section.content_layout.addWidget(self.work_community_intro)
+
+        self.work_community_question = QLabel("현재까지 작업량은?")
+        self.work_community_question.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.work_community_section.content_layout.addWidget(self.work_community_question)
+
+        self.work_community_count = QLabel("0회 생성")
+        self.work_community_count.setStyleSheet(
+            f"color: {c.text_primary}; border: none; background: transparent; font-size: 26px; font-weight: 800;"
+        )
+        self.work_community_section.content_layout.addWidget(self.work_community_count)
+
+        meta_row = QHBoxLayout()
+        meta_row.setSpacing(ds.spacing.space_3)
+
+        self.work_community_level = QLabel("레벨: 새싹 메이커")
+        self.work_community_level.setStyleSheet(
+            f"background-color: {c.surface_variant}; color: {c.text_primary}; border-radius: {ds.radius.full}px; padding: 4px 10px; font-weight: 600;"
+        )
+        meta_row.addWidget(self.work_community_level, alignment=Qt.AlignmentFlag.AlignLeft)
+
+        self.work_community_next = QLabel("다음 레벨까지 5회")
+        self.work_community_next.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent;"
+        )
+        meta_row.addWidget(self.work_community_next, alignment=Qt.AlignmentFlag.AlignLeft)
+        meta_row.addStretch()
+        self.work_community_section.content_layout.addLayout(meta_row)
+
+        self.work_community_refresh_btn = QPushButton("작업량 새로고침")
+        self.work_community_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.work_community_refresh_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                padding: 8px 14px;
+                border-radius: {ds.radius.sm}px;
+                border: 1px solid {c.border_light};
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {c.surface};
+            }}
+        """)
+        self.work_community_refresh_btn.clicked.connect(self.refresh_work_community_stats)
+        self.work_community_section.content_layout.addWidget(
+            self.work_community_refresh_btn,
+            alignment=Qt.AlignmentFlag.AlignLeft
+        )
+
+        content_layout.addWidget(self.work_community_section)
         
         # =================== SECTION: API Key Management ===================
         self.api_section = SettingsSection("API 키 설정 (최대 8개)")
@@ -478,6 +543,86 @@ class SettingsTab(QWidget, ThemedMixin):
             from managers.settings_manager import get_settings_manager
             get_settings_manager().set_output_folder(folder)
     
+    @staticmethod
+    def _extract_user_id_from_login_data(login_data):
+        """Safely extract user_id from login_data payload."""
+        if not login_data or not isinstance(login_data, dict):
+            return None
+        data_part = login_data.get("data", {})
+        if isinstance(data_part, dict):
+            inner = data_part.get("data", {})
+            user_id = inner.get("id") if isinstance(inner, dict) else None
+            if user_id:
+                return user_id
+        return login_data.get("userId")
+
+    @staticmethod
+    def _resolve_creator_level(used_count: int):
+        """Return gamified community level and next target."""
+        levels = [
+            (0, "새싹 메이커", 5),
+            (5, "꾸준한 크리에이터", 20),
+            (20, "쇼츠 장인", 50),
+            (50, "커뮤니티 리더", 100),
+            (100, "레전드 빌더", None),
+        ]
+        current = levels[0]
+        for level in levels:
+            if used_count >= level[0]:
+                current = level
+            else:
+                break
+        return current[1], current[2]
+
+    def _apply_work_community_ui(self, used_count: int | None, message: str | None = None):
+        """Render work count/community labels."""
+        if used_count is None:
+            self.work_community_count.setText("-")
+            self.work_community_level.setText("레벨: 확인 필요")
+            self.work_community_next.setText(message or "로그인 후 작업량을 확인할 수 있어요.")
+            return
+
+        safe_used = max(int(used_count), 0)
+        level_name, next_target = self._resolve_creator_level(safe_used)
+        self.work_community_count.setText(f"{safe_used}회 생성")
+        self.work_community_level.setText(f"레벨: {level_name}")
+
+        if next_target is None:
+            self.work_community_next.setText("이미 상위권입니다. 계속 기록을 쌓아보세요.")
+            return
+
+        remaining = max(next_target - safe_used, 0)
+        if remaining == 0:
+            self.work_community_next.setText("새 레벨 달성! 다음 목표를 확인해보세요.")
+        else:
+            self.work_community_next.setText(f"다음 레벨까지 {remaining}회")
+
+    def refresh_work_community_stats(self, used_count: int | None = None):
+        """Refresh cumulative work stats shown in Settings community card."""
+        if used_count is not None:
+            self._apply_work_community_ui(used_count)
+            return
+
+        if not self.gui:
+            self._apply_work_community_ui(None, "앱 정보가 없어 작업량을 불러올 수 없습니다.")
+            return
+
+        user_id = self._extract_user_id_from_login_data(getattr(self.gui, "login_data", None))
+        if not user_id:
+            self._apply_work_community_ui(None, "로그인 후 작업량을 확인할 수 있어요.")
+            return
+
+        try:
+            from caller import rest
+            info = rest.check_work_available(str(user_id))
+            used = info.get("used", 0)
+            if isinstance(used, int):
+                self._apply_work_community_ui(used)
+            else:
+                self._apply_work_community_ui(None, "작업량 응답을 해석하지 못했습니다.")
+        except Exception:
+            self._apply_work_community_ui(None, "작업량 조회 중 오류가 발생했습니다.")
+
     def _show_api_status(self):
         """Show API status dialog"""
         if self.gui and hasattr(self.gui, 'show_api_status'):
@@ -650,6 +795,10 @@ class SettingsTab(QWidget, ThemedMixin):
         """구독 관리 페이지로 이동"""
         if self.gui and hasattr(self.gui, '_on_step_selected'):
             self.gui._on_step_selected("subscription")
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        QTimer.singleShot(0, self.refresh_work_community_stats)
 
     def _connect_youtube(self, platform_id: str):
         """Connect YouTube channel via OAuth"""

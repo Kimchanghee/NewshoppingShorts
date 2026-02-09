@@ -114,6 +114,26 @@ if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     
+    # 한글 폰트 설정 (Korean font support)
+    from PyQt6.QtGui import QFont, QFontDatabase
+    
+    # 사용 가능한 한글 폰트 검색
+    available_fonts = QFontDatabase.families()
+    korean_fonts = ['Pretendard', 'Malgun Gothic', '맑은 고딕', 'NanumGothic', 'Apple SD Gothic Neo']
+    default_font = None
+    for font_name in korean_fonts:
+        if font_name in available_fonts:
+            default_font = QFont(font_name, 10)
+            break
+    
+    if default_font is None:
+        # 폴백: 시스템 기본 폰트 사용
+        default_font = QFont()
+        default_font.setPointSize(10)
+    
+    app.setFont(default_font)
+    logging.info(f"Default font set to: {default_font.family()}")
+    
     from ui.windows.startup_splash import StartupSplash
     from PyQt6.QtWidgets import QMessageBox
 

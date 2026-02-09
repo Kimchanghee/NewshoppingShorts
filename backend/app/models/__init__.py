@@ -6,12 +6,15 @@ Database models
 - RegistrationRequest: 회원가입 요청 모델
 - BillingKey: 카드 빌링키 모델
 - RecurringSubscription: 정기결제 구독 모델
+- PaymentErrorLog: 결제 오류 로그 모델
+- UserPaymentStats: 사용자 결제 통계 모델
 """
 from app.models.user import User
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
 from app.models.registration_request import RegistrationRequest, RequestStatus
 from app.models.billing import BillingKey, RecurringSubscription, SubscriptionStatus
+from app.models.payment_error import PaymentErrorLog, UserPaymentStats
 
 __all__ = [
     'User',
@@ -22,4 +25,6 @@ __all__ = [
     'BillingKey',
     'RecurringSubscription',
     'SubscriptionStatus',
+    'PaymentErrorLog',
+    'UserPaymentStats',
 ]

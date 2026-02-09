@@ -26,6 +26,20 @@ class ExitHandler:
     def __init__(self, app: 'VideoAnalyzerGUI'):
         self.app = app
 
+    def _extract_login_user_and_token(self) -> tuple[object, str]:
+        """Extract user_id and JWT token from login_data safely."""
+        login_data = getattr(self.app, "login_data", None)
+        if not isinstance(login_data, dict):
+            return None, ""
+
+        data_part = login_data.get("data", {})
+        inner = data_part.get("data", {}) if isinstance(data_part, dict) else {}
+        user_id = inner.get("id") if isinstance(inner, dict) else None
+        token = ""
+        if isinstance(data_part, dict):
+            token = str(data_part.get("token") or "").strip()
+        return user_id, token
+
     def process_before_exit_program(self):
         """
         Logout from server before app exit (safe for both Qt/Tk).
@@ -37,17 +51,14 @@ class ExitHandler:
                 logger.info("No login data - skipping logout")
                 return
 
-            # Safe nested dictionary access
-            user_id = (self.app.login_data.get('data', {})
-                                          .get('data', {})
-                                          .get('id'))
+            user_id, token = self._extract_login_user_and_token()
 
             if not user_id:
                 logger.warning("User ID not found in login data - skipping logout")
                 return
 
             # Attempt logout
-            data = {'userId': user_id, "key": "ssmaker"}
+            data = {'userId': user_id, "key": token or "ssmaker"}
             try:
                 logout_status = rest.logOut(**data)
                 if str(logout_status).lower() == "success":

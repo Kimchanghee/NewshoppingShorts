@@ -169,11 +169,11 @@ class Typography:
     letter_spacing_wide: str = "0.025em"
     letter_spacing_wider: str = "0.05em"
 
-    # Font families - STITCH 디자인 적용
-    font_family_heading: str = "'Outfit', 'Malgun Gothic', sans-serif"  # 헤딩용 (geometric)
-    font_family_body: str = "'Manrope', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif"  # 본문용 (friendly)
-    font_family_primary: str = "'Manrope', 'Pretendard', 'Malgun Gothic', sans-serif"  # 기본
-    font_family_mono: str = "'JetBrains Mono', 'Fira Code', 'Consolas', monospace"  # 모노스페이스
+    # Font families - 한글 우선 (Korean-first fallback)
+    font_family_heading: str = "'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif"  # 헤딩용
+    font_family_body: str = "'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif"  # 본문용
+    font_family_primary: str = "'Pretendard', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif"  # 기본
+    font_family_mono: str = "'D2Coding', 'Consolas', 'JetBrains Mono', monospace"  # 모노스페이스
 
 
 @dataclass(frozen=True)

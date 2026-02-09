@@ -348,7 +348,7 @@ NewshoppingShortsMaker瑜??ъ슜?댁＜?붿꽌 媛먯궗?⑸땲?? ?쇳븨 ?륂�
 - Gemini fallback: set GEMINI_API_KEY (or SecretsManager)
 - Payment server: set PAYMENT_API_BASE_URL for subscription checkout
 
-- PayApp: PAYAPP_API_KEY, PAYAPP_MID, PAYAPP_BASE_URL, PAYAPP_RETURN_URL, PAYAPP_CANCEL_URL
+- PayApp: PAYAPP_USERID, PAYAPP_LINKKEY, PAYAPP_LINKVAL, PAYAPP_SHOPNAME (optional), PAYAPP_API_URL (optional)
 
 - Payment API (web checkout): PAYMENT_API_BASE_URL, CHECKOUT_POLL_INTERVAL, CHECKOUT_POLL_MAX_TRIES
 
@@ -412,4 +412,3 @@ If Vertex AI is unavailable (network issues, quota exceeded, invalid credentials
 - Trial limits are managed in the backend database
 - Default limit: `FREE_TRIAL_WORK_COUNT = 5` in `backend/app/routers/registration.py`
 - Subscription approval sets `work_count = -1` (unlimited)
-

@@ -489,7 +489,7 @@ class RegistrationRequestDialog(QWidget):
         """)
         self.submitButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.submitButton.clicked.connect(self._on_submit)
-        self.submitButton.setEnabled(False)  # 초기에는 비활성화
+        self.submitButton.setEnabled(True)
 
     def _apply_input_style(self, widget):
         widget.setStyleSheet(f"""
@@ -517,67 +517,76 @@ class RegistrationRequestDialog(QWidget):
         self.contactEdit.textChanged.connect(self._validate_form)
 
     def _validate_form(self):
-        """
-        모든 필드 검증하여 회원가입 버튼 활성화/비활성화
-
-        필수 조건:
-        - 가입자 명: 2자 이상
-        - 이메일: 유효한 이메일 형식
-        - 아이디: 4자 이상, 영문/숫자/밑줄만, 중복확인 완료
-        - 비밀번호: 6자 이상
-        - 비밀번호 확인: 비밀번호와 일치
-        - 연락처: 숫자 10자 이상
-        """
-        import re
-
-        is_valid = True
-
-        # 가입자 명 검증
-        name = self.nameEdit.text().strip()
-        if len(name) < 2:
-            is_valid = False
-
-        # 이메일 검증
-        email = self.emailEdit.text().strip()
-        if not email or "@" not in email or "." not in email:
-            is_valid = False
-
-        # 아이디 검증
-        username = self.usernameEdit.text().strip().lower()
-        if len(username) < 4:
-            is_valid = False
-        elif not re.match(r"^[a-z0-9_]+$", username):
-            is_valid = False
-        elif not self._username_available:
-            is_valid = False
-
-        # 비밀번호 검증
+        """Update realtime hints. Final validation runs on submit."""
         password = self.passwordEdit.text()
-        if len(password) < 6:
-            is_valid = False
-
-        # 비밀번호 확인 검증 + 실시간 피드백
         password_confirm = self.passwordConfirmEdit.text()
-        if password_confirm:  # 입력이 있을 때만 피드백 표시
+
+        if password_confirm:
             if password != password_confirm:
-                is_valid = False
-                self.passwordMatchLabel.setText("✗ 비밀번호가 일치하지 않습니다")
-                self.passwordMatchLabel.setStyleSheet(f"color: {login_color('error')}; background: transparent;")
+                self.passwordMatchLabel.setText("비밀번호가 일치하지 않습니다.")
+                self.passwordMatchLabel.setStyleSheet(
+                    f"color: {login_color('error')}; background: transparent;"
+                )
             else:
-                self.passwordMatchLabel.setText("✓ 비밀번호가 일치합니다")
-                self.passwordMatchLabel.setStyleSheet(f"color: {login_color('success')}; background: transparent;")
+                self.passwordMatchLabel.setText("비밀번호가 일치합니다.")
+                self.passwordMatchLabel.setStyleSheet(
+                    f"color: {login_color('success')}; background: transparent;"
+                )
         else:
             self.passwordMatchLabel.setText("")
-            if password:  # 비밀번호는 있지만 확인은 비어있음
-                is_valid = False
 
-        # 연락처 검증
+        # Keep clickable so user can always get exact missing-field alert.
+        self.submitButton.setEnabled(True)
+
+    def _collect_form_issues(self):
+        """Collect missing/invalid registration fields in display order."""
+        import re
+
+        issues = []
+
+        name = self.nameEdit.text().strip()
+        email = self.emailEdit.text().strip()
+        username = self.usernameEdit.text().strip().lower()
+        password = self.passwordEdit.text()
+        password_confirm = self.passwordConfirmEdit.text()
         contact_raw = self.contactEdit.text().strip()
         contact = re.sub(r"[^0-9]", "", contact_raw)
-        if len(contact) < 10:
-            is_valid = False
 
-        self.submitButton.setEnabled(is_valid)
+        if not name:
+            issues.append(("가입자 명", "가입자 명을 입력해주세요.", self.nameEdit, "missing"))
+        elif len(name) < 2:
+            issues.append(("가입자 명", "가입자 명은 2자 이상 입력해주세요.", self.nameEdit, "invalid"))
+
+        if not email:
+            issues.append(("이메일", "이메일을 입력해주세요.", self.emailEdit, "missing"))
+        elif "@" not in email or "." not in email:
+            issues.append(("이메일", "올바른 이메일 주소를 입력해주세요.", self.emailEdit, "invalid"))
+
+        if not username:
+            issues.append(("아이디", "아이디를 입력해주세요.", self.usernameEdit, "missing"))
+        elif len(username) < 4:
+            issues.append(("아이디", "아이디는 4자 이상이어야 합니다.", self.usernameEdit, "invalid"))
+        elif not re.match(r"^[a-z0-9_]+$", username):
+            issues.append(("아이디", "아이디는 영문, 숫자, 밑줄(_)만 사용할 수 있습니다.", self.usernameEdit, "invalid"))
+        elif not self._username_available:
+            issues.append(("아이디 중복확인", "아이디 중복확인을 해주세요.", self.checkUsernameBtn, "invalid"))
+
+        if not password:
+            issues.append(("비밀번호", "비밀번호를 입력해주세요.", self.passwordEdit, "missing"))
+        elif len(password) < 6:
+            issues.append(("비밀번호", "비밀번호는 6자 이상이어야 합니다.", self.passwordEdit, "invalid"))
+
+        if not password_confirm:
+            issues.append(("비밀번호 확인", "비밀번호 확인을 입력해주세요.", self.passwordConfirmEdit, "missing"))
+        elif password != password_confirm:
+            issues.append(("비밀번호 확인", "비밀번호가 일치하지 않습니다.", self.passwordConfirmEdit, "invalid"))
+
+        if not contact_raw:
+            issues.append(("연락처", "연락처를 입력해주세요.", self.contactEdit, "missing"))
+        elif len(contact) < 10:
+            issues.append(("연락처", "올바른 연락처를 입력해주세요.", self.contactEdit, "invalid"))
+
+        return issues
 
     def _on_back(self):
         self.backRequested.emit()
@@ -645,40 +654,29 @@ class RegistrationRequestDialog(QWidget):
         import re
         from caller import rest
 
+        issues = self._collect_form_issues()
+        if issues:
+            missing = [issue for issue in issues if issue[3] == "missing"]
+            if missing:
+                self._show_missing_field_alert(missing)
+                focus_target = missing[0][2]
+            else:
+                first_issue = issues[0]
+                self._show_error(first_issue[1])
+                focus_target = first_issue[2]
+
+            if focus_target is not None:
+                focus_target.setFocus()
+                if isinstance(focus_target, QLineEdit):
+                    focus_target.selectAll()
+            return
+
         name = self.nameEdit.text().strip()
         username = self.usernameEdit.text().strip().lower()
         password = self.passwordEdit.text()
-        password_confirm = self.passwordConfirmEdit.text()
         contact_raw = self.contactEdit.text().strip()
         contact = re.sub(r"[^0-9]", "", contact_raw)
         email = self.emailEdit.text().strip()
-
-        if not name or len(name) < 2:
-            self._show_error("가입자 명은 2자 이상 입력해주세요.")
-            return
-        if not email or "@" not in email or "." not in email:
-            self._show_error("올바른 이메일 주소를 입력해주세요.")
-            return
-        if not username or len(username) < 4:
-            self._show_error("아이디는 4자 이상이어야 합니다.")
-            return
-        if not re.match(r"^[a-z0-9_]+$", username):
-            self._show_error("아이디는 영문, 숫자, 밑줄(_)만 사용할 수 있습니다.")
-            return
-        if not self._username_available:
-            self._show_error("아이디 중복확인을 해주세요.")
-            return
-        if not password or len(password) < 6:
-            self._show_error("비밀번호는 6자 이상이어야 합니다.")
-            return
-        if password != password_confirm:
-            self._show_error("비밀번호가 일치하지않습니다")
-            self.passwordEdit.clear()
-            self.passwordConfirmEdit.clear()
-            return
-        if len(contact) < 10:
-            self._show_error("올바른 연락처를 입력해주세요.")
-            return
 
         try:
             logger.info(
@@ -686,17 +684,17 @@ class RegistrationRequestDialog(QWidget):
                 name,
                 username,
                 contact,
-                email
+                email,
             )
             result = rest.submitRegistrationRequest(
                 name=name,
                 username=username,
                 password=password,
                 contact=contact,
-                email=email
+                email=email,
             )
             if result.get("success"):
-                QMessageBox.information(self, "완료", "회원가입이 완료되었습니다! 바로 로그인해주세요.")
+                QMessageBox.information(self, "\uC644\uB8CC", "\uD68C\uC6D0\uAC00\uC785\uC774 \uC644\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4! \uBC14\uB85C \uB85C\uADF8\uC778\uD574\uC8FC\uC138\uC694.")
                 logger.info("[UI] Registration success | username=%s", username)
                 self.registrationRequested.emit(name, username, password, contact, email)
                 self.close()
@@ -706,15 +704,30 @@ class RegistrationRequestDialog(QWidget):
                     username,
                     result.get("message"),
                 )
-                self._show_error(result.get("message", "알 수 없는 오류가 발생했습니다."))
+                self._show_error(result.get("message", "\uC54C \uC218 \uC5C6\uB294 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4."))
         except Exception as e:
             logger.exception("[UI] Registration exception")
-            QMessageBox.critical(self, "오류", str(e))
+            QMessageBox.critical(self, "\uC624\uB958", str(e))
 
-    def _show_error(self, message: str):
+    def _show_missing_field_alert(self, missing_issues):
+        """Show a clear alert describing exactly which required fields are missing."""
+        missing_fields = [field_name for field_name, *_ in missing_issues]
+
+        if len(missing_fields) == 1:
+            message = f"'{missing_fields[0]}' 항목을 입력해주세요."
+        else:
+            bullets = "\n".join(f"- {field}" for field in missing_fields)
+            message = (
+                f"다음 항목이 비어 있습니다:\n{bullets}\n\n"
+                "누락된 항목을 모두 입력해주세요."
+            )
+
+        self._show_error(message, title="입력 누락")
+
+    def _show_error(self, message: str, title: str = "입력 오류"):
         msgBox = QMessageBox(self)
         msgBox.setIcon(QMessageBox.Icon.Warning)
-        msgBox.setWindowTitle("입력 오류")
+        msgBox.setWindowTitle(title)
         msgBox.setText(message)
         msgBox.setStandardButtons(QMessageBox.StandardButton.Ok)
         msgBox.exec()
@@ -728,7 +741,7 @@ class RegistrationRequestDialog(QWidget):
         self.contactEdit.clear()
         self._username_available = False
         self.usernameStatusLabel.setText("")
-        self.submitButton.setEnabled(False)
+        self.submitButton.setEnabled(True)
 
 
 Ui_LoginWindow = ModernLoginUi
