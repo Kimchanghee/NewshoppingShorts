@@ -26,9 +26,14 @@ packages_to_collect = [
     'numpy',
     'requests',
     'tqdm',
+    'pytesseract',  # OCR support (Tesseract)
 ]
 
-hidden_imports = []
+hidden_imports = [
+    'rapidocr_onnxruntime', # OCR support (RapidOCR - fallback/alternative)
+    'shapely', # Required by RapidOCR/PaddleOCR
+    'pyclipper', # Required by RapidOCR/PaddleOCR
+]
 datas = [
     ('resource', 'resource'),
     # Fonts are intentionally not bundled (see .gitignore). The app falls back to system fonts.
