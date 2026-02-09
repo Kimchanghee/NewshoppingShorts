@@ -7,6 +7,8 @@ import sys
 import socket
 import threading
 import hashlib
+import json
+from pathlib import Path
 from typing import Optional, Any, Dict
 
 from PyQt6 import QtCore, QtWidgets, QtGui
@@ -36,6 +38,7 @@ class Login(QMainWindow, Ui_LoginWindow):
         
         if self.setPort():
             self.setupUi(self)
+            self._apply_version_label()
             ui_controller.userLoadInfo(self)
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
             
@@ -50,6 +53,40 @@ class Login(QMainWindow, Ui_LoginWindow):
         else:
             self.showCustomMessageBox("오류", "이미 실행 중입니다.")
             sys.exit()
+
+    def _read_app_version(self) -> str:
+        """
+        Resolve app version from version.json.
+        For frozen builds, prefer bundled (_MEIPASS) version to match current exe.
+        """
+        candidates = []
+        if getattr(sys, "frozen", False):
+            meipass = getattr(sys, "_MEIPASS", None)
+            if meipass:
+                candidates.append(Path(meipass) / "version.json")
+            candidates.append(Path(sys.executable).resolve().parent / "version.json")
+        else:
+            candidates.append(Path(__file__).resolve().parents[2] / "version.json")
+            candidates.append(Path.cwd() / "version.json")
+
+        for path in candidates:
+            try:
+                if path.exists():
+                    with open(path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    version = str(data.get("version", "")).strip()
+                    if version:
+                        return version
+            except Exception as e:
+                logger.debug(f"Failed to read version from {path}: {e}")
+
+        return "1.0.0"
+
+    def _apply_version_label(self) -> None:
+        """Apply dynamic app version text to login UI."""
+        if hasattr(self, "versionLabel"):
+            version = self._read_app_version()
+            self.versionLabel.setText(f"v{version}")
 
     def _fallback_port(self) -> int:
         """
