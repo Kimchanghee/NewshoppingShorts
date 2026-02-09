@@ -501,6 +501,10 @@ class AuthService:
 
         if is_new_trial_cycle(stored_cycle_start):
             user.work_used = 0
+            # Reset monthly quota to 5 (as per policy update)
+            # 정책 업데이트: 매달 5회 제공
+            if user.work_count < 5:
+                user.work_count = 5
             user.trial_cycle_started_at = current_cycle_start
             changed = True
             logger.info(f"Trial monthly quota reset applied: user_id={user.id}")
