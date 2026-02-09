@@ -43,7 +43,7 @@ from app.schemas.registration import (
 # Users registered after that get 2 free uses.
 EARLY_BIRD_CUTOFF_KST = datetime(2026, 2, 8, 23, 59, 59)
 EARLY_BIRD_WORK_COUNT = 5
-DEFAULT_TRIAL_WORK_COUNT = 2
+DEFAULT_TRIAL_WORK_COUNT = 5
 DEFAULT_TRIAL_DAYS = 365
 
 
