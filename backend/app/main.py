@@ -382,13 +382,17 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.22/ssmaker_v1.3.22.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.23/ssmaker_v1.3.23.exe")
 
 APP_VERSION_INFO = {
-    "version": "1.3.22",
+    "version": "1.3.23",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.22 업데이트:
+    "release_notes": """버전 1.3.23 업데이트:
+
+🔧 구독관리 텍스트 깨짐 복구
+• 구독관리 화면의 깨진 한글 문구를 전체 정리
+• 결제/안내/상태 메시지 문구 가독성 개선
 
 🔄 결제 UX 정리
 • 카드결제는 카드 등록 없이 새 창 결제 페이지에서 진행
