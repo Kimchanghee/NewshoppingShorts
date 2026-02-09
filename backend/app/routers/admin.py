@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Request, Query, HTTPException
 from slowapi import Limiter
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel
@@ -372,14 +373,28 @@ async def get_stats(
 
     # User stats
     total_users = db.query(User).count()
-    active_users = db.query(User).filter(User.is_active == True).count()
+    active_users = db.query(User).filter(User.is_active.is_(True)).count()
+    online_users = db.query(User).filter(User.is_online.is_(True)).count()
 
     # Users with active subscription
     now = datetime.now(timezone.utc)
     active_subscriptions = db.query(User).filter(
         User.subscription_expires_at > now,
-        User.is_active == True
+        User.is_active.is_(True)
     ).count()
+
+    # Work usage stats (cumulative)
+    total_work_used = int(
+        db.query(func.coalesce(func.sum(User.work_used), 0)).scalar() or 0
+    )
+    users_with_work = db.query(User).filter(User.work_used > 0).count()
+    task_text = func.lower(func.trim(func.coalesce(User.current_task, "")))
+    in_progress_users = db.query(User).filter(
+        User.is_online.is_(True),
+        task_text != "",
+        task_text.notin_(["idle", "pending", "waiting", "\ub300\uae30 \uc911"]),
+    ).count()
+    avg_work_used_per_user = round(total_work_used / total_users, 2) if total_users else 0
 
     # Registration request stats
     pending_requests = db.query(RegistrationRequest).filter(
@@ -396,7 +411,14 @@ async def get_stats(
         "users": {
             "total": total_users,
             "active": active_users,
-            "with_subscription": active_subscriptions
+            "online": online_users,
+            "with_subscription": active_subscriptions,
+        },
+        "work": {
+            "total_used": total_work_used,
+            "users_with_work": users_with_work,
+            "in_progress_users": in_progress_users,
+            "avg_used_per_user": avg_work_used_per_user,
         },
         "registration_requests": {
             "pending": pending_requests,

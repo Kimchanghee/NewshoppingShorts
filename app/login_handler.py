@@ -30,6 +30,20 @@ class LoginHandler:
     def __init__(self, app: "VideoAnalyzerGUI"):
         self.app = app
 
+    def _extract_login_user_and_token(self) -> tuple[object, str]:
+        """Extract user_id and JWT token from login_data safely."""
+        login_data = getattr(self.app, "login_data", None)
+        if not isinstance(login_data, dict):
+            return None, ""
+
+        data_part = login_data.get("data", {})
+        inner = data_part.get("data", {}) if isinstance(data_part, dict) else {}
+        user_id = inner.get("id") if isinstance(inner, dict) else None
+        token = ""
+        if isinstance(data_part, dict):
+            token = str(data_part.get("token") or "").strip()
+        return user_id, token
+
     def start_login_watch(self):
         """로그인 상태 감시 시작 및 신규 사용자 자동 체험판 신청"""
         if not self.app.login_data:
@@ -179,14 +193,10 @@ class LoginHandler:
 
             # 서버 로그아웃
             if self.app.login_data and isinstance(self.app.login_data, dict):
-                user_id = (
-                    self.app.login_data.get("data", {})
-                    .get("data", {})
-                    .get("id")
-                )
+                user_id, token = self._extract_login_user_and_token()
                 if user_id:
                     try:
-                        logout_status = rest.logOut(userId=user_id, key="ssmaker")
+                        logout_status = rest.logOut(userId=user_id, key=token or "ssmaker")
                         if str(logout_status).lower() == "success":
                             logger.info("[LoginHandler] Logout successful")
                         else:
@@ -257,3 +267,4 @@ class LoginHandler:
         except Exception as e:
             logger.warning(f"[LoginHandler] Failed to get app version: {e}")
             return "unknown"
+

@@ -6,6 +6,7 @@ import os
 import sys
 import socket
 import threading
+import hashlib
 from typing import Optional, Any, Dict
 
 from PyQt6 import QtCore, QtWidgets, QtGui
@@ -31,6 +32,7 @@ class Login(QMainWindow, Ui_LoginWindow):
         self.setWindowIcon(QIcon("resource/trayIcon.png"))
         self.oldPos: Optional[QPoint] = None
         self.serverSocket: Optional[socket.socket] = None
+        self.server_port: Optional[int] = None
         
         if self.setPort():
             self.setupUi(self)
@@ -49,23 +51,77 @@ class Login(QMainWindow, Ui_LoginWindow):
             self.showCustomMessageBox("오류", "이미 실행 중입니다.")
             sys.exit()
 
+    def _fallback_port(self) -> int:
+        """
+        Deterministic fallback port for single-instance lock.
+        Prevents fixed-port collisions with unrelated local apps.
+        """
+        seed = f"{os.path.expanduser('~')}|{os.path.abspath(sys.argv[0])}|ssmaker"
+        digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
+        return 30000 + (int(digest[:8], 16) % 20000)
+
+    @staticmethod
+    def _configure_single_instance_socket(sock: socket.socket) -> None:
+        """
+        Request exclusive ownership on Windows when available.
+        """
+        if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+            except OSError:
+                # Best effort only.
+                pass
+
     def setPort(self) -> bool:
+        raw_port = os.getenv("SSMAKER_PORT")
         try:
-            port = int(os.getenv("SSMAKER_PORT", str(DEFAULT_PROCESS_PORT)))
+            if raw_port:
+                ports_to_try = [int(raw_port)]
+            else:
+                default_port = int(DEFAULT_PROCESS_PORT)
+                fallback_port = self._fallback_port()
+                ports_to_try = [default_port]
+                if fallback_port != default_port:
+                    ports_to_try.append(fallback_port)
         except ValueError as e:
             logger.error(f"Invalid SSMAKER_PORT value: {e}")
             return False
 
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.bind(("localhost", port))
-            sock.listen(1)
-            self.serverSocket = sock
-            logger.info(f"Server socket bound to port {port}")
-            return True
-        except OSError as e:
-            logger.warning(f"Failed to bind socket to port {port}: {e}")
-            return False
+        last_error: Optional[OSError] = None
+
+        for index, port in enumerate(ports_to_try):
+            sock: Optional[socket.socket] = None
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self._configure_single_instance_socket(sock)
+                sock.bind(("127.0.0.1", port))
+                sock.listen(1)
+                self.serverSocket = sock
+                self.server_port = port
+
+                if index > 0:
+                    logger.info(
+                        "Default single-instance port %s is busy; using fallback port %s",
+                        ports_to_try[0],
+                        port,
+                    )
+                else:
+                    logger.info(f"Server socket bound to port {port}")
+                return True
+            except OSError as e:
+                last_error = e
+                if sock:
+                    try:
+                        sock.close()
+                    except OSError:
+                        pass
+
+        logger.warning(
+            "Failed to bind single-instance socket (attempted_ports=%s): %s",
+            ports_to_try,
+            last_error,
+        )
+        return False
 
     def _preload_ip(self):
         threading.Thread(target=self._get_local_ip, daemon=True).start()
@@ -176,8 +232,20 @@ class Login(QMainWindow, Ui_LoginWindow):
         self.showCustomMessageBox("가입 완료", "회원가입이 완료되었습니다.\n로그인 버튼을 눌러주세요.")
 
     def _closeWindow(self):
-        if self.serverSocket: self.serverSocket.close()
+        if self.serverSocket:
+            try:
+                self.serverSocket.close()
+            finally:
+                self.serverSocket = None
         QApplication.quit()
+
+    def closeEvent(self, event):
+        if self.serverSocket:
+            try:
+                self.serverSocket.close()
+            finally:
+                self.serverSocket = None
+        super().closeEvent(event)
 
     def keyPressEvent(self, event):
         if event.key() in [Qt.Key.Key_Return, Qt.Key.Key_Enter]:

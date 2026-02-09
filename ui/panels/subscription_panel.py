@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QMessageBox, QFrame, QProgressBar,
     QSpacerItem, QSizePolicy, QTextEdit, QLineEdit,
-    QStackedWidget, QScrollArea,
+    QStackedWidget, QScrollArea, QGridLayout,
     QButtonGroup
 )
 from PyQt6.QtCore import Qt, QTimer
@@ -29,6 +29,26 @@ logger = get_logger(__name__)
 
 PAYMENT_INFO_VBANK_TEXT = "가상계좌 발급 후 입금 시 자동 활성화."
 PAYMENT_INFO_CARD_TEXT = "카드번호는 새 창 결제 페이지에서 입력하세요."
+PAYAPP_METHOD_LABELS = {
+    "card": "신용카드",
+    "phone": "휴대전화",
+    "vbank": "가상계좌",
+    "npay": "네이버페이",
+    "kpay": "카카오페이",
+    "sapay": "스마일페이",
+    "apay": "애플페이",
+    "tpay": "토스페이",
+}
+PAYAPP_METHOD_INFOS = {
+    "vbank": PAYMENT_INFO_VBANK_TEXT,
+    "card": PAYMENT_INFO_CARD_TEXT,
+    "phone": "휴대전화 결제 인증은 새 창에서 진행됩니다.",
+    "npay": "네이버페이 로그인/인증은 새 창에서 진행됩니다.",
+    "kpay": "카카오페이 로그인/인증은 새 창에서 진행됩니다.",
+    "sapay": "스마일페이 로그인/인증은 새 창에서 진행됩니다.",
+    "apay": "애플페이 인증은 새 창에서 진행됩니다.",
+    "tpay": "토스페이 로그인/인증은 새 창에서 진행됩니다.",
+}
 
 # Plan definitions with features
 def format_price_korean(amount: int) -> str:
@@ -838,27 +858,27 @@ class PaymentForm(QWidget):
         method_label.setObjectName("field_label")
         form_layout.addWidget(method_label)
 
-        method_row = QHBoxLayout()
-        method_row.setSpacing(ds.spacing.space_2)
-        self.method_vbank_btn = QPushButton("가상계좌")
-        self.method_vbank_btn.setObjectName("method_button")
-        self.method_vbank_btn.setCheckable(True)
-        self.method_vbank_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        method_row.addWidget(self.method_vbank_btn)
-
-        self.method_card_btn = QPushButton("카드결제")
-        self.method_card_btn.setObjectName("method_button")
-        self.method_card_btn.setCheckable(True)
-        self.method_card_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        method_row.addWidget(self.method_card_btn)
-        form_layout.addLayout(method_row)
+        method_grid = QGridLayout()
+        method_grid.setSpacing(ds.spacing.space_2)
 
         self.method_group = QButtonGroup(self)
         self.method_group.setExclusive(True)
-        self.method_group.addButton(self.method_vbank_btn)
-        self.method_group.addButton(self.method_card_btn)
-        self.method_vbank_btn.clicked.connect(lambda: self.set_payment_method("vbank"))
-        self.method_card_btn.clicked.connect(lambda: self.set_payment_method("card"))
+        self.method_buttons: dict[str, QPushButton] = {}
+        max_cols = 4
+        for idx, (method_code, method_label_text) in enumerate(PAYAPP_METHOD_LABELS.items()):
+            method_btn = QPushButton(method_label_text)
+            method_btn.setObjectName("method_button")
+            method_btn.setCheckable(True)
+            method_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.method_group.addButton(method_btn)
+            self.method_buttons[method_code] = method_btn
+            row = idx // max_cols
+            col = idx % max_cols
+            method_grid.addWidget(method_btn, row, col)
+            method_btn.clicked.connect(
+                lambda _checked=False, m=method_code: self.set_payment_method(m)
+            )
+        form_layout.addLayout(method_grid)
 
         self.method_stack = QStackedWidget()
         self.method_stack.setObjectName("method_stack")
@@ -949,16 +969,13 @@ class PaymentForm(QWidget):
         self.status_label.setText(status)
 
     def set_payment_method(self, method: str, notify: bool = True):
-        normalized = "card" if method == "card" else "vbank"
+        normalized = method if method in PAYAPP_METHOD_LABELS else "vbank"
         self._payment_method = normalized
-        self.method_vbank_btn.setChecked(normalized == "vbank")
-        self.method_card_btn.setChecked(normalized == "card")
+        for method_code, method_btn in self.method_buttons.items():
+            method_btn.setChecked(method_code == normalized)
         # Keep UI minimal: both methods use same phone-only web checkout flow.
         self.method_stack.setCurrentIndex(0)
-        if normalized == "card":
-            self.vbank_info_label.setText(PAYMENT_INFO_CARD_TEXT)
-        else:
-            self.vbank_info_label.setText(PAYMENT_INFO_VBANK_TEXT)
+        self.vbank_info_label.setText(PAYAPP_METHOD_INFOS.get(normalized, PAYMENT_INFO_VBANK_TEXT))
         self._sync_method_stack_height()
         self.status_label.setText("결제 대기 중")
         if notify and callable(self.on_method_changed):
@@ -966,6 +983,13 @@ class PaymentForm(QWidget):
 
     def get_payment_method(self) -> str:
         return self._payment_method
+
+    def get_payment_method_label(self) -> str:
+        return PAYAPP_METHOD_LABELS.get(self._payment_method, "결제")
+
+    def set_method_buttons_enabled(self, enabled: bool):
+        for method_btn in self.method_buttons.values():
+            method_btn.setEnabled(enabled)
 
     def _on_submit(self):
         if self.on_submit:
@@ -1298,8 +1322,7 @@ class SubscriptionPanel(QWidget):
         self.plans_container.show()
         self.payment_form.show()
         # Keep payment controls interactive when the section is opened.
-        self.payment_form.method_vbank_btn.setEnabled(True)
-        self.payment_form.method_card_btn.setEnabled(True)
+        self.payment_form.set_method_buttons_enabled(True)
         self.payment_form.phone_input.setEnabled(True)
         self.payment_form.cancel_btn.setEnabled(True)
         # Auto-select default plan once for smoother checkout UX.
@@ -1318,8 +1341,7 @@ class SubscriptionPanel(QWidget):
         self._update_plan_card_selection(plan_data.get("id"))
         self.payment_form.set_plan(plan_data)
         self.payment_form.set_submit_enabled(True)
-        self.payment_form.method_vbank_btn.setEnabled(True)
-        self.payment_form.method_card_btn.setEnabled(True)
+        self.payment_form.set_method_buttons_enabled(True)
         self.payment_form.phone_input.setEnabled(True)
         self.payment_form.cancel_btn.setEnabled(True)
         self.payment_form.set_status("결제 대기 중")
@@ -1395,8 +1417,8 @@ class SubscriptionPanel(QWidget):
         try:
             plan_id = self.selected_plan.get("id", "pro_1month")
             payment_method = self.payment_form.get_payment_method()
-
-            status_text = "카드 결제창 준비 중..." if payment_method == "card" else "가상계좌 결제창 준비 중..."
+            method_label = self.payment_form.get_payment_method_label()
+            status_text = f"{method_label} 결제창 준비 중..."
             self.payment_form.set_status(status_text)
 
             # Unified web checkout flow:
@@ -1410,11 +1432,14 @@ class SubscriptionPanel(QWidget):
                     payment_type=payment_method,
                 )
             except RuntimeError as e:
-                # Backward compatibility for servers that do not support payment_type.
+                # Backward compatibility only when server explicitly rejects payment_type.
+                err_text = str(e)
+                if "payment_type" not in err_text.lower():
+                    raise
                 logger.warning(
-                    "[Subscription] checkout with payment_type=%s failed, retrying legacy create: %s",
+                    "[Subscription] checkout with payment_type=%s failed by schema mismatch, retrying legacy create: %s",
                     payment_method,
-                    e,
+                    err_text,
                 )
                 data = self.payment.create_payapp_checkout(
                     str(user_id),
@@ -1648,9 +1673,13 @@ class SubscriptionPanel(QWidget):
                     credits_lbl = getattr(self.gui, "credits_label", None)
                     if credits_lbl is not None:
                         if is_pro:
-                            credits_lbl.setText(f"구독중 | 누적 {work_used}회")
+                            credits_lbl.setText("구독중")
                         else:
-                            credits_lbl.setText(f"크레딧 {remaining}/{work_count} | 누적 {work_used}회")
+                            credits_lbl.setText(f"크레딧 {remaining}/{work_count}")
+
+                    settings_tab = getattr(self.gui, "settings_tab", None)
+                    if settings_tab is not None and hasattr(settings_tab, "refresh_work_community_stats"):
+                        settings_tab.refresh_work_community_stats(used_count=work_used)
 
                 return True
             else:

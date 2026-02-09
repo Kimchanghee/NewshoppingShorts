@@ -199,6 +199,7 @@ class AdminDashboard(QMainWindow):
         self.current_tab = 0  # 0: 사용자 관리, 1: 구독 요청
         self.last_update_time = None
         self._rate_limited = False
+        self._admin_stats_loaded = False
         logger.info("[Admin UI] Dashboard start | api_base=%s key_set=%s", self.api_base_url, bool(self.admin_api_key))
         self._setup_ui()
         self._load_data()
@@ -322,29 +323,28 @@ class AdminDashboard(QMainWindow):
         self._create_tables()
 
     def _create_stat_cards(self):
-        """통계 카드 생성 - 균형 잡힌 레이아웃"""
+        """Create top stat cards."""
         card_y = 75
         card_h = 80
-        # 6개 카드를 균등 배치
         total_w = 1520
         gap = ds.spacing.space_4  # 16px
-        card_w = (total_w - (gap * 5)) // 6
         start_x = 40
 
-        # Create 6 cards
         items = [
-            ("구독요청 대기", get_color("warning"), "pending_label"),
-            ("구독요청 승인", get_color("success"), "approved_label"),
-            ("구독요청 거부", get_color("error"), "rejected_label"),
-            ("전체 사용자", get_color("primary"), "users_label"),
-            ("온라인 사용자", get_color("success"), "online_label"),
-            ("활성 구독자", get_color("secondary"), "active_sub_label")
+            ("Pending Requests", get_color("warning"), "pending_label"),
+            ("Approved Requests", get_color("success"), "approved_label"),
+            ("Rejected Requests", get_color("error"), "rejected_label"),
+            ("Total Users", get_color("primary"), "users_label"),
+            ("Online Users", get_color("success"), "online_label"),
+            ("Active Subs", get_color("secondary"), "active_sub_label"),
+            ("Total Works", get_color("info"), "total_work_used_label"),
         ]
+        card_count = len(items)
+        card_w = (total_w - (gap * (card_count - 1))) // card_count
 
         for i, (title, color, attr_name) in enumerate(items):
             x = start_x + i * (card_w + gap)
             self._create_card(x, card_y, card_w, card_h, title, color)
-            # Create label
             lbl = self._get_value_label(x, card_y, card_w, card_h)
             setattr(self, attr_name, lbl)
 
@@ -585,6 +585,11 @@ class AdminDashboard(QMainWindow):
 
     def _load_data(self):
         """데이터 로드 (회원가입 요청 제거 - 자동 승인됨)"""
+        if not self.admin_api_key:
+            self.connection_label.setText("Admin key missing")
+            self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
+            return
+
         if self._rate_limited:
             self.connection_label.setText("요청 제한 중 - 대기 후 재시도")
             self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
@@ -592,6 +597,8 @@ class AdminDashboard(QMainWindow):
         self.connection_label.setText("연결 중...")
         self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
         logger.info("[Admin UI] Load data start")
+        self._admin_stats_loaded = False
+        self._load_admin_stats()
         self._load_users()
         self._load_subscriptions()
         self._update_last_refresh_time()
@@ -612,21 +619,22 @@ class AdminDashboard(QMainWindow):
         worker.start()
 
     def _on_users_loaded(self, data: dict):
-        """사용자 목록 로드 완료"""
+        """Handle loaded user list."""
         logger.info("[Admin UI] Users loaded (%d)", len(data.get("users", [])))
         items = data.get("users", [])
+        total_count = data.get("total", len(items))
         self.users_table.setRowCount(len(items))
-        self.users_label.setText(str(len(items)))
-        self.connection_label.setText("연결 정상")
+        self.connection_label.setText("Connected")
         self.connection_label.setStyleSheet(f"color: {get_color('success')};")
 
         online_count = 0
         active_sub_count = 0
+        fallback_total_work_used = 0
         now = datetime.now(timezone.utc)
 
         for row, user in enumerate(items):
             self.users_table.setRowHeight(row, 50)
-            
+
             # 0: ID
             self._set_cell(self.users_table, row, 0, str(user.get("id", "")))
             # 1: Name
@@ -640,13 +648,13 @@ class AdminDashboard(QMainWindow):
             self._set_cell(self.users_table, row, 4, user.get("phone") or "-")
             # 5: Email
             self._set_cell(self.users_table, row, 5, user.get("email") or "-")
-            
+
             # 6: Type
             utype = user.get("user_type", "trial")
             utype_text = {
-                "trial": "무료계정",
-                "subscriber": "유료계정",
-                "admin": "관리자",
+                "trial": "Trial",
+                "subscriber": "Subscriber",
+                "admin": "Admin",
             }.get(utype, utype)
             utype_color = {
                 "trial": get_color("text_muted"),
@@ -657,36 +665,44 @@ class AdminDashboard(QMainWindow):
 
             # 7: Subscription Expires
             expires_utc = user.get("subscription_expires_at")
-            expires_str = self._convert_to_kst(expires_utc) if expires_utc else "무료계정"
+            expires_str = self._convert_to_kst(expires_utc) if expires_utc else "Trial"
 
             color = get_color("text_muted") if not expires_utc else get_color("text_primary")
             if expires_utc:
                 try:
                     dt = datetime.fromisoformat(expires_utc.replace("Z", "+00:00"))
-                    # Naive datetime (no timezone) -> assume UTC
                     if dt.tzinfo is None:
                         dt = dt.replace(tzinfo=timezone.utc)
                     if dt < now:
-                         color = get_color("error")
+                        color = get_color("error")
                     elif (dt - now).days <= 10:
-                         # 구독만료 10일 이내: 빨간색으로 경고 (갱신 유도)
-                         color = get_color("error")
+                        color = get_color("error")
                     else:
-                         color = get_color("success")
-                         active_sub_count += 1
+                        color = get_color("success")
+                        active_sub_count += 1
                 except (ValueError, TypeError) as e:
                     logger.warning(f"Subscription expiry parsing failed for user: {e}")
             self._set_cell(self.users_table, row, 7, expires_str, color)
 
-            # 8: Work Count
-            work_count = user.get("work_count", -1)
-            work_used = user.get("work_used", 0)
+            # 8: Work usage
+            raw_work_count = user.get("work_count", -1)
+            raw_work_used = user.get("work_used", 0)
+            try:
+                work_count = int(raw_work_count)
+            except (TypeError, ValueError):
+                work_count = -1
+            try:
+                work_used = max(int(raw_work_used), 0)
+            except (TypeError, ValueError):
+                work_used = 0
+
+            fallback_total_work_used += work_used
             if work_count == -1:
-                work_str = "무제한"
+                work_str = f"INF | {work_used}"
                 color = get_color("success")
             else:
                 remaining = max(0, work_count - work_used)
-                work_str = f"{remaining}/{work_count}"
+                work_str = f"{remaining}/{work_count} | {work_used}"
                 color = get_color("warning") if remaining <= 10 else get_color("text_primary")
             self._set_cell(self.users_table, row, 8, work_str, color)
 
@@ -701,22 +717,28 @@ class AdminDashboard(QMainWindow):
             self._set_cell(self.users_table, row, 11, user.get("last_login_ip", "-"))
 
             # 12: Online Status
-            # Trust server's is_online field (set via heartbeat mechanism)
             is_online = user.get("is_online", False)
-
             if is_online:
                 online_count += 1
 
-            self._set_cell(self.users_table, row, 12, "ON" if is_online else "OFF",
-                           get_color("success") if is_online else get_color("text_muted"))
+            self._set_cell(
+                self.users_table,
+                row,
+                12,
+                "ON" if is_online else "OFF",
+                get_color("success") if is_online else get_color("text_muted"),
+            )
 
             # 13: Current Task
             self._set_cell(self.users_table, row, 13, user.get("current_task", "-"))
 
             # 14: App Version
             app_version = user.get("app_version") or "-"
-            # 최신 버전 여부에 따라 색상 표시 (unknown이면 회색)
-            version_color = get_color("text_muted") if app_version == "-" or app_version == "unknown" else get_color("success")
+            version_color = (
+                get_color("text_muted")
+                if app_version in ("-", "unknown")
+                else get_color("success")
+            )
             self._set_cell(self.users_table, row, 14, app_version, version_color)
 
             # 15: Actions
@@ -728,8 +750,43 @@ class AdminDashboard(QMainWindow):
             )
             self.users_table.setCellWidget(row, 15, widget)
 
-        self.online_label.setText(str(online_count))
-        self.active_sub_label.setText(str(active_sub_count))
+        if not self._admin_stats_loaded:
+            self.users_label.setText(str(total_count))
+            self.online_label.setText(str(online_count))
+            self.active_sub_label.setText(str(active_sub_count))
+            self.total_work_used_label.setText(str(fallback_total_work_used))
+
+    def _load_admin_stats(self):
+        """Load admin summary stats."""
+        url = f"{self.api_base_url}/user/admin/stats"
+        worker = ApiWorker("GET", url, self._get_headers())
+        worker.data_ready.connect(self._on_admin_stats_loaded)
+        worker.error.connect(
+            lambda e: logger.warning("[Admin UI] Failed to load admin stats: %s", e)
+        )
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
+        self.workers.append(worker)
+        worker.start()
+
+    def _on_admin_stats_loaded(self, data: dict):
+        """Update stat cards from admin stats response."""
+        users = data.get("users", {}) or {}
+        work = data.get("work", {}) or {}
+
+        self.users_label.setText(str(users.get("total", 0)))
+        self.online_label.setText(str(users.get("online", users.get("active", 0))))
+        self.active_sub_label.setText(str(users.get("with_subscription", 0)))
+        self.total_work_used_label.setText(str(work.get("total_used", 0)))
+
+        avg_used = work.get("avg_used_per_user", 0)
+        users_with_work = work.get("users_with_work", 0)
+        in_progress_users = work.get("in_progress_users", 0)
+        self.total_work_used_label.setToolTip(
+            f"Users with work history: {users_with_work}\n"
+            f"Users currently working: {in_progress_users}\n"
+            f"Average work per user: {avg_used}"
+        )
+        self._admin_stats_loaded = True
 
     def _set_cell(self, table, row, col, text, color=None):
         """셀 설정"""
@@ -1319,7 +1376,7 @@ if __name__ == "__main__":
     API_URL = os.getenv("API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app")
     API_KEY = os.getenv("SSMAKER_ADMIN_KEY") or os.getenv("ADMIN_API_KEY")
     if not API_KEY:
-        raise RuntimeError("SSMAKER_ADMIN_KEY 또는 ADMIN_API_KEY 환경변수가 설정되어야 합니다.")
+        logger.warning("[Admin UI] No admin key in env. Dashboard will open in limited mode.")
 
     app = QApplication(sys.argv)
     

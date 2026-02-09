@@ -234,6 +234,7 @@ class TopBarPanel(QFrame):
 
                 remaining = info.get("remaining", 0)
                 total = info.get("total", 0)
+                used = info.get("used", 0)
 
                 top_data = self.gui.login_data.get("data", {}).get("data", {})
 
@@ -259,6 +260,10 @@ class TopBarPanel(QFrame):
                     self.gui.credits_label.setText("구독중")
                 else:
                     self.gui.credits_label.setText(f"크레딧: {remaining}/{total}")
+
+                settings_tab = getattr(self.gui, "settings_tab", None)
+                if settings_tab is not None and hasattr(settings_tab, "refresh_work_community_stats"):
+                    settings_tab.refresh_work_community_stats(used_count=used)
 
                 d = self.design
                 c = d.colors

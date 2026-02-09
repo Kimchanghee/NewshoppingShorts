@@ -39,6 +39,19 @@ from app.models.payment_session import PaymentSession, PaymentStatus, PaymentSta
 from app.models.session import SessionModel
 from app.models.user import User, UserType
 from app.models.billing import BillingKey, RecurringSubscription, SubscriptionStatus
+from app.models.payment_error import PaymentErrorLog, UserPaymentStats
+from app.utils.payment_error_tracker import (
+    record_payment_error,
+    update_user_payment_stats,
+    get_user_payment_stats,
+    ErrorType,
+)
+from app.utils.subscription_manager import (
+    get_effective_user_type,
+    check_subscription_expiry,
+    expire_subscription,
+    get_subscription_summary,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -70,6 +83,13 @@ PLAN_NAMES = {
 }
 
 # ?ъ슜?먮떦 理쒕? 移대뱶 ?깅줉 ??(Maximum cards per user)
+# Normalize display names used for external payment fields.
+PLAN_NAMES = {
+    "pro_1month": "프로 1개월",
+    "pro_6months": "프로 6개월",
+    "pro_12months": "프로 12개월",
+}
+
 MAX_CARDS_PER_USER = 5
 
 # PayApp Configuration (from environment)
@@ -78,6 +98,7 @@ MAX_CARDS_PER_USER = 5
 PAYAPP_USERID = os.getenv("PAYAPP_USERID", "")
 PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
 PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
+PAYAPP_SHOPNAME = os.getenv("PAYAPP_SHOPNAME", "NewshoppingShorts")
 _PAYAPP_API_URL_RAW = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
 # SSRF prevention: only allow known PayApp domain
 from urllib.parse import urlparse as _urlparse
@@ -457,6 +478,7 @@ async def payment_webhook(
             logger.warning(f"[Payment] Session not found for webhook: {payment_id}")
             return {"success": False, "message": "Payment not found"}
 
+
     except Exception as e:
         logger.error(f"[Payment] Webhook error: {e}", exc_info=True)
         return {"success": False, "message": "Internal error"}
@@ -549,18 +571,18 @@ async def mock_cancel_payment(
 # ?????????????????????????????????????????????
 
 class PayAppCreateRequest(BaseModel):
-    """PayApp 寃곗젣 ?앹꽦 ?붿껌"""
+    """PayApp payment request."""
     user_id: str
-    phone: str  # ?섏떊???꾪솕踰덊샇 (PayApp ?꾩닔)
-    plan_id: str = "pro_1month"  # Added: which plan to purchase
-    payment_type: str = "vbank"  # 寃곗젣 ?섎떒: "vbank" (媛?곴퀎醫? ?먮뒗 "card" (移대뱶)
+    phone: str
+    plan_id: str = "pro_1month"
+    payment_type: str = "vbank"  # card/phone/vbank/kpay/npay/sapay/apay/tpay
 
     @field_validator("phone")
     @classmethod
     def validate_phone(cls, v):
         v = v.replace("-", "").strip()
-        if not re.match(r'^01[016789]\d{7,8}$', v):
-            raise ValueError("?좏슚???대??곕쾲?몃? ?낅젰?댁＜?몄슂")
+        if not re.match(r"^01[016789]\d{7,8}$", v):
+            raise ValueError("Please enter a valid mobile number.")
         return v
 
 
@@ -591,52 +613,113 @@ def _activate_subscription(db: Session, user_id: str, plan_id: str) -> None:
         current_expiry = user.subscription_expires_at
         new_expiry = calculate_subscription_expiry(plan_days, current_expiry)
 
+        # Track free-to-paid conversion
+        was_free = user.user_type != UserType.SUBSCRIBER
+        
         user.user_type = UserType.SUBSCRIBER
         user.subscription_expires_at = new_expiry
-        user.work_count = -1  # 臾댁젣??        user.work_used = 0
+        user.work_count = -1  # Unlimited
+        user.work_used = 0
         db.commit()
-        logger.info(
-            f"[Payment] Subscription activated: user={user_id}, plan={plan_id}, "
-            f"days={plan_days}, expires_at={user.subscription_expires_at}"
-        )
+        
+        # Update payment stats on success
+        update_user_payment_stats(db, user_id, success=True)
+        
+        if was_free:
+            logger.info(
+                f"[Payment] FREE->PAID conversion: user={user_id}, plan={plan_id}, "
+                f"days={plan_days}, expires_at={new_expiry}"
+            )
+        else:
+            logger.info(
+                f"[Payment] Subscription renewed: user={user_id}, plan={plan_id}, "
+                f"days={plan_days}, expires_at={new_expiry}"
+            )
     except Exception as e:
         db.rollback()
         logger.error(f"[Payment] Failed to activate subscription: {e}", exc_info=True)
 
 
-def _call_payapp_api(params: dict) -> dict:
-    """
-    PayApp API ?몄텧 ?ы띁
-    Centralized helper for calling the PayApp API.
 
-    Sends POST to PAYAPP_API_URL, parses the URL-encoded response,
-    and returns a flat dict. Raises RuntimeError on timeout/network failure.
-    """
+# Allowed payment types for PayApp payment requests.
+_ALLOWED_PAYMENT_TYPES = {
+    "card",   # 신용카드
+    "phone",  # 휴대전화
+    "vbank",  # 가상계좌
+    "kpay",   # 카카오페이
+    "npay",   # 네이버페이
+    "sapay",  # 스마일페이
+    "apay",   # 애플페이
+    "tpay",   # 토스페이
+}
+
+
+def _call_payapp_api(params: dict) -> dict:
+    """Call PayApp API and decode URL-encoded response robustly."""
     try:
+        payload = dict(params or {})
+        # PayApp supports charset option; force UTF-8 response whenever possible.
+        payload.setdefault("charset", "utf-8")
+
         resp = http_requests.post(
             PAYAPP_API_URL,
-            data=params,
+            data=payload,
             timeout=30,
             allow_redirects=False,
         )
         resp.raise_for_status()
-        result = {k: v[0] for k, v in parse_qs(resp.text, keep_blank_values=True).items()}
+
+        # Parse x-www-form-urlencoded body with encoding fallbacks.
+        # Some merchants still receive legacy CP949/EUC-KR encoded values.
+        raw_text = resp.content.decode("latin1", errors="ignore")
+        best_result: dict[str, str] = {}
+        for encoding in ("utf-8", "cp949", "euc-kr"):
+            try:
+                parsed = {
+                    k: v[0]
+                    for k, v in parse_qs(
+                        raw_text,
+                        keep_blank_values=True,
+                        encoding=encoding,
+                        errors="strict",
+                    ).items()
+                }
+            except UnicodeDecodeError:
+                continue
+            if not parsed:
+                continue
+            best_result = parsed
+            # Prefer parse containing known PayApp keys.
+            if any(
+                key in parsed
+                for key in ("state", "errorCode", "errorMessage", "payurl", "mul_no", "encBill")
+            ):
+                break
+        if not best_result:
+            best_result = {
+                k: v[0]
+                for k, v in parse_qs(
+                    raw_text,
+                    keep_blank_values=True,
+                    encoding="utf-8",
+                    errors="replace",
+                ).items()
+            }
+
+        result = best_result
         if "state" not in result:
             safe_keys = ",".join(sorted(result.keys()))[:120]
+            snippet = resp.content[:180].decode("utf-8", errors="replace").replace("\n", " ")
             logger.warning(
-                f"[PayApp] API response missing state (keys={safe_keys or 'none'})"
+                f"[PayApp] API response missing state (keys={safe_keys or 'none'}, snippet={snippet})"
             )
         return result
     except http_requests.exceptions.Timeout:
         logger.error("[PayApp] API request timed out")
-        raise RuntimeError("寃곗젣 ?쒕쾭 ?곌껐 ?쒓컙 珥덇낵")
+        raise RuntimeError("Payment server connection timed out.")
     except Exception as e:
         logger.error(f"[PayApp] API request failed: {e}", exc_info=True)
-        raise RuntimeError("寃곗젣 ?붿껌 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.")
-
-
-# Allowed payment types for PayApp 寃곗젣 ?붿껌
-_ALLOWED_PAYMENT_TYPES = {"vbank", "card"}
+        raise RuntimeError("Error occurred while processing payment request.")
 
 
 @router.post("/payapp/create", response_model=PayAppCreateResponse)
@@ -649,13 +732,12 @@ async def create_payapp_payment(
     db: Session = Depends(get_db)
 ):
     """
-    PayApp 寃곗젣 ?붿껌 ?앹꽦 (媛?곴퀎醫??먮뒗 移대뱶)
-    Creates a PayApp payment request (virtual account or card)
+    Creates a PayApp payment request (virtual account or card).
 
     Security:
     - Requires Authorization + X-User-ID headers
     - Header user must match body user_id
-    - payment_type must be "vbank" or "card"
+    - payment_type must be one of card/phone/vbank/kpay/npay/sapay/apay/tpay
     """
     _validate_authenticated_user(db, str(x_user_id), authorization)
     if str(data.user_id) != str(x_user_id):
@@ -664,7 +746,6 @@ async def create_payapp_payment(
         )
         raise HTTPException(status_code=403, detail="User mismatch")
 
-    # 寃곗젣 ?섎떒 寃利?(Validate payment type)
     if data.payment_type not in _ALLOWED_PAYMENT_TYPES:
         raise HTTPException(
             status_code=400,
@@ -678,38 +759,44 @@ async def create_payapp_payment(
     if not PAYAPP_USERID:
         logger.error("[PayApp] PAYAPP_USERID not configured")
         return PayAppCreateResponse(
-            success=False, message="寃곗젣 ?ㅼ젙???꾨즺?섏? ?딆븯?듬땲??"
+            success=False,
+            message="Payment configuration is incomplete. Please contact support. (PAYAPP_USERID missing)",
+        )
+    if not PAYAPP_LINKKEY or not PAYAPP_LINKVAL:
+        logger.error("[PayApp] PAYAPP_LINKKEY/LINKVAL not configured")
+        return PayAppCreateResponse(
+            success=False,
+            message=(
+                "Payment configuration is incomplete. Please contact support. "
+                "(PAYAPP_LINKKEY/PAYAPP_LINKVAL missing)"
+            ),
         )
 
-    # Create local payment session first
-    local_payment_id = secrets.token_urlsafe(32)
-    expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
-
-    # Determine feedbackurl (backend webhook URL).
-    # Production must use explicit PAYMENT_API_BASE_URL.
     try:
         feedback_url = _get_feedback_url(request)
     except RuntimeError as e:
         logger.error(f"[PayApp] Invalid feedback URL configuration: {e}")
-        return PayAppCreateResponse(success=False, message="결제 서버 설정 오류")
+        return PayAppCreateResponse(success=False, message="Payment server configuration error.")
 
-    # Get plan info
     plan_price = PLAN_PRICES.get(data.plan_id)
     if plan_price is None or plan_price <= 0:
-        return PayAppCreateResponse(success=False, message=f"?좏슚?섏? ?딆? ?뚮옖?낅땲?? {data.plan_id}")
+        return PayAppCreateResponse(success=False, message=f"Invalid plan_id: {data.plan_id}")
 
-    good_name = f"?쇳븨?륂뤌硫붿씠而?{PLAN_NAMES.get(data.plan_id, '?꾨줈 援щ룆')}"
+    good_name = PLAN_NAMES.get(data.plan_id, "Pro subscription")
+    local_payment_id = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
 
-    # Call PayApp API with dynamic plan_id and payment_type
     payapp_params = {
         "cmd": "payrequest",
         "userid": PAYAPP_USERID,
+        "shopname": PAYAPP_SHOPNAME,
         "goodname": good_name,
         "price": str(plan_price),
         "recvphone": data.phone.replace("-", ""),
         "openpaytype": data.payment_type,
         "smsuse": "n",
         "feedbackurl": feedback_url,
+        "charset": "utf-8",
         "var1": local_payment_id,
         "var2": user_id,
         "checkretry": "y",
@@ -722,7 +809,6 @@ async def create_payapp_payment(
             mul_no = result.get("mul_no", "")
             payurl = result.get("payurl", "")
 
-            # Save payment session to DB with dynamic plan_id
             session = PaymentSession(
                 payment_id=local_payment_id,
                 plan_id=data.plan_id,
@@ -742,16 +828,132 @@ async def create_payapp_payment(
                 payurl=payurl,
                 mul_no=mul_no,
             )
-        else:
-            error_msg = result.get("errorMessage", "?????녿뒗 ?ㅻ쪟")
-            logger.warning(f"[PayApp] API error: {error_msg}")
-            return PayAppCreateResponse(success=False, message="寃곗젣 ?붿껌???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂.")
+
+        error_code = str(result.get("errorCode", "")).strip()
+        error_msg = str(result.get("errorMessage", "")).strip() or "Unknown error"
+        logger.warning(
+            f"[PayApp] API error: state={result.get('state')}, code={error_code}, msg={error_msg}"
+        )
+        # Record payment error
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.GATEWAY_ERROR,
+            error_code=error_code,
+            error_message=error_msg,
+            user_id=user_id,
+            plan_id=data.plan_id,
+            endpoint="payapp_create",
+        )
+        update_user_payment_stats(db, user_id, success=False)
+        message = "Payment request failed."
+        if error_code:
+            message += f" (PayApp {error_code})"
+        if error_msg:
+            message += f" {error_msg}"
+        return PayAppCreateResponse(success=False, message=message)
 
     except RuntimeError as e:
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.TIMEOUT if "timeout" in str(e).lower() else ErrorType.SYSTEM_ERROR,
+            error_message=str(e),
+            user_id=user_id,
+            plan_id=data.plan_id,
+            endpoint="payapp_create",
+        )
         return PayAppCreateResponse(success=False, message=str(e))
     except Exception as e:
         logger.error(f"[PayApp] Unexpected error: {e}", exc_info=True)
-        return PayAppCreateResponse(success=False, message="寃곗젣 ?붿껌 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.")
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.SYSTEM_ERROR,
+            error_message=str(e)[:200],
+            user_id=user_id,
+            plan_id=data.plan_id,
+            endpoint="payapp_create",
+        )
+        return PayAppCreateResponse(success=False, message="Error occurred while processing payment request.")
+
+
+def _handle_recurring_webhook(
+    db: Session,
+    rebill_no: str,
+    pay_state: str,
+    price: object,
+    user_id: str,
+) -> PlainTextResponse:
+    """
+    Handle PayApp recurring webhook events that do not include var1/local payment id.
+    """
+    subscription = (
+        db.query(RecurringSubscription)
+        .filter(RecurringSubscription.rebill_no == rebill_no)
+        .with_for_update()
+        .first()
+    )
+    if not subscription:
+        logger.warning("[PayApp Webhook] Recurring subscription not found: rebill_no=%s", rebill_no)
+        return PlainTextResponse("FAIL")
+
+    if user_id and str(subscription.user_id) != user_id:
+        logger.warning(
+            "[PayApp Webhook] recurring user mismatch: subscription_user=%s, webhook_user=%s",
+            subscription.user_id,
+            user_id,
+        )
+        return PlainTextResponse("FAIL")
+
+    if price not in (None, ""):
+        received_price = _parse_int_value(str(price))
+        if (
+            received_price is None
+            or subscription.amount is None
+            or received_price != int(subscription.amount)
+        ):
+            logger.warning(
+                "[PayApp Webhook] recurring price mismatch: expected=%s, got=%s",
+                subscription.amount,
+                price,
+            )
+            return PlainTextResponse("FAIL")
+
+    # PayApp transition states.
+    if pay_state in ("1", "10"):
+        return PlainTextResponse("SUCCESS")
+
+    if pay_state == _PAYAPP_SUCCESS_STATE:
+        if subscription.status != SubscriptionStatus.ACTIVE:
+            subscription.status = SubscriptionStatus.ACTIVE
+            db.commit()
+        _activate_subscription(db, str(subscription.user_id), str(subscription.plan_id))
+        logger.info(
+            "[PayApp Webhook] recurring payment succeeded: rebill_no=%s user=%s plan=%s",
+            rebill_no,
+            subscription.user_id,
+            subscription.plan_id,
+        )
+        return PlainTextResponse("SUCCESS")
+
+    if pay_state in _PAYAPP_CANCEL_STATES:
+        if subscription.status != SubscriptionStatus.CANCELLED:
+            subscription.status = SubscriptionStatus.CANCELLED
+            db.commit()
+        # Record cancellation for statistics
+        if subscription.user_id:
+            update_user_payment_stats(db, str(subscription.user_id), success=False)
+            record_payment_error(
+                db=db,
+                error_type=ErrorType.CANCELLED,
+                error_code=pay_state,
+                user_id=str(subscription.user_id),
+                plan_id=str(subscription.plan_id) if subscription.plan_id else None,
+                endpoint="payapp_recurring_webhook",
+            )
+        logger.info("[PayApp Webhook] recurring payment cancelled: rebill_no=%s", rebill_no)
+        return PlainTextResponse("SUCCESS")
+
+    logger.info("[PayApp Webhook] recurring webhook ignored unknown pay_state=%s", pay_state)
+    return PlainTextResponse("SUCCESS")
 
 
 @router.post("/payapp/webhook")
@@ -771,10 +973,11 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
         recv_linkval = form_data.get("linkval", "")
         local_payment_id = str(form_data.get("var1", "")).strip()
         user_id = str(form_data.get("var2", "")).strip()
+        rebill_no = str(form_data.get("rebill_no", form_data.get("rebillNo", ""))).strip()
 
         logger.info(
             f"[PayApp Webhook] pay_state={pay_state}, mul_no={mul_no}, "
-            f"price={price}, var1={local_payment_id}, var2={user_id}"
+            f"price={price}, var1={local_payment_id}, var2={user_id}, rebill_no={rebill_no}"
         )
 
         if not PAYAPP_LINKKEY or not PAYAPP_LINKVAL:
@@ -790,6 +993,14 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
             return PlainTextResponse("FAIL")
 
         if not local_payment_id:
+            if rebill_no:
+                return _handle_recurring_webhook(
+                    db=db,
+                    rebill_no=rebill_no,
+                    pay_state=pay_state,
+                    price=price,
+                    user_id=user_id,
+                )
             logger.warning("[PayApp Webhook] Missing var1(local payment id)")
             return PlainTextResponse("FAIL")
 
@@ -873,6 +1084,18 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
 
         if mapped_status == PaymentStatus.SUCCEEDED and session.user_id:
             _activate_subscription(db, session.user_id, session.plan_id)
+        elif mapped_status == PaymentStatus.CANCELLED and session.user_id:
+            # Update payment stats on cancellation/failure
+            update_user_payment_stats(db, session.user_id, success=False)
+            record_payment_error(
+                db=db,
+                error_type=ErrorType.CANCELLED,
+                error_code=pay_state,
+                user_id=session.user_id,
+                payment_id=local_payment_id,
+                plan_id=session.plan_id,
+                endpoint="payapp_webhook",
+            )
 
         return PlainTextResponse("SUCCESS")
 
@@ -1131,15 +1354,38 @@ async def register_card(
                 "card_name": card_name,
             }
         else:
-            error_msg = result.get("errorMessage", "移대뱶 ?깅줉 ?ㅽ뙣")
+            error_msg = result.get("errorMessage", "카드 등록 실패")
+            error_code = result.get("errorCode", "")
             logger.warning(f"[PayApp Card] Register failed: {error_msg}")
-            return {"success": False, "message": "移대뱶 ?깅줉???ㅽ뙣?덉뒿?덈떎. ?낅젰 ?뺣낫瑜??뺤씤 ???ㅼ떆 ?쒕룄?댁＜?몄슂."}
+            record_payment_error(
+                db=db,
+                error_type=ErrorType.GATEWAY_ERROR,
+                error_code=error_code,
+                error_message=error_msg,
+                user_id=user_id,
+                endpoint="payapp_card_register",
+            )
+            return {"success": False, "message": "카드 등록에 실패했습니다. 입력 정보를 확인 후 다시 시도해주세요."}
 
     except RuntimeError as e:
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.SYSTEM_ERROR,
+            error_message=str(e),
+            user_id=user_id,
+            endpoint="payapp_card_register",
+        )
         return {"success": False, "message": str(e)}
     except Exception as e:
         logger.error(f"[PayApp Card] Register error: {e}", exc_info=True)
-        return {"success": False, "message": "移대뱶 ?깅줉 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎."}
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.SYSTEM_ERROR,
+            error_message=str(e)[:200],
+            user_id=user_id,
+            endpoint="payapp_card_register",
+        )
+        return {"success": False, "message": "카드 등록 처리 중 오류가 발생했습니다."}
 
 
 @router.post("/payapp/card/pay")
@@ -1272,15 +1518,43 @@ async def pay_with_card(
                 "mul_no": mul_no,
             }
         else:
-            error_msg = result.get("errorMessage", "移대뱶 寃곗젣 ?ㅽ뙣")
+            error_msg = result.get("errorMessage", "카드 결제 실패")
+            error_code = result.get("errorCode", "")
             logger.warning(f"[PayApp Card] Pay failed: {error_msg}")
-            return {"success": False, "message": "移대뱶 寃곗젣???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+            # Record payment error
+            record_payment_error(
+                db=db,
+                error_type=ErrorType.GATEWAY_ERROR,
+                error_code=error_code,
+                error_message=error_msg,
+                user_id=user_id,
+                plan_id=data.plan_id,
+                endpoint="payapp_card_pay",
+            )
+            update_user_payment_stats(db, user_id, success=False)
+            return {"success": False, "message": "카드 결제에 실패했습니다. 다시 시도해주세요."}
 
     except RuntimeError as e:
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.SYSTEM_ERROR,
+            error_message=str(e),
+            user_id=user_id,
+            plan_id=data.plan_id,
+            endpoint="payapp_card_pay",
+        )
         return {"success": False, "message": str(e)}
     except Exception as e:
         logger.error(f"[PayApp Card] Pay error: {e}", exc_info=True)
-        return {"success": False, "message": "移대뱶 寃곗젣 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎."}
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.SYSTEM_ERROR,
+            error_message=str(e)[:200],
+            user_id=user_id,
+            plan_id=data.plan_id,
+            endpoint="payapp_card_pay",
+        )
+        return {"success": False, "message": "카드 결제 처리 중 오류가 발생했습니다."}
 
 
 @router.post("/payapp/card/delete")
@@ -1515,15 +1789,41 @@ async def create_subscription(
                 "payurl": payurl,
             }
         else:
-            error_msg = result.get("errorMessage", "?뺢린寃곗젣 ?깅줉 ?ㅽ뙣")
+            error_msg = result.get("errorMessage", "정기결제 등록 실패")
+            error_code = result.get("errorCode", "")
             logger.warning(f"[PayApp Subscribe] Create failed: {error_msg}")
-            return {"success": False, "message": "?뺢린寃곗젣 ?깅줉???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+            record_payment_error(
+                db=db,
+                error_type=ErrorType.GATEWAY_ERROR,
+                error_code=error_code,
+                error_message=error_msg,
+                user_id=user_id,
+                plan_id=data.plan_id,
+                endpoint="payapp_subscribe_create",
+            )
+            return {"success": False, "message": "정기결제 등록에 실패했습니다. 다시 시도해주세요."}
 
     except RuntimeError as e:
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.SYSTEM_ERROR,
+            error_message=str(e),
+            user_id=user_id,
+            plan_id=data.plan_id,
+            endpoint="payapp_subscribe_create",
+        )
         return {"success": False, "message": str(e)}
     except Exception as e:
         logger.error(f"[PayApp Subscribe] Create error: {e}", exc_info=True)
-        return {"success": False, "message": "?뺢린寃곗젣 ?깅줉 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎."}
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.SYSTEM_ERROR,
+            error_message=str(e)[:200],
+            user_id=user_id,
+            plan_id=data.plan_id,
+            endpoint="payapp_subscribe_create",
+        )
+        return {"success": False, "message": "정기결제 등록 처리 중 오류가 발생했습니다."}
 
 
 @router.post("/payapp/subscribe/cancel")
@@ -1775,4 +2075,203 @@ async def get_subscription_status(
     return {"success": True, "subscriptions": sub_list}
 
 
+# --- Admin Endpoints (관리자 API) ---
 
+@router.get("/admin/subscription/summary/{user_id}")
+@limiter.limit("30/minute")
+async def admin_get_subscription_summary(
+    request: Request,
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_admin_api_key),
+):
+    """
+    관리자용 사용자 구독 요약 조회
+    Admin endpoint to get user subscription summary.
+    
+    Security:
+    - Requires admin API key
+    """
+    summary = get_subscription_summary(db, user_id)
+    return summary
+
+
+@router.get("/admin/payment/stats/{user_id}")
+@limiter.limit("30/minute")
+async def admin_get_payment_stats(
+    request: Request,
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_admin_api_key),
+):
+    """
+    관리자용 사용자 결제 통계 조회
+    Admin endpoint to get user payment stats.
+    
+    Security:
+    - Requires admin API key
+    """
+    stats = get_user_payment_stats(db, user_id)
+    if not stats:
+        return {
+            "user_id": user_id,
+            "consecutive_fail_count": 0,
+            "total_fail_count": 0,
+            "total_success_count": 0,
+            "last_fail_at": None,
+            "last_success_at": None,
+        }
+    
+    return {
+        "user_id": user_id,
+        "consecutive_fail_count": stats.consecutive_fail_count,
+        "total_fail_count": stats.total_fail_count,
+        "total_success_count": stats.total_success_count,
+        "last_fail_at": stats.last_fail_at.isoformat() if stats.last_fail_at else None,
+        "last_success_at": stats.last_success_at.isoformat() if stats.last_success_at else None,
+    }
+
+
+@router.post("/admin/subscription/expire/{user_id}")
+@limiter.limit("10/minute")
+async def admin_expire_subscription(
+    request: Request,
+    user_id: str,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_admin_api_key),
+):
+    """
+    관리자용 사용자 구독 강제 만료
+    Admin endpoint to force expire a user subscription.
+    
+    Security:
+    - Requires admin API key
+    """
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    if user.user_type != UserType.SUBSCRIBER:
+        return {"success": False, "message": "User is not a subscriber"}
+    
+    success = expire_subscription(db, user, reason="admin_manual")
+    
+    if success:
+        logger.info(f"[Admin] Subscription expired: user={user_id}")
+        return {"success": True, "message": "Subscription expired successfully"}
+    else:
+        return {"success": False, "message": "Failed to expire subscription"}
+
+
+@router.post("/admin/subscription/process-expired")
+@limiter.limit("5/minute")
+async def admin_process_expired_subscriptions(
+    request: Request,
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_admin_api_key),
+):
+    """
+    관리자용 만료 구독 일괄 처리
+    Admin endpoint to batch process expired subscriptions.
+    
+    Security:
+    - Requires admin API key
+    """
+    from app.utils.subscription_manager import process_expired_subscriptions
+    
+    processed, failed = process_expired_subscriptions(db)
+    
+    logger.info(f"[Admin] Processed expired subscriptions: processed={processed}, failed={failed}")
+    return {
+        "success": True,
+        "processed": processed,
+        "failed": failed,
+    }
+
+
+@router.get("/admin/payment/errors")
+@limiter.limit("30/minute")
+async def admin_get_payment_errors(
+    request: Request,
+    user_id: Optional[str] = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    _: None = Depends(verify_admin_api_key),
+):
+    """
+    관리자용 결제 오류 로그 조회
+    Admin endpoint to get payment error logs.
+    
+    Security:
+    - Requires admin API key
+    """
+    from app.utils.payment_error_tracker import get_recent_errors, get_error_count_by_type
+    
+    errors = get_recent_errors(db, user_id=user_id, limit=limit)
+    error_counts = get_error_count_by_type(db, hours=24)
+    
+    error_list = [
+        {
+            "id": err.id,
+            "user_id": err.user_id,
+            "error_type": err.error_type,
+            "error_code": err.error_code,
+            "error_message": err.error_message,
+            "endpoint": err.endpoint,
+            "payment_id": err.payment_id,
+            "plan_id": err.plan_id,
+            "created_at": err.created_at.isoformat() if err.created_at else None,
+        }
+        for err in errors
+    ]
+    
+    return {
+        "success": True,
+        "errors": error_list,
+        "error_counts_24h": error_counts,
+    }
+
+
+@router.get("/user/subscription/status")
+@limiter.limit("30/minute")
+async def get_user_subscription_status(
+    request: Request,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    authorization: str = Header(..., alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """
+    사용자 구독 상태 상세 조회 (만료 여부 포함)
+    Get detailed subscription status for authenticated user.
+    
+    Security:
+    - Requires Authorization + X-User-ID headers
+    """
+    _validate_authenticated_user(db, str(x_user_id), authorization)
+    user_id = str(x_user_id)
+    
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    is_expired, days_remaining = check_subscription_expiry(user)
+    effective_type = get_effective_user_type(user)
+    
+    # If subscription is expired but user_type is still SUBSCRIBER, auto-expire
+    if is_expired and user.user_type == UserType.SUBSCRIBER:
+        expire_subscription(db, user, reason="request_check")
+        effective_type = UserType.FREE
+    
+    return {
+        "success": True,
+        "user_id": user_id,
+        "user_type": effective_type.value if effective_type else None,
+        "subscription_expires_at": (
+            user.subscription_expires_at.isoformat() 
+            if user.subscription_expires_at else None
+        ),
+        "is_expired": is_expired,
+        "days_remaining": days_remaining,
+        "work_count": user.work_count,
+        "work_used": user.work_used,
+    }
