@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 Application flow controller for PyQt6.
-Game-like auto-update: login → check → download → replace → restart (no user interaction).
+Game-like auto-update: login ??check ??download ??replace ??restart (no user interaction).
 After restart: show update-complete dialog with release notes + 5s countdown.
 """
 from typing import Optional, List, Tuple, Any, Dict
@@ -75,22 +75,22 @@ class AppController:
         self._latest_version: str = ""
         self._release_notes: str = ""
         self._main_launched: bool = False
-        self._pending_update_info: Optional[Dict[str, Any]] = None  # 업데이트 내역 저장용
+        self._pending_update_info: Optional[Dict[str, Any]] = None  # ?낅뜲?댄듃 ?댁뿭 ??μ슜
 
-    # ── Entry point ──
+    # ?? Entry point ??
 
     def start(self) -> None:
-        """Start the app – show login first."""
+        """Start the app ??show login first."""
         self._show_login()
 
-    # ── Splash management ──
+    # ?? Splash management ??
 
     def _close_splash(self) -> None:
         if self.splash:
             self.splash.close()
             self.splash = None
 
-    # ── Login ──
+    # ?? Login ??
 
     def _show_login(self) -> None:
         from ui.windows.login_window import Login
@@ -112,7 +112,7 @@ class AppController:
             logger.info("Development mode: Skipping update check")
             self._proceed_to_loading()
 
-    # ── Post-login update check (game-like auto-update) ──
+    # ?? Post-login update check (game-like auto-update) ??
 
     def _check_update_after_login(self) -> None:
         current_version = self.get_current_version()
@@ -135,15 +135,23 @@ class AppController:
             logger.warning("Update available but no download URL provided")
             if self._update_is_mandatory:
                 QMessageBox.critical(
-                    None, "업데이트 오류",
-                    "필수 업데이트를 다운로드할 수 없습니다.\n프로그램을 종료합니다.",
+                    None, "?낅뜲?댄듃 ?ㅻ쪟",
+                    "?꾩닔 ?낅뜲?댄듃瑜??ㅼ슫濡쒕뱶?????놁뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
             return
             
         if not file_hash:
-            logger.warning("No file_hash provided by server — skipping integrity check")
+            logger.error("No file_hash provided by server - refusing unsafe update")
+            if self._update_is_mandatory:
+                QMessageBox.critical(
+                    None, "?낅뜲?댄듃 ?ㅻ쪟",
+                    "?꾩닔 ?낅뜲?댄듃 寃利??뺣낫(file_hash)媛 ?놁뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                )
+                sys.exit(1)
+            self._proceed_to_loading()
+            return
 
         logger.info(f"Auto-updating to version {self._latest_version} (Hash: {file_hash})")
         if self.login_window:
@@ -154,7 +162,7 @@ class AppController:
         logger.warning(f"Update check failed: {error}")
         self._proceed_to_loading()
 
-    # ── Version ──
+    # ?? Version ??
 
     def get_current_version(self) -> str:
         try:
@@ -172,7 +180,7 @@ class AppController:
             logger.error(f"Failed to read version: {e}")
         return "1.0.0"
 
-    # ── Loading & Main App ──
+    # ?? Loading & Main App ??
 
     def _proceed_to_loading(self) -> None:
         """Continue to ProcessWindow and main app (no update needed)."""
@@ -226,8 +234,8 @@ class AppController:
             if self.loading_window:
                 self.loading_window.close()
             QMessageBox.critical(
-                None, "시작 오류",
-                f"앱 초기화 중 오류가 발생했습니다:\n{e}",
+                None, "?쒖옉 ?ㅻ쪟",
+                f"??珥덇린??以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎:\n{e}",
             )
 
     def launch_main_app(self) -> None:
@@ -250,7 +258,7 @@ class AppController:
             if self.loading_window:
                 self.loading_window.close()
 
-            # 업데이트 내역 팝업 표시 (새 버전일 때만)
+            # ?낅뜲?댄듃 ?댁뿭 ?앹뾽 ?쒖떆 (??踰꾩쟾???뚮쭔)
             self._show_update_notes_if_needed()
 
         except Exception as e:
@@ -258,12 +266,12 @@ class AppController:
             if self.loading_window:
                 self.loading_window.close()
             QMessageBox.critical(
-                None, "시작 오류",
-                f"메인 앱을 시작할 수 없습니다:\n{type(e).__name__}: {e}",
+                None, "?쒖옉 ?ㅻ쪟",
+                f"硫붿씤 ?깆쓣 ?쒖옉?????놁뒿?덈떎:\n{type(e).__name__}: {e}",
             )
 
     def _show_update_notes_if_needed(self) -> None:
-        """업데이트 내역 팝업 표시 (새 버전이거나 릴리즈 노트가 있을 때)"""
+        """?낅뜲?댄듃 ?댁뿭 ?앹뾽 ?쒖떆 (??踰꾩쟾?닿굅??由대━利??명듃媛 ?덉쓣 ??"""
         if not self._pending_update_info:
             return
 
@@ -272,7 +280,7 @@ class AppController:
         version = self._pending_update_info.get("version", "")
         release_notes = self._pending_update_info.get("release_notes", "")
 
-        # 새 버전이고 릴리즈 노트가 있을 때만 팝업 표시
+        # ??踰꾩쟾?닿퀬 由대━利??명듃媛 ?덉쓣 ?뚮쭔 ?앹뾽 ?쒖떆
         if is_new_version and has_notes and release_notes:
             try:
                 from ui.windows.update_dialog import UpdateNotesDialog
@@ -286,7 +294,7 @@ class AppController:
             except Exception as e:
                 logger.warning(f"Failed to show update notes dialog: {e}")
 
-    # ── Pending update persistence ──
+    # ?? Pending update persistence ??
 
     @staticmethod
     def _save_pending_update(version: str, release_notes: str) -> None:
@@ -321,7 +329,7 @@ class AppController:
                 pass
         return None
 
-    # ── Update-complete dialog ──
+    # ?? Update-complete dialog ??
 
     def _show_update_complete(self, pending: Dict[str, str]) -> None:
         """Show update-complete dialog with 5s countdown, then launch main app."""
@@ -336,7 +344,7 @@ class AppController:
         self.update_complete_dialog.confirmed.connect(self.launch_main_app)
         self.update_complete_dialog.show()
 
-    # ── Update download & install ──
+    # ?? Update download & install ??
 
     @staticmethod
     def _windows_creation_flags() -> int:
@@ -397,8 +405,8 @@ exit /b 1
         if not download_url:
             if self._update_is_mandatory:
                 QMessageBox.critical(
-                    None, "오류",
-                    "업데이트 파일 경로가 잘못되었습니다.\n프로그램을 종료합니다.",
+                    None, "?ㅻ쪟",
+                    "?낅뜲?댄듃 ?뚯씪 寃쎈줈媛 ?섎せ?섏뿀?듬땲??\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
@@ -419,7 +427,7 @@ exit /b 1
 
         def on_download_finished(success: bool, result: str):
             if success:
-                self.update_progress_dialog.set_status("설치 준비 중...")
+                self.update_progress_dialog.set_status("?ㅼ튂 以鍮?以?..")
                 self.update_progress_dialog.set_progress(100)
                 QtCore.QTimer.singleShot(500, lambda: self._run_updater(result))
             else:
@@ -427,8 +435,8 @@ exit /b 1
                 logger.error(f"Update verification failed: {result}")
                 if self._update_is_mandatory:
                     QMessageBox.critical(
-                        None, "업데이트 실패",
-                        f"업데이트 검증 실패:\n{result}\n\n프로그램을 종료합니다.",
+                        None, "?낅뜲?댄듃 ?ㅽ뙣",
+                        f"?낅뜲?댄듃 寃利??ㅽ뙣:\n{result}\n\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
                     )
                     sys.exit(1)
                 self._proceed_to_loading()
@@ -455,8 +463,9 @@ exit /b 1
                 # Save update info BEFORE restarting so post-restart can show complete dialog
                 self._save_pending_update(self._latest_version, self._release_notes)
 
-                # 1) Primary path: dedicated updater executable.
-                updater_candidates = [os.path.join(exe_dir, "updater.exe")]
+                # 1) Primary path: updater bundled inside the frozen archive.
+                # Do not trust updater.exe placed next to the installed executable.
+                updater_candidates = []
                 meipass = getattr(sys, "_MEIPASS", "")
                 if meipass:
                     updater_candidates.append(os.path.join(meipass, "updater.exe"))
@@ -523,8 +532,8 @@ exit /b 1
             if hasattr(self, "update_progress_dialog"):
                 self.update_progress_dialog.close()
             QMessageBox.critical(
-                None, "업데이트 실행 오류",
-                f"업데이트 실행 중 오류가 발생했습니다:\n{e}",
+                None, "?낅뜲?댄듃 ?ㅽ뻾 ?ㅻ쪟",
+                f"?낅뜲?댄듃 ?ㅽ뻾 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎:\n{e}",
             )
             if self._update_is_mandatory:
                 sys.exit(1)
@@ -545,6 +554,9 @@ class DownloadWorker(QtCore.QThread):
         import requests
         import hashlib
         try:
+            if not self.expected_hash:
+                raise ValueError("Missing expected hash for update package")
+
             sha256 = hashlib.sha256()
             with requests.get(self.url, stream=True, timeout=(10, 120)) as r:
                 r.raise_for_status()
@@ -562,9 +574,10 @@ class DownloadWorker(QtCore.QThread):
             
             # Verify hash
             file_hash = sha256.hexdigest().lower()
-            if self.expected_hash and file_hash != self.expected_hash.lower():
+            if file_hash != self.expected_hash.lower():
                 raise ValueError(f"Hash mismatch! Expected {self.expected_hash}, got {file_hash}")
                 
             self.finished.emit(True, self.dest_path)
         except Exception as e:
             self.finished.emit(False, str(e))
+
