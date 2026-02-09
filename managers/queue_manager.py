@@ -19,6 +19,10 @@ logger = get_logger(__name__)
 
 URL_PATTERN = re.compile(r"https?://[^\s\"'<>]+")
 MIX_JOB_PREFIX = "mix://job/"
+LEGACY_QUEUE_PREFIX_PATTERN = re.compile(
+    r"^(?:(?:waiting|processing|completed|failed|skipped|done|error|대기|진행|완료|실패|건너뜀)\s+\d+\s+)",
+    re.IGNORECASE,
+)
 
 
 class QueueManager:
@@ -66,15 +70,121 @@ class QueueManager:
 
     def _to_display_url(self, key: str) -> str:
         if not self._is_mix_job(key):
-            return key
+            return self._strip_legacy_queue_prefix(key)
         mix_urls = self.get_mix_job_urls(key)
         short_id = key.rsplit("/", 1)[-1][:6]
         if mix_urls:
-            return f"[MIX:{short_id}] {len(mix_urls)} clips"
-        return f"[MIX:{short_id}]"
+            return f"[믹스:{short_id}] {len(mix_urls)}개"
+        return f"[믹스:{short_id}]"
 
     def get_display_url(self, key: str) -> str:
         return self._to_display_url(key)
+
+    @staticmethod
+    def _normalize_status(status: str) -> str:
+        if status is None:
+            return "waiting"
+        raw = str(status).strip()
+        if not raw:
+            return "waiting"
+        lowered = raw.lower()
+        mapping = {
+            "waiting": "waiting",
+            "wait": "waiting",
+            "대기": "waiting",
+            "processing": "processing",
+            "in progress": "processing",
+            "진행": "processing",
+            "진행 중": "processing",
+            "completed": "completed",
+            "complete": "completed",
+            "done": "completed",
+            "완료": "completed",
+            "failed": "failed",
+            "error": "failed",
+            "실패": "failed",
+            "skipped": "skipped",
+            "skip": "skipped",
+            "건너뜀": "skipped",
+            "건너뛰기": "skipped",
+        }
+        return mapping.get(raw, mapping.get(lowered, lowered))
+
+    @staticmethod
+    def _localize_status_text(text: str) -> str:
+        if text is None:
+            return ""
+        message = str(text).strip()
+        if not message:
+            return ""
+
+        direct_map = {
+            "waiting": "대기",
+            "wait": "대기",
+            "processing": "진행 중",
+            "in progress": "진행 중",
+            "completed": "완료",
+            "complete": "완료",
+            "done": "완료",
+            "failed": "실패",
+            "error": "실패",
+            "skipped": "건너뜀",
+            "skip": "건너뜀",
+            "disabled": "사용 안 함",
+            "connected": "연결됨",
+            "youtube": "유튜브",
+        }
+        lowered = message.lower()
+        if lowered in direct_map:
+            return direct_map[lowered]
+
+        for eng, kor in (
+            ("waiting", "대기"),
+            ("processing", "진행 중"),
+            ("completed", "완료"),
+            ("done", "완료"),
+            ("failed", "실패"),
+            ("error", "실패"),
+            ("skipped", "건너뜀"),
+            ("disabled", "사용 안 함"),
+            ("connected", "연결됨"),
+            ("youtube", "유튜브"),
+        ):
+            message = re.sub(rf"\b{re.escape(eng)}\b", kor, message, flags=re.IGNORECASE)
+        return message
+
+    @staticmethod
+    def _normalize_source_label(source_label: str) -> str:
+        raw = (source_label or "").strip()
+        lowered = raw.lower()
+        mapping = {
+            "input": "입력창",
+            "entry": "입력창",
+            "clipboard": "클립보드",
+        }
+        return mapping.get(lowered, raw or "입력")
+
+    @staticmethod
+    def _strip_legacy_queue_prefix(text: str) -> str:
+        raw = (text or "").strip()
+        if not raw:
+            return raw
+        return LEGACY_QUEUE_PREFIX_PATTERN.sub("", raw)
+
+    @staticmethod
+    def _localize_upload_status(text: str) -> str:
+        normalized_text = QueueManager._localize_status_text(text)
+        mapping = {
+            "YouTube": "유튜브",
+            "youtube": "유튜브",
+            "Disabled": "사용 안 함",
+            "disabled": "사용 안 함",
+            "Connected": "연결됨",
+            "connected": "연결됨",
+            "Enabled": "사용",
+            "enabled": "사용",
+        }
+        return mapping.get(normalized_text, normalized_text)
 
     def _find_queue_key_by_display(self, display_value: str) -> str:
         if display_value in self.gui.url_queue or display_value in self.gui.url_status:
@@ -91,7 +201,7 @@ class QueueManager:
         clean_urls = [u.strip() for u in urls if isinstance(u, str) and u.strip()]
         clean_urls = clean_urls[:5]
         if len(clean_urls) < 2:
-            raise ValueError("Mix mode requires at least 2 URLs.")
+            raise ValueError("믹스 모드는 링크가 최소 2개 필요합니다.")
 
         key = f"{MIX_JOB_PREFIX}{uuid4().hex[:12]}"
         self._set_mix_job_urls(key, clean_urls)
@@ -129,9 +239,9 @@ class QueueManager:
         item = selected[0]
         display_value = item.text(1)
         key = self._find_queue_key_by_display(display_value)
-        status = self.gui.url_status.get(key)
+        status = self._normalize_status(self.gui.url_status.get(key))
         if status == "processing":
-            show_warning(self.gui, "Warning", "Current job is processing.")
+            show_warning(self.gui, "경고", "현재 작업이 진행 중입니다.")
             return
 
         if key in self.gui.url_queue:
@@ -143,20 +253,22 @@ class QueueManager:
 
         self.update_url_listbox()
         self.update_queue_count()
-        self.add_log(f"Removed: {display_value[:80]}")
+        self.add_log(f"삭제됨: {display_value[:80]}")
 
     def clear_url_queue(self):
         if not self.gui.url_queue and not self.gui.url_status:
             return
         if not show_question(
             self.gui,
-            "Confirm",
-            "Clear all queued URLs? (completed/failed history will be removed)",
+            "확인",
+            "대기열의 모든 링크를 비우시겠습니까? (완료/실패 이력도 삭제됩니다)",
         ):
             return
 
         processing = [
-            url for url, status in self.gui.url_status.items() if status == "processing"
+            url
+            for url, status in self.gui.url_status.items()
+            if self._normalize_status(status) == "processing"
         ]
         self.gui.url_queue[:] = processing
         self.gui.url_status.clear()
@@ -189,16 +301,18 @@ class QueueManager:
         self._prune_mix_jobs(set(processing))
         self.update_url_listbox()
         self.update_queue_count()
-        self.add_log("Queue cleared (processing items kept).")
+        self.add_log("대기열을 비웠습니다. (진행 중 항목은 유지)")
 
     def clear_waiting_only(self):
         waiting_urls = [
-            url for url, status in self.gui.url_status.items() if status == "waiting"
+            url
+            for url, status in self.gui.url_status.items()
+            if self._normalize_status(status) == "waiting"
         ]
         if not waiting_urls:
-            show_info(self.gui, "Info", "No waiting URLs.")
+            show_info(self.gui, "안내", "대기 중인 링크가 없습니다.")
             return
-        if not show_question(self.gui, "Confirm", "Clear waiting URLs only?"):
+        if not show_question(self.gui, "확인", "대기 상태 링크만 삭제할까요?"):
             return
 
         for key in waiting_urls:
@@ -211,7 +325,7 @@ class QueueManager:
 
         self.update_url_listbox()
         self.update_queue_count()
-        self.add_log("Waiting URLs cleared.")
+        self.add_log("대기 중 링크를 삭제했습니다.")
 
     # ----------------------- UI sync helpers -----------------------
     def update_url_listbox(self):
@@ -221,11 +335,11 @@ class QueueManager:
         tree.clear()
 
         status_labels = {
-            "waiting": "Waiting",
-            "processing": "Processing",
-            "completed": "Completed",
-            "failed": "Failed",
-            "skipped": "Skipped",
+            "waiting": "대기",
+            "processing": "진행 중",
+            "completed": "완료",
+            "failed": "실패",
+            "skipped": "건너뜀",
         }
 
         auto_upload_status = getattr(self.gui, "url_auto_upload_status", {})
@@ -233,24 +347,28 @@ class QueueManager:
             auto_upload_status = getattr(self.gui.state, "url_auto_upload_status", {})
 
         for idx, key in enumerate(self.gui.url_queue, 1):
-            status = self.gui.url_status.get(key, "waiting")
+            status_raw = self.gui.url_status.get(key, "waiting")
+            status = self._normalize_status(status_raw)
+            if status_raw != status:
+                self.gui.url_status[key] = status
             display_url = self._to_display_url(key)
-            order_label = "Processing" if status == "processing" else "Waiting"
+            order_label = "진행" if status == "processing" else "대기"
             order_text = f"{order_label} {idx}"
 
             if status == "processing":
                 step_msg = self.gui.url_status_message.get(key, "")
-                status_text = step_msg if step_msg else "Processing"
+                status_text = self._localize_status_text(step_msg) if step_msg else "진행 중"
             else:
-                status_text = status_labels.get(status, status)
+                status_text = status_labels.get(status, self._localize_status_text(status_raw))
 
             auto_upload_text = auto_upload_status.get(key, "")
             if not auto_upload_text:
                 settings = get_settings_manager()
                 if settings.get_youtube_auto_upload() and settings.get_youtube_connected():
-                    auto_upload_text = "YouTube"
+                    auto_upload_text = "유튜브"
                 else:
-                    auto_upload_text = "Disabled"
+                    auto_upload_text = "사용 안 함"
+            auto_upload_text = self._localize_upload_status(auto_upload_text)
 
             remarks_text = ""
             if status == "completed":
@@ -263,17 +381,20 @@ class QueueManager:
             )
             tree.addTopLevelItem(item)
 
-        processed_items = [
-            (key, status)
-            for key, status in self.gui.url_status.items()
-            if key not in self.gui.url_queue and status in ("completed", "failed", "skipped")
-        ]
+        processed_items = []
+        for key, raw_status in self.gui.url_status.items():
+            status = self._normalize_status(raw_status)
+            if key in self.gui.url_queue or status not in ("completed", "failed", "skipped"):
+                continue
+            if raw_status != status:
+                self.gui.url_status[key] = status
+            processed_items.append((key, status))
         for key, status in processed_items:
             display_url = self._to_display_url(key)
             order_text = (
-                "Completed"
+                "완료"
                 if status == "completed"
-                else "Skipped" if status == "skipped" else "Failed"
+                else "건너뜀" if status == "skipped" else "실패"
             )
             status_text = status_labels.get(status, status)
 
@@ -281,11 +402,12 @@ class QueueManager:
             if not auto_upload_text and status == "completed":
                 settings = get_settings_manager()
                 if settings.get_youtube_auto_upload() and settings.get_youtube_connected():
-                    auto_upload_text = "YouTube"
+                    auto_upload_text = "유튜브"
                 else:
-                    auto_upload_text = "Disabled"
+                    auto_upload_text = "사용 안 함"
             elif not auto_upload_text:
                 auto_upload_text = "-"
+            auto_upload_text = self._localize_upload_status(auto_upload_text)
 
             remarks_text = (
                 self.gui.url_remarks.get(key, "")
@@ -310,16 +432,17 @@ class QueueManager:
             return
 
         counts = {k: 0 for k in ("processing", "waiting", "completed", "skipped", "failed")}
-        for status in url_status.values():
+        for raw_status in url_status.values():
+            status = self._normalize_status(raw_status)
             if status in counts:
                 counts[status] += 1
 
         count_labels = [
-            ("count_processing", f"Processing {counts['processing']}"),
-            ("count_waiting", f"Waiting {counts['waiting']}"),
-            ("count_completed", f"Completed {counts['completed']}"),
-            ("count_skipped", f"Skipped {counts['skipped']}"),
-            ("count_failed", f"Failed {counts['failed']}"),
+            ("count_processing", f"진행 {counts['processing']}"),
+            ("count_waiting", f"대기 {counts['waiting']}"),
+            ("count_completed", f"완료 {counts['completed']}"),
+            ("count_skipped", f"건너뜀 {counts['skipped']}"),
+            ("count_failed", f"실패 {counts['failed']}"),
         ]
         for attr, text in count_labels:
             label = getattr(self.gui, attr, None)
@@ -334,18 +457,20 @@ class QueueManager:
             overall_label.setText(f"{completed}/{total} ({percent:.0f}%)")
 
     def update_queue_status(self, url: str, status: str, message: str = ""):
+        normalized_status = self._normalize_status(status)
         if url not in self.gui.url_status:
-            self.gui.url_status[url] = status
+            self.gui.url_status[url] = normalized_status
             self.gui.url_queue.append(url)
         else:
-            self.gui.url_status[url] = status
+            self.gui.url_status[url] = normalized_status
 
         if message:
-            self.gui.url_status_message[url] = message
+            self.gui.url_status_message[url] = self._localize_status_text(message)
         self.update_url_listbox()
 
     # ----------------------- URL input helpers -----------------------
     def _enqueue_urls(self, text: str, source_label: str) -> tuple:
+        source_label = self._normalize_source_label(source_label)
         urls = URL_PATTERN.findall(text)
         if not urls:
             return 0, 0
@@ -369,33 +494,33 @@ class QueueManager:
         self.update_queue_count()
 
         if added_count > 0:
-            msg = f"{source_label} added {added_count} URL(s)."
+            msg = f"{source_label}에서 링크 {added_count}개를 추가했습니다."
             if duplicate_count > 0:
-                msg += f"\nSkipped duplicates: {duplicate_count}"
-            show_info(self.gui, "Done", msg)
-            self.add_log(f"{source_label} added {added_count} URL(s)")
+                msg += f"\n중복 링크 {duplicate_count}개는 제외했습니다."
+            show_info(self.gui, "완료", msg)
+            self.add_log(f"{source_label}에서 링크 {added_count}개 추가")
         elif duplicate_count > 0:
-            show_warning(self.gui, "Info", f"All URLs were duplicates ({duplicate_count}).")
+            show_warning(self.gui, "안내", f"입력한 링크가 모두 중복입니다. ({duplicate_count}개)")
 
         return added_count, duplicate_count
 
     def add_url_from_entry(self):
         url_entry = getattr(self.gui, "url_entry", None)
         if url_entry is None:
-            show_warning(self.gui, "Error", "URL input widget not found.")
+            show_warning(self.gui, "오류", "링크 입력 위젯을 찾을 수 없습니다.")
             return
 
         text = url_entry.toPlainText().strip()
         if not text:
-            show_warning(self.gui, "Info", "Please enter URL(s).")
+            show_warning(self.gui, "안내", "링크를 입력해주세요.")
             return
 
         urls = URL_PATTERN.findall(text)
         if not urls:
-            show_warning(self.gui, "Info", "No valid URL found.")
+            show_warning(self.gui, "안내", "유효한 링크를 찾지 못했습니다.")
             return
 
-        self._enqueue_urls(text, "Input")
+        self._enqueue_urls(text, "입력창")
         url_entry.clear()
 
     def paste_and_extract(self):
@@ -405,15 +530,15 @@ class QueueManager:
         text = clipboard.text()
 
         if not text or not text.strip():
-            show_warning(self.gui, "Info", "Clipboard is empty.")
+            show_warning(self.gui, "안내", "클립보드가 비어 있습니다.")
             return
 
         urls = URL_PATTERN.findall(text)
         if not urls:
-            show_warning(self.gui, "Info", "No valid URL found in clipboard.")
+            show_warning(self.gui, "안내", "클립보드에서 유효한 링크를 찾지 못했습니다.")
             return
 
-        self._enqueue_urls(text, "Clipboard")
+        self._enqueue_urls(text, "클립보드")
 
     # ----------------------- logging -----------------------
     def add_log(self, message: str, level: str = "info"):

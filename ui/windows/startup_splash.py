@@ -164,7 +164,7 @@ class StartupSplash(QWidget):
         layout.addWidget(title)
 
         # Subtitle
-        subtitle = QLabel("Shopping Shorts Maker")
+        subtitle = QLabel("쇼핑 숏폼 메이커")
         subtitle.setFont(QFont("Pretendard", 10))
         subtitle.setStyleSheet(f"""
             color: {self.COLORS['secondary']};

@@ -151,7 +151,7 @@ class ApiWorker(QThread):
             elif self.method == "DELETE":
                 resp = requests.delete(self.url, headers=self.headers, timeout=API_TIMEOUT)
             else:
-                self.error.emit(f"Unknown method: {self.method}")
+                self.error.emit(f"지원하지 않는 요청 방식입니다: {self.method}")
                 return
 
             logger.info("[Admin API] Response %s: %s", resp.status_code, resp.text[:400])
@@ -165,7 +165,7 @@ class ApiWorker(QThread):
             elif resp.status_code == 204:
                 self.data_ready.emit({"success": True})
             else:
-                self.error.emit(f"Error {resp.status_code}: {resp.text}")
+                self.error.emit(f"오류 {resp.status_code}: {resp.text}")
         except Exception as e:
             logger.exception("[Admin API] request failed")
             self.error.emit(str(e))
@@ -331,13 +331,13 @@ class AdminDashboard(QMainWindow):
         start_x = 40
 
         items = [
-            ("Pending Requests", get_color("warning"), "pending_label"),
-            ("Approved Requests", get_color("success"), "approved_label"),
-            ("Rejected Requests", get_color("error"), "rejected_label"),
-            ("Total Users", get_color("primary"), "users_label"),
-            ("Online Users", get_color("success"), "online_label"),
-            ("Active Subs", get_color("secondary"), "active_sub_label"),
-            ("Total Works", get_color("info"), "total_work_used_label"),
+            ("대기 요청", get_color("warning"), "pending_label"),
+            ("승인 요청", get_color("success"), "approved_label"),
+            ("거부 요청", get_color("error"), "rejected_label"),
+            ("전체 사용자", get_color("primary"), "users_label"),
+            ("접속 사용자", get_color("success"), "online_label"),
+            ("활성 구독", get_color("secondary"), "active_sub_label"),
+            ("총 작업 수", get_color("info"), "total_work_used_label"),
         ]
         card_count = len(items)
         card_w = (total_w - (gap * (card_count - 1))) // card_count
@@ -496,7 +496,7 @@ class AdminDashboard(QMainWindow):
         self.users_table.setColumnCount(16)  # 컬럼 수 변경 (버전 추가)
         self.users_table.setHorizontalHeaderLabels(
             [
-                "ID",
+                "번호",
                 "이름",
                 "아이디",
                 "비밀번호",
@@ -507,7 +507,7 @@ class AdminDashboard(QMainWindow):
                 "무료 횟수",
                 "로그인",
                 "마지막 로그인",
-                "IP",
+                "아이피",
                 "접속",
                 "현재작업",
                 "버전",
@@ -525,7 +525,7 @@ class AdminDashboard(QMainWindow):
         self.subscriptions_table.setGeometry(table_x, table_y, table_w, table_h)
         self.subscriptions_table.setColumnCount(7)
         self.subscriptions_table.setHorizontalHeaderLabels(
-            ["ID", "사용자", "상태", "요청작업", "메시지", "요청일시", "관리"]
+            ["번호", "사용자", "상태", "요청작업", "메시지", "요청일시", "관리"]
         )
         self._style_table(
             # Column widths adjusted to prevent Action column overflow
@@ -586,7 +586,7 @@ class AdminDashboard(QMainWindow):
     def _load_data(self):
         """데이터 로드 (회원가입 요청 제거 - 자동 승인됨)"""
         if not self.admin_api_key:
-            self.connection_label.setText("Admin key missing")
+            self.connection_label.setText("관리자 키가 없습니다")
             self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
             return
 
@@ -624,7 +624,7 @@ class AdminDashboard(QMainWindow):
         items = data.get("users", [])
         total_count = data.get("total", len(items))
         self.users_table.setRowCount(len(items))
-        self.connection_label.setText("Connected")
+        self.connection_label.setText("연결됨")
         self.connection_label.setStyleSheet(f"color: {get_color('success')};")
 
         online_count = 0
@@ -652,9 +652,9 @@ class AdminDashboard(QMainWindow):
             # 6: Type
             utype = user.get("user_type", "trial")
             utype_text = {
-                "trial": "Trial",
-                "subscriber": "Subscriber",
-                "admin": "Admin",
+                "trial": "체험판",
+                "subscriber": "구독자",
+                "admin": "관리자",
             }.get(utype, utype)
             utype_color = {
                 "trial": get_color("text_muted"),
@@ -665,7 +665,7 @@ class AdminDashboard(QMainWindow):
 
             # 7: Subscription Expires
             expires_utc = user.get("subscription_expires_at")
-            expires_str = self._convert_to_kst(expires_utc) if expires_utc else "Trial"
+            expires_str = self._convert_to_kst(expires_utc) if expires_utc else "체험판"
 
             color = get_color("text_muted") if not expires_utc else get_color("text_primary")
             if expires_utc:
@@ -698,7 +698,7 @@ class AdminDashboard(QMainWindow):
 
             fallback_total_work_used += work_used
             if work_count == -1:
-                work_str = f"INF | {work_used}"
+                work_str = f"무제한 | {work_used}"
                 color = get_color("success")
             else:
                 remaining = max(0, work_count - work_used)
@@ -725,7 +725,7 @@ class AdminDashboard(QMainWindow):
                 self.users_table,
                 row,
                 12,
-                "ON" if is_online else "OFF",
+                "온라인" if is_online else "오프라인",
                 get_color("success") if is_online else get_color("text_muted"),
             )
 
@@ -1211,6 +1211,12 @@ class AdminDashboard(QMainWindow):
         
         # 정보 표시
         y_pos = 70
+        raw_user_type = (data.get("user_type") or "trial").strip().lower()
+        user_type_text = {
+            "trial": "체험판",
+            "subscriber": "구독자",
+            "admin": "관리자",
+        }.get(raw_user_type, raw_user_type)
         items = [
             ("실제 이름:", data.get("name") or "-"),
             ("이메일 주소:", data.get("email") or "-"),
@@ -1221,7 +1227,7 @@ class AdminDashboard(QMainWindow):
             ("사용한 작업:", str(work_used)),
             ("남은 작업:", str(remaining) if work_count != -1 else "무제한"),
             ("구독 만료:", self._convert_to_kst(data.get("subscription_expires_at"))),
-            ("사용자 유형:", data.get("user_type", "trial")),
+            ("사용자 유형:", user_type_text),
             ("현재 작업:", data.get("current_task") or "-"),
         ]
         
@@ -1361,6 +1367,103 @@ class AdminDashboard(QMainWindow):
 # Dialog classes have been extracted to ui/admin_dialogs.py
 
 
+
+
+    def _show_login_history(self, user_id, username):
+        """로그인 이력 보기"""
+        dialog = LoginHistoryDialog(
+            username, user_id, self.api_base_url, self._get_headers(), self
+        )
+        dialog.exec()
+
+    def _delete_user(self, user_id, username):
+        """사용자 삭제"""
+        logger.info("[Admin UI] Delete user clicked | user_id=%s username=%s", user_id, username)
+        if not _styled_question_box(
+            self,
+            "사용자 삭제",
+            f"'{username}' 사용자를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
+        ):
+            return
+
+        url = f"{self.api_base_url}/user/admin/users/{user_id}"
+        worker = ApiWorker("DELETE", url, self._get_headers())
+        worker.data_ready.connect(lambda d: self._on_action_done("삭제", d))
+        worker.error.connect(lambda e: self._on_action_error("삭제", e))
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
+        self.workers.append(worker)
+        worker.start()
+
+    def _on_action_error(self, action, error):
+        """작업 실패 시 에러 메시지 표시"""
+        self._on_error(error)
+        msg = _styled_msg_box(self, "오류", f"{action} 실패: {error}", "error")
+        msg.exec()
+        self._load_data()
+
+    def _on_action_done(self, action, data):
+        if data.get("success"):
+            msg = _styled_msg_box(
+                self, "완료", f"{action} 처리가 완료되었습니다.", "info"
+            )
+            msg.exec()
+            self._load_data()
+        else:
+            msg = _styled_msg_box(
+                self,
+                "오류",
+                data.get("message", "처리 중 오류가 발생했습니다."),
+                "warning",
+            )
+            msg.exec()
+
+    def _on_error(self, error):
+        self.connection_label.setText("연결 오류")
+        self.connection_label.setStyleSheet(f"color: {get_color('error')};")
+        logger.error("[Admin API] Error: %s", error)
+        if "429" in str(error):
+            self._handle_rate_limit(error)
+
+    def _handle_rate_limit(self, error_text: str):
+        """429 발생 시 Retry-After 헤더 기반 자동 재시도
+
+        In production, the server should send a Retry-After header that could be parsed here.
+        The Retry-After header can specify seconds (numeric) or an HTTP-date (RFC 7231).
+
+        Example:
+            - Retry-After: 120 (retry after 120 seconds)
+            - Retry-After: Wed, 21 Oct 2025 07:28:00 GMT (retry at specific time)
+        """
+        if self._rate_limited:
+            return
+
+        self._rate_limited = True
+        self.connection_label.setText("요청 제한 - 잠시 후 자동 재시도")
+        self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
+
+        if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
+            self.refresh_timer.stop()
+
+        # Default: 5 minutes (300 seconds = 300000 ms)
+        # TODO: Parse Retry-After header from response if available
+        # retry_delay_seconds = int(response_headers.get('Retry-After', '300'))
+        retry_delay_ms = RETRY_DELAY_MS
+
+        logger.warning("[Admin UI] Rate limit triggered. Pausing for %d seconds. Detail: %s", retry_delay_ms // 1000, error_text)
+        QTimer.singleShot(retry_delay_ms, self._resume_after_rate_limit)
+
+    def _resume_after_rate_limit(self):
+        self._rate_limited = False
+        self.connection_label.setText("재시도 중...")
+        self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
+        if hasattr(self, "refresh_timer"):
+            self.refresh_timer.start(REFRESH_INTERVAL_MS)
+        self._load_data()
+
+
+# Dialog classes have been extracted to ui/admin_dialogs.py
+
+
 if __name__ == "__main__":
     import sys
     from PyQt6.QtWidgets import QApplication
@@ -1375,14 +1478,29 @@ if __name__ == "__main__":
     # Get configuration from env or use defaults
     API_URL = os.getenv("API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app")
     API_KEY = os.getenv("SSMAKER_ADMIN_KEY") or os.getenv("ADMIN_API_KEY")
-    if not API_KEY:
-        logger.warning("[Admin UI] No admin key in env. Dashboard will open in limited mode.")
 
     app = QApplication(sys.argv)
     
     # Set default font
     font = QFont(FONT_FAMILY, ds.typography.size_sm // 2)
     app.setFont(font)
+
+    if not API_KEY:
+        # Auto-connect without login (User request)
+        API_KEY = "no-login-required"
+        logger.info("[Admin UI] Auto-login enabled via dummy key")
+        
+        # from PyQt6.QtWidgets import QInputDialog, QLineEdit
+        # logger.warning("[Admin UI] No admin key in env. Asking user.")
+        # key, ok = QInputDialog.getText(None, "Authentication Required", 
+        #                                "Admin API Key가 설정되지 않았습니다.\n키를 입력해주세요:", 
+        #                                QLineEdit.EchoMode.Password)
+        # if ok and key:
+        #     API_KEY = key.strip()
+        #     # Remember key for this session (or potentially save to file)
+        #     os.environ["SSMAKER_ADMIN_KEY"] = API_KEY
+        # else:
+        #     logger.warning("[Admin UI] User cancelled key input")
 
     window = AdminDashboard(API_URL, API_KEY)
     window.show()

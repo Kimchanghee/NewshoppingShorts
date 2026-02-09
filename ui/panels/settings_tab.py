@@ -405,7 +405,7 @@ class SettingsTab(QWidget, ThemedMixin):
         update_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
         info_section.content_layout.addWidget(update_label)
 
-        dev_label = QLabel("개발: Shopping Shorts Team")
+        dev_label = QLabel("개발: 쇼핑 숏폼 팀")
         dev_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
         info_section.content_layout.addWidget(dev_label)
 
@@ -815,7 +815,7 @@ class SettingsTab(QWidget, ThemedMixin):
                     success = yt_manager.connect_channel()
                     if success:
                         channel_info = yt_manager.get_channel_info()
-                        channel_name = channel_info.get("title", "YouTube 채널")
+                        channel_name = channel_info.get("title", "유튜브 채널")
                         channel_id = channel_info.get("id", "")
 
                         # Save to settings
@@ -833,7 +833,7 @@ class SettingsTab(QWidget, ThemedMixin):
                             self.gui.state.youtube_connected = True
                             self.gui.state.youtube_channel_info = channel_info
 
-                        show_info(self, "연결 성공", f"YouTube 채널 '{channel_name}'이(가) 연결되었습니다.")
+                        show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
                         return
 
             # Fallback: Show manual connection dialog
@@ -841,7 +841,7 @@ class SettingsTab(QWidget, ThemedMixin):
 
         except Exception as e:
             logger.error(f"[Settings] YouTube 연결 실패: {e}")
-            show_error(self, "연결 실패", f"YouTube 채널 연결에 실패했습니다.\n\n{e}")
+            show_error(self, "연결 실패", f"유튜브 채널 연결에 실패했습니다.\n\n{e}")
 
     def _show_youtube_oauth_dialog(self):
         """Show YouTube OAuth connection dialog"""
@@ -849,15 +849,15 @@ class SettingsTab(QWidget, ThemedMixin):
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QLabel, QLineEdit, QPushButton, QHBoxLayout
 
         dialog = QDialog(self)
-        dialog.setWindowTitle("YouTube 채널 연결")
+        dialog.setWindowTitle("유튜브 채널 연결")
         dialog.setFixedSize(450, 200)
 
         layout = QVBoxLayout(dialog)
         layout.setSpacing(12)
 
         # Instructions
-        inst = QLabel("YouTube Data API를 사용하려면 OAuth 인증이 필요합니다.\n\n"
-                      "1. Google Cloud Console에서 OAuth 클라이언트 ID를 생성하세요.\n"
+        inst = QLabel("유튜브 데이터 API를 사용하려면 OAuth 인증이 필요합니다.\n\n"
+                      "1. 구글 클라우드 콘솔에서 OAuth 클라이언트 ID를 생성하세요.\n"
                       "2. client_secrets.json 파일을 앱 폴더에 저장하세요.\n"
                       "3. 아래 버튼을 클릭하여 인증을 시작하세요.")
         inst.setWordWrap(True)
@@ -885,7 +885,7 @@ class SettingsTab(QWidget, ThemedMixin):
                 self.gui.state.youtube_connected = True
                 self.gui.state.youtube_channel_info = {"name": channel_name}
             dialog.accept()
-            show_info(self, "연결 성공", f"YouTube 채널 '{channel_name}'이(가) 연결되었습니다.")
+            show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
 
         connect_btn.clicked.connect(do_connect)
         btn_layout.addStretch()
@@ -902,7 +902,7 @@ class SettingsTab(QWidget, ThemedMixin):
         """Disconnect YouTube channel"""
         from ui.components.custom_dialog import show_question, show_info
 
-        if not show_question(self, "연결 해제", "YouTube 채널 연결을 해제하시겠습니까?\n자동 업로드가 중지됩니다."):
+        if not show_question(self, "연결 해제", "유튜브 채널 연결을 해제하시겠습니까?\n자동 업로드가 중지됩니다."):
             return
 
         # Clear settings
@@ -925,7 +925,7 @@ class SettingsTab(QWidget, ThemedMixin):
             except Exception:
                 pass
 
-        show_info(self, "연결 해제", "YouTube 채널 연결이 해제되었습니다.")
+        show_info(self, "연결 해제", "유튜브 채널 연결이 해제되었습니다.")
 
     def _apply_theme(self):
         c = self.ds.colors
