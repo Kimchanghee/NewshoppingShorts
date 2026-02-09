@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 Auto Updater Module
-자동 업데이트 모듈
+?먮룞 ?낅뜲?댄듃 紐⑤뱢
 
-사용자가 프로그램 실행 시 서버에서 최신 버전을 확인하고,
-업데이트가 있으면 알림 후 다운로드합니다.
+?ъ슜?먭? ?꾨줈洹몃옩 ?ㅽ뻾 ???쒕쾭?먯꽌 理쒖떊 踰꾩쟾???뺤씤?섍퀬,
+?낅뜲?댄듃媛 ?덉쑝硫??뚮┝ ???ㅼ슫濡쒕뱶?⑸땲??
 """
 
 import os
@@ -24,10 +24,10 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# 현재 앱 버전 (빌드 시 이 값을 업데이트)
+# ?꾩옱 ??踰꾩쟾 (鍮뚮뱶 ????媛믪쓣 ?낅뜲?댄듃)
 CURRENT_VERSION = "1.3.21"
 
-# 버전 확인 API 엔드포인트
+# 踰꾩쟾 ?뺤씤 API ?붾뱶?ъ씤??
 UPDATE_CHECK_URL = os.getenv(
     "UPDATE_CHECK_URL",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app/app/version"
@@ -36,12 +36,11 @@ UPDATE_CHECK_URL = os.getenv(
 
 def get_current_version() -> str:
     """
-    현재 앱 버전 반환.
+    ?꾩옱 ??踰꾩쟾 諛섑솚.
     
     Returns:
-        현재 버전 문자열
-    """
-    # 버전 파일이 있으면 읽음
+        ?꾩옱 踰꾩쟾 臾몄옄??    """
+    # 踰꾩쟾 ?뚯씪???덉쑝硫??쎌쓬
     version_file = get_version_file_path()
     if version_file and version_file.exists():
         try:
@@ -56,45 +55,45 @@ def get_current_version() -> str:
 
 def get_version_file_path() -> Optional[Path]:
     """
-    버전 파일 경로 반환.
+    踰꾩쟾 ?뚯씪 寃쎈줈 諛섑솚.
 
-    PyInstaller --onefile 모드에서는:
-    1. EXE 옆 version.json 우선 (업데이트 시 교체 가능)
-    2. _MEIPASS 번들 내 version.json 폴백 (초기 설치 시)
+    PyInstaller --onefile 紐⑤뱶?먯꽌??
+    1. EXE ??version.json ?곗꽑 (?낅뜲?댄듃 ??援먯껜 媛??
+    2. _MEIPASS 踰덈뱾 ??version.json ?대갚 (珥덇린 ?ㅼ튂 ??
 
     Returns:
-        버전 파일 경로 또는 None
+        踰꾩쟾 ?뚯씪 寃쎈줈 ?먮뒗 None
     """
     if getattr(sys, 'frozen', False):
-        # 1순위: EXE 옆 (업데이트 시 새 버전 파일이 여기에 놓임)
+        # 1?쒖쐞: EXE ??(?낅뜲?댄듃 ????踰꾩쟾 ?뚯씪???ш린???볦엫)
         exe_dir = Path(sys.executable).parent
         exe_version = exe_dir / "version.json"
         if exe_version.exists():
             return exe_version
 
-        # 2순위: _MEIPASS 번들 내 (--onefile 초기 실행 시)
+        # 2?쒖쐞: _MEIPASS 踰덈뱾 ??(--onefile 珥덇린 ?ㅽ뻾 ??
         meipass = getattr(sys, '_MEIPASS', None)
         if meipass:
             bundled_version = Path(meipass) / "version.json"
             if bundled_version.exists():
                 return bundled_version
 
-        return exe_version  # 없어도 경로는 반환 (get_current_version에서 fallback)
+        return exe_version  # ?놁뼱??寃쎈줈??諛섑솚 (get_current_version?먯꽌 fallback)
     else:
-        # 개발 환경
+        # 媛쒕컻 ?섍꼍
         base_path = Path(__file__).parent.parent
         return base_path / "version.json"
 
 
 def parse_version(version_str: str) -> Tuple[int, int, int]:
     """
-    버전 문자열을 튜플로 파싱.
+    踰꾩쟾 臾몄옄?댁쓣 ?쒗뵆濡??뚯떛.
     
     Args:
-        version_str: 버전 문자열 (예: "1.0.0")
+        version_str: 踰꾩쟾 臾몄옄??(?? "1.0.0")
     
     Returns:
-        (major, minor, patch) 튜플
+        (major, minor, patch) ?쒗뵆
     """
     try:
         parts = version_str.strip().split('.')
@@ -109,16 +108,16 @@ def parse_version(version_str: str) -> Tuple[int, int, int]:
 
 def compare_versions(current: str, latest: str) -> int:
     """
-    두 버전을 비교.
+    ??踰꾩쟾??鍮꾧탳.
     
     Args:
-        current: 현재 버전
-        latest: 최신 버전
+        current: ?꾩옱 踰꾩쟾
+        latest: 理쒖떊 踰꾩쟾
     
     Returns:
-        -1: current < latest (업데이트 필요)
-         0: current == latest (동일)
-         1: current > latest (현재가 더 최신)
+        -1: current < latest (?낅뜲?댄듃 ?꾩슂)
+         0: current == latest (?숈씪)
+         1: current > latest (?꾩옱媛 ??理쒖떊)
     """
     current_tuple = parse_version(current)
     latest_tuple = parse_version(latest)
@@ -133,7 +132,7 @@ def compare_versions(current: str, latest: str) -> int:
 
 class UpdateChecker:
     """
-    자동 업데이트 확인 및 다운로드 클래스.
+    ?먮룞 ?낅뜲?댄듃 ?뺤씤 諛??ㅼ슫濡쒕뱶 ?대옒??
     """
     
     def __init__(
@@ -142,11 +141,11 @@ class UpdateChecker:
         timeout: int = 10
     ):
         """
-        초기화.
+        珥덇린??
         
         Args:
-            check_url: 버전 확인 API URL
-            timeout: 요청 타임아웃 (초)
+            check_url: 踰꾩쟾 ?뺤씤 API URL
+            timeout: ?붿껌 ??꾩븘??(珥?
         """
         self.check_url = check_url
         self.timeout = timeout
@@ -155,10 +154,10 @@ class UpdateChecker:
         
     def check_for_updates(self) -> Dict[str, Any]:
         """
-        서버에서 업데이트 확인.
+        ?쒕쾭?먯꽌 ?낅뜲?댄듃 ?뺤씤.
         
         Returns:
-            업데이트 정보 딕셔너리:
+            ?낅뜲?댄듃 ?뺣낫 ?뺤뀛?덈━:
             {
                 "update_available": bool,
                 "current_version": str,
@@ -198,11 +197,18 @@ class UpdateChecker:
                 result["is_mandatory"] = data.get("is_mandatory", False)
                 result["file_hash"] = data.get("file_hash")  # SHA256 hash for integrity verification
                 
-                # 버전 비교
+                # 踰꾩쟾 鍮꾧탳
                 comparison = compare_versions(self.current_version, latest_version)
                 if comparison < 0:
-                    result["update_available"] = True
-                    logger.info(f"Update available: {self.current_version} -> {latest_version}")
+                    if not result["download_url"]:
+                        result["error"] = "Missing download_url in update metadata"
+                        logger.error("Update metadata missing download_url")
+                    elif not result["file_hash"]:
+                        result["error"] = "Missing file_hash in update metadata"
+                        logger.error("Update metadata missing file_hash; refusing unsafe update")
+                    else:
+                        result["update_available"] = True
+                        logger.info(f"Update available: {self.current_version} -> {latest_version}")
                 else:
                     logger.info(f"No update needed. Current: {self.current_version}, Latest: {latest_version}")
             else:
@@ -210,16 +216,16 @@ class UpdateChecker:
                 logger.warning(f"Update check failed: HTTP {response.status_code}")
                 
         except requests.exceptions.Timeout:
-            result["error"] = "요청 시간이 초과되었습니다."
+            result["error"] = "?붿껌 ?쒓컙??珥덇낵?섏뿀?듬땲??"
             logger.warning("Update check timeout")
         except requests.exceptions.ConnectionError:
-            result["error"] = "서버에 연결할 수 없습니다."
+            result["error"] = "?쒕쾭???곌껐?????놁뒿?덈떎."
             logger.warning("Update check connection error")
         except json.JSONDecodeError:
-            result["error"] = "서버 응답을 파싱할 수 없습니다."
+            result["error"] = "?쒕쾭 ?묐떟???뚯떛?????놁뒿?덈떎."
             logger.warning("Update check JSON parse error")
         except Exception as e:
-            result["error"] = f"알 수 없는 오류: {str(e)[:50]}"
+            result["error"] = f"?????녿뒗 ?ㅻ쪟: {str(e)[:50]}"
             logger.exception(f"Update check error: {e}")
         
         self._update_info = result
@@ -231,14 +237,14 @@ class UpdateChecker:
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> Optional[Path]:
         """
-        업데이트 파일 다운로드.
+        ?낅뜲?댄듃 ?뚯씪 ?ㅼ슫濡쒕뱶.
         
         Args:
-            download_url: 다운로드 URL
-            progress_callback: 진행률 콜백 (downloaded_bytes, total_bytes)
+            download_url: ?ㅼ슫濡쒕뱶 URL
+            progress_callback: 吏꾪뻾瑜?肄쒕갚 (downloaded_bytes, total_bytes)
         
         Returns:
-            다운로드된 파일 경로 또는 None
+            ?ㅼ슫濡쒕뱶???뚯씪 寃쎈줈 ?먮뒗 None
         """
         if not download_url:
             logger.error("Download URL is empty")
@@ -247,18 +253,18 @@ class UpdateChecker:
         try:
             logger.info(f"Downloading update from: {download_url}")
             
-            # 임시 디렉토리에 다운로드
+            # ?꾩떆 ?붾젆?좊━???ㅼ슫濡쒕뱶
             temp_dir = Path(tempfile.gettempdir()) / "ssmaker_update"
             temp_dir.mkdir(parents=True, exist_ok=True)
             
-            # 파일명 추출
+            # ?뚯씪紐?異붿텧
             filename = download_url.split("/")[-1].split("?")[0]
             if not filename.endswith((".exe", ".zip", ".msi")):
                 filename = "ssmaker_update.exe"
             
             download_path = temp_dir / filename
             
-            # 스트리밍 다운로드
+            # ?ㅽ듃由щ컢 ?ㅼ슫濡쒕뱶
             response = requests.get(
                 download_url,
                 stream=True,
@@ -294,7 +300,9 @@ class UpdateChecker:
                     return None
                 logger.info("File integrity verified (SHA256)")
             else:
-                logger.warning("No file_hash provided by server - skipping integrity check")
+                logger.error("No file_hash provided by server - refusing to install update")
+                download_path.unlink(missing_ok=True)
+                return None
 
             return download_path
             
@@ -304,13 +312,13 @@ class UpdateChecker:
     
     def install_update(self, installer_path: Path) -> bool:
         """
-        다운로드된 업데이트 설치.
+        ?ㅼ슫濡쒕뱶???낅뜲?댄듃 ?ㅼ튂.
         
         Args:
-            installer_path: 설치 파일 경로
+            installer_path: ?ㅼ튂 ?뚯씪 寃쎈줈
         
         Returns:
-            성공 여부
+            ?깃났 ?щ?
         """
         if not installer_path or not installer_path.exists():
             logger.error("Installer file not found")
@@ -319,9 +327,9 @@ class UpdateChecker:
         try:
             logger.info(f"Installing update: {installer_path}")
             
-            # Windows: 설치 프로그램 실행
+            # Windows: ?ㅼ튂 ?꾨줈洹몃옩 ?ㅽ뻾
             if sys.platform == "win32":
-                # 현재 프로그램 종료 후 설치 프로그램 실행
+                # ?꾩옱 ?꾨줈洹몃옩 醫낅즺 ???ㅼ튂 ?꾨줈洹몃옩 ?ㅽ뻾
                 subprocess.Popen(
                     [str(installer_path)],
                     creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
@@ -338,8 +346,8 @@ class UpdateChecker:
 
 class UpdateCheckerAsync:
     """
-    비동기 업데이트 확인 클래스.
-    백그라운드에서 업데이트를 확인합니다.
+    鍮꾨룞湲??낅뜲?댄듃 ?뺤씤 ?대옒??
+    諛깃렇?쇱슫?쒖뿉???낅뜲?댄듃瑜??뺤씤?⑸땲??
     """
     
     def __init__(self):
@@ -353,40 +361,40 @@ class UpdateCheckerAsync:
         callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> None:
         """
-        비동기로 업데이트 확인.
+        鍮꾨룞湲곕줈 ?낅뜲?댄듃 ?뺤씤.
         
         Args:
-            callback: 완료 후 호출될 콜백 함수
+            callback: ?꾨즺 ???몄텧??肄쒕갚 ?⑥닔
         """
         self._callback = callback
         self._thread = threading.Thread(target=self._check_worker, daemon=True)
         self._thread.start()
     
     def _check_worker(self):
-        """백그라운드 워커."""
+        """諛깃렇?쇱슫???뚯빱."""
         self._result = self._checker.check_for_updates()
         if self._callback:
             self._callback(self._result)
     
     def get_result(self) -> Optional[Dict[str, Any]]:
-        """결과 반환."""
+        """寃곌낵 諛섑솚."""
         return self._result
     
     def is_checking(self) -> bool:
-        """확인 중 여부."""
+        """?뺤씤 以??щ?."""
         return self._thread is not None and self._thread.is_alive()
 
 
-# 싱글톤 인스턴스
+# ?깃????몄뒪?댁뒪
 _update_checker: Optional[UpdateCheckerAsync] = None
 
 
 def get_update_checker() -> UpdateCheckerAsync:
     """
-    전역 업데이트 체커 인스턴스 반환.
+    ?꾩뿭 ?낅뜲?댄듃 泥댁빱 ?몄뒪?댁뒪 諛섑솚.
     
     Returns:
-        UpdateCheckerAsync 인스턴스
+        UpdateCheckerAsync ?몄뒪?댁뒪
     """
     global _update_checker
     if _update_checker is None:
@@ -398,10 +406,11 @@ def check_for_updates_on_startup(
     callback: Optional[Callable[[Dict[str, Any]], None]] = None
 ) -> None:
     """
-    시작 시 업데이트 확인 (비동기).
+    ?쒖옉 ???낅뜲?댄듃 ?뺤씤 (鍮꾨룞湲?.
     
     Args:
-        callback: 업데이트 확인 완료 후 콜백
+        callback: ?낅뜲?댄듃 ?뺤씤 ?꾨즺 ??肄쒕갚
     """
     checker = get_update_checker()
     checker.check_async(callback)
+
