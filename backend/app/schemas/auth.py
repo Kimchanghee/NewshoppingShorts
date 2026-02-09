@@ -1,5 +1,3 @@
-import hmac
-import os
 import re
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Union
@@ -9,7 +7,9 @@ class LoginRequest(BaseModel):
     """Login request with validated inputs"""
     id: str = Field(..., min_length=3, max_length=50, description="Username")
     pw: str = Field(..., min_length=4, max_length=128, description="Password")
-    key: str = Field(..., max_length=256, description="API key")
+    # Deprecated: desktop binaries cannot safely keep a shared client secret.
+    # Kept for backward compatibility with older clients that still send `key`.
+    key: str = Field("", max_length=256, description="Legacy client key (deprecated)")
     ip: str = Field(..., max_length=45, description="Client IP (legacy, server extracts actual IP)")
     force: bool = False
 
@@ -24,22 +24,8 @@ class LoginRequest(BaseModel):
     @field_validator('key')
     @classmethod
     def validate_key(cls, v: str) -> str:
-        """
-        Validate API key using constant-time comparison.
-        상수 시간 비교를 사용한 API 키 검증 (타이밍 공격 방지)
-
-        Security: Uses hmac.compare_digest() for constant-time comparison
-        to prevent timing attacks that could leak the API key.
-        """
-        expected_key = os.environ.get("SSMAKER_API_KEY", "")
-        if not expected_key:
-            raise ValueError('API key not configured on server')
-
-        # Use constant-time comparison to prevent timing attacks
-        # 타이밍 공격을 방지하기 위해 상수 시간 비교 사용
-        if not hmac.compare_digest(v.encode('utf-8'), expected_key.encode('utf-8')):
-            raise ValueError('Invalid API key')
-        return v
+        # Legacy field: only sanitize format; no shared-secret enforcement.
+        return (v or "").strip()
 
 
 class LoginResponse(BaseModel):
@@ -65,13 +51,13 @@ class CheckRequest(BaseModel):
 
 
 class UseWorkRequest(BaseModel):
-    """Work usage request - 작업 횟수 사용 요청"""
+    """Work usage request."""
     user_id: str = Field(..., min_length=1, max_length=50, description="User ID")
     token: str = Field(..., min_length=10, max_length=1024, description="JWT token")
 
 
 class UseWorkResponse(BaseModel):
-    """Work usage response - 작업 횟수 사용 응답"""
+    """Work usage response."""
     success: bool
     message: str
     remaining: Optional[int] = None  # -1 = unlimited
@@ -79,7 +65,7 @@ class UseWorkResponse(BaseModel):
 
 
 class CheckWorkResponse(BaseModel):
-    """Work count check response - 작업 횟수 확인 응답"""
+    """Work count check response."""
     success: bool
     can_work: bool
     work_count: int  # -1 = unlimited

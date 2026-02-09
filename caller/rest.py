@@ -214,12 +214,12 @@ def _create_secure_session() -> requests.Session:
     # - total=3: maximum retries
     # - backoff_factor=1.0: exponential backoff (1, 2, 4 seconds)
     # - status_forcelist: retry on common transient HTTP errors
-    # - allowed_methods: enable retries for idempotent methods
+    # - allowed_methods: retry only safe/idempotent read methods
     retry_strategy = Retry(
         total=3,
         backoff_factor=1.0,
         status_forcelist=[429, 500, 502, 503, 504],
-        allowed_methods=["GET", "POST", "PUT", "DELETE"],
+        allowed_methods=["GET", "HEAD", "OPTIONS"],
         raise_on_status=False,
         respect_retry_after_header=True,
     )
