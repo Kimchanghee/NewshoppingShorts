@@ -32,6 +32,7 @@ class TopBarPanel(QFrame):
         super().__init__()
         self.gui = gui
         self.design = design_system
+        self._automation_callback = None
         self._build()
 
     def _build(self):
@@ -158,6 +159,40 @@ class TopBarPanel(QFrame):
         self.gui.subscribe_btn.clicked.connect(self.show_subscription_panel)
         self.gui.subscribe_btn.hide()
         layout.addWidget(self.gui.subscribe_btn)
+
+        # Automation Settings Button
+        self.gui.automation_btn = QPushButton("자동화 설정")
+        self.gui.automation_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.gui.automation_btn.setFont(
+            QFont(d.typography.font_family_body, d.typography.size_2xs, QFont.Weight.Bold)
+        )
+        self.gui.automation_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.surface};
+                color: {c.text_primary};
+                padding: 6px 12px;
+                border: 1px solid {c.border_light};
+                border-radius: {d.radius.base}px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.bg_hover};
+                border-color: {c.primary};
+            }}
+        """)
+        # Default callback: use gui handler if available.
+        if hasattr(self.gui, "open_automation_settings"):
+            self._automation_callback = self.gui.open_automation_settings
+        self.gui.automation_btn.clicked.connect(self._on_automation_btn_clicked)
+        layout.addWidget(self.gui.automation_btn)
+
+    def _on_automation_btn_clicked(self):
+        """Dispatch automation button click to the registered callback."""
+        if callable(self._automation_callback):
+            self._automation_callback()
+
+    def add_automation_settings_action(self, callback):
+        """Backward-compatible API expected by main.py."""
+        self._automation_callback = callback if callable(callback) else None
 
     def show_subscription_panel(self):
         """Navigate to subscription panel."""
