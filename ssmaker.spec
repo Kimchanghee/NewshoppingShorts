@@ -30,9 +30,9 @@ packages_to_collect = [
 ]
 
 hidden_imports = [
-    'rapidocr_onnxruntime', # OCR support (RapidOCR - fallback/alternative)
-    'shapely', # Required by RapidOCR/PaddleOCR
-    'pyclipper', # Required by RapidOCR/PaddleOCR
+    # 'rapidocr_onnxruntime', # Removed due to Access Violation crash on Python 3.13
+    # 'shapely',
+    # 'pyclipper',
 ]
 datas = [
     ('resource', 'resource'),
