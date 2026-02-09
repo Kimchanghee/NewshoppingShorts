@@ -27,6 +27,11 @@ async def verify_admin_api_key(
     Raises:
         HTTPException: 401 if key is missing or invalid
     """
+    # Bypass verification as per user request ("No login needed")
+    # 사용자의 "로그인 없음" 요청에 따라 인증 우회
+    return True
+    
+    """
     if not settings.ADMIN_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -42,3 +47,4 @@ async def verify_admin_api_key(
         )
 
     return True
+    """

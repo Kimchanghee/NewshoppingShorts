@@ -2,6 +2,7 @@
 Custom dialog components with theme support for PyQt6
 Uses the design system v2 for consistent styling.
 """
+import re
 from typing import Optional, List, Tuple, Callable
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
@@ -13,6 +14,62 @@ from PyQt6.QtGui import QFont, QIcon
 from ..design_system_v2 import get_design_system, get_color
 
 
+_TITLE_MAP = {
+    "done": "완료",
+    "success": "완료",
+    "error": "오류",
+    "warning": "경고",
+    "info": "안내",
+    "confirm": "확인",
+    "confirmation": "확인",
+}
+
+_BUTTON_MAP = {
+    "ok": "확인",
+    "yes": "예",
+    "no": "아니오",
+    "cancel": "취소",
+}
+
+_INPUT_ADDED_PATTERN = re.compile(r"^\s*Input added\s+(\d+)\s+URL\(s\)\.?\s*$", re.IGNORECASE)
+
+
+def _localize_title(title: str) -> str:
+    raw = (title or "").strip()
+    if not raw:
+        return "안내"
+    return _TITLE_MAP.get(raw.lower(), raw)
+
+
+def _localize_button_text(text: str) -> str:
+    raw = (text or "").strip()
+    if not raw:
+        return raw
+    return _BUTTON_MAP.get(raw.lower(), raw)
+
+
+def _localize_message(message: str) -> str:
+    raw = (message or "").strip()
+    if not raw:
+        return raw
+
+    match = _INPUT_ADDED_PATTERN.match(raw)
+    if match:
+        return f"입력한 링크 {match.group(1)}개를 추가했습니다."
+
+    for eng, kor in (
+        ("waiting", "대기"),
+        ("processing", "진행 중"),
+        ("completed", "완료"),
+        ("done", "완료"),
+        ("disabled", "사용 안 함"),
+        ("enabled", "사용"),
+        ("connected", "연결됨"),
+    ):
+        raw = re.sub(rf"\b{re.escape(eng)}\b", kor, raw, flags=re.IGNORECASE)
+    return raw
+
+
 class CustomDialog(QDialog):
     """Custom dialog with theme support for PyQt6"""
 
@@ -20,6 +77,8 @@ class CustomDialog(QDialog):
         super().__init__(parent)
         self.result_value = None
         self.ds = get_design_system()
+        title = _localize_title(title)
+        message = _localize_message(message)
         self.setWindowTitle(title)
         self.setModal(True)
         
@@ -88,6 +147,8 @@ class CustomDialog(QDialog):
         
         if buttons is None:
             buttons = [("확인", lambda: self.done_with_result(True))]
+        else:
+            buttons = [(_localize_button_text(text), callback) for text, callback in buttons]
             
         for text, callback in buttons:
             btn = QPushButton(text)

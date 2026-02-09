@@ -451,7 +451,7 @@ exit /b 1
         import shutil
 
         if hasattr(self, "update_progress_dialog") and self.update_progress_dialog:
-            self.update_progress_dialog.set_status("Restarting app...")
+            self.update_progress_dialog.set_status("앱 재시작 중...")
 
         try:
             if getattr(sys, "frozen", False):

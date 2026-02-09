@@ -39,7 +39,7 @@ class SubscriptionRequestDialog(QDialog):
         """)
 
         # Title Bar (Custom)
-        self.title_bar = QLabel("Shopping Shorts Maker", self.main_frame)
+        self.title_bar = QLabel("쇼핑 숏폼 메이커", self.main_frame)
         self.title_bar.setGeometry(30, 30, 300, 30)
         self.title_bar.setFont(QFont(FONT_FAMILY, 14, QFont.Weight.Bold))
         self.title_bar.setStyleSheet("color: #e31639; background: transparent; border: none;")

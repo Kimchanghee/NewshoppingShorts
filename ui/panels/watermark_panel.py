@@ -202,7 +202,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
         enable_section = self._create_section("워터마크 활성화", "영상에 채널 이름 워터마크를 표시합니다.")
         enable_row = QHBoxLayout()
 
-        self.enable_btn = QPushButton("OFF")
+        self.enable_btn = QPushButton("꺼짐")
         self.enable_btn.setCheckable(True)
         self.enable_btn.setFixedSize(60, 32)
         self.enable_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -359,7 +359,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
     def _update_enable_btn_style(self, enabled):
         ds = self.ds
         if enabled:
-            self.enable_btn.setText("ON")
+            self.enable_btn.setText("켜짐")
             self.enable_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {get_color('primary')};
@@ -371,7 +371,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
                 }}
             """)
         else:
-            self.enable_btn.setText("OFF")
+            self.enable_btn.setText("꺼짐")
             self.enable_btn.setStyleSheet(f"""
                 QPushButton {{
                     background-color: {get_color('surface_variant')};

@@ -84,7 +84,7 @@ class PlatformUploadSection(QFrame):
 
         # COMING SOON badge
         if self._coming_soon:
-            badge = QLabel("COMING SOON")
+            badge = QLabel("출시 예정")
             badge.setFont(QFont(ds.typography.font_family_primary, 10, QFont.Weight.Bold))
             badge.setStyleSheet(f"""
                 background-color: {c.surface};
@@ -121,7 +121,7 @@ class YouTubeUploadSection(PlatformUploadSection):
         is_connected = self.settings.get_youtube_connected()
         super().__init__(
             platform_id="youtube",
-            platform_name="YouTube",
+            platform_name="유튜브",
             platform_icon="▶",
             platform_color="#FF0000",
             is_connected=is_connected,
@@ -140,7 +140,7 @@ class YouTubeUploadSection(PlatformUploadSection):
             msg_layout = QVBoxLayout()
             msg_layout.setSpacing(8)
 
-            msg = QLabel("YouTube 채널이 연결되지 않았습니다.")
+            msg = QLabel("유튜브 채널이 연결되지 않았습니다.")
             msg.setFont(QFont(ds.typography.font_family_primary, 12))
             msg.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
             msg_layout.addWidget(msg)
@@ -272,7 +272,7 @@ class YouTubeUploadSection(PlatformUploadSection):
             self._interval_widget = interval_widget
 
             # Daily limit info
-            limit_label = QLabel("* YouTube 정책: 24시간 내 최대 6개 영상 업로드 가능")
+            limit_label = QLabel("* 유튜브 정책: 24시간 내 최대 6개 영상 업로드 가능")
             limit_label.setFont(QFont(ds.typography.font_family_primary, 10))
             limit_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
             layout.addWidget(limit_label)
@@ -379,7 +379,7 @@ class UploadPanel(QFrame, ThemedMixin):
         # YouTube section (COMING SOON)
         youtube_section = PlatformUploadSection(
             platform_id="youtube",
-            platform_name="YouTube",
+            platform_name="유튜브",
             platform_icon="▶",
             platform_color="#FF0000",
             coming_soon=True,
@@ -390,7 +390,7 @@ class UploadPanel(QFrame, ThemedMixin):
         # TikTok section (COMING SOON)
         tiktok_section = PlatformUploadSection(
             platform_id="tiktok",
-            platform_name="TikTok",
+            platform_name="틱톡",
             platform_icon="♪",
             platform_color="#000000",
             coming_soon=True,
@@ -401,7 +401,7 @@ class UploadPanel(QFrame, ThemedMixin):
         # Instagram section (COMING SOON)
         instagram_section = PlatformUploadSection(
             platform_id="instagram",
-            platform_name="Instagram",
+            platform_name="인스타그램",
             platform_icon="📷",
             platform_color="#E1306C",
             coming_soon=True,
@@ -412,7 +412,7 @@ class UploadPanel(QFrame, ThemedMixin):
         # Threads section (COMING SOON)
         threads_section = PlatformUploadSection(
             platform_id="threads",
-            platform_name="Threads",
+            platform_name="스레드",
             platform_icon="@",
             platform_color="#000000",
             coming_soon=True,
@@ -423,7 +423,7 @@ class UploadPanel(QFrame, ThemedMixin):
         # X section (COMING SOON)
         x_section = PlatformUploadSection(
             platform_id="x",
-            platform_name="X (Twitter)",
+            platform_name="X (트위터)",
             platform_icon="𝕏",
             platform_color="#000000",
             coming_soon=True,

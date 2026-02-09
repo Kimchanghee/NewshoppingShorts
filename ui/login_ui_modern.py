@@ -133,7 +133,7 @@ class ModernLoginUi:
             border-radius: {ds.radius.full}px;
             padding: {ds.spacing.space_1}px;
         """)
-        self.logoBadge.setText("SHORTS MAKER")
+        self.logoBadge.setText("숏폼 메이커")
 
         self.titleLabel = QLabel(self.leftFrame)
         self.titleLabel.setGeometry(QtCore.QRect(0, 240, 300, 60))

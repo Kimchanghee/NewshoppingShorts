@@ -21,7 +21,7 @@ class URLContentPanel(TabContent):
         # Step Header
         header_layout = QHBoxLayout()
         
-        badge = QLabel("STEP 1")
+        badge = QLabel("1단계")
         badge.setStyleSheet(f"""
             background-color: {self.get_color("primary")};
             color: white;
@@ -31,7 +31,7 @@ class URLContentPanel(TabContent):
         """)
         header_layout.addWidget(badge)
         
-        title = QLabel("URL 입력")
+        title = QLabel("링크 입력")
         title.setStyleSheet(f"""
             color: {self.get_color("text_primary")};
             font-size: 18px;
@@ -54,11 +54,11 @@ class URLContentPanel(TabContent):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 20, 20, 20)
         
-        card_title = QLabel("TikTok / Douyin URL을 입력하세요")
+        card_title = QLabel("틱톡 / 더우인 링크를 입력하세요")
         card_title.setStyleSheet(f"color: {self.get_color('text_primary')}; font-size: 14px; font-weight: bold; border: none;")
         card_layout.addWidget(card_title)
         
-        card_subtitle = QLabel("여러 개의 URL을 한 번에 붙여넣을 수 있습니다. (최대 30개)")
+        card_subtitle = QLabel("여러 개의 링크를 한 번에 붙여넣을 수 있습니다. (최대 30개)")
         card_subtitle.setStyleSheet(f"color: {self.get_color('text_secondary')}; font-size: 13px; border: none;")
         card_layout.addWidget(card_subtitle)
         card_layout.addSpacing(12)
@@ -91,7 +91,7 @@ class URLContentPanel(TabContent):
         
         # Buttons Row
         btn_layout = QHBoxLayout()
-        self.add_btn = create_rounded_button(card, "URL 추가", self.gui.add_url_from_entry)
+        self.add_btn = create_rounded_button(card, "링크 추가", self.gui.add_url_from_entry)
         btn_layout.addWidget(self.add_btn)
         
         self.clipboard_btn = create_rounded_button(card, "클립보드에서 추가", self.gui.paste_and_extract, style="secondary")
@@ -99,7 +99,7 @@ class URLContentPanel(TabContent):
         
         btn_layout.addStretch()
         
-        self.url_count_label = QLabel("URL: 0/30")
+        self.url_count_label = QLabel("링크: 0/30")
         self.url_count_label.setStyleSheet(f"color: {self.get_color('text_secondary')}; border: none;")
         btn_layout.addWidget(self.url_count_label)
         
@@ -129,7 +129,7 @@ class URLContentPanel(TabContent):
         """)
         guide_layout.addWidget(info_icon)
         
-        guide_text = QLabel("URL 추가 후 '스타일' 단계에서 음성과 폰트를 선택하세요")
+        guide_text = QLabel("링크 추가 후 '스타일' 단계에서 음성과 폰트를 선택하세요")
         guide_text.setStyleSheet(f"color: {self.get_color('info')}; border: none;")
         guide_layout.addWidget(guide_text)
         
@@ -147,4 +147,4 @@ class URLContentPanel(TabContent):
             self.gui.sidebar_container.go_next()
 
     def update_url_count(self, count):
-        self.url_count_label.setText(f"URL: {count}/30")
+        self.url_count_label.setText(f"링크: {count}/30")

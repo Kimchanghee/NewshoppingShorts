@@ -16,31 +16,31 @@ from ui.design_system_v2 import get_design_system, get_color
 # Platform configuration
 PLATFORM_CONFIG = {
     "youtube": {
-        "name": "YouTube",
+        "name": "유튜브",
         "icon": "▶",
         "color": "#FF0000",
         "description": "구글 계정으로 로그인하여 채널을 연결합니다.",
     },
     "tiktok": {
-        "name": "TikTok",
+        "name": "틱톡",
         "icon": "♪",
         "color": "#000000",
         "description": "틱톡 계정을 연결합니다.",
     },
     "instagram": {
-        "name": "Instagram",
+        "name": "인스타그램",
         "icon": "📷",
         "color": "#E1306C",
         "description": "인스타그램 계정을 연결합니다.",
     },
     "threads": {
-        "name": "Threads",
+        "name": "스레드",
         "icon": "@",
         "color": "#000000",
         "description": "스레드 계정을 연결합니다.",
     },
     "x": {
-        "name": "X (Twitter)",
+        "name": "X (트위터)",
         "icon": "𝕏",
         "color": "#000000",
         "description": "X 계정을 연결합니다.",
@@ -140,7 +140,7 @@ class SocialAuthCard(QFrame):
 
         # Disable and gray out
         self._action_btn.setEnabled(False)
-        self._action_btn.setText("COMING SOON")
+        self._action_btn.setText("출시 예정")
         self._action_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {c.surface_variant};

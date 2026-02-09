@@ -11,7 +11,7 @@ class LoadingSplash(QDialog):
         super().__init__(parent)
         self.ds = get_design_system()
         
-        self.setWindowTitle("Loading")
+        self.setWindowTitle("로딩")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
             self.ds.spacing.space_6,
@@ -21,7 +21,7 @@ class LoadingSplash(QDialog):
         )
         layout.setSpacing(self.ds.spacing.space_4)
         
-        label = QLabel("Loading...", self)
+        label = QLabel("불러오는 중...", self)
         label.setStyleSheet(f"""
             QLabel {{
                 color: {get_color('text_primary')};
