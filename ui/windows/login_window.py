@@ -91,7 +91,8 @@ class Login(QMainWindow, Ui_LoginWindow):
         ip = self._get_local_ip()
         
         try:
-            res = rest.login(userId=user_id, userPw=user_pw, key="ssmaker", ip=ip, force=force)
+            client_key = os.getenv("SSMAKER_CLIENT_API_KEY", "").strip()
+            res = rest.login(userId=user_id, userPw=user_pw, key=client_key, ip=ip, force=force)
             if res.get("status") is True:
                 self._handle_login_success(res)
             elif res.get("status") == "EU003":
