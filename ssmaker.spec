@@ -17,7 +17,7 @@ packages_to_collect = [
     'google.genai',
     'faster_whisper',
     'ctranslate2',
-    'onnxruntime',
+    # 'onnxruntime', # Removed to fix access violation on Python 3.13
     'PIL',
     'cv2',
     'PyQt6',
@@ -99,7 +99,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'test', 'unittest', 'matplotlib'],
+    excludes=['tkinter', 'test', 'unittest', 'matplotlib', 'onnxruntime'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
