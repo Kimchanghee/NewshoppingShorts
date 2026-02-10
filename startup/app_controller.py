@@ -135,8 +135,9 @@ class AppController:
             logger.warning("Update available but no download URL provided")
             if self._update_is_mandatory:
                 QMessageBox.critical(
-                    None, "?낅뜲?댄듃 ?ㅻ쪟",
-                    "?꾩닔 ?낅뜲?댄듃瑜??ㅼ슫濡쒕뱶?????놁뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                    None,
+                    "업데이트 오류",
+                    "필수 업데이트를 다운로드할 수 없습니다.\n프로그램을 종료합니다.",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
@@ -146,8 +147,9 @@ class AppController:
             logger.error("No file_hash provided by server - refusing unsafe update")
             if self._update_is_mandatory:
                 QMessageBox.critical(
-                    None, "?낅뜲?댄듃 ?ㅻ쪟",
-                    "?꾩닔 ?낅뜲?댄듃 寃利??뺣낫(file_hash)媛 ?놁뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                    None,
+                    "업데이트 오류",
+                    "필수 업데이트 검증 정보(file_hash)가 없습니다.\n프로그램을 종료합니다.",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
@@ -234,8 +236,9 @@ class AppController:
             if self.loading_window:
                 self.loading_window.close()
             QMessageBox.critical(
-                None, "?쒖옉 ?ㅻ쪟",
-                f"??珥덇린??以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎:\n{e}",
+                None,
+                "시작 오류",
+                f"초기화 중 오류가 발생했습니다:\n{e}",
             )
 
     def launch_main_app(self) -> None:
@@ -258,7 +261,7 @@ class AppController:
             if self.loading_window:
                 self.loading_window.close()
 
-            # ?낅뜲?댄듃 ?댁뿭 ?앹뾽 ?쒖떆 (??踰꾩쟾???뚮쭔)
+            # 업데이트 내역 팝업 표시 (새 버전일 때만)
             self._show_update_notes_if_needed()
 
         except Exception as e:
@@ -266,12 +269,13 @@ class AppController:
             if self.loading_window:
                 self.loading_window.close()
             QMessageBox.critical(
-                None, "?쒖옉 ?ㅻ쪟",
-                f"硫붿씤 ?깆쓣 ?쒖옉?????놁뒿?덈떎:\n{type(e).__name__}: {e}",
+                None,
+                "시작 오류",
+                f"메인 앱을 시작할 수 없습니다:\n{type(e).__name__}: {e}",
             )
 
     def _show_update_notes_if_needed(self) -> None:
-        """?낅뜲?댄듃 ?댁뿭 ?앹뾽 ?쒖떆 (??踰꾩쟾?닿굅??由대━利??명듃媛 ?덉쓣 ??"""
+        """업데이트 내역 팝업 표시 (새 버전이고 릴리즈노트가 있을 때)."""
         if not self._pending_update_info:
             return
 
@@ -280,7 +284,7 @@ class AppController:
         version = self._pending_update_info.get("version", "")
         release_notes = self._pending_update_info.get("release_notes", "")
 
-        # ??踰꾩쟾?닿퀬 由대━利??명듃媛 ?덉쓣 ?뚮쭔 ?앹뾽 ?쒖떆
+        # 새 버전이고 릴리즈노트가 있을 때만 팝업 표시
         if is_new_version and has_notes and release_notes:
             try:
                 from ui.windows.update_dialog import UpdateNotesDialog
@@ -405,8 +409,9 @@ exit /b 1
         if not download_url:
             if self._update_is_mandatory:
                 QMessageBox.critical(
-                    None, "?ㅻ쪟",
-                    "?낅뜲?댄듃 ?뚯씪 寃쎈줈媛 ?섎せ?섏뿀?듬땲??\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                    None,
+                    "오류",
+                    "업데이트 파일 경로가 올바르지 않습니다.\n프로그램을 종료합니다.",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
@@ -427,7 +432,7 @@ exit /b 1
 
         def on_download_finished(success: bool, result: str):
             if success:
-                self.update_progress_dialog.set_status("?ㅼ튂 以鍮?以?..")
+                self.update_progress_dialog.set_status("설치 준비 중...")
                 self.update_progress_dialog.set_progress(100)
                 QtCore.QTimer.singleShot(500, lambda: self._run_updater(result))
             else:
@@ -435,8 +440,9 @@ exit /b 1
                 logger.error(f"Update verification failed: {result}")
                 if self._update_is_mandatory:
                     QMessageBox.critical(
-                        None, "?낅뜲?댄듃 ?ㅽ뙣",
-                        f"?낅뜲?댄듃 寃利??ㅽ뙣:\n{result}\n\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                        None,
+                        "업데이트 실패",
+                        f"업데이트 검증 실패:\n{result}\n\n프로그램을 종료합니다.",
                     )
                     sys.exit(1)
                 self._proceed_to_loading()
@@ -532,8 +538,9 @@ exit /b 1
             if hasattr(self, "update_progress_dialog"):
                 self.update_progress_dialog.close()
             QMessageBox.critical(
-                None, "?낅뜲?댄듃 ?ㅽ뻾 ?ㅻ쪟",
-                f"?낅뜲?댄듃 ?ㅽ뻾 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎:\n{e}",
+                None,
+                "업데이트 실행 오류",
+                f"업데이트 실행 중 오류가 발생했습니다:\n{e}",
             )
             if self._update_is_mandatory:
                 sys.exit(1)

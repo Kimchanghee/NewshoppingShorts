@@ -414,12 +414,15 @@ class URLInputPanel(QWidget):
         return f"""
             QTextEdit {{
                 background-color: {get_color('surface_variant')};
-                color: {get_color('text_primary')};
+                /* Force high-contrast input text for dark UI builds */
+                color: #FFFFFF;
                 border: 1px solid {get_color('border')};
                 border-radius: {ds.radius.base}px;
                 padding: {ds.spacing.space_2}px;
                 font-family: {ds.typography.font_family_primary};
                 font-size: {ds.typography.size_sm}px;
+                selection-background-color: {get_color('primary')};
+                selection-color: #FFFFFF;
             }}
             QTextEdit:focus {{
                 border: 2px solid {get_color('primary')};
