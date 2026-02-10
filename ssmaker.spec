@@ -27,6 +27,10 @@ packages_to_collect = [
     'requests',
     'tqdm',
     'pytesseract',  # OCR support (Tesseract)
+    # Browser automation (optional feature set but should be bundled if installed)
+    'selenium',
+    'webdriver_manager',
+    'bs4',
 ]
 
 hidden_imports = [

@@ -7,14 +7,6 @@ import os
 import time
 from typing import Optional, Dict
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-
 from utils.logging_config import get_logger
 from managers.settings_manager import get_settings_manager
 
@@ -38,6 +30,17 @@ class InpockManager:
         """Initialize Selenium WebDriver"""
         if self.driver:
             return
+
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.chrome.options import Options
+            from webdriver_manager.chrome import ChromeDriverManager
+        except Exception as e:
+            raise RuntimeError(
+                "브라우저 자동화를 사용하려면 Selenium이 필요합니다.\n"
+                "프로그램을 최신 버전으로 업데이트해도 동일하면, 관리자에게 문의해주세요."
+            ) from e
 
         chrome_options = Options()
         if headless:
