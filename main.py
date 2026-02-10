@@ -48,6 +48,9 @@ from managers.session_manager import SessionManager
 from managers.subscription_manager import SubscriptionManager
 from managers.generated_video_manager import GeneratedVideoManager
 from managers.youtube_manager import get_youtube_manager
+from managers.coupang_manager import CoupangManager
+from managers.inpock_manager import InpockManager
+from managers.sourcing_manager import SourcingManager
 from ui.theme_manager import get_theme_manager
 from ui.design_system_v2 import get_design_system
 from pathlib import Path
@@ -111,6 +114,9 @@ class VideoAnalyzerGUI(
         self._video_helpers = VideoHelpers(self)
         self._generated_video_manager = GeneratedVideoManager(self)
         self.youtube_manager = get_youtube_manager(gui=self)
+        self.coupang_manager = CoupangManager()
+        self.inpock_manager = InpockManager()
+        self.sourcing_manager = SourcingManager()
 
         # Load API keys and initialize provider
         self.api_handler.load_saved_api_keys()
@@ -154,6 +160,16 @@ class VideoAnalyzerGUI(
         # Connect signals
         self.log_signal.connect(self._on_log_signal)
         self.ui_callback_signal.connect(self._execute_ui_callback)
+
+        # Add Automation Settings Menu (Temporary placement for testing)
+        if hasattr(self, 'topbar'):
+           self.topbar.add_automation_settings_action(self.open_automation_settings)
+
+    def open_automation_settings(self):
+        """Open the Automation Settings Dialog"""
+        from ui.windows.automation_settings_dialog import AutomationSettingsDialog
+        dialog = AutomationSettingsDialog(self)
+        dialog.exec()
 
     def _init_api_key_manager(self):
         """Initialize API key manager for key rotation."""

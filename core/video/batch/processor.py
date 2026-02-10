@@ -41,6 +41,21 @@ MIX_MIN_SEGMENT_SECONDS = 2.0
 MIX_MAX_SEGMENT_SECONDS = 8.0
 
 
+def _extract_product_name(url: str) -> str:
+    """Extract product name from URL for fallback title"""
+    try:
+        # Simple extraction strategy
+        if "coupang.com" in url:
+            return "쿠팡 추천 상품"
+        elif "1688.com" in url:
+            return "1688 추천 상품"
+        elif "taobao.com" in url:
+            return "타오바오 추천 상품"
+    except Exception:
+        pass
+    return "쇼핑 추천 아이템"
+
+
 def _safe_set_url_status(app, url: str, status: str):
     """스레드 안전하게 url_status 설정"""
     lock = getattr(app, "url_status_lock", None)
@@ -1001,7 +1016,25 @@ def _process_single_video(app, url, current_number, total_urls):
             )
 
             if need_redownload:
-                downloaded_path = DouyinExtract.download_tiktok_douyin_video(url)
+                if "1688.com" in url:
+                    sourcing_mgr = getattr(app, "sourcing_manager", None)
+                    if sourcing_mgr:
+                        app.add_log(f"[다운로드] 1688 영상 추출 시도 중...")
+                        video_url = sourcing_mgr.extract_video_info(url)
+                        if video_url:
+                            temp_filename = f"1688_{int(time.time())}.mp4"
+                            temp_path = os.path.join(tempfile.gettempdir(), temp_filename)
+                            if sourcing_mgr.download_video(video_url, temp_path):
+                                downloaded_path = temp_path
+                                app.add_log(f"[다운로드] 1688 영상 다운로드 성공")
+                            else:
+                                raise Exception("1688 영상 다운로드 실패")
+                        else:
+                            raise Exception("1688 상품 페이지에서 영상을 찾을 수 없습니다.")
+                    else:
+                        raise Exception("Sourcing Manager가 초기화되지 않았습니다.")
+                else:
+                    downloaded_path = DouyinExtract.download_tiktok_douyin_video(url)
                 app._temp_downloaded_file = downloaded_path
                 _register_temp_download_files(app, [downloaded_path])
                 app.add_log(
@@ -1276,6 +1309,79 @@ def _process_single_video(app, url, current_number, total_urls):
             try:
                 app.save_generated_videos_locally(show_popup=False)
                 logger.info("[LocalSave] 음성 %d/%d 즉시 저장 완료", idx_voice, total_voices)
+
+                # ===============================================================
+                # AUTOMATION: Coupang, Inpock, YouTube Auto-Upload
+                # ===============================================================
+                try:
+                    # 1. Get the latest saved video path
+                    if hasattr(app, "generated_videos") and app.generated_videos:
+                        latest_video = app.generated_videos[-1]
+                        final_video_path = latest_video.get("saved_path")
+
+                        if final_video_path and os.path.exists(final_video_path):
+                            # Common Data
+                            product_name = _extract_product_name(url) or "쇼핑 추천 아이템"
+                            
+                            # Use analysis result for richer info if available
+                            product_info = ""
+                            if hasattr(app, "analysis_result") and isinstance(app.analysis_result, dict):
+                                product_info = app.analysis_result.get("summary") or ""
+                            if not product_info:
+                                product_info = product_name
+
+                            # SEO Generation (using YouTube Manager helpers)
+                            yt_manager = getattr(app, "youtube_manager", None)
+                            video_title = ""
+                            video_desc = ""
+                            video_tags = []
+
+                            if yt_manager:
+                                video_title = yt_manager.generate_seo_title(product_info)
+                                video_desc = yt_manager.generate_seo_description(product_info, url)
+                                video_tags = yt_manager.generate_seo_hashtags(product_info)
+                            
+                            # 2. Coupang Partners Link Generation
+                            coupang_link = ""
+                            coupang_manager = getattr(app, "coupang_manager", None)
+                            if coupang_manager and coupang_manager.is_connected():
+                                # Only try if it looks like a product URL (simple check)
+                                if "coupang.com" in url or "1688.com" in url or "taobao" in url:
+                                    # For 1688/Taobao, we might need a matching Coupang product.
+                                    # For now, if the input URL is Coupang, we generate a deep link.
+                                    # If it's 1688, we might not have a direct mapping yet unless sourcing manager found one.
+                                    # Assuming direct coupang link generation for now if URL is compatible.
+                                    if "coupang.com" in url:
+                                        coupang_link = coupang_manager.generate_deep_link(url)
+                                        if coupang_link:
+                                            logger.info(f"[Automation] Coupang link generated: {coupang_link}")
+                                            video_desc += f"\n\n🚀 쿠팡 최저가 구매: {coupang_link}"
+                                            
+                                            # Update Inpock if link generated
+                                            inpock_mgr = getattr(app, "inpock_manager", None)
+                                            if inpock_mgr and inpock_mgr.is_connected():
+                                                success = inpock_mgr.add_link(
+                                                    title=product_name[:30], 
+                                                    url=coupang_link
+                                                )
+                                                if success:
+                                                    logger.info("[Automation] Added to Inpock Link")
+                                                    video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..." # Placeholder or actual profile URL if known
+
+                            # 3. Add to YouTube Upload Queue
+                            if yt_manager and yt_manager.get_upload_settings().enabled:
+                                yt_manager.add_to_upload_queue(
+                                    video_path=final_video_path,
+                                    title=video_title,
+                                    description=video_desc,
+                                    tags=video_tags,
+                                    source_url=url
+                                )
+                                logger.info("[Automation] Added to YouTube upload queue")
+
+                except Exception as auto_err:
+                    logger.warning(f"[Automation] 자동화 단계 실패 (영상은 저장됨): {auto_err}")
+
             except Exception as _save_err:
                 logger.warning("[LocalSave] 즉시 저장 실패 (배치 종료 시 재시도): %s", _save_err)
 

@@ -42,6 +42,13 @@ class SettingsManager:
         "instagram_connected": False,
         "threads_connected": False,
         "x_connected": False,
+        # Automation Settings
+        "coupang_access_key": "",
+        "coupang_secret_key": "",
+        "coupang_access_key": "",
+        "coupang_secret_key": "",
+        "cookies_inpock": {},  # Dict to store Inpock Link cookies
+        "cookies_1688": {},  # Dict to store 1688 cookies
     }
 
     def __init__(self, settings_file: str = "ui_preferences.json"):
@@ -429,7 +436,46 @@ class SettingsManager:
             "instagram_connected": self._settings.get("instagram_connected", False),
             "threads_connected": self._settings.get("threads_connected", False),
             "x_connected": self._settings.get("x_connected", False),
+            "coupang_connected": bool(self._settings.get("coupang_access_key") and self._settings.get("coupang_secret_key")),
+            "coupang_connected": bool(self._settings.get("coupang_access_key") and self._settings.get("coupang_secret_key")),
+            "inpock_connected": bool(self._settings.get("cookies_inpock")),
         }
+
+    # ============ Automation Settings ============
+
+    def get_coupang_keys(self) -> Dict[str, str]:
+        """Get Coupang Partners API keys"""
+        return {
+            "access_key": self._settings.get("coupang_access_key", ""),
+            "secret_key": self._settings.get("coupang_secret_key", ""),
+        }
+
+    def set_coupang_keys(self, access_key: str, secret_key: str) -> bool:
+        """Save Coupang Partners API keys"""
+        with self._lock:
+            self._settings["coupang_access_key"] = access_key
+            self._settings["coupang_secret_key"] = secret_key
+        return self._save_settings()
+
+    def get_inpock_cookies(self) -> Dict[str, str]:
+        """Get Inpock Link cookies"""
+        return self._settings.get("cookies_inpock", {})
+
+    def set_inpock_cookies(self, cookies: Dict[str, str]) -> bool:
+        """Save Inpock Link cookies"""
+        with self._lock:
+            self._settings["cookies_inpock"] = cookies
+        return self._save_settings()
+
+    def get_1688_cookies(self) -> Dict[str, str]:
+        """Get 1688 cookies"""
+        return self._settings.get("cookies_1688", {})
+
+    def set_1688_cookies(self, cookies: Dict[str, str]) -> bool:
+        """Save 1688 cookies for selenium"""
+        with self._lock:
+            self._settings["cookies_1688"] = cookies
+        return self._save_settings()
 
     # ============ Bulk Operations ============
 

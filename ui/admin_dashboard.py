@@ -196,8 +196,6 @@ class AdminDashboard(QMainWindow):
             logger.error("[Admin UI] ADMIN_API_KEY not set - dashboard will not work")
 
         self.workers = []
-        self.current_tab = 0  # 0: 사용자 관리, 1: 구독 요청
-        self.last_update_time = None
         self._rate_limited = False
         self._admin_stats_loaded = False
         logger.info("[Admin UI] Dashboard start | api_base=%s key_set=%s", self.api_base_url, bool(self.admin_api_key))
@@ -313,13 +311,13 @@ class AdminDashboard(QMainWindow):
         # 통계 카드들 (Y: 75)
         self._create_stat_cards()
 
-        # 탭 버튼들 (Y: 180)
-        self._create_tab_buttons()
+        # 탭 버튼들 (제거됨 - 단일 뷰)
+        # self._create_tab_buttons()
 
-        # 필터/검색 영역 (Y: 240)
+        # 필터/검색 영역 (Y: 180 으로 이동)
         self._create_filter_area()
 
-        # 테이블 (Y: 290)
+        # 테이블 (Y: 230 으로 이동)
         self._create_tables()
 
     def _create_stat_cards(self):
@@ -331,9 +329,6 @@ class AdminDashboard(QMainWindow):
         start_x = 40
 
         items = [
-            ("대기 요청", get_color("warning"), "pending_label"),
-            ("승인 요청", get_color("success"), "approved_label"),
-            ("거부 요청", get_color("error"), "rejected_label"),
             ("전체 사용자", get_color("primary"), "users_label"),
             ("접속 사용자", get_color("success"), "online_label"),
             ("활성 구독", get_color("secondary"), "active_sub_label"),
@@ -427,15 +422,15 @@ class AdminDashboard(QMainWindow):
         self.sub_filter_label.setVisible(tab_index == 1)
 
     def _create_filter_area(self):
-        """필터/검색 영역 생성 (회원가입 요청 필터 제거)"""
+        """필터/검색 영역 생성"""
         # 사용자 검색 (기본 표시)
         self.search_label = QLabel("아이디 검색:", self.central)
-        self.search_label.setGeometry(40, 245, 90, 30)
+        self.search_label.setGeometry(40, 185, 90, 30)
         self.search_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
         self.search_label.setStyleSheet(f"color: {get_color('text_primary')};")
 
         self.search_edit = QLineEdit(self.central)
-        self.search_edit.setGeometry(135, 242, 200, 36)
+        self.search_edit.setGeometry(135, 182, 200, 36)
         self.search_edit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
         self.search_edit.setPlaceholderText("검색어 입력...")
         self.search_edit.setStyleSheet(f"""
@@ -452,43 +447,12 @@ class AdminDashboard(QMainWindow):
         """)
         self.search_edit.textChanged.connect(self._on_search_changed)
 
-        # 구독 요청 필터
-        self.sub_filter_label = QLabel("상태 필터:", self.central)
-        self.sub_filter_label.setGeometry(40, 245, 80, 30)
-        self.sub_filter_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
-        self.sub_filter_label.setStyleSheet(f"color: {get_color('text_primary')};")
-        self.sub_filter_label.setVisible(False)
-
-        self.sub_filter_combo = QComboBox(self.central)
-        self.sub_filter_combo.setGeometry(125, 242, 140, 36)
-        self.sub_filter_combo.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
-        self.sub_filter_combo.addItems(["대기 중", "승인됨", "거부됨", "전체"])
-        self.sub_filter_combo.setStyleSheet(f"""
-            QComboBox {{
-                background-color: {get_color('surface')};
-                color: {get_color('text_primary')};
-                border: 1px solid {get_color('border')};
-                border-radius: {ds.radius.base}px;
-                padding: 5px {ds.spacing.space_4}px;
-            }}
-            QComboBox::drop-down {{
-                border: none;
-            }}
-            QComboBox QAbstractItemView {{
-                background-color: {get_color('surface')};
-                color: {get_color('text_primary')};
-                selection-background-color: {get_color('primary')};
-            }}
-        """)
-        self.sub_filter_combo.currentTextChanged.connect(self._on_sub_filter_changed)
-        self.sub_filter_combo.setVisible(False)
-
     def _create_tables(self):
         """테이블 생성"""
         table_x = 40
-        table_y = 290
+        table_y = 230
         table_w = 1520
-        table_h = 580
+        table_h = 640  # 높이 증가
 
         # 사용자 관리 테이블 (확장된 컨럼 + 비밀번호 + 버전)
         self.users_table = QTableWidget(self.central)
@@ -516,23 +480,9 @@ class AdminDashboard(QMainWindow):
         )
         self._style_table(
              # Increased Action column (last) to 330px to prevent button overflow
-            self.users_table, [40, 80, 90, 80, 110, 150, 70, 120, 70, 50, 120, 100, 45, 80, 60, 290]
+            self.users_table, [40, 80, 90, 80, 110, 150, 70, 120, 70, 50, 120, 100, 80, 80, 60, 255]
         )
         # 사용자 테이블이 기본 표시됨
-
-        # 구독 요청 테이블
-        self.subscriptions_table = QTableWidget(self.central)
-        self.subscriptions_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.subscriptions_table.setColumnCount(7)
-        self.subscriptions_table.setHorizontalHeaderLabels(
-            ["번호", "사용자", "상태", "요청작업", "메시지", "요청일시", "관리"]
-        )
-        self._style_table(
-            # Column widths adjusted to prevent Action column overflow
-            # Last column (Actions) increased from 250 -> 320 to fit 5 buttons
-            self.subscriptions_table, [60, 80, 100, 350, 150, 80, 200]
-        )
-        self.subscriptions_table.setVisible(False)
 
     def _style_table(self, table: QTableWidget, widths: list):
         """테이블 스타일"""
@@ -600,7 +550,6 @@ class AdminDashboard(QMainWindow):
         self._admin_stats_loaded = False
         self._load_admin_stats()
         self._load_users()
-        self._load_subscriptions()
         self._update_last_refresh_time()
 
     def _load_users(self):
@@ -652,7 +601,7 @@ class AdminDashboard(QMainWindow):
             # 6: Type
             utype = user.get("user_type", "trial")
             utype_text = {
-                "trial": "체험판",
+                "trial": "무료 계정",
                 "subscriber": "구독자",
                 "admin": "관리자",
             }.get(utype, utype)
@@ -665,23 +614,29 @@ class AdminDashboard(QMainWindow):
 
             # 7: Subscription Expires
             expires_utc = user.get("subscription_expires_at")
-            expires_str = self._convert_to_kst(expires_utc) if expires_utc else "체험판"
-
-            color = get_color("text_muted") if not expires_utc else get_color("text_primary")
-            if expires_utc:
-                try:
-                    dt = datetime.fromisoformat(expires_utc.replace("Z", "+00:00"))
-                    if dt.tzinfo is None:
-                        dt = dt.replace(tzinfo=timezone.utc)
-                    if dt < now:
-                        color = get_color("error")
-                    elif (dt - now).days <= 10:
-                        color = get_color("error")
-                    else:
-                        color = get_color("success")
-                        active_sub_count += 1
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Subscription expiry parsing failed for user: {e}")
+            
+            # 무료 계정(trial)인 경우 만료일 표시 안 함 (사용자 요청)
+            if utype == "trial":
+                expires_str = "-"
+                color = get_color("text_muted")
+            else:
+                expires_str = self._convert_to_kst(expires_utc) if expires_utc else "-"
+                color = get_color("text_muted") if not expires_utc else get_color("text_primary")
+                if expires_utc:
+                    try:
+                        dt = datetime.fromisoformat(expires_utc.replace("Z", "+00:00"))
+                        if dt.tzinfo is None:
+                            dt = dt.replace(tzinfo=timezone.utc)
+                        if dt < now:
+                            color = get_color("error")
+                        elif (dt - now).days <= 10:
+                            color = get_color("error")
+                        else:
+                            color = get_color("success")
+                            active_sub_count += 1
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Subscription expiry parsing failed for user: {e}")
+            
             self._set_cell(self.users_table, row, 7, expires_str, color)
 
             # 8: Work usage
@@ -717,7 +672,26 @@ class AdminDashboard(QMainWindow):
             self._set_cell(self.users_table, row, 11, user.get("last_login_ip", "-"))
 
             # 12: Online Status
+            # 12: Online Status
             is_online = user.get("is_online", False)
+            last_heartbeat_str = user.get("last_heartbeat")
+            
+            if is_online and last_heartbeat_str:
+                try:
+                    hb_dt = datetime.fromisoformat(last_heartbeat_str.replace("Z", "+00:00"))
+                    if hb_dt.tzinfo is None:
+                        hb_dt = hb_dt.replace(tzinfo=timezone.utc)
+                    
+                    # 90초(1분 30초) 이상 지났으면 오프라인으로 간주 (네트워크 지연 고려)
+                    # 클라이언트는 5초마다 핑을 보내므로 90초면 충분히 오프라인임
+                    if (now - hb_dt).total_seconds() > 90:
+                        is_online = False
+                except Exception:
+                    pass
+            elif is_online and not last_heartbeat_str:
+                # 온라인인데 하트비트가 없으면 오프라인 처리
+                is_online = False
+
             if is_online:
                 online_count += 1
 
@@ -790,7 +764,9 @@ class AdminDashboard(QMainWindow):
 
     def _set_cell(self, table, row, col, text, color=None):
         """셀 설정"""
-        item = QTableWidgetItem(text)
+        if text is None:
+            text = ""
+        item = QTableWidgetItem(str(text))
         item.setFlags(item.flags() & ~Qt.ItemFlag.ItemIsEditable)
         item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
         # 항상 텍스트 색상 설정 (기본: 흰색)
