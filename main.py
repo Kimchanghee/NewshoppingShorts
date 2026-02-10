@@ -49,8 +49,8 @@ from managers.subscription_manager import SubscriptionManager
 from managers.generated_video_manager import GeneratedVideoManager
 from managers.youtube_manager import get_youtube_manager
 from managers.coupang_manager import CoupangManager
-from managers.inpock_manager import InpockManager
-from managers.sourcing_manager import SourcingManager
+from managers.inpock_manager import get_inpock_manager
+from managers.sourcing_manager import get_sourcing_manager
 from ui.theme_manager import get_theme_manager
 from ui.design_system_v2 import get_design_system
 from pathlib import Path
@@ -115,8 +115,10 @@ class VideoAnalyzerGUI(
         self._generated_video_manager = GeneratedVideoManager(self)
         self.youtube_manager = get_youtube_manager(gui=self)
         self.coupang_manager = CoupangManager()
-        self.inpock_manager = InpockManager()
-        self.sourcing_manager = SourcingManager()
+        # Selenium-based managers must not crash the app on machines without selenium/chrome.
+        # Their heavy imports are guarded and the driver is created lazily.
+        self.inpock_manager = get_inpock_manager()
+        self.sourcing_manager = get_sourcing_manager()
 
         # Load API keys and initialize provider
         self.api_handler.load_saved_api_keys()

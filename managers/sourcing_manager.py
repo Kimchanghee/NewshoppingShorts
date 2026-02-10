@@ -10,15 +10,6 @@ import requests
 from typing import Optional, Dict, List
 from urllib.parse import quote
 
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from webdriver_manager.chrome import ChromeDriverManager
-from bs4 import BeautifulSoup
-
 from utils.logging_config import get_logger
 from managers.settings_manager import get_settings_manager
 
@@ -41,6 +32,20 @@ class SourcingManager:
         """Initialize Selenium WebDriver"""
         if self.driver:
             return
+
+        try:
+            from selenium import webdriver
+            from selenium.webdriver.chrome.service import Service
+            from selenium.webdriver.chrome.options import Options
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+            from webdriver_manager.chrome import ChromeDriverManager
+        except Exception as e:
+            raise RuntimeError(
+                "1688 소싱 기능을 사용하려면 Selenium이 필요합니다.\n"
+                "프로그램을 최신 버전으로 업데이트해도 동일하면, 관리자에게 문의해주세요."
+            ) from e
 
         chrome_options = Options()
         if headless:
@@ -125,7 +130,8 @@ class SourcingManager:
         Returns:
             List of found products (title, url, price, image)
         """
-        self._init_driver(headless=False) # Visual search is better with head for debugging
+        # Visual search is better with head for debugging
+        self._init_driver(headless=False)
         
         # 1688 Image Search requires uploading or passing URL. 
         # Passing URL via query param is tricky, often requires upload.
@@ -136,6 +142,10 @@ class SourcingManager:
         
         # Wait for results
         try:
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.CSS_SELECTOR, ".sm-offer-item"))
             )
@@ -144,6 +154,7 @@ class SourcingManager:
             return []
 
         products = []
+        from selenium.webdriver.common.by import By
         items = self.driver.find_elements(By.CSS_SELECTOR, ".sm-offer-item")
         
         for item in items[:5]: # Top 5 results
@@ -189,6 +200,10 @@ class SourcingManager:
         
         try:
             # Method 1: Look for <video> tag
+            from selenium.webdriver.common.by import By
+            from selenium.webdriver.support.ui import WebDriverWait
+            from selenium.webdriver.support import expected_conditions as EC
+
             WebDriverWait(self.driver, 5).until(
                 EC.presence_of_element_located((By.TAG_NAME, "video"))
             )
