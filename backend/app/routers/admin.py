@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
-from app.models.user import User
+from app.models.user import User, UserType
 from app.models.login_attempt import LoginAttempt
 from app.utils.subscription_utils import calculate_subscription_expiry
 from app.services.auth_service import AuthService
@@ -240,6 +240,9 @@ async def extend_subscription(
         )
 
         user.subscription_expires_at = new_expiry
+        # Restore subscriber status so client-side /my-status returns the expiry
+        user.user_type = UserType.SUBSCRIBER
+        user.work_count = -1  # Unlimited during active subscription
         db.commit()
 
         logger.info(f"Subscription extended: user_id={user_id}, new_expiry={new_expiry}")
