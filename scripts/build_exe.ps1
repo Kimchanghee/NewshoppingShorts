@@ -56,6 +56,7 @@ try {
   Remove-Item -Path `
     (Join-Path $Root "build"), `
     (Join-Path $Root "dist"), `
+    (Join-Path $Root "build_staging"), `
     (Join-Path $Root "scripts\\build"), `
     (Join-Path $Root "scripts\\dist") `
     -Recurse -Force -ErrorAction SilentlyContinue
@@ -63,6 +64,66 @@ try {
   Invoke-Native "[1.5/5] Materializing faster-whisper models (dereference HF cache symlinks)..." $Python @(
     (Join-Path $Root "scripts\\materialize_whisper_models.py")
   )
+
+  Write-Host "`n[1.7/5] Staging Tesseract OCR runtime (for end-user OCR/blur)..."
+  $stageRoot = Join-Path $Root "build_staging\\tesseract"
+  Remove-Item -Path $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
+  New-Item -ItemType Directory -Path $stageRoot | Out-Null
+
+  $tesseractExe = $null
+  try {
+    $cmd = Get-Command tesseract -ErrorAction SilentlyContinue
+    if ($cmd -and $cmd.Source -and (Test-Path $cmd.Source)) {
+      $tesseractExe = $cmd.Source
+    }
+  } catch {
+    $tesseractExe = $null
+  }
+
+  $candidates = @(
+    $tesseractExe,
+    "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
+    "C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe",
+    (Join-Path $env:LOCALAPPDATA "Programs\\Tesseract-OCR\\tesseract.exe")
+  ) | Where-Object { $_ -and (Test-Path $_) }
+
+  $tesseractExe = $candidates | Select-Object -First 1
+  if (-not $tesseractExe) {
+    throw "Tesseract not found on build machine. Install it once (recommended): winget install UB-Mannheim.TesseractOCR"
+  }
+
+  $tessRoot = Split-Path $tesseractExe -Parent
+  Copy-Item -Path $tesseractExe -Destination (Join-Path $stageRoot "tesseract.exe") -Force
+  Copy-Item -Path (Join-Path $tessRoot "*.dll") -Destination $stageRoot -Force -ErrorAction SilentlyContinue
+
+  $stageTessdata = Join-Path $stageRoot "tessdata"
+  New-Item -ItemType Directory -Path $stageTessdata | Out-Null
+
+  $installedTessdata = Join-Path $tessRoot "tessdata"
+  foreach ($lang in @("eng", "kor", "chi_sim", "osd")) {
+    $dst = Join-Path $stageTessdata ("$lang.traineddata")
+    $src = Join-Path $installedTessdata ("$lang.traineddata")
+    if ((Test-Path $src) -and -not (Test-Path $dst)) {
+      Copy-Item -Path $src -Destination $dst -Force
+    }
+  }
+
+  $tessdataFastBase = "https://github.com/tesseract-ocr/tessdata_fast/raw/main"
+  foreach ($lang in @("eng", "kor", "chi_sim")) {
+    $dst = Join-Path $stageTessdata ("$lang.traineddata")
+    if (-not (Test-Path $dst)) {
+      Write-Host "Downloading tessdata_fast: $lang.traineddata"
+      Invoke-WebRequest -Uri ("$tessdataFastBase/$lang.traineddata") -OutFile $dst -UseBasicParsing
+    }
+  }
+
+  foreach ($lang in @("eng", "kor", "chi_sim")) {
+    $dst = Join-Path $stageTessdata ("$lang.traineddata")
+    if (-not (Test-Path $dst)) {
+      throw "Missing required tessdata after staging: $dst"
+    }
+  }
+  Write-Host "OK: Staged Tesseract to $stageRoot"
 
   Invoke-Native "[2/5] Building updater.exe (for bundling)..." $Python @(
     "-m", "PyInstaller", "--noconfirm", "--clean",
@@ -97,7 +158,10 @@ $mustContain = @(
   # Ensure we ship an ffmpeg binary (we rely on imageio_ffmpeg, not a local resource/bin copy).
   "imageio_ffmpeg\\binaries\\ffmpeg",
   # Ensure bundled Korean font assets are present for subtitle/UI rendering.
-  "fonts\\Pretendard-ExtraBold.ttf"
+  "fonts\\Pretendard-ExtraBold.ttf",
+  # Ensure bundled Tesseract runtime exists for OCR/blur on end-user PCs.
+  "tesseract\\tesseract.exe",
+  "tesseract\\tessdata\\chi_sim.traineddata"
 )
 
 foreach ($item in $mustContain) {

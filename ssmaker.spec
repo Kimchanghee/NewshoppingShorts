@@ -45,6 +45,13 @@ if os.path.isdir(_fonts_dir):
 else:
     print(f"[spec] WARNING: fonts directory not found: {_fonts_dir}")
 
+# Bundle Tesseract runtime (exe + DLLs + tessdata) for end-user machines.
+_tesseract_bundle = os.path.join(project_root, 'build_staging', 'tesseract')
+if os.path.isdir(_tesseract_bundle):
+    datas.append((_tesseract_bundle, 'tesseract'))
+else:
+    print(f"[spec] WARNING: tesseract bundle not found (blur OCR may not work on user PCs): {_tesseract_bundle}")
+
 binaries = []
 
 for package in packages_to_collect:

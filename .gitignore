@@ -67,6 +67,7 @@ logs/
 # 빌드 파일
 build/
 dist/
+build_staging/
 # ssmaker.spec은 빌드 설정 파일이므로 포함
 
 # Whisper 모델 (빌드 시 자동 다운로드됨)
