@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 import os
-from PyInstaller.utils.hooks import collect_all, copy_metadata
+from PyInstaller.utils.hooks import collect_all, copy_metadata, collect_submodules
 
 block_cipher = None
 project_root = os.path.abspath('.')
@@ -68,6 +68,14 @@ for package in packages_to_collect:
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
     hidden_imports += tmp_ret[2]
+
+# Some packages are imported dynamically at runtime (lazy imports) and might be missed by Analysis.
+# Force-include their submodules so end-users do not see ModuleNotFoundError.
+for mod_name in ("selenium", "webdriver_manager", "bs4"):
+    try:
+        hidden_imports += collect_submodules(mod_name)
+    except Exception as e:
+        print(f"[spec] WARNING: collect_submodules('{mod_name}') failed: {e!r}")
 
 # Some packages (e.g. imageio) call importlib.metadata at runtime.
 # PyInstaller does not include package metadata unless explicitly requested.

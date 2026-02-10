@@ -161,7 +161,10 @@ $mustContain = @(
   "fonts\\Pretendard-ExtraBold.ttf",
   # Ensure bundled Tesseract runtime exists for OCR/blur on end-user PCs.
   "tesseract\\tesseract.exe",
-  "tesseract\\tessdata\\chi_sim.traineddata"
+  "tesseract\\tessdata\\chi_sim.traineddata",
+  # Ensure optional automation modules are bundled (lazy-imported at runtime).
+  "selenium\\__init__",
+  "webdriver_manager\\__init__"
 )
 
 foreach ($item in $mustContain) {
