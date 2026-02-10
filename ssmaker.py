@@ -4,6 +4,7 @@ Shopping Shorts Maker - Entry Point (PyQt6)
 """
 import sys
 import os
+import time
 import logging
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtWidgets import QApplication
@@ -78,25 +79,41 @@ class StartupWorker(QtCore.QThread):
 
     def run(self):
         try:
-            # Stage 1: Bootstrapping (20%)
+            # Stage 1: Bootstrapping (10-20%)
             self.status.emit("실행 환경 확인 중...")
+            self.progress.emit(10)
+            time.sleep(0.1)
             self.progress.emit(20)
 
-            # Stage 2: Configuration (45%)
+            # Stage 2: Configuration (20-45%)
             self.status.emit("설정 불러오는 중...")
             import config
+            self.progress.emit(35)
+            # Pre-load some heavy modules here if possible or just update status
+            try:
+                import requests
+            except ImportError:
+                pass
             self.progress.emit(45)
 
-            # Stage 3: Login UI assets (70%)
+            # Stage 3: Login UI assets (45-70%)
             self.status.emit("로그인 화면 준비 중...")
+            self.progress.emit(55)
             from ui.login_Ui import Ui_LoginWindow
+            self.progress.emit(60)
             from ui.windows.login_window import Login
             self.progress.emit(70)
 
-            # Stage 4: App controller (90%)
-            self.status.emit("앱 컨트롤러 준비 중...")
+            # Stage 4: App controller (70-95%)
+            self.status.emit("앱 컨트롤러 초기화 중...")
+            self.progress.emit(80)
             from startup.app_controller import AppController
             self.progress.emit(90)
+            
+            # Finalize
+            self.status.emit("시작 준비 완료...")
+            self.progress.emit(95)
+            time.sleep(0.2)
 
             # Complete (100%)
             self.status.emit("로그인 창 여는 중...")
