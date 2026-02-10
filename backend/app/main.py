@@ -384,22 +384,20 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.30/ssmaker_v1.3.30.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.31/ssmaker_v1.3.31.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.30",
+    "version": "1.3.31",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.30 변경사항
-- 업데이트/오류 안내 문구의 글자 깨짐(??? 현상) 수정
-- 링크 입력창 텍스트 색상을 흰색으로 고정(다크 UI 가독성 개선)
-- 워터마크 기본값 초기화(테스트/깨진 값 자동 리셋) 및 설정 저장 경로를 사용자 폴더(`~/.ssmaker`)로 이동
-- GLM-OCR은 API 키가 있을 때만 초기화 시도(불필요한 경고 감소)
-- RapidOCR는 `SSMAKER_ENABLE_RAPIDOCR=1`일 때만 사용(Windows onnxruntime 크래시 방지)""",
+    "release_notes": """### v1.3.31 변경사항
+- GLM-OCR API 키 연동 완료 (EXE 빌드에 .env 자동 포함)
+- 로딩 화면 문구 개선 (비기술적 설명으로 변경)
+- EXE 빌드 시 .env / .secure_config.enc 자동 번들링 지원""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "72ef25ea79bb3c82757c7a84208585820e67c39131ad29a0960000e636f9c593",
+    "file_hash": "",
 }
 
 

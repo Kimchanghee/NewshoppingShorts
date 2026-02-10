@@ -42,10 +42,13 @@ try:
     from dotenv import load_dotenv
     if getattr(sys, "frozen", False):
         _exe_dir = os.path.dirname(sys.executable)
+        _meipass = getattr(sys, "_MEIPASS", "")
         _candidates = [
             os.path.join(_exe_dir, ".env"),
             os.path.join(os.path.expanduser("~"), ".ssmaker", ".env"),
+            os.path.join(_meipass, ".env") if _meipass else None,
         ]
+        _candidates = [p for p in _candidates if p]
         for _p in _candidates:
             if os.path.exists(_p):
                 load_dotenv(_p, override=False)
@@ -80,16 +83,15 @@ class StartupWorker(QtCore.QThread):
     def run(self):
         try:
             # Stage 1: Bootstrapping (10-20%)
-            self.status.emit("실행 환경 확인 중...")
+            self.status.emit("프로그램 환경을 확인하고 있습니다...")
             self.progress.emit(10)
             time.sleep(0.1)
             self.progress.emit(20)
 
             # Stage 2: Configuration (20-45%)
-            self.status.emit("설정 불러오는 중...")
+            self.status.emit("설정을 불러오고 있습니다...")
             import config
             self.progress.emit(35)
-            # Pre-load some heavy modules here if possible or just update status
             try:
                 import requests
             except ImportError:
@@ -97,7 +99,7 @@ class StartupWorker(QtCore.QThread):
             self.progress.emit(45)
 
             # Stage 3: Login UI assets (45-70%)
-            self.status.emit("로그인 화면 준비 중...")
+            self.status.emit("로그인 화면을 준비하고 있습니다...")
             self.progress.emit(55)
             from ui.login_Ui import Ui_LoginWindow
             self.progress.emit(60)
@@ -105,18 +107,18 @@ class StartupWorker(QtCore.QThread):
             self.progress.emit(70)
 
             # Stage 4: App controller (70-95%)
-            self.status.emit("앱 컨트롤러 초기화 중...")
+            self.status.emit("프로그램을 시작하고 있습니다...")
             self.progress.emit(80)
             from startup.app_controller import AppController
             self.progress.emit(90)
-            
+
             # Finalize
-            self.status.emit("시작 준비 완료...")
+            self.status.emit("거의 완료되었습니다...")
             self.progress.emit(95)
             time.sleep(0.2)
 
             # Complete (100%)
-            self.status.emit("로그인 창 여는 중...")
+            self.status.emit("로그인 화면을 열고 있습니다...")
             self.progress.emit(100)
 
             self.finished.emit()
