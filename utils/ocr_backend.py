@@ -88,11 +88,21 @@ class OCRBackend:
         engines = []
 
         # Priority 1: GLM-OCR API (online, highest accuracy)
+        # Only attempt when an API key exists; otherwise skip to avoid noisy warnings at startup.
         if GLM_OCR_AVAILABLE and not os.getenv("GLM_OCR_DISABLED"):
-            engines.append(("glm_ocr", self._init_glm_ocr))
+            try:
+                from utils.glm_ocr_client import has_glm_ocr_api_key
+                if has_glm_ocr_api_key():
+                    engines.append(("glm_ocr", self._init_glm_ocr))
+                else:
+                    logger.info("[OCR] GLM-OCR API key not configured; skipping GLM-OCR engine")
+            except Exception:
+                engines.append(("glm_ocr", self._init_glm_ocr))
 
         # Priority 2: RapidOCR (Python < 3.13 only)
-        if sys.version_info < (3, 13):
+        # NOTE: rapidocr_onnxruntime can crash the interpreter on some Windows machines
+        # (onnxruntime access violation). Keep it opt-in for stability.
+        if sys.version_info < (3, 13) and os.getenv("SSMAKER_ENABLE_RAPIDOCR"):
             engines.append(("rapidocr", self._init_rapidocr))
 
         # Priority 3: Tesseract (final fallback)
@@ -659,12 +669,14 @@ def check_ocr_availability() -> dict:
             pass
 
     # RapidOCR 체크 (Python 3.13 미만)
+    # NOTE: rapidocr_onnxruntime import may crash the interpreter on some Windows machines.
+    # Only treat it as "usable" when explicitly enabled.
     if sys.version_info < (3, 13):
         try:
-            from rapidocr_onnxruntime import RapidOCR
-            info["rapidocr_available"] = True
-        except ImportError:
-            pass
+            import importlib.util
+            info["rapidocr_available"] = bool(importlib.util.find_spec("rapidocr_onnxruntime"))
+        except Exception:
+            info["rapidocr_available"] = False
 
     # Tesseract 체크
     try:
@@ -682,12 +694,12 @@ def check_ocr_availability() -> dict:
     except ImportError:
         pass
 
-    # 추천 엔진 (우선순위: GLM-OCR > RapidOCR > Tesseract)
+    # 추천 엔진 (우선순위: GLM-OCR > RapidOCR(opt-in) > Tesseract)
     if info["glm_ocr_available"]:
         info["recommended_engine"] = "glm_ocr"
     elif sys.version_info >= (3, 13):
         info["recommended_engine"] = "tesseract"
-    elif info["rapidocr_available"]:
+    elif info["rapidocr_available"] and os.getenv("SSMAKER_ENABLE_RAPIDOCR"):
         info["recommended_engine"] = "rapidocr"
     elif info["tesseract_available"]:
         info["recommended_engine"] = "tesseract"

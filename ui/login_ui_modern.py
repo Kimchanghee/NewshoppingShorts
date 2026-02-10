@@ -5,6 +5,10 @@ Modern Login UI for Shopping Shorts Maker (PyQt6)
 """
 
 import logging
+import json
+import os
+import sys
+from pathlib import Path
 
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt, pyqtSignal, QThread
@@ -36,6 +40,37 @@ def login_color(key: str) -> str:
 
 FONT_FAMILY = "맑은 고딕"
 logger = logging.getLogger(__name__)
+
+
+def _read_app_version() -> str:
+    """
+    Best-effort app version resolver for the login UI.
+
+    NOTE:
+    LoginWindow also applies the version label. This is a safe fallback so the
+    value is not stuck on a hardcoded placeholder after updates.
+    """
+    candidates = []
+    if getattr(sys, "frozen", False):
+        meipass = getattr(sys, "_MEIPASS", None)
+        if meipass:
+            candidates.append(Path(meipass) / "version.json")
+        candidates.append(Path(sys.executable).resolve().parent / "version.json")
+    else:
+        candidates.append(Path(__file__).resolve().parents[1] / "version.json")
+        candidates.append(Path.cwd() / "version.json")
+
+    for path in candidates:
+        try:
+            if path.exists():
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                version = str(data.get("version", "")).strip()
+                if version:
+                    return version
+        except Exception:
+            continue
+    return "1.0.0"
 
 
 class UsernameCheckWorker(QThread):
@@ -161,7 +196,7 @@ class ModernLoginUi:
         self.versionLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.versionLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.versionLabel.setStyleSheet("color: rgba(255,255,255,0.5); background: transparent;")
-        self.versionLabel.setText("v2.0.0")
+        self.versionLabel.setText(f"v{_read_app_version()}")
 
         # 오른쪽 패널
         self.rightFrame = QFrame(self.centralwidget)

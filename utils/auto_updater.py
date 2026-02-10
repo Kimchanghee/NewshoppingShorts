@@ -216,16 +216,16 @@ class UpdateChecker:
                 logger.warning(f"Update check failed: HTTP {response.status_code}")
                 
         except requests.exceptions.Timeout:
-            result["error"] = "?붿껌 ?쒓컙??珥덇낵?섏뿀?듬땲??"
+            result["error"] = "요청 시간이 초과되었습니다."
             logger.warning("Update check timeout")
         except requests.exceptions.ConnectionError:
-            result["error"] = "?쒕쾭???곌껐?????놁뒿?덈떎."
+            result["error"] = "서버에 연결할 수 없습니다."
             logger.warning("Update check connection error")
         except json.JSONDecodeError:
-            result["error"] = "?쒕쾭 ?묐떟???뚯떛?????놁뒿?덈떎."
+            result["error"] = "서버 응답을 해석할 수 없습니다."
             logger.warning("Update check JSON parse error")
         except Exception as e:
-            result["error"] = f"?????녿뒗 ?ㅻ쪟: {str(e)[:50]}"
+            result["error"] = f"알 수 없는 오류: {str(e)[:50]}"
             logger.exception(f"Update check error: {e}")
         
         self._update_info = result

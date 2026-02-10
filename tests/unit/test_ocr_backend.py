@@ -106,14 +106,22 @@ class TestOCREngineSelection:
     """Test OCR engine selection logic"""
 
     def test_rapidocr_preferred_python_312(self):
-        """Test RapidOCR preferred on Python < 3.13"""
+        """RapidOCR is opt-in on Python < 3.13 (stability: onnxruntime may crash on Windows)."""
+        import os
         import sys
         from utils.ocr_backend import check_ocr_availability
 
-        info = check_ocr_availability()
-
-        if sys.version_info < (3, 13) and info["rapidocr_available"]:
-            assert info["recommended_engine"] == "rapidocr"
+        prev = os.environ.get("SSMAKER_ENABLE_RAPIDOCR")
+        try:
+            os.environ["SSMAKER_ENABLE_RAPIDOCR"] = "1"
+            info = check_ocr_availability()
+            if sys.version_info < (3, 13) and info["rapidocr_available"]:
+                assert info["recommended_engine"] == "rapidocr"
+        finally:
+            if prev is None:
+                os.environ.pop("SSMAKER_ENABLE_RAPIDOCR", None)
+            else:
+                os.environ["SSMAKER_ENABLE_RAPIDOCR"] = prev
 
     def test_tesseract_fallback_python_313_plus(self):
         """Test Tesseract used on Python 3.13+"""

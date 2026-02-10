@@ -31,6 +31,8 @@ class SettingsManager:
         "watermark_position": "bottom_right",  # 위치: top_left, top_right, bottom_left, bottom_right
         "watermark_font_id": "pretendard",  # 워터마크 폰트 ID
         "watermark_font_size": "medium",  # 워터마크 크기: small, medium, large
+        # 워터마크가 사용자가 직접 설정한 값인지 (기본값/테스트값 자동 초기화에 사용)
+        "watermark_user_configured": False,
         # 소셜 미디어 연결 설정
         "youtube_connected": False,
         "youtube_channel_id": "",
@@ -63,28 +65,53 @@ class SettingsManager:
         self._lock = threading.Lock()  # Thread safety lock
         self._load_settings()
 
+    def _get_settings_dir(self) -> str:
+        """
+        사용자별 설정 저장 폴더.
+
+        NOTE:
+        설정을 EXE 옆(설치 폴더)에 저장하면 업데이트/압축해제 과정에서
+        테스트 설정이 같이 배포되는 문제가 생길 수 있어 사용자 홈으로 이동합니다.
+        """
+        return os.path.join(os.path.expanduser("~"), ".ssmaker")
+
     def _get_settings_path(self) -> str:
         """Get the full path to the settings file"""
-        # Store in the same directory as the script/executable
+        return os.path.join(self._get_settings_dir(), self.settings_file)
+
+    def _get_legacy_settings_path(self) -> str:
+        """Legacy location: next to exe / repo root (older builds)."""
         try:
-            # For frozen executables (PyInstaller)
             import sys
-            if getattr(sys, 'frozen', False):
+            if getattr(sys, "frozen", False):
                 base_dir = os.path.dirname(sys.executable)
             else:
                 base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         except Exception as e:
-            logger.debug(f"[SettingsManager] 기본 경로 감지 실패, cwd 사용: {e}")
+            logger.debug(f"[SettingsManager] Legacy path fallback to cwd: {e}")
             base_dir = os.getcwd()
-
         return os.path.join(base_dir, self.settings_file)
 
     def _load_settings(self) -> None:
         """Load settings from file (thread-safe)"""
         settings_path = self._get_settings_path()
+        legacy_path = self._get_legacy_settings_path()
+        needs_save = False
 
         try:
             with self._lock:
+                # One-time migration: if new path missing but legacy file exists, copy.
+                if not os.path.exists(settings_path) and os.path.exists(legacy_path):
+                    try:
+                        os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+                        with open(legacy_path, "r", encoding="utf-8") as f:
+                            legacy_loaded = json.load(f)
+                        with open(settings_path, "w", encoding="utf-8") as f:
+                            json.dump(legacy_loaded, f, ensure_ascii=False, indent=2)
+                        logger.info("[SettingsManager] Migrated settings to user directory")
+                    except Exception as e:
+                        logger.warning(f"[SettingsManager] Settings migration failed: {e}")
+
                 if os.path.exists(settings_path):
                     with open(settings_path, 'r', encoding='utf-8') as f:
                         loaded = json.load(f)
@@ -94,10 +121,33 @@ class SettingsManager:
                 else:
                     self._settings = self.DEFAULT_SETTINGS.copy()
                     # Using default settings (no file found)
+
+                # Reset accidental/test watermark defaults (avoid shipping dev watermark).
+                try:
+                    user_cfg = bool(self._settings.get("watermark_user_configured", False))
+                    enabled = bool(self._settings.get("watermark_enabled", False))
+                    channel = str(self._settings.get("watermark_channel_name", "") or "").strip()
+                    suspicious = (not channel) or ("?" in channel) or ("\ufffd" in channel) or (channel == "와이엠")
+                    if enabled and (not user_cfg) and suspicious:
+                        self._settings["watermark_enabled"] = False
+                        self._settings["watermark_channel_name"] = ""
+                        logger.info("[SettingsManager] Reset suspicious watermark defaults")
+                        needs_save = True
+                except Exception:
+                    pass
         except Exception as e:
             # Settings loading failed - using defaults
             logger.warning(f"[SettingsManager] Settings loading failed: {e}")
             self._settings = self.DEFAULT_SETTINGS.copy()
+
+        # Save outside the lock if we reset suspicious watermark defaults.
+        if needs_save:
+            try:
+                # Only save when file already exists (avoid creating file for fresh installs).
+                if os.path.exists(settings_path):
+                    self._save_settings()
+            except Exception:
+                pass
 
     def _save_settings(self) -> bool:
         """Save settings to file (thread-safe)"""
@@ -105,6 +155,7 @@ class SettingsManager:
 
         try:
             with self._lock:
+                os.makedirs(os.path.dirname(settings_path), exist_ok=True)
                 with open(settings_path, 'w', encoding='utf-8') as f:
                     json.dump(self._settings, f, ensure_ascii=False, indent=2)
             logger.debug(f"[SettingsManager] Settings saved: {settings_path}")
@@ -280,6 +331,7 @@ class SettingsManager:
         """
         with self._lock:
             self._settings["watermark_enabled"] = bool(enabled)
+            self._settings["watermark_user_configured"] = True
         return self._save_settings()
 
     def get_watermark_channel_name(self) -> str:
@@ -301,6 +353,7 @@ class SettingsManager:
         sanitized = str(name).strip()[:MAX_CHANNEL_NAME_LENGTH]
         with self._lock:
             self._settings["watermark_channel_name"] = sanitized
+            self._settings["watermark_user_configured"] = True
         return self._save_settings()
 
     def get_watermark_position(self) -> str:
@@ -322,6 +375,7 @@ class SettingsManager:
             position = "bottom_right"
         with self._lock:
             self._settings["watermark_position"] = position
+            self._settings["watermark_user_configured"] = True
         return self._save_settings()
 
     def get_watermark_font_id(self) -> str:
@@ -343,6 +397,7 @@ class SettingsManager:
             font_id = "pretendard"
         with self._lock:
             self._settings["watermark_font_id"] = font_id
+            self._settings["watermark_user_configured"] = True
         return self._save_settings()
 
     def get_watermark_font_size(self) -> str:
@@ -364,6 +419,7 @@ class SettingsManager:
             size = "medium"
         with self._lock:
             self._settings["watermark_font_size"] = size
+            self._settings["watermark_user_configured"] = True
         return self._save_settings()
 
     def get_watermark_settings(self) -> Dict[str, Any]:

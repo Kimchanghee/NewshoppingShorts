@@ -246,13 +246,16 @@ class EnhancedURLInputPanel(QFrame, ThemedMixin):
         self.gui.url_entry.setStyleSheet(f"""
             QTextEdit {{
                 background-color: {c.bg_input};
-                color: {c.text_primary};
+                /* Force high-contrast input text for dark UI builds */
+                color: #FFFFFF;
                 border: 2px solid {c.border_light};
                 border-radius: {r.md}px;
                 padding: {self.spacing.md}px;
                 font-family: {t.font_family_body};
                 font-size: {t.font_size_base}px;
                 line-height: {int(t.font_size_base * t.line_height_relaxed)}px;
+                selection-background-color: {c.primary};
+                selection-color: #FFFFFF;
             }}
             QTextEdit:focus {{
                 border-color: {c.primary};

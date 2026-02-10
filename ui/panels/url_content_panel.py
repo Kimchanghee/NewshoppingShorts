@@ -69,11 +69,14 @@ class URLContentPanel(TabContent):
         self.url_entry.setStyleSheet(f"""
             QTextEdit {{
                 background-color: {self.get_color("bg_input")};
-                color: {self.get_color("text_primary")};
+                /* Force high-contrast input text for dark UI builds */
+                color: #FFFFFF;
                 border: 1px solid {self.get_color("border_light")};
                 border-radius: 8px;
                 padding: 10px;
                 font-size: 14px;
+                selection-background-color: {self.get_color("primary")};
+                selection-color: #FFFFFF;
             }}
             QTextEdit:focus {{
                 border: 2px solid {self.get_color("border_focus")};

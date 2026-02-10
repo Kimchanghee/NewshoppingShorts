@@ -58,6 +58,14 @@ def _get_api_key() -> str:
     return ""
 
 
+def has_glm_ocr_api_key() -> bool:
+    """Return True when GLM-OCR API key is configured (env or SecretsManager)."""
+    try:
+        return bool(_get_api_key())
+    except Exception:
+        return False
+
+
 class GLMOCRClient:
     """
     GLM-OCR API Client
