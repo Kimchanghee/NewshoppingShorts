@@ -45,11 +45,11 @@ class Initializer(QtCore.QObject):
             init_issues = []
             # 1. System requirements (0-10%)
             self.checkItemChanged.emit("system", "checking", "")
-            self.statusChanged.emit("시스템 환경 확인 중...")
+            self.statusChanged.emit("컴퓨터 환경을 확인하고 있습니다...")
             time.sleep(0.3)
             can_run, issues, warnings, specs = check_system_requirements()
             if not can_run:
-                self.checkItemChanged.emit("system", "error", "미충족")
+                self.checkItemChanged.emit("system", "error", "환경 미충족")
                 init_issues.append(("system", "error", "시스템 요구사항 미충족"))
             else:
                 self.checkItemChanged.emit("system", "success", "정상")
@@ -58,15 +58,15 @@ class Initializer(QtCore.QObject):
 
             # 2. Fonts (10-20%)
             self.checkItemChanged.emit("fonts", "checking", "")
-            self.statusChanged.emit("폰트 확인 중...")
+            self.statusChanged.emit("자막 폰트를 준비하고 있습니다...")
             time.sleep(0.3)
-            self.checkItemChanged.emit("fonts", "success", "확인 완료")
+            self.checkItemChanged.emit("fonts", "success", "준비 완료")
             self.progressChanged.emit(20)
             time.sleep(0.2)
 
             # 3. FFmpeg (20-30%)
             self.checkItemChanged.emit("ffmpeg", "checking", "")
-            self.statusChanged.emit("FFmpeg 확인 중...")
+            self.statusChanged.emit("영상 편집 도구를 확인하고 있습니다...")
             time.sleep(0.3)
             self.checkItemChanged.emit("ffmpeg", "success", "확인 완료")
             self.progressChanged.emit(30)
@@ -74,15 +74,15 @@ class Initializer(QtCore.QObject):
 
             # 4. Internet connectivity (30-45%)
             self.checkItemChanged.emit("internet", "checking", "")
-            self.statusChanged.emit("인터넷 연결 확인 중...")
+            self.statusChanged.emit("인터넷 연결 상태를 확인하고 있습니다...")
             time.sleep(0.3)
-            self.checkItemChanged.emit("internet", "success", "연결 완료")
+            self.checkItemChanged.emit("internet", "success", "연결됨")
             self.progressChanged.emit(45)
             time.sleep(0.2)
 
             # 5. Core modules (45-60%)
             self.checkItemChanged.emit("modules", "checking", "")
-            self.statusChanged.emit("핵심 모듈 확인 중...")
+            self.statusChanged.emit("필수 기능을 확인하고 있습니다...")
             time.sleep(0.3)
             self.checkItemChanged.emit("modules", "success", "확인 완료")
             self.progressChanged.emit(60)
@@ -90,7 +90,7 @@ class Initializer(QtCore.QObject):
 
             # 6. OCR Engine (60-75%)
             self.checkItemChanged.emit("ocr", "checking", "")
-            self.statusChanged.emit("OCR 엔진 초기화 중...")
+            self.statusChanged.emit("자막 인식 기능을 준비하고 있습니다...")
             time.sleep(0.3)
             self._init_ocr()
             self.progressChanged.emit(75)
@@ -98,7 +98,7 @@ class Initializer(QtCore.QObject):
 
             # 7. TTS directory (75-85%)
             self.checkItemChanged.emit("tts_dir", "checking", "")
-            self.statusChanged.emit("음성 폴더 확인 중...")
+            self.statusChanged.emit("음성 저장소를 준비하고 있습니다...")
             time.sleep(0.3)
             self.checkItemChanged.emit("tts_dir", "success", "준비 완료")
             self.progressChanged.emit(85)
@@ -106,10 +106,10 @@ class Initializer(QtCore.QObject):
 
             # 8. API (85-92%)
             self.checkItemChanged.emit("api", "checking", "")
-            self.statusChanged.emit("API 연결 확인 중...")
+            self.statusChanged.emit("서비스 서버에 연결하고 있습니다...")
             time.sleep(0.3)
             if self._check_api_connectivity():
-                self.checkItemChanged.emit("api", "success", "준비 완료")
+                self.checkItemChanged.emit("api", "success", "연결됨")
             else:
                 self.checkItemChanged.emit("api", "warning", "연결 실패")
             self.progressChanged.emit(92)
@@ -117,14 +117,14 @@ class Initializer(QtCore.QObject):
 
             # 9. Update check (92-100%)
             self.checkItemChanged.emit("update_check", "checking", "")
-            self.statusChanged.emit("업데이트 내역 확인 중...")
+            self.statusChanged.emit("새로운 업데이트를 확인하고 있습니다...")
             time.sleep(0.3)
             update_info = self._check_update_info()
             self.progressChanged.emit(100)
 
             # Final delay to show 100% before transitioning
-            self.statusChanged.emit("모든 점검 완료! 시작합니다...")
-            time.sleep(0.5)  # Quick transition after showing completion
+            self.statusChanged.emit("모든 준비가 완료되었습니다!")
+            time.sleep(0.5)
             self.finished.emit()
         except Exception as e:
             logger.error("초기화 중 오류: %s", e)
