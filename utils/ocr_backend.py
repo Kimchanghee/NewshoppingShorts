@@ -293,6 +293,22 @@ class OCRBackend:
     def _find_tesseract_cmd(self) -> Optional[str]:
         """Tesseract 실행 파일 경로 찾기"""
         # 환경 변수 확인
+        # Prefer bundled runtime in frozen (PyInstaller) builds.
+        if getattr(sys, "frozen", False):
+            base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+            bundled_root = os.path.join(base, "tesseract")
+            exe_name = "tesseract.exe" if sys.platform == "win32" else "tesseract"
+            bundled_exe = os.path.join(bundled_root, exe_name)
+            if os.path.exists(bundled_exe):
+                return bundled_exe
+
+        # Also support "next to executable" layouts (some update/unpack flows).
+        exe_dir = os.path.dirname(sys.executable)
+        exe_name = "tesseract.exe" if sys.platform == "win32" else "tesseract"
+        adjacent_exe = os.path.join(exe_dir, "tesseract", exe_name)
+        if os.path.exists(adjacent_exe):
+            return adjacent_exe
+
         env_cmd = os.environ.get("TESSERACT_CMD") or os.environ.get("TESSERACT_PATH")
         if env_cmd and os.path.exists(env_cmd):
             return env_cmd
@@ -322,6 +338,12 @@ class OCRBackend:
         if env_dir:
             candidates.append(env_dir)
 
+        # Prefer bundled tessdata in frozen (PyInstaller) builds.
+        if getattr(sys, "frozen", False):
+            base = getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
+            candidates.append(os.path.join(base, "tesseract", "tessdata"))
+        candidates.append(os.path.join(os.path.dirname(sys.executable), "tesseract", "tessdata"))
+
         candidates.extend(
             [
                 os.path.join(os.path.expandvars(r"%LOCALAPPDATA%"), "Tesseract-OCR", "tessdata"),
@@ -347,6 +369,18 @@ class OCRBackend:
         if not cmd:
             raise RuntimeError("Tesseract 실행 파일을 찾을 수 없습니다.")
 
+        # Ensure dependent DLLs are discoverable on Windows (bundled tesseract ships DLLs next to the exe).
+        cmd_dir = os.path.dirname(cmd)
+        if cmd_dir and os.path.isdir(cmd_dir):
+            os.environ["PATH"] = cmd_dir + os.pathsep + os.environ.get("PATH", "")
+            if sys.platform == "win32":
+                try:
+                    add_dll = getattr(os, "add_dll_directory", None)
+                    if add_dll:
+                        add_dll(cmd_dir)
+                except Exception:
+                    pass
+
         pytesseract.pytesseract.tesseract_cmd = cmd
         self._pytesseract = pytesseract
         self._tesseract_output = Output
@@ -371,16 +405,17 @@ class OCRBackend:
                 for lang in (langs_raw or [])
                 if str(lang).strip()
             }
-            if "kor" in langs and "eng" in langs:
-                return "kor+eng"
-            elif "kor" in langs:
-                return "kor"
-            elif "chi_sim" in langs and "eng" in langs:
-                return "chi_sim+eng"
-            elif "eng" in langs:
-                return "eng"
-            else:
-                return next(iter(langs), "eng")
+            # Prefer including Simplified Chinese for subtitle blur detection.
+            preferred = []
+            if "chi_sim" in langs:
+                preferred.append("chi_sim")
+            if "kor" in langs:
+                preferred.append("kor")
+            if "eng" in langs:
+                preferred.append("eng")
+            if preferred:
+                return "+".join(preferred)
+            return next(iter(langs), "eng")
         except Exception:
             return os.environ.get("TESSERACT_LANG", "eng")
 

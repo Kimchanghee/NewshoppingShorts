@@ -164,13 +164,15 @@ class SubtitleDetector:
             or None if no Chinese subtitles found
         """
         
+        video_path = getattr(self.gui, 'local_file_path', '') if getattr(self.gui, 'video_source', 'none') == 'local' else getattr(self.gui, '_temp_downloaded_file', None)
+
         # OCR reader 가용성 확인
         ocr_reader = getattr(self.gui, "ocr_reader", None)
         if not ocr_reader:
-            logger.warning("[OCR 감지] ocr_reader가 None - 자막 감지 건너뜀 (OCR 엔진 미초기화)")
-            return None
+            logger.warning("[OCR 감지] ocr_reader가 None - OCR 없이 하단 자막 밴드 폴백 감지를 시도합니다.")
+            fallback = self._fallback_detect_bottom_subtitle_band(video_path)
+            return fallback or None
 
-        video_path = getattr(self.gui, 'local_file_path', '') if getattr(self.gui, 'video_source', 'none') == 'local' else getattr(self.gui, '_temp_downloaded_file', None)
         # Video path determined silently
 
         # GPU/NumPy acceleration status (silently configured)
@@ -289,7 +291,8 @@ class SubtitleDetector:
             # 결과 분석
             if not all_regions:
                 # No Chinese subtitles detected in any segment
-                return None
+                fallback = self._fallback_detect_bottom_subtitle_band(video_path, W=W, H=H, fps=fps, total_frames=total_frames)
+                return fallback or None
 
             # Chinese subtitles detected (processing silently)
 
@@ -299,8 +302,9 @@ class SubtitleDetector:
 
             # 최소 1개 프레임에서 중국어가 감지되었으면 블러 적용
             if frames_with_chinese == 0:
-                logger.info("[OCR Parallel] No Chinese detected in any frame - skipping blur")
-                return None
+                logger.info("[OCR Parallel] No Chinese detected in any frame - trying fallback band detection")
+                fallback = self._fallback_detect_bottom_subtitle_band(video_path, W=W, H=H, fps=fps, total_frames=total_frames)
+                return fallback or None
             elif detection_rate < 0.01:
                 # 1% 미만이어도 감지된 프레임이 있으면 경고만 출력하고 진행
                 logger.warning(f"[OCR Parallel] Very low Chinese detection rate: {detection_rate*100:.2f}% ({frames_with_chinese} frames)")
@@ -408,6 +412,119 @@ class SubtitleDetector:
             gc.collect()
             # Memory cleanup completed silently
 
+    def _fallback_detect_bottom_subtitle_band(
+        self,
+        video_path: Optional[str],
+        *,
+        W: Optional[int] = None,
+        H: Optional[int] = None,
+        fps: Optional[float] = None,
+        total_frames: Optional[int] = None,
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        OCR 없이도 하단 자막 밴드를 감지하는 폴백.
+
+        목표:
+        - 사용자 PC에 OCR 엔진이 없거나(OCR 초기화 실패 포함),
+          OCR이 중국어를 잘 못 읽는 상황에서도 "블러가 아예 안 되는" 상황을 방지.
+
+        방식:
+        - 영상에서 몇 프레임을 샘플링
+        - 하단 ROI(기본 72%~95%)의 엣지 밀도를 계산
+        - 텍스트/자막처럼 고주파(엣지)가 지속적으로 나타나면 하단 밴드를 블러 대상으로 반환
+        """
+        if not video_path or not isinstance(video_path, str) or not os.path.exists(video_path):
+            return None
+        if not CV2_AVAILABLE:
+            return None
+
+        try:
+            import cv2
+            import numpy as np
+            import math
+
+            cap = cv2.VideoCapture(video_path)
+            try:
+                if not cap.isOpened():
+                    return None
+
+                if W is None:
+                    W = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+                if H is None:
+                    H = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+                if fps is None:
+                    fps = cap.get(cv2.CAP_PROP_FPS)
+                    if not fps or not math.isfinite(fps) or fps <= 0:
+                        fps = 30.0
+
+                if total_frames is None:
+                    fc = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+                    total_frames = int(fc) if fc and math.isfinite(fc) and fc > 0 else 0
+
+                duration = (total_frames / fps) if (total_frames and fps) else 0.0
+
+                if not W or not H or total_frames <= 0:
+                    return None
+
+                sample_n = 8
+                idxs = np.linspace(0, max(total_frames - 1, 0), num=sample_n, dtype=int).tolist()
+                y1 = int(H * 0.72)
+                y2 = int(H * 0.95)
+                if y2 <= y1:
+                    return None
+
+                edge_ratios = []
+                for fi in idxs:
+                    try:
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, int(fi))
+                        ok, frame = cap.read()
+                        if not ok or frame is None:
+                            continue
+                        roi = frame[y1:y2, :]
+                        if roi.size == 0:
+                            continue
+                        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+                        if gray.shape[1] > 640:
+                            scale = 640.0 / float(gray.shape[1])
+                            gray = cv2.resize(gray, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_AREA)
+                        edges = cv2.Canny(gray, 50, 150)
+                        ratio = float(np.count_nonzero(edges)) / float(edges.size)
+                        edge_ratios.append(ratio)
+                    except Exception:
+                        continue
+
+                if len(edge_ratios) < 3:
+                    return None
+
+                avg = sum(edge_ratios) / len(edge_ratios)
+                # Empirical threshold: subtitles tend to produce sustained edge density.
+                if avg < 0.012:
+                    return None
+
+                logger.info(
+                    f"[Fallback] Bottom-band subtitle edges detected (avg_edge_ratio={avg:.4f}); applying band blur fallback."
+                )
+
+                region = {
+                    "x": 0.0,
+                    "y": 72.0,
+                    "width": 100.0,
+                    "height": 23.0,
+                    "start_time": 0.0,
+                    "end_time": float(duration) if duration and duration > 0 else None,
+                    "text": "",
+                    "sample_text": "",
+                    "language": "",
+                    "confidence": 0.25,
+                    "source": "fallback_region_edges",
+                }
+                return [region]
+            finally:
+                cap.release()
+        except Exception:
+            return None
+
     def _filter_chinese_regions(self, subtitle_positions: Optional[Iterable[Dict[str, Any]]]) -> List[Dict[str, Any]]:
         """
         Filter subtitle positions to only include Chinese text regions.
@@ -459,6 +576,9 @@ class SubtitleDetector:
                 filtered.append(entry)
             elif source in {'rapidocr', 'rapidocr_gpu', 'opencv_ocr', 'opencv_ocr_gpu', 'opencv_ocr_numpy'} and not lang:
                 reason = f"OCR 소스 '{source}'에서 감지"
+                filtered.append(entry)
+            elif source.startswith("fallback_region"):
+                reason = "OCR 폴백 자막 밴드"
                 filtered.append(entry)
             else:
                 logger.debug(f"[BLUR FILTER] #{idx+1}: Not Chinese - excluded (lang={lang}, text='{text[:30]}...', source={source})")
