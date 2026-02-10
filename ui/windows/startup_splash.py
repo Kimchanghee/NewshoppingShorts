@@ -197,6 +197,16 @@ class StartupSplash(QWidget):
         """)
         layout.addWidget(self.progress_bar)
 
+        # Percentage label (New)
+        self.percent_label = QLabel("0%")
+        self.percent_label.setFont(QFont("Pretendard", 10, QFont.Weight.Bold))
+        self.percent_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.percent_label.setStyleSheet(f"""
+            color: {self.COLORS['primary']};
+            background: transparent;
+        """)
+        layout.addWidget(self.percent_label)
+
         # Status text
         self.status_label = QLabel(self._status_text)
         self.status_label.setFont(QFont("Pretendard", 11))
@@ -248,6 +258,8 @@ class StartupSplash(QWidget):
     def set_progress(self, value):
         """Update progress bar (maintains backward compatibility)"""
         self.progress_bar.setValue(value)
+        if hasattr(self, 'percent_label'):
+            self.percent_label.setText(f"{value}%")
 
     def showEvent(self, event):
         """Fade-in animation when splash is shown"""

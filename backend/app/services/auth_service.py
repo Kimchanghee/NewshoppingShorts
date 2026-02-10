@@ -251,17 +251,20 @@ class AuthService:
                     _hash_ip(ip_address),
                 )
 
-            # Other-IP fresh sessions are treated as true duplicate login.
+            # Other-IP active sessions are now also auto-claimed to prevent "duplicate login" errors
+            # per user request. This implements "push notification" style login
+            # where the latest login kicks out previous sessions.
             if other_ip_sessions:
-                if session_changes:
-                    self.db.commit()
+                for session in other_ip_sessions:
+                    session.is_active = False
+                session_changes = True
                 logger.info(
-                    "[Login Failed] Duplicate login: username=%s, ip_hash=%s, other_ip_sessions=%d",
+                    "[Login] Reclaimed %d other-IP session(s) (auto-kick): username=%s, ip_hash=%s",
+                    len(other_ip_sessions),
                     _mask_username(username),
                     _hash_ip(ip_address),
-                    len(other_ip_sessions),
                 )
-                return {"status": "EU003", "message": "EU003"}  # Duplicate login
+                # return {"status": "EU003", "message": "EU003"}  # Duplicate login - DISABLED
 
         if session_changes:
             self.db.commit()
