@@ -116,17 +116,18 @@ async def submit_registration_request(
                 message="이미 가입된 아이디입니다. 로그인해 주세요.",
             )
 
-        # 1.5. 동일 IP 중복 가입 체크 (첫 번째 계정 이후 추가 가입 방지)
-        client_ip = get_client_ip(request)
-        existing_ip_user = db.query(User).filter(User.registration_ip == client_ip).first()
-        if existing_ip_user:
-            import hashlib
-            ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:12] if client_ip else "unknown"
-            logger.warning(f"[Register Fail] Duplicate IP detected: ip_hash={ip_hash}")
-            return RegistrationResponse(
-                success=False,
-                message="⚠️ 중복 IP에서 회원가입 감지!\n\n동일한 IP에서 이미 가입된 계정이 존재합니다.\n추가 계정이 필요하시면 구독을 신청하시거나 담당자에게 문의해 주시기 바랍니다.",
-            )
+        # 1.5. 동일 IP 중복 가입 체크 (첫 번째 계정 이후 추가 가입 방지) - 비활성화됨
+        # client_ip = get_client_ip(request)
+        # existing_ip_user = db.query(User).filter(User.registration_ip == client_ip).first()
+        # if existing_ip_user:
+        #     import hashlib
+        #     ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:12] if client_ip else "unknown"
+        #     logger.warning(f"[Register Fail] Duplicate IP detected: ip_hash={ip_hash}")
+        #     return RegistrationResponse(
+        #         success=False,
+        #         message="⚠️ 중복 IP에서 회원가입 감지!\n\n동일한 IP에서 이미 가입된 계정이 존재합니다.\n추가 계정이 필요하시면 구독을 신청하시거나 담당자에게 문의해 주시기 바랍니다.",
+        #     )
+        client_ip = get_client_ip(request)  # IP는 여전히 수집하지만 중복 체크는 하지 않음
 
         # 2. RegistrationRequest 테이블 중복 확인 (모든 상태 체크)
         existing_request = (
