@@ -397,7 +397,7 @@ APP_VERSION_INFO = {
 - EXE 빌드 시 .env / .secure_config.enc 자동 번들링 지원""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "",
+    "file_hash": "4C4FC7F0EB5D809C10D62C3AADDB972139955F1CC58F25855B25DC317FC78EC8",
 }
 
 
