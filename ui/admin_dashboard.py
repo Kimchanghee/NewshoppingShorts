@@ -7,6 +7,10 @@ Admin Dashboard for Shopping Shorts Maker
 import logging
 import os
 import sys
+from dotenv import load_dotenv
+
+# .env 파일 로드 (실행 파일과 같은 디렉토리에 있는 .env 우선)
+load_dotenv()
 
 # 프로젝트 루트 경로 추가 (단독 실행 시 필요)
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

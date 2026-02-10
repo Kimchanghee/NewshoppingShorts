@@ -27,6 +27,10 @@ packages_to_collect = [
     'requests',
     'tqdm',
     'pytesseract',  # OCR support (Tesseract)
+    # TTS / Audio processing
+    'pydub',
+    'edge_tts',
+    'av',
     # Browser automation (optional feature set but should be bundled if installed)
     'selenium',
     'webdriver_manager',
@@ -70,6 +74,24 @@ else:
 
 binaries = []
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Bundle Visual C++ Runtime DLLs explicitly for target machines
+# without VC++ Redistributable installed (fixes "Failed to load Python DLL" error).
+# ─────────────────────────────────────────────────────────────────────────────
+import sysconfig as _sysconfig
+_python_base = _sysconfig.get_config_var('base') or os.path.dirname(sys.executable)
+for _vcrt_name in ('vcruntime140.dll', 'vcruntime140_1.dll'):
+    # 1st priority: Python installation directory (MS Store / official installer)
+    _vcrt_path = os.path.join(sys.base_prefix, _vcrt_name)
+    if not os.path.exists(_vcrt_path):
+        # 2nd priority: System32
+        _vcrt_path = os.path.join(os.environ.get('SystemRoot', r'C:\Windows'), 'System32', _vcrt_name)
+    if os.path.exists(_vcrt_path):
+        binaries.append((_vcrt_path, '.'))
+        print(f"[spec] Bundling VC runtime: {_vcrt_path}")
+    else:
+        print(f"[spec] WARNING: {_vcrt_name} not found - target PCs may need VC++ Redistributable")
+
 for package in packages_to_collect:
     try:
         tmp_ret = collect_all(package)
@@ -83,7 +105,7 @@ for package in packages_to_collect:
 
 # Some packages are imported dynamically at runtime (lazy imports) and might be missed by Analysis.
 # Force-include their submodules so end-users do not see ModuleNotFoundError.
-for mod_name in ("selenium", "webdriver_manager", "bs4"):
+for mod_name in ("selenium", "webdriver_manager", "bs4", "pydub", "edge_tts", "av"):
     try:
         hidden_imports += collect_submodules(mod_name)
     except Exception as e:

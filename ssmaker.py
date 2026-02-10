@@ -19,6 +19,28 @@ try:
 except Exception:
     pass
 
+# PyInstaller --onefile: patch importlib.metadata for packages whose dist-info
+# may not be discovered at runtime (fixes "No package metadata was found for imageio").
+if getattr(sys, "frozen", False):
+    import importlib.metadata as _meta
+    _orig_version = _meta.version
+    _FALLBACK_VERSIONS = {
+        "imageio": "2.37.2",
+        "imageio-ffmpeg": "0.6.0",
+        "moviepy": "1.0.3",
+        "pydub": "0.25.1",
+        "edge-tts": "7.2.7",
+        "av": "16.1.0",
+    }
+    def _patched_version(name):
+        try:
+            return _orig_version(name)
+        except _meta.PackageNotFoundError:
+            if name in _FALLBACK_VERSIONS:
+                return _FALLBACK_VERSIONS[name]
+            raise
+    _meta.version = _patched_version
+
 # 빌드 환경(Frozen)에서 리소스 경로 처리
 if getattr(sys, "frozen", False):
     _base_path = getattr(sys, "_MEIPASS", "")
