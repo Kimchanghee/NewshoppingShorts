@@ -382,34 +382,24 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_DOWNLOAD_URL = os.getenv("APP_DOWNLOAD_URL", "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.25/ssmaker_v1.3.25.exe")
+_DEFAULT_DOWNLOAD_URL = os.getenv(
+    "APP_DOWNLOAD_URL",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.30/ssmaker_v1.3.30.exe",
+)
 
 APP_VERSION_INFO = {
-    "version": "1.3.25",
+    "version": "1.3.30",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """버전 1.3.25 업데이트:
-
-🔧 구독관리 텍스트 깨짐 복구
-• 구독관리 화면의 깨진 한글 문구를 전체 정리
-• 결제/안내/상태 메시지 문구 가독성 개선
-
-🔄 결제 UX 정리
-• 카드결제는 카드 등록 없이 새 창 결제 페이지에서 진행
-• 가상계좌 안내 문구를 축약해 결제 화면 높이/폭 부담 완화
-
-🔄 자동 업데이트 안정화
-• 이전 버전에서 최신 버전으로 자동 업데이트가 안 되던 문제 수정
-• 파일 해시 검증을 선택적으로 변경 (해시 있으면 검증, 없으면 경고만)
-• 업데이트 다운로드 및 재시작 안정성 개선
-
-✅ 포함된 기능
-• 게임 스타일 자동 업데이트 (사용자 확인 불필요)
-• 업데이트 완료 후 릴리즈 노트 표시
-• 구독 요금제 월 단위 가격 표시""",
+    "release_notes": """### v1.3.30 변경사항
+- 업데이트/오류 안내 문구의 글자 깨짐(??? 현상) 수정
+- 링크 입력창 텍스트 색상을 흰색으로 고정(다크 UI 가독성 개선)
+- 워터마크 기본값 초기화(테스트/깨진 값 자동 리셋) 및 설정 저장 경로를 사용자 폴더(`~/.ssmaker`)로 이동
+- GLM-OCR은 API 키가 있을 때만 초기화 시도(불필요한 경고 감소)
+- RapidOCR는 `SSMAKER_ENABLE_RAPIDOCR=1`일 때만 사용(Windows onnxruntime 크래시 방지)""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "",
+    "file_hash": "72ef25ea79bb3c82757c7a84208585820e67c39131ad29a0960000e636f9c593",
 }
 
 
