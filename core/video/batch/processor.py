@@ -1049,6 +1049,10 @@ def _process_single_video(app, url, current_number, total_urls):
         )
         logger.info("=" * 70)
         app.add_log(f"[다운로드] [{current_number}/{total_urls}] 영상 다운로드 중...")
+        try:
+            rest.log_user_action("영상 다운로드 시작", f"[{current_number}/{total_urls}] 다운로드 시작")
+        except Exception:
+            pass
 
         mix_urls = _get_mix_job_urls(app, url)
         if len(mix_urls) >= MIX_MIN_URLS:
@@ -1107,6 +1111,10 @@ def _process_single_video(app, url, current_number, total_urls):
             app.add_log(
                 f"⏭️ [{current_number}/{total_urls}] {skip_message} - 다음 영상으로 자동 이동"
             )
+            try:
+                rest.log_user_action("영상 스킵", f"[{current_number}/{total_urls}] {skip_message}")
+            except Exception:
+                pass
             _safe_set_url_status(app, url, "skipped")
             app.url_status_message[url] = f"길이초과{int(original_video_duration)}초"
             app.update_url_listbox()
@@ -1143,6 +1151,10 @@ def _process_single_video(app, url, current_number, total_urls):
 
         _stage_times['download'] = time.time() - _stage_start
         logger.info("[STAGE 1 완료] 다운로드 소요: %.1f초", _stage_times['download'])
+        try:
+            rest.log_user_action("영상 다운로드 완료", f"[{current_number}/{total_urls}] 다운로드 완료 ({_stage_times['download']:.1f}초)")
+        except Exception:
+            pass
         app.update_progress_state("download", "completed", 100, "원본 영상 확보 완료!")
         app.update_step_progress("download", 100)
 
@@ -1162,9 +1174,17 @@ def _process_single_video(app, url, current_number, total_urls):
         app.add_log(
             f"[분석] [{current_number}/{total_urls}] AI 영상 분석 중... ({original_video_duration:.1f}s)"
         )
+        try:
+            rest.log_user_action("AI 분석 시작", f"[{current_number}/{total_urls}] 영상 길이: {original_video_duration:.1f}초")
+        except Exception:
+            pass
         _analyze_video_for_batch(app)
         _stage_times['analysis'] = time.time() - _stage_start
         logger.info("[STAGE 2 완료] AI 분석 소요: %.1f초", _stage_times['analysis'])
+        try:
+            rest.log_user_action("AI 분석 완료", f"[{current_number}/{total_urls}] 분석 완료 ({_stage_times['analysis']:.1f}초)")
+        except Exception:
+            pass
         # Log analysis result summary
         script_count = len(app.analysis_result.get('script') or []) if isinstance(app.analysis_result, dict) else 0
         subtitle_count = len(app.analysis_result.get('subtitle_positions') or []) if isinstance(app.analysis_result, dict) else 0
@@ -1186,10 +1206,18 @@ def _process_single_video(app, url, current_number, total_urls):
         logger.info("[STAGE 3/5] 번역/각색 시작")
         logger.info("=" * 70)
         app.add_log(f"[번역] [{current_number}/{total_urls}] 대본 번역/각색 중...")
+        try:
+            rest.log_user_action("번역 시작", f"[{current_number}/{total_urls}] 대본 번역/각색 시작")
+        except Exception:
+            pass
         _translate_script_for_batch(app)
         _stage_times['translation'] = time.time() - _stage_start
         translation_len = len(app.translation_result) if app.translation_result else 0
         logger.info("[STAGE 3 완료] 번역 소요: %.1f초, 결과: %d자", _stage_times['translation'], translation_len)
+        try:
+            rest.log_user_action("번역 완료", f"[{current_number}/{total_urls}] 번역 완료 ({_stage_times['translation']:.1f}초, {translation_len}자)")
+        except Exception:
+            pass
         if app.translation_result:
             preview = app.translation_result[:80].replace('\n', ' ')
             logger.info("  번역 미리보기: %s...", preview)
@@ -1288,10 +1316,18 @@ def _process_single_video(app, url, current_number, total_urls):
             )
             _tts_start = time.time()
             logger.info("[STAGE 4] TTS 생성 시작 - %s", voice_label)
+            try:
+                rest.log_user_action("TTS 생성 시작", f"[{current_number}/{total_urls}] {voice_label} ({idx_voice}/{total_voices})")
+            except Exception:
+                pass
             _generate_tts_for_batch(app, voice)
             _tts_elapsed = time.time() - _tts_start
             _stage_times[f'tts_{voice_label}'] = _tts_elapsed
             logger.info("[STAGE 4] TTS 생성 완료 - %.1f초 소요", _tts_elapsed)
+            try:
+                rest.log_user_action("TTS 생성 완료", f"[{current_number}/{total_urls}] {voice_label} 완료 ({_tts_elapsed:.1f}초)")
+            except Exception:
+                pass
             # Log TTS result summary
             tts_segments = len(app._per_line_tts) if hasattr(app, '_per_line_tts') and app._per_line_tts else 0
             tts_duration = (app.tts_sync_info or {}).get('speeded_duration', 0)
@@ -1345,12 +1381,20 @@ def _process_single_video(app, url, current_number, total_urls):
             app.update_step_progress("video", 20)
             _encode_start = time.time()
             logger.info("[STAGE 5] 영상 인코딩 시작 - %s", voice_label)
+            try:
+                rest.log_user_action("영상 인코딩 시작", f"[{current_number}/{total_urls}] {voice_label} 인코딩 시작")
+            except Exception:
+                pass
             _create_final_video_for_batch(
                 app, voice, idx_voice, total_voices, current_number, total_urls
             )
             _encode_elapsed = time.time() - _encode_start
             _stage_times[f'encode_{voice_label}'] = _encode_elapsed
             logger.info("[STAGE 5] 영상 인코딩 완료 - %.1f초 소요", _encode_elapsed)
+            try:
+                rest.log_user_action("영상 인코딩 완료", f"[{current_number}/{total_urls}] {voice_label} 인코딩 완료 ({_encode_elapsed:.1f}초)")
+            except Exception:
+                pass
 
             # ★ 보이스별 즉시 저장: 완료 즉시 출력 폴더로 이동 (사용자에게 바로 보임)
             try:
@@ -1425,6 +1469,10 @@ def _process_single_video(app, url, current_number, total_urls):
                                     source_url=url
                                 )
                                 logger.info("[Automation] Added to YouTube upload queue")
+                                try:
+                                    rest.log_user_action("유튜브 업로드 큐 추가", f"제목: {video_title[:50]}")
+                                except Exception:
+                                    pass
 
                 except Exception as auto_err:
                     logger.warning(f"[Automation] 자동화 단계 실패 (영상은 저장됨): {auto_err}")
@@ -1478,6 +1526,10 @@ def _process_single_video(app, url, current_number, total_urls):
         error_msg = _translate_error_message(str(exc))
         error_lower = str(exc).lower()
         logger.error("[처리 오류] %s", error_msg)
+        try:
+            rest.log_user_action("작업 오류", f"[{current_number}/{total_urls}] 단계: {current_step}, 오류: {error_msg[:100]}", "ERROR")
+        except Exception:
+            pass
 
         # ★ API 키 교체 가능한 오류는 'error' 상태로 표시하지 않음 ★
         # 429(할당량), 403(권한), 503(과부하) 등은 키 교체 후 재시도되므로 진행 중 유지

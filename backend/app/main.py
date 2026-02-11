@@ -404,17 +404,17 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.32/SSMaker_Setup_v1.3.32.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.33/SSMaker_Setup_v1.3.33.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.32",
+    "version": "1.3.33",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.32 변경사항
-- Inno Setup 기반 설치형 인스톨러로 전환하여 설치/업데이트가 더 안정적입니다.
-- 프로그램 빌드 구조 개선 및 호환성 향상.
-- 보안 및 인증 프로세스가 강화되었습니다.""",
+    "release_notes": """### v1.3.33 변경사항
+- 작업 로그 기록 추가: 다운로드, AI 분석, 번역, TTS 생성, 인코딩 등 모든 작업 단계가 서버에 기록됩니다.
+- 빌드 안정성 개선: 누락된 패키지(psutil, jwt, colorama, dotenv, cryptography) 번들링 추가.
+- 관리자 활동 로그에서 실제 작업 진행 상황을 확인할 수 있습니다.""",
     "is_mandatory": False,
     "update_channel": "stable",
     "file_hash": "955002783a1dae5a977f2003667fbcec709422a8aec9152e4a9d6a74bdceeb94",

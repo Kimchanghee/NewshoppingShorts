@@ -10,19 +10,18 @@ project_root = os.path.abspath('.')
 # 1. Dependency Collection
 # ─────────────────────────────────────────────────────────────────────────────
 packages_to_collect = [
-    'moviepy', 
+    'moviepy',
     'imageio',
     'imageio_ffmpeg',
-    'openai', 
+    'openai',
     'google.genai',
+    'google.auth',
     'faster_whisper',
     'ctranslate2',
     # 'onnxruntime', # Removed to fix access violation on Python 3.13
     'PIL',
     'cv2',
     'PyQt6',
-    'qtawesome',
-    'pandas',
     'numpy',
     'requests',
     'tqdm',
@@ -31,6 +30,13 @@ packages_to_collect = [
     'pydub',
     'edge_tts',
     'av',
+    # JWT / Security
+    'jwt',
+    'cryptography',
+    # System / Utilities
+    'psutil',
+    'colorama',
+    'dotenv',
     # Browser automation (optional feature set but should be bundled if installed)
     'selenium',
     'webdriver_manager',
@@ -41,6 +47,12 @@ hidden_imports = [
     # 'rapidocr_onnxruntime', # Removed due to Access Violation crash on Python 3.13
     # 'shapely',
     # 'pyclipper',
+    'psutil',
+    'psutil._pswindows',
+    'jwt',
+    'jwt.algorithms',
+    'colorama',
+    'dotenv',
 ]
 datas = [
     ('resource', 'resource'),
@@ -106,7 +118,7 @@ for package in packages_to_collect:
 
 # Some packages are imported dynamically at runtime (lazy imports) and might be missed by Analysis.
 # Force-include their submodules so end-users do not see ModuleNotFoundError.
-for mod_name in ("selenium", "webdriver_manager", "bs4", "pydub", "edge_tts", "av"):
+for mod_name in ("selenium", "webdriver_manager", "bs4", "pydub", "edge_tts", "av", "psutil", "jwt", "colorama", "dotenv", "cryptography"):
     try:
         hidden_imports += collect_submodules(mod_name)
     except Exception as e:
@@ -211,4 +223,4 @@ coll = COLLECT(
 #       /sha1 <CERT_THUMBPRINT> dist\ssmaker\ssmaker.exe
 #
 # Then build the installer:
-#   iscc /DMyAppVersion=1.3.32 /DSignToolAvailable installer.iss
+#   iscc /DMyAppVersion=1.3.33 /DSignToolAvailable installer.iss
