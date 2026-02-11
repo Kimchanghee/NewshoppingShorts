@@ -255,6 +255,13 @@ class QueueManager:
         self.update_queue_count()
         self.add_log(f"삭제됨: {display_value[:80]}")
 
+        # Log URL removal
+        try:
+            from caller.rest import log_user_action
+            log_user_action("URL 삭제", f"작업 큐에서 URL 삭제: {display_value[:50]}...")
+        except Exception:
+            pass
+
     def clear_url_queue(self):
         if not self.gui.url_queue and not self.gui.url_status:
             return
@@ -499,6 +506,13 @@ class QueueManager:
                 msg += f"\n중복 링크 {duplicate_count}개는 제외했습니다."
             show_info(self.gui, "완료", msg)
             self.add_log(f"{source_label}에서 링크 {added_count}개 추가")
+            
+            # Log URL add
+            try:
+                from caller.rest import log_user_action
+                log_user_action("URL 추가", f"{source_label}에서 {added_count}개의 URL을 추가했습니다.")
+            except Exception:
+                pass
         elif duplicate_count > 0:
             show_warning(self.gui, "안내", f"입력한 링크가 모두 중복입니다. ({duplicate_count}개)")
 

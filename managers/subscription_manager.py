@@ -128,6 +128,11 @@ class SubscriptionManager:
             logger.warning(f"[Subscription] Auto-refresh parse error: {e}")
         except Exception as e:
             logger.error(f"[Subscription] Auto-refresh failed: {e}")
+            try:
+                from caller.rest import log_user_action
+                log_user_action("구독 갱신 오류", f"구독 정보를 갱신하는 중 오류가 발생했습니다: {e}", "ERROR")
+            except Exception:
+                pass
 
     def _update_countdown_display(self):
         """Update countdown label (called every 1s)."""

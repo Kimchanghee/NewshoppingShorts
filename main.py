@@ -267,6 +267,12 @@ class VideoAnalyzerGUI(
         self.stack.setCurrentIndex(idx)
         self.step_nav.set_active(step_id)
 
+        try:
+            from caller.rest import log_user_action
+            log_user_action("메뉴 이동", f"사용자가 '{step_id}'(으)로 이동했습니다.")
+        except Exception:
+            pass
+
 
 def main():
     sys.excepthook = global_exception_handler

@@ -48,10 +48,11 @@ datas = [
 ]
 
 # Bundle .env file for GLM-OCR API key (if present at build time)
-_env_file = os.path.join(project_root, '.env')
-if os.path.exists(_env_file):
-    datas.append((_env_file, '.'))
-    print("[spec] Including .env file for API key configuration")
+# Bundle .env file was previously included here, but is now excluded for security.
+# _env_file = os.path.join(project_root, '.env')
+# if os.path.exists(_env_file):
+#     datas.append((_env_file, '.'))
+#     print("[spec] Including .env file for API key configuration")
 
 # Bundle encrypted secure config (if present at build time)
 _secure_config = os.path.join(project_root, 'utils', '.secure_config.enc')

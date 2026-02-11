@@ -407,6 +407,12 @@ def login(**data) -> Dict[str, Any]:
                 if _check_token_expiration(token):
                     _set_auth_token(token)
                     logger.info("[Login] New auth token stored successfully")
+                    
+                    # Log login success
+                    try:
+                        log_user_action("로그인", f"로그인 성공 (IP: {ip_address})")
+                    except Exception:
+                        pass
                 else:
                     logger.warning("[Login] Received expired JWT token from server")
             else:
@@ -414,6 +420,17 @@ def login(**data) -> Dict[str, Any]:
         else:
             # Normalize message for common failure cases
             loginObject["message"] = _friendly_login_message(loginObject)
+            
+            # Log login failure (if user exists but password wrong, etc.)
+            try:
+                # Token might not be available, so this log might fail if authentication is required for logging
+                # But if we have a temporary token or if the logging endpoint allows unauthenticated logs (usually not), it works.
+                # Since log_user_action requires a token, we might not be able to log failure here if previous token is gone.
+                # However, if re-logging in, we might still have a valid token? Usually not.
+                # We skip logging failure here to avoid complexity, or only log if we have a valid token.
+                pass 
+            except Exception:
+                pass
 
         return loginObject
     except requests.exceptions.Timeout:
@@ -490,6 +507,13 @@ def logOut(**data) -> str:
         logger.warning("Logout skipped - no valid auth token available")
         _set_auth_token(None)
         return "error"
+
+    # Log logout action
+    try:
+        log_user_action("로그아웃", "사용자가 로그아웃했습니다.")
+    except Exception:
+        pass
+
     body = {"id": user_id, "key": logout_token}
 
     try:
@@ -768,7 +792,36 @@ def submitRegistrationRequest(
         if response.status_code == 422:
             # FastAPI validation error
             try:
-                detail = response.json().get("detail", [])
+                data = response.json()
+                # 1. Custom error format (error.details)
+                error_obj = data.get("error", {})
+                if isinstance(error_obj, dict):
+                    details = error_obj.get("details", [])
+                    if details and isinstance(details, list):
+                        # Extract message from first error detail
+                        first_error = details[0]
+                        msg = first_error.get("msg", "")
+                        loc = first_error.get("loc", [])
+                        field = loc[-1] if loc else ""
+                        
+                        # Translate Pydantic standard messages if needed
+                        if "at least" in msg:
+                            msg = "길이가 너무 짧습니다."
+                        
+                        return {
+                            "success": False,
+                            "message": f"입력값이 올바르지 않습니다.\n({field}: {msg})",
+                        }
+                    
+                    # If message exists in error object
+                    if error_obj.get("message"):
+                        return {
+                            "success": False,
+                            "message": error_obj.get("message"),
+                        }
+
+                # 2. Standard FastAPI format (detail list)
+                detail = data.get("detail", [])
                 if detail and isinstance(detail, list):
                     msg = detail[0].get("msg", "")
                     return {
@@ -777,9 +830,10 @@ def submitRegistrationRequest(
                     }
             except Exception:
                 pass
+            
             return {
                 "success": False,
-                "message": "입력값이 올바르지 않습니다. (연락처는 숫자/하이픈 10자리 이상)",
+                "message": "입력값이 올바르지 않습니다. (입력 형식을 확인해주세요)",
             }
 
         if response.status_code == 429:
@@ -1446,3 +1500,31 @@ def safe_subscription_request(user_id: str, message: str = "") -> Dict[str, Any]
     except Exception as e:
         logger.error(f"Subscription request failed: {e}")
         return {"success": False, "message": "Subscription request failed."}
+
+
+def log_user_action(action: str, content: str = None, level: str = "INFO") -> None:
+    """
+    Log user activity for debugging.
+    사용자 활동 로그 전송 (서버로 전송)
+    """
+    try:
+        # Require minimal token check
+        token = _get_auth_token()
+        if not token:
+            return
+
+        body = {
+            "level": level,
+            "action": action,
+            "content": content
+        }
+        
+        # Use short timeout to not block UI
+        _secure_session.post(
+            f"{main_server}/user/logs",
+            json=body,
+            timeout=2.0
+        )
+    except Exception as e:
+        # Failing to log should not raise error to user
+        logger.debug(f"Failed to send log: {e}")

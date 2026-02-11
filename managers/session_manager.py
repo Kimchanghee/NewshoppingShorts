@@ -441,6 +441,13 @@ class SessionManager:
             else:
                 self.gui.add_log(f"[세션 복구] {total_urls}개 URL 복구 완료")
 
+            # Log session restore
+            try:
+                from caller.rest import log_user_action
+                log_user_action("세션 복구", f"{total_urls}개 URL이 포함된 이전 세션을 복구했습니다.")
+            except Exception:
+                pass
+
             return True
 
         except Exception as e:

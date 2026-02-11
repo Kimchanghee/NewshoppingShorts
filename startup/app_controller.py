@@ -261,6 +261,13 @@ class AppController:
             if self.loading_window:
                 self.loading_window.close()
 
+            # Log application start
+            try:
+                from caller.rest import log_user_action
+                log_user_action("앱 실행", "애플리케이션이 성공적으로 실행되었습니다.")
+            except Exception:
+                pass
+
             # 업데이트 내역 팝업 표시 (새 버전일 때만)
             self._show_update_notes_if_needed()
 
