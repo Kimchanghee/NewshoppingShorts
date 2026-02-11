@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-SSMaker Auto-Updater
-This standalone script is responsible for replacing the main application executable
-with a newly downloaded version. It waits for the main application to terminate,
-replaces the file, and then restarts the application.
+SSMaker Auto-Updater (Legacy fallback)
+
+NOTE: Primary updates now use the Inno Setup installer via silent install.
+This standalone updater is kept as a fallback for edge cases where the
+installer-based update cannot be used (e.g. portable mode).
 
 Usage:
     updater.exe <source_path> <dest_path> <execute_after> <pid_to_wait>
@@ -46,7 +47,7 @@ def main():
         # 1. Wait for the main application to close
         max_retries = 30  # Wait up to 30 seconds
         process_closed = False
-        
+
         for i in range(max_retries):
             try:
                 # Check if process exists
@@ -58,11 +59,11 @@ def main():
                 process_closed = True
                 logging.info(f"Process {pid_to_wait} has terminated.")
                 break
-        
+
         if not process_closed:
             logging.error("Timeout waiting for application to close.")
             sys.exit(1)
-            
+
         # Double check to ensure file handles are released
         time.sleep(1)
 
@@ -75,10 +76,10 @@ def main():
                 if os.path.exists(backup_path):
                     os.remove(backup_path)
                 os.rename(dest_path, backup_path)
-            
+
             shutil.copy2(source_path, dest_path)
             logging.info("File replaced successfully.")
-            
+
             # Clean up source file
             try:
                 os.remove(source_path)

@@ -47,9 +47,18 @@ if (-not (Test-Path $Python)) {
   $Python = "python"
 }
 
+# Read version from version.json for Inno Setup
+$versionJson = Join-Path $Root "version.json"
+$AppVersion = "0.0.0"
+if (Test-Path $versionJson) {
+  $vdata = Get-Content $versionJson -Raw | ConvertFrom-Json
+  $AppVersion = $vdata.version
+}
+
 try {
   Write-Host "Project root: $Root"
   Write-Host "Python: $Python"
+  Write-Host "App version: $AppVersion"
   Push-Location $Root
 
   Write-Host "`n[1/5] Cleaning build artifacts..."
@@ -125,108 +134,121 @@ try {
   }
   Write-Host "OK: Staged Tesseract to $stageRoot"
 
-  Invoke-Native "[2/5] Building updater.exe (for bundling)..." $Python @(
-    "-m", "PyInstaller", "--noconfirm", "--clean",
-    "--distpath", (Join-Path $Root "dist"),
-    "--workpath", (Join-Path $Root "build"),
-    (Join-Path $Root "updater.spec")
-  )
-
-  Invoke-Native "[3/5] Building ssmaker.exe..." $Python @(
+  # ── PyInstaller: onedir build ──────────────────────────────────────────────
+  Invoke-Native "[2/5] Building ssmaker (onedir)..." $Python @(
     "-m", "PyInstaller", "--noconfirm", "--clean",
     "--distpath", (Join-Path $Root "dist"),
     "--workpath", (Join-Path $Root "build"),
     (Join-Path $Root "ssmaker.spec")
   )
 
-  $ssmakerExe = Join-Path $Root "dist\\ssmaker.exe"
-  $updaterExe = Join-Path $Root "dist\\updater.exe"
+  $distDir = Join-Path $Root "dist\\ssmaker"
+  $ssmakerExe = Join-Path $distDir "ssmaker.exe"
 
   if (-not (Test-Path $ssmakerExe)) {
     throw "Build output missing: ${ssmakerExe}"
   }
 
-  Write-Host "`n[4/5] Verifying bundled contents inside ssmaker.exe..."
-  # Use the module entrypoint instead of relying on `pyi-archive_viewer(.exe)` being on PATH.
-  # On GitHub Actions, python.exe is typically in the install root while scripts are in a separate `Scripts\` dir.
-  $listing = "l`nq`n" | & $Python -m PyInstaller.utils.cliutils.archive_viewer $ssmakerExe
+  # ── Verify output directory contents ───────────────────────────────────────
+  Write-Host "`n[3/5] Verifying build output in dist\ssmaker\..."
 
-# Must-have bundle items
-$mustContain = @(
-  "updater.exe",
-  "version.json",
-  # Ensure we ship an ffmpeg binary (we rely on imageio_ffmpeg, not a local resource/bin copy).
-  "imageio_ffmpeg\\binaries\\ffmpeg",
-  # Ensure bundled Korean font assets are present for subtitle/UI rendering.
-  "fonts\\Pretendard-ExtraBold.ttf",
-  # Ensure bundled Tesseract runtime exists for OCR/blur on end-user PCs.
-  "tesseract\\tesseract.exe",
-  "tesseract\\tessdata\\chi_sim.traineddata",
-  # Ensure optional automation modules are bundled (lazy-imported at runtime).
-  "selenium\\__init__",
-  "webdriver_manager\\__init__"
-)
-
-foreach ($item in $mustContain) {
-  if (-not ($listing | Select-String -SimpleMatch $item)) {
-    throw "Missing required bundle item: ${item}"
+  # Collect all relative paths in the output directory for verification
+  $allFiles = Get-ChildItem -Path $distDir -Recurse -File | ForEach-Object {
+    $_.FullName.Substring($distDir.Length + 1)
   }
-}
 
-# imageio runtime requires dist-info metadata for importlib.metadata at runtime.
-$imageioMeta = $listing | Select-String -SimpleMatch "imageio-" | Select-String -SimpleMatch "dist-info\\METADATA"
-if (-not $imageioMeta) {
-  throw "imageio package metadata (dist-info/METADATA) not found inside ssmaker.exe archive."
-}
+  # Must-have items
+  $mustContain = @(
+    "ssmaker.exe",
+    "version.json",
+    # ffmpeg binary (imageio_ffmpeg)
+    "imageio_ffmpeg",
+    # Korean font assets
+    "fonts\\Pretendard-ExtraBold.ttf",
+    # Tesseract OCR runtime
+    "tesseract\\tesseract.exe",
+    "tesseract\\tessdata\\chi_sim.traineddata",
+    # Automation modules
+    "selenium",
+    "webdriver_manager"
+  )
 
-# Make sure we are not accidentally shipping local secrets/configs.
-# NOTE: Even if these files exist only on the build machine, bundling them would be catastrophic.
-$mustNotContain = @(
-  ".env",
-  ".secure_config.enc",
-  # SecretsManager fallback file + dev key (should never be bundled)
-  ".secrets",
-  ".encryption_key",
-  # Legacy/local remember-me file (can contain ID/PW)
-  "info.on",
-  # Credential / key files (must never ship)
-  "temp_pw.txt",
-  "vertex-credentials",
-  ".key"
-)
-foreach ($item in $mustNotContain) {
-  if ($listing | Select-String -SimpleMatch $item) {
-    throw "Sensitive file was bundled into ssmaker.exe: ${item}"
-  }
-}
-
-# certifi CA bundle is required for TLS verification at runtime.
-# Block all other .pem files.
-$allowedPem = @(
-  "certifi\\cacert.pem"
-)
-$pemHits = $listing | Select-String -SimpleMatch ".pem"
-foreach ($hit in $pemHits) {
-  $line = $hit.ToString()
-  $isAllowed = $false
-  foreach ($allow in $allowedPem) {
-    if ($line -like "*$allow*") {
-      $isAllowed = $true
-      break
+  foreach ($item in $mustContain) {
+    $found = $allFiles | Where-Object { $_ -like "*$item*" }
+    if (-not $found) {
+      throw "Missing required item in dist\ssmaker\: ${item}"
     }
   }
-  if (-not $isAllowed) {
-    throw "Sensitive file was bundled into ssmaker.exe: $line"
+
+  # imageio dist-info metadata
+  $imageioMeta = $allFiles | Where-Object { $_ -like "*imageio*dist-info*METADATA*" }
+  if (-not $imageioMeta) {
+    throw "imageio package metadata (dist-info/METADATA) not found in build output."
   }
-}
-Write-Host "OK: bundle contents verified."
 
-Write-Host "`n[5/5] Removing standalone dist\\updater.exe (single-file distribution)..."
-Remove-Item -Path $updaterExe -Force -ErrorAction SilentlyContinue
+  # Sensitive files must NOT be in the output
+  $mustNotContain = @(
+    ".env",
+    ".secure_config.enc",
+    ".secrets",
+    ".encryption_key",
+    "info.on",
+    "temp_pw.txt",
+    "vertex-credentials",
+    ".key"
+  )
+  foreach ($item in $mustNotContain) {
+    # Exact filename match (not substring) to avoid false positives like "certifi/.key" matching registry keys
+    $found = $allFiles | Where-Object {
+      $name = Split-Path $_ -Leaf
+      $name -eq $item
+    }
+    if ($found) {
+      throw "Sensitive file found in build output: ${found}"
+    }
+  }
 
-Write-Host "`nDone."
-Write-Host "Distribute only:"
-Write-Host " - $ssmakerExe"
+  # certifi CA bundle allowed; block other .pem files
+  $pemFiles = $allFiles | Where-Object { $_ -like "*.pem" }
+  foreach ($pem in $pemFiles) {
+    if ($pem -notlike "*certifi*cacert.pem*") {
+      throw "Unexpected .pem file in build output: ${pem}"
+    }
+  }
+  Write-Host "OK: build output verified."
+
+  # ── Inno Setup: create installer ───────────────────────────────────────────
+  Write-Host "`n[4/5] Building Windows installer with Inno Setup..."
+
+  # Find ISCC.exe (Inno Setup Compiler)
+  $iscc = $null
+  $isccCandidates = @(
+    (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
+    "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe",
+    "C:\\Program Files\\Inno Setup 6\\ISCC.exe"
+  ) | Where-Object { $_ -and (Test-Path $_) }
+  $iscc = $isccCandidates | Select-Object -First 1
+
+  if (-not $iscc) {
+    throw "Inno Setup not found. Install: winget install JRSoftware.InnoSetup  OR  choco install innosetup -y"
+  }
+
+  $issFile = Join-Path $Root "installer.iss"
+  Invoke-Native "[4/5] Compiling installer..." $iscc @(
+    "/DMyAppVersion=$AppVersion",
+    $issFile
+  )
+
+  $installerExe = Join-Path $Root "dist\\SSMaker_Setup_v${AppVersion}.exe"
+  if (-not (Test-Path $installerExe)) {
+    throw "Installer output missing: ${installerExe}"
+  }
+
+  # ── Done ───────────────────────────────────────────────────────────────────
+  $installerSize = [math]::Round((Get-Item $installerExe).Length / 1MB, 1)
+  Write-Host "`n[5/5] Build complete."
+  Write-Host "Distribute:"
+  Write-Host " - $installerExe  (${installerSize} MB)"
 
 } catch {
   $msg = $_.Exception.Message

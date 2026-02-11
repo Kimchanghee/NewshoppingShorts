@@ -312,33 +312,46 @@ class UpdateChecker:
     
     def install_update(self, installer_path: Path) -> bool:
         """
-        ?ㅼ슫濡쒕뱶???낅뜲?댄듃 ?ㅼ튂.
-        
+        다운로드된 Inno Setup 인스톨러를 사일런트 모드로 실행하여 업데이트 설치.
+
+        이 메서드가 True를 반환하면, 호출자는 반드시 앱을 종료해야 합니다.
+        인스톨러가 파일 교체 후 앱을 자동으로 재시작합니다.
+
         Args:
-            installer_path: ?ㅼ튂 ?뚯씪 寃쎈줈
-        
+            installer_path: 인스톨러 파일 경로
+
         Returns:
-            ?깃났 ?щ?
+            성공 여부
         """
         if not installer_path or not installer_path.exists():
             logger.error("Installer file not found")
             return False
-        
+
         try:
-            logger.info(f"Installing update: {installer_path}")
-            
-            # Windows: ?ㅼ튂 ?꾨줈洹몃옩 ?ㅽ뻾
+            logger.info(f"Installing update (silent): {installer_path}")
+
             if sys.platform == "win32":
-                # ?꾩옱 ?꾨줈洹몃옩 醫낅즺 ???ㅼ튂 ?꾨줈洹몃옩 ?ㅽ뻾
+                # Inno Setup 사일런트 설치:
+                # /VERYSILENT  - UI 없이 설치
+                # /SUPPRESSMSGBOXES - 메시지 박스 숨김
+                # /CLOSEAPPLICATIONS - 실행 중인 앱 자동 종료
+                # /SP- - 설치 확인 프롬프트 건너뛰기
                 subprocess.Popen(
-                    [str(installer_path)],
-                    creationflags=subprocess.CREATE_NEW_CONSOLE | subprocess.CREATE_NEW_PROCESS_GROUP
+                    [
+                        str(installer_path),
+                        "/VERYSILENT",
+                        "/SUPPRESSMSGBOXES",
+                        "/CLOSEAPPLICATIONS",
+                        "/SP-",
+                    ],
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP
                 )
+                logger.info("Installer launched. App should exit now for update to proceed.")
                 return True
             else:
                 logger.warning("Auto-install not supported on this platform")
                 return False
-                
+
         except Exception as e:
             logger.exception(f"Install failed: {e}")
             return False

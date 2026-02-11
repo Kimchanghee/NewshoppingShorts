@@ -35,6 +35,9 @@ jobs:
         python -m pip install pyinstaller
         python -c "import sys; import PyInstaller; print('python=', sys.executable); print('pyinstaller=', PyInstaller.__version__)"
 
+    - name: Install Inno Setup
+      run: choco install innosetup --no-progress -y
+
     - name: Download Whisper models
       run: python scripts/download_whisper_models.py
       continue-on-error: true
@@ -67,19 +70,25 @@ jobs:
         p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"Updated version.json to {version}")
 
-    - name: Build EXE
+    - name: Build Installer
       shell: pwsh
       run: |
         ./scripts/build_exe.ps1
 
-    - name: Rename EXE
+    - name: Compute installer SHA256
+      id: hash
+      shell: pwsh
       run: |
-        mv dist/ssmaker.exe dist/ssmaker_v${{ steps.version.outputs.VERSION }}.exe
+        $version = "${{ steps.version.outputs.VERSION }}"
+        $installer = "dist/SSMaker_Setup_v${version}.exe"
+        $hash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLower()
+        Write-Host "SHA256: $hash"
+        echo "FILE_HASH=$hash" >> $env:GITHUB_OUTPUT
 
     - name: Create Release
       uses: softprops/action-gh-release@v1
       with:
-        files: dist/ssmaker_v${{ steps.version.outputs.VERSION }}.exe
+        files: dist/SSMaker_Setup_v${{ steps.version.outputs.VERSION }}.exe
         name: Release v${{ steps.version.outputs.VERSION }}
         body: |
           ## SSMaker v${{ steps.version.outputs.VERSION }}
@@ -88,18 +97,22 @@ jobs:
           - 자동 빌드된 버전입니다.
 
           ### 다운로드
-          아래 파일을 다운로드하세요.
+          아래 설치 파일을 다운로드하여 실행하세요.
+
+          ### SHA256
+          `${{ steps.hash.outputs.FILE_HASH }}`
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Update server version API
       run: |
         $version = "${{ steps.version.outputs.VERSION }}"
-        $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/v${version}/ssmaker_v${version}.exe"
+        $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/v${version}/SSMaker_Setup_v${version}.exe"
 
         $body = @{
           version = $version
           download_url = $downloadUrl
+          file_hash = "${{ steps.hash.outputs.FILE_HASH }}"
           release_notes = "버전 ${version} 자동 배포"
           is_mandatory = $false
         } | ConvertTo-Json
