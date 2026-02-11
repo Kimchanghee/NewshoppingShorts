@@ -362,6 +362,8 @@ if not os.path.exists(static_dir):
     os.makedirs(static_dir, exist_ok=True)
     logger.info(f"Created missing static directory at {static_dir}")
 
+from app.routers import auth, registration, admin, subscription, payment, logs
+
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/")
@@ -375,6 +377,7 @@ app.include_router(registration.router)
 app.include_router(admin.router)
 app.include_router(subscription.router)
 app.include_router(payment.router)
+app.include_router(logs.router)
 
 @app.get("/health")
 async def health():
@@ -392,9 +395,10 @@ APP_VERSION_INFO = {
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
     "release_notes": """### v1.3.31 변경사항
-- GLM-OCR API 키 연동 완료 (EXE 빌드에 .env 자동 포함)
-- 로딩 화면 문구 개선 (비기술적 설명으로 변경)
-- EXE 빌드 시 .env / .secure_config.enc 자동 번들링 지원""",
+- 텍스트 인식(OCR) 기능이 강화되어 더 정확한 쇼핑 정보를 가져옵니다.
+- 프로그램 실행 속도와 안정성이 향상되었습니다.
+- 사용자 경험을 위해 로딩 화면과 안내 문구를 더 쉽게 개선했습니다.
+- 보안 및 인증 프로세스가 강화되었습니다.""",
     "is_mandatory": False,
     "update_channel": "stable",
     "file_hash": "7a0abc3085e152ae2a168096e5cde7a3d813174566f3a3372ddd987e2837bca3",

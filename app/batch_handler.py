@@ -221,6 +221,25 @@ class BatchHandler:
 
         self.app.add_log(f"영상 만들기 시작 - {len(waiting_urls)}개 URL")
 
+        # Detailed logging for usage tracking
+        try:
+            from ui.panels.cta_panel import get_selected_cta_lines
+            from caller import rest
+            
+            selected_font = getattr(self.app, 'selected_font_id', 'unknown')
+            selected_cta = getattr(self.app, 'selected_cta_id', 'unknown')
+            cta_lines = get_selected_cta_lines(self.app)
+            
+            rest.log_user_action(
+                "영상 생성 시작", 
+                f"작업 URL: {len(waiting_urls)}개\n"
+                f"선택 음성: {', '.join(voice_labels)}\n"
+                f"폰트: {selected_font}\n"
+                f"CTA: {selected_cta} ({' '.join(cta_lines)})"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to log start action: {e}")
+
         # 동적 처리 플래그 설정
         self.app.dynamic_processing = True
         self.app.batch_processing = True

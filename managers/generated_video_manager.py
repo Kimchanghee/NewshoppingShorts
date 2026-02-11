@@ -113,6 +113,13 @@ class GeneratedVideoManager:
         if saved_count > 0 and show_popup:
             self._show_success_popup(saved_count, url_output_dir)
 
+        # Log video generation
+        try:
+            from caller.rest import log_user_action
+            log_user_action("영상 생성 완료", f"{saved_count}개의 영상이 생성되었습니다.")
+        except Exception:
+            pass
+
         return saved_count
 
     def _cleanup_temp_dirs(self):

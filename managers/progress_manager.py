@@ -644,6 +644,17 @@ class ProgressManager(ProgressObserver):
             except Exception as e:
                 logger.debug(f"[ProgressManager] refresh_stage_indicator error: {e}")
 
+            # Log significant status changes
+            if status in ('processing', 'completed', 'error') and progress in (0, 100):
+                try:
+                    from caller.rest import log_user_action
+                    log_user_action(
+                        f"단계 {status}", 
+                        f"'{step}' 단계가 {status} 상태입니다. (진행률: {progress}%)"
+                    )
+                except Exception:
+                    pass
+
             # ★ ProgressPanel 직접 업데이트 (가장 확실한 경로)
             # Direct ProgressPanel update (most reliable path)
             progress_panel = getattr(self.gui, 'progress_panel', None)

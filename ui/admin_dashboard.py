@@ -31,6 +31,7 @@ from PyQt6.QtWidgets import (
     QScrollArea,
     QAbstractItemView,
     QFrame,
+    QVBoxLayout,
 )
 from PyQt6.QtGui import QFont, QColor, QBrush, QIcon
 from datetime import datetime, timedelta, timezone
@@ -829,13 +830,13 @@ class AdminDashboard(QMainWindow):
         ext_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
         ext_btn.clicked.connect(lambda: self._extend_subscription(user_id, username))
         
-        # 3. Status (Yellow/Warning)
-        stat_btn = QPushButton("상태", widget)
+        # 3. Log (Yellow/Warning) -> Changed to Log
+        stat_btn = QPushButton("로그", widget)
         stat_btn.setGeometry(100, 5, 50, 30)
         stat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("warning")
         stat_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
-        stat_btn.clicked.connect(lambda: self._check_work_status(user_id, username))
+        stat_btn.clicked.connect(lambda: self._show_user_logs(user_id, username))
 
         # 4. History (Gray/Info)
         hist_btn = QPushButton("이력", widget)
@@ -1153,90 +1154,96 @@ class AdminDashboard(QMainWindow):
         self.workers.append(worker)
         worker.start()
 
-    def _check_work_status(self, user_id, username):
-        """작업 상태 확인"""
-        logger.info("[Admin UI] Check work status | user_id=%s username=%s", user_id, username)
-        url = f"{self.api_base_url}/user/admin/users/{user_id}"
+    def _show_user_logs(self, user_id, username):
+        """사용자 로그 보기 (24시간)"""
+        logger.info("[Admin UI] Show logs | user_id=%s username=%s", user_id, username)
+        url = f"{self.api_base_url}/user/admin/users/{user_id}/logs"
         worker = ApiWorker("GET", url, self._get_headers())
-        worker.data_ready.connect(lambda d: self._show_work_status_dialog(username, d))
+        worker.data_ready.connect(lambda d: self._show_logs_dialog(username, d))
         worker.error.connect(self._on_error)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
-    
-    def _show_work_status_dialog(self, username: str, data: dict):
-        """작업 상태 다이얼로그 표시"""
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"'{username}' 작업 상태")
-        dialog.setFixedSize(450, 480)
-        dialog.setStyleSheet(f"background-color: {get_color('surface')};")
-        
-        title_lbl = QLabel(f"'{username}' 상세 정보 및 상태", dialog)
-        title_lbl.setGeometry(30, 25, 390, 25)
-        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2, QFont.Weight.Bold))
-        title_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
-        
-        # 작업 횟수 정보
-        work_count = data.get("work_count", -1)
-        work_used = data.get("work_used", 0)
-        
-        if work_count == -1:
-            work_status = "무제한"
-            remaining = "무제한"
-            color = get_color("success")
-        else:
-            remaining = max(0, work_count - work_used)
-            work_status = f"{remaining} / {work_count}"
-            color = get_color("warning") if remaining <= 10 else get_color("success")
-        
-        # 정보 표시
-        y_pos = 70
-        raw_user_type = (data.get("user_type") or "trial").strip().lower()
-        user_type_text = {
-            "trial": "체험판",
-            "subscriber": "구독자",
-            "admin": "관리자",
-        }.get(raw_user_type, raw_user_type)
-        items = [
-            ("실제 이름:", data.get("name") or "-"),
-            ("이메일 주소:", data.get("email") or "-"),
-            ("휴대폰 번호:", data.get("phone") or "-"),
-            ("-" * 30, ""), # Separator
-            ("작업 유형:", "구독자" if work_count == -1 else "제한형"),
-            ("총 작업 횟수:", "무제한" if work_count == -1 else str(work_count)),
-            ("사용한 작업:", str(work_used)),
-            ("남은 작업:", str(remaining) if work_count != -1 else "무제한"),
-            ("구독 만료:", self._convert_to_kst(data.get("subscription_expires_at"))),
-            ("사용자 유형:", user_type_text),
-            ("현재 작업:", data.get("current_task") or "-"),
-        ]
-        
-        for label, value in items:
-            if label == "-" * 30:
-                sep = QFrame(dialog)
-                sep.setFrameShape(QFrame.Shape.HLine)
-                sep.setFrameShadow(QFrame.Shadow.Sunken)
-                sep.setGeometry(30, y_pos + 10, 390, 1)
-                sep.setStyleSheet(f"background-color: {get_color('border')};")
-                y_pos += 25
-                continue
 
-            lbl = QLabel(label, dialog)
-            lbl.setGeometry(30, y_pos, 120, 25)
-            lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
-            lbl.setStyleSheet(f"color: {get_color('text_muted')};")
-            
-            val_lbl = QLabel(value, dialog)
-            val_lbl.setGeometry(160, y_pos, 260, 25)
-            val_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
-            val_lbl.setStyleSheet(f"color: {color if '남은 작업' in label else get_color('text_primary')};")
-            
-            y_pos += 35
+    def _show_logs_dialog(self, username: str, data: dict):
+        """로그 목록 다이얼로그 표시"""
+        logs = data.get("logs", [])
         
-        # 닫기 버튼
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"'{username}' 활동 로그 (최근 24시간)")
+        dialog.setFixedSize(900, 600)
+        dialog.setStyleSheet(f"background-color: {get_color('surface')}; color: {get_color('text_primary')};")
+        
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setSpacing(10)
+        
+        # Title
+        title_lbl = QLabel(f"'{username}' 최근 활동 로그 ({len(logs)}건)", dialog)
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_md, QFont.Weight.Bold))
+        layout.addWidget(title_lbl)
+
+        # Table
+        table = QTableWidget(dialog)
+        table.setColumnCount(4)
+        table.setHorizontalHeaderLabels(["시간", "레벨", "동작", "내용"])
+        
+        header = table.horizontalHeader()
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents) # Time
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents) # Level
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents) # Action
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)          # Content
+        
+        table.verticalHeader().setVisible(False)
+        table.setAlternatingRowColors(True)
+        table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        table.setWordWrap(True)  # Enable word wrap for long content
+        table.setStyleSheet(f"""
+            QTableWidget {{
+                gridline-color: {get_color('border')};
+                background-color: {get_color('surface')};
+                alternate-background-color: {get_color('surface_variant')};
+            }}
+            QHeaderView::section {{
+                background-color: {get_color('surface_variant')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                padding: 4px;
+            }}
+        """)
+        
+        table.setRowCount(len(logs))
+        
+        for row, log in enumerate(logs):
+            created = log.get("created_at", "")
+            try:
+                # Assuming created_at is ISO format
+                if created:
+                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    # Convert to KST (+09:00)
+                    kst = timezone(timedelta(hours=9))
+                    created = dt.astimezone(kst).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                pass
+                
+            self._set_cell(table, row, 0, created)
+            self._set_cell(table, row, 1, log.get("level", "INFO"))
+            self._set_cell(table, row, 2, log.get("action", ""))
+            
+            # Content items might involve newlines, so usage of setCellWidget or careful text handling
+            content_item = QTableWidgetItem(log.get("content", "") or "")
+            content_item.setForeground(QBrush(QColor(get_color("text_primary"))))
+            table.setItem(row, 3, content_item)
+            
+        layout.addWidget(table)
+        
+        # Close button
+        btn_layout = QVBoxLayout() # Just to align right? No, simple close button
         close_btn = QPushButton("닫기", dialog)
-        close_btn.setGeometry(320, 420, 100, 35)
-        close_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        close_btn.setFixedSize(100, 35)
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         close_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color('background')};
@@ -1249,6 +1256,7 @@ class AdminDashboard(QMainWindow):
             }}
         """)
         close_btn.clicked.connect(dialog.accept)
+        layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
         dialog.exec()
 
