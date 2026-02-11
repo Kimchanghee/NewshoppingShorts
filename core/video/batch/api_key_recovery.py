@@ -258,22 +258,43 @@ def handle_api_error_with_rotation(app, error_str, error_type, step_name="처리
             app.add_log(f"[{step_name}] 키 교체: {blocked_key} -> {new_key}")
             return True
         else:
-            app.add_log(f"[{step_name}] 사용 가능한 API 키 없음")
-            if error_type == "429":
-                # Wait 60s with cancellation check
-                for _ in range(60):
-                    if not getattr(app, "batch_processing", True):
-                        break
-                    time.sleep(1)
+            app.add_log(f"[{step_name}] 사용 가능한 API 키 없음 - 작업을 중지합니다.")
+            _show_no_key_popup_and_stop(app, step_name)
             return False
     else:
         app.add_log(f"[{step_name}] API {error_type} 오류 - 키 관리자 없음")
-        if error_type == "429":
-            for _ in range(60):
-                if not getattr(app, "batch_processing", True):
-                    break
-                time.sleep(1)
+        _show_no_key_popup_and_stop(app, step_name)
         return False
+
+
+def _show_no_key_popup_and_stop(app, step_name="처리"):
+    """
+    Show a popup alerting the user that no API keys are available,
+    then stop batch processing.
+    """
+    app.batch_processing = False
+    app.dynamic_processing = False
+
+    def _show_popup():
+        try:
+            from ui.components.custom_dialog import show_error
+            show_error(
+                app,
+                "API 키 오류",
+                f"[{step_name}] 사용 가능한 API 키가 없습니다.\n\n"
+                "모든 API 키가 차단되었거나 등록된 키가 없습니다.\n"
+                "설정 페이지에서 API 키를 추가하거나 확인해주세요.\n\n"
+                "작업이 중지되었습니다.",
+            )
+        except Exception as popup_err:
+            logger.error("[ApiKeyRecovery] Failed to show no-key popup: %s", popup_err)
+
+    signal = getattr(app, "ui_callback_signal", None)
+    if signal is not None:
+        try:
+            signal.emit(_show_popup)
+        except RuntimeError:
+            pass
 
 
 def interruptible_sleep(app, seconds):

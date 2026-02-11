@@ -23,7 +23,7 @@ class RegistrationRequestCreate(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     username: str = Field(..., min_length=4, max_length=50)
     password: str = Field(..., min_length=8, max_length=128)
-    contact: str = Field(..., min_length=10, max_length=50)
+    contact: str = Field(..., min_length=1, max_length=50)
     email: Optional[str] = Field(None, max_length=255)
 
     @field_validator('password')

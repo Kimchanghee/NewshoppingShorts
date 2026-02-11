@@ -25,8 +25,45 @@ except Exception:
     _FERNET_AVAILABLE = False
 
 
+def _get_windows_machine_guid() -> str:
+    """Read MachineGuid from Windows registry (unique per OS install)."""
+    try:
+        import winreg
+        with winreg.OpenKey(
+            winreg.HKEY_LOCAL_MACHINE,
+            r"SOFTWARE\Microsoft\Cryptography",
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "MachineGuid")
+            if value:
+                return str(value)
+    except Exception:
+        pass
+    return ""
+
+
 def _get_machine_key() -> bytes:
-    """Generate a stable machine-bound key seed."""
+    """Generate a stable machine-bound key seed.
+
+    Uses Windows MachineGuid (unique per OS install, not user-guessable)
+    combined with COMPUTERNAME for additional entropy.
+    Falls back to legacy inputs when MachineGuid is unavailable.
+    """
+    machine_guid = _get_windows_machine_guid()
+
+    machine_id_parts = [
+        os.name,
+        sys.platform,
+        os.getenv("COMPUTERNAME", "default"),
+    ]
+    if machine_guid:
+        machine_id_parts.append(machine_guid)
+
+    machine_string = "-".join(machine_id_parts)
+    return hashlib.sha256(machine_string.encode("utf-8")).digest()
+
+
+def _get_machine_key_legacy() -> bytes:
+    """Legacy key derivation (without MachineGuid) for backward compatibility."""
     machine_id_parts = [
         os.name,
         sys.platform,
@@ -49,14 +86,23 @@ def _get_runtime_base() -> str:
     return os.path.dirname(os.path.abspath(__file__))
 
 
-def _get_fernet() -> Optional["Fernet"]:
-    """Build a Fernet instance from machine-bound key material."""
+def _build_fernet(machine_key: bytes) -> Optional["Fernet"]:
+    """Build a Fernet instance from given machine key bytes."""
     if not _FERNET_AVAILABLE:
         return None
-
-    key_material = hashlib.sha256(_get_machine_key() + b"SSMKR_SECURE_CONFIG_V2").digest()
+    key_material = hashlib.sha256(machine_key + b"SSMKR_SECURE_CONFIG_V2").digest()
     fernet_key = base64.urlsafe_b64encode(key_material)
     return Fernet(fernet_key)
+
+
+def _get_fernet() -> Optional["Fernet"]:
+    """Build a Fernet instance from machine-bound key material."""
+    return _build_fernet(_get_machine_key())
+
+
+def _get_fernet_legacy() -> Optional["Fernet"]:
+    """Build a Fernet instance using legacy (weaker) key derivation."""
+    return _build_fernet(_get_machine_key_legacy())
 
 
 def _load_encrypted_config() -> Optional[dict]:
@@ -82,10 +128,26 @@ def _load_encrypted_config() -> Optional[dict]:
             if not fernet:
                 logger.warning("[SecureConfig] cryptography is unavailable; cannot read v2 config")
                 return None
-            decrypted = fernet.decrypt(payload[3:])
+            token_bytes = payload[3:]
+            try:
+                decrypted = fernet.decrypt(token_bytes)
+            except InvalidToken:
+                # Fallback: try legacy key derivation for configs created before
+                # MachineGuid was added to the key material.
+                fernet_legacy = _get_fernet_legacy()
+                if fernet_legacy:
+                    try:
+                        decrypted = fernet_legacy.decrypt(token_bytes)
+                        logger.info("[SecureConfig] Decrypted with legacy key (will re-encrypt on next create)")
+                    except InvalidToken:
+                        logger.warning("[SecureConfig] Invalid encrypted config token (both key variants)")
+                        return None
+                else:
+                    logger.warning("[SecureConfig] Invalid encrypted config token")
+                    return None
         else:
             # Legacy format: base64(XOR(json, machine_key))
-            key = _get_machine_key()
+            key = _get_machine_key_legacy()
             decrypted = _legacy_xor_cipher(base64.b64decode(payload), key)
 
         config = json.loads(decrypted.decode("utf-8"))

@@ -2260,7 +2260,7 @@ async def get_user_subscription_status(
     # If subscription is expired but user_type is still SUBSCRIBER, auto-expire
     if is_expired and user.user_type == UserType.SUBSCRIBER:
         expire_subscription(db, user, reason="request_check")
-        effective_type = UserType.FREE
+        effective_type = UserType.TRIAL
     
     return {
         "success": True,

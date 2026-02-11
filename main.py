@@ -163,16 +163,6 @@ class VideoAnalyzerGUI(
         self.log_signal.connect(self._on_log_signal)
         self.ui_callback_signal.connect(self._execute_ui_callback)
 
-        # Add Automation Settings Menu (Temporary placement for testing)
-        if hasattr(self, 'topbar'):
-           self.topbar.add_automation_settings_action(self.open_automation_settings)
-
-    def open_automation_settings(self):
-        """Open the Automation Settings Dialog"""
-        from ui.windows.automation_settings_dialog import AutomationSettingsDialog
-        dialog = AutomationSettingsDialog(self)
-        dialog.exec()
-
     def _init_api_key_manager(self):
         """Initialize API key manager for key rotation."""
         if config.GEMINI_API_KEYS:

@@ -14,7 +14,7 @@
 ;     uses the previously registered path.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.3.31"
+  #define MyAppVersion "1.3.32"
 #endif
 
 #define MyAppName "SSMaker"
@@ -58,6 +58,16 @@ RestartApplications=no
 AppVerName={#MyAppName} v{#MyAppVersion}
 VersionInfoVersion={#MyAppVersion}.0
 UninstallDisplayName={#MyAppName}
+; Code signing (Authenticode) - reduces SmartScreen warnings and prevents tampering.
+; To enable: install a code signing certificate and configure signtool path below.
+; Usage:  iscc /DMyAppVersion=1.3.32 /DSignToolAvailable installer.iss
+;
+; SignTool expects signtool.exe in PATH (Windows SDK) or set SIGNTOOL_PATH env var.
+; Certificate can be specified via SIGN_CERT_THUMBPRINT env var.
+#ifdef SignToolAvailable
+SignTool=signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 /sha1 {#GetEnv("SIGN_CERT_THUMBPRINT")} $f
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "korean"; MessagesFile: "compiler:Languages\Korean.isl"

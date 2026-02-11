@@ -200,3 +200,15 @@ coll = COLLECT(
     upx_exclude=[],
     name='ssmaker',
 )
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. Post-build Code Signing (Authenticode)
+# ─────────────────────────────────────────────────────────────────────────────
+# After building, sign the EXE to prevent SmartScreen warnings and ensure integrity.
+# Run this after PyInstaller build completes:
+#
+#   signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 ^
+#       /sha1 <CERT_THUMBPRINT> dist\ssmaker\ssmaker.exe
+#
+# Then build the installer:
+#   iscc /DMyAppVersion=1.3.32 /DSignToolAvailable installer.iss

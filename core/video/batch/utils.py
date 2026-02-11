@@ -150,6 +150,10 @@ def _translate_error_message(error_text: str) -> str:
        any(kw in error_lower for kw in ['api', 'gemini', 'google', 'request', 'response', 'http']):
         return "API 서버 과부하 - 잠시 후 재시도"
 
+    # API 키 만료/무효 (400 + API_KEY_INVALID) - 일반 400보다 먼저 체크
+    if "API_KEY_INVALID" in error_text or "api key expired" in error_lower or "renew the api key" in error_lower:
+        return "API 키가 만료되었거나 유효하지 않습니다 - 설정에서 새 API 키를 입력해주세요"
+
     # 401/403 권한 오류
     if "401" in error_text or "403" in error_text or "PERMISSION_DENIED" in error_text or "Unauthorized" in error_text:
         return "API 인증 오류 - API 키 확인 필요"

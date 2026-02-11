@@ -404,17 +404,16 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.31/ssmaker_v1.3.31.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.32/SSMaker_Setup_v1.3.32.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.31",
+    "version": "1.3.32",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.31 변경사항
-- 텍스트 인식(OCR) 기능이 강화되어 더 정확한 쇼핑 정보를 가져옵니다.
-- 프로그램 실행 속도와 안정성이 향상되었습니다.
-- 사용자 경험을 위해 로딩 화면과 안내 문구를 더 쉽게 개선했습니다.
+    "release_notes": """### v1.3.32 변경사항
+- Inno Setup 기반 설치형 인스톨러로 전환하여 설치/업데이트가 더 안정적입니다.
+- 프로그램 빌드 구조 개선 및 호환성 향상.
 - 보안 및 인증 프로세스가 강화되었습니다.""",
     "is_mandatory": False,
     "update_channel": "stable",

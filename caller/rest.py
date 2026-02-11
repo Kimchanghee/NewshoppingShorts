@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 
+import re
 import requests
 import json
 import os
@@ -741,6 +742,14 @@ def submitRegistrationRequest(
     if not password or len(password) < 8:
         return {"success": False, "message": "비밀번호는 8자 이상이어야 합니다."}
 
+    # Contact validation (digits only, at least 10)
+    contact_clean = re.sub(r'[^0-9]', '', contact)
+    if len(contact_clean) < 10:
+        return {
+            "success": False,
+            "message": "올바른 연락처를 입력해주세요.",
+        }
+
     # Email validation (simple check)
     if not email or "@" not in email or "." not in email:
         return {
@@ -752,7 +761,7 @@ def submitRegistrationRequest(
         "name": name.strip(),
         "username": username.strip().lower(),
         "password": password,
-        "contact": contact.strip(),
+        "contact": contact_clean,
         "email": email.strip()
     }
 
@@ -760,8 +769,7 @@ def submitRegistrationRequest(
         logger.info(
             f"Sending registration request to: {main_server}/user/register/request"
         )
-        _contact = contact.strip()
-        masked_contact = _contact[:3] + "****" + _contact[-4:] if len(_contact) >= 7 else "****"
+        masked_contact = contact_clean[:3] + "****" + contact_clean[-4:] if len(contact_clean) >= 7 else "****"
         logger.info(
             "Registration payload: name=%s username=%s contact=%s",
             _sanitize_user_id_for_logging(name),
@@ -1505,16 +1513,18 @@ def log_user_action(action: str, content: str = None, level: str = "INFO") -> No
         if not token:
             return
 
+        headers = {"Authorization": f"Bearer {token}"}
         body = {
             "level": level,
             "action": action,
             "content": content
         }
-        
+
         # Use short timeout to not block UI
         _secure_session.post(
             f"{main_server}/user/logs",
             json=body,
+            headers=headers,
             timeout=2.0
         )
     except Exception as e:

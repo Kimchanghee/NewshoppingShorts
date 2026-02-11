@@ -94,18 +94,16 @@ class BatchHandler:
 
         if not has_valid_api_key:
             self.app.add_log("[API] API 키가 설정되지 않았습니다.")
-            result = show_question(
+            show_warning(
                 self.app,
-                "🔑 API 키 필요",
-                "Gemini API 키가 설정되지 않았습니다.\n\n"
-                "작업을 시작하려면 최소 1개 이상의 API 키가 필요합니다.\n\n"
-                "API 키를 지금 추가하시겠습니까?\n\n"
-                "※ API 키는 https://aistudio.google.com/apikey\n"
-                "   에서 무료로 발급받을 수 있습니다.",
+                "API KEY 필요",
+                "API KEY를 먼저 저장해주세요.\n\n"
+                "작업을 시작하려면 최소 1개 이상의 API 키가 필요합니다.\n"
+                "확인을 누르면 설정 페이지로 이동합니다.",
             )
-            if result:
-                # 사용자가 "예"를 선택하면 API 키 관리 창 열기
-                self.app.show_api_key_manager()
+            # 설정 페이지로 이동
+            if hasattr(self.app, '_on_step_selected'):
+                self.app._on_step_selected("settings")
             return
 
         # 작업 횟수 확인 (Work count check)
@@ -224,8 +222,7 @@ class BatchHandler:
         # Detailed logging for usage tracking
         try:
             from ui.panels.cta_panel import get_selected_cta_lines
-            from caller import rest
-            
+
             selected_font = getattr(self.app, 'selected_font_id', 'unknown')
             selected_cta = getattr(self.app, 'selected_cta_id', 'unknown')
             cta_lines = get_selected_cta_lines(self.app)

@@ -70,7 +70,7 @@ def get_status_color(status: str) -> str:
     return color_map.get(status, get_color("text_primary"))
 
 # Constants
-WINDOW_WIDTH = 1600
+WINDOW_WIDTH = 1840
 WINDOW_HEIGHT = 900
 API_TIMEOUT = 30
 REFRESH_INTERVAL_MS = 60000
@@ -280,14 +280,14 @@ class AdminDashboard(QMainWindow):
 
         # 마지막 업데이트 시간 라벨
         self.last_update_label = QLabel("마지막 업데이트: -", self.central)
-        self.last_update_label.setGeometry(900, 25, 300, 30)
+        self.last_update_label.setGeometry(1060, 25, 300, 30)
         self.last_update_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
         self.last_update_label.setStyleSheet(f"color: {get_color('text_muted')};")
         self.last_update_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
 
         # 새로고침 버튼
         refresh_btn = QPushButton("새로고침", self.central)
-        refresh_btn.setGeometry(1220, 20, 120, 40)
+        refresh_btn.setGeometry(1460, 20, 120, 40)
         refresh_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm , QFont.Weight.Bold))  # 14 -> 10pt
         refresh_btn.setStyleSheet(f"""
             QPushButton {{
@@ -306,7 +306,7 @@ class AdminDashboard(QMainWindow):
 
         # 연결 상태 표시
         self.connection_label = QLabel("", self.central)
-        self.connection_label.setGeometry(1360, 25, 200, 30)
+        self.connection_label.setGeometry(1600, 25, 200, 30)
         self.connection_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
         self.connection_label.setStyleSheet(f"color: {get_color('success')};")
 
@@ -326,7 +326,7 @@ class AdminDashboard(QMainWindow):
         """Create top stat cards."""
         card_y = 75
         card_h = 80
-        total_w = 1520
+        total_w = 1760
         gap = ds.spacing.space_4  # 16px
         start_x = 40
 
@@ -398,7 +398,7 @@ class AdminDashboard(QMainWindow):
         """테이블 생성"""
         table_x = 40
         table_y = 230
-        table_w = 1520
+        table_w = 1760
         table_h = 640  # 높이 증가
 
         # 사용자 관리 테이블 (확장된 컨럼 + 비밀번호 + 버전)
@@ -427,7 +427,7 @@ class AdminDashboard(QMainWindow):
         )
         self._style_table(
              # Increased Action column (last) to 330px to prevent button overflow
-            self.users_table, [40, 80, 90, 80, 110, 150, 70, 120, 70, 50, 120, 100, 80, 80, 60, 255]
+            self.users_table, [40, 80, 100, 80, 115, 160, 70, 125, 75, 55, 130, 110, 80, 90, 60, 330]
         )
         # 사용자 테이블이 기본 표시됨
 
@@ -669,6 +669,7 @@ class AdminDashboard(QMainWindow):
                 user.get("username"),
                 row,
                 user.get("has_password", False),
+                user_type=utype,
             )
             self.users_table.setCellWidget(row, 15, widget)
 
@@ -725,12 +726,13 @@ class AdminDashboard(QMainWindow):
         table.setItem(row, col, item)
 
     def _create_user_actions(
-        self, user_id, username, row: int = 0, has_password: bool = False
+        self, user_id, username, row: int = 0, has_password: bool = False,
+        user_type: str = "trial"
     ) -> QWidget:
         """사용자 작업 버튼 - 미니멀 디자인"""
         widget = QWidget()
-        # Widen container to fit 5 buttons (55px * 5 + spacing)
-        widget.setMinimumSize(320, 40)
+        # Widen container to fit 6 buttons
+        widget.setMinimumSize(330, 40)
         # 투명 배경 (테이블 행 색상 통과)
         widget.setStyleSheet("background-color: transparent;")
 
@@ -755,44 +757,59 @@ class AdminDashboard(QMainWindow):
             }
         """
 
+        x_pos = 0
+
         # 1. PW Check (Button)
         pw_btn = QPushButton("PW", widget)
-        pw_btn.setGeometry(0, 5, 40, 30)
+        pw_btn.setGeometry(x_pos, 5, 40, 30)
         pw_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        # Gray theme
         c_norm = get_color("text_muted")
         c_hov = get_color("border")
         pw_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_hov))
         pw_btn.clicked.connect(lambda: self._show_password_info(username, has_password))
+        x_pos += 45
 
-        # 2. Extension (Green/Success)
+        # 2. Extension (Blue/Info)
         ext_btn = QPushButton("연장", widget)
-        ext_btn.setGeometry(45, 5, 50, 30)
+        ext_btn.setGeometry(x_pos, 5, 50, 30)
         ext_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        c_norm = get_color("info") # Blue
+        c_norm = get_color("info")
         ext_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
         ext_btn.clicked.connect(lambda: self._extend_subscription(user_id, username))
-        
-        # 3. Log (Yellow/Warning) -> Changed to Log
+        x_pos += 55
+
+        # 3. Revoke Subscription (Orange) - 구독자만 표시
+        if user_type == "subscriber":
+            revoke_btn = QPushButton("박탈", widget)
+            revoke_btn.setGeometry(x_pos, 5, 50, 30)
+            revoke_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            c_norm = "#FF6B35"
+            revoke_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
+            revoke_btn.clicked.connect(lambda: self._revoke_subscription(user_id, username))
+            x_pos += 55
+
+        # 4. Log (Yellow/Warning)
         stat_btn = QPushButton("로그", widget)
-        stat_btn.setGeometry(100, 5, 50, 30)
+        stat_btn.setGeometry(x_pos, 5, 50, 30)
         stat_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("warning")
         stat_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
         stat_btn.clicked.connect(lambda: self._show_user_logs(user_id, username))
+        x_pos += 55
 
-        # 4. History (Gray/Info)
+        # 5. History (Gray/Info)
         hist_btn = QPushButton("이력", widget)
-        hist_btn.setGeometry(155, 5, 50, 30)
+        hist_btn.setGeometry(x_pos, 5, 50, 30)
         hist_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("text_primary")
         c_hov = get_color("surface_variant")
         hist_btn.setStyleSheet(base_style % (get_color("border"), ds.radius.sm, c_norm, ds.typography.size_2xs , c_hov))
         hist_btn.clicked.connect(lambda: self._show_login_history(user_id, username))
+        x_pos += 55
 
-        # 5. Delete (Red/Danger)
+        # 6. Delete (Red/Danger)
         del_btn = QPushButton("삭제", widget)
-        del_btn.setGeometry(210, 5, 50, 30)
+        del_btn.setGeometry(x_pos, 5, 50, 30)
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         c_norm = get_color("error")
         del_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_norm))
@@ -866,6 +883,25 @@ class AdminDashboard(QMainWindow):
             worker.finished.connect(lambda: self._cleanup_worker(worker))
             self.workers.append(worker)
             worker.start()
+
+    def _revoke_subscription(self, user_id, username):
+        """구독 박탈 (유료 → 무료 전환)"""
+        logger.info("[Admin UI] Revoke clicked | user_id=%s username=%s", user_id, username)
+        if not _styled_question_box(
+            self, "구독 박탈",
+            f"'{username}' 사용자의 구독을 박탈하시겠습니까?\n\n"
+            "유료 계정 → 무료 계정으로 전환됩니다.\n"
+            "클라이언트에 실시간으로 반영됩니다."
+        ):
+            return
+
+        url = f"{self.api_base_url}/user/admin/users/{user_id}/revoke-subscription"
+        worker = ApiWorker("POST", url, self._get_headers(), {})
+        worker.data_ready.connect(lambda d: self._on_action_done("구독 박탈", d))
+        worker.error.connect(self._on_error)
+        worker.finished.connect(lambda: self._cleanup_worker(worker))
+        self.workers.append(worker)
+        worker.start()
 
     def _toggle_user(self, user_id, username):
         """사용자 상태 토글"""
@@ -947,6 +983,23 @@ class AdminDashboard(QMainWindow):
         
         table.setRowCount(len(logs))
         
+        # 작업 로그 액션별 색상 매핑
+        action_color_map = {
+            "작업 진행": "#FACC15",      # 노란색 - 단계 시작
+            "작업 완료": "#22C55E",      # 초록색 - 단계 완료
+            "작업 오류": "#EF4444",      # 빨간색 - 단계 오류
+            "영상 처리 시작": "#60A5FA", # 파란색 - 영상 시작
+            "영상 처리 완료": "#22C55E", # 초록색 - 영상 완료
+            "영상 생성 시작": "#60A5FA", # 파란색 - 배치 시작
+            "영상 생성 종료": "#818CF8", # 보라색 - 배치 종료
+            "영상 생성 완료": "#22C55E", # 초록색
+        }
+        level_color_map = {
+            "ERROR": get_color("error"),
+            "WARN": get_color("warning"),
+            "WARNING": get_color("warning"),
+        }
+
         for row, log in enumerate(logs):
             created = log.get("created_at", "")
             try:
@@ -960,14 +1013,20 @@ class AdminDashboard(QMainWindow):
                     created = dt.astimezone(kst).strftime("%Y-%m-%d %H:%M:%S")
             except Exception:
                 pass
-                
+
+            action = log.get("action", "")
+            level = log.get("level", "INFO")
+            action_color = action_color_map.get(action)
+            level_color = level_color_map.get(level.upper())
+
             self._set_cell(table, row, 0, created)
-            self._set_cell(table, row, 1, log.get("level", "INFO"))
-            self._set_cell(table, row, 2, log.get("action", ""))
-            
+            self._set_cell(table, row, 1, level, level_color)
+            self._set_cell(table, row, 2, action, action_color)
+
             # Content items might involve newlines, so usage of setCellWidget or careful text handling
             content_item = QTableWidgetItem(log.get("content", "") or "")
-            content_item.setForeground(QBrush(QColor(get_color("text_primary"))))
+            content_color = action_color if action_color else get_color("text_primary")
+            content_item.setForeground(QBrush(QColor(content_color)))
             table.setItem(row, 3, content_item)
             
         layout.addWidget(table)
