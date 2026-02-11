@@ -367,50 +367,14 @@ class AppController:
         flags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
         return flags
 
-    @staticmethod
-    def _build_fallback_update_batch(current_pid: int, current_exe: str, new_exe_path: str) -> str:
-        """
-        Build a robust fallback batch updater.
-        - retries copy
-        - restores backup on failure
-        - starts app with explicit working directory
-        """
-        exe_dir = os.path.dirname(current_exe) or "."
-        return f"""@echo off
-setlocal EnableExtensions
-set "LOG=%TEMP%\\ssmaker_update.log"
-echo [%date% %time%] fallback updater start>>"%LOG%"
-timeout /t 2 /nobreak >nul
-taskkill /F /PID {current_pid} >nul 2>&1
-
-for /l %%I in (1,1,20) do (
-  copy /Y "{new_exe_path}" "{current_exe}.new" >nul 2>&1 && goto copied
-  timeout /t 1 /nobreak >nul
-)
-echo copy_failed>>"%LOG%"
-goto fail
-
-:copied
-if exist "{current_exe}.bak" del /F "{current_exe}.bak" >nul 2>&1
-if exist "{current_exe}" move /Y "{current_exe}" "{current_exe}.bak" >nul 2>&1
-move /Y "{current_exe}.new" "{current_exe}" >nul 2>&1
-if errorlevel 1 (
-  echo replace_failed>>"%LOG%"
-  if exist "{current_exe}.bak" move /Y "{current_exe}.bak" "{current_exe}" >nul 2>&1
-  goto fail
-)
-start "" /D "{exe_dir}" "{current_exe}"
-del /F "{new_exe_path}" >nul 2>&1
-del /F "%~f0" >nul 2>&1
-exit /b 0
-
-:fail
-start "" /D "{exe_dir}" "{current_exe}"
-exit /b 1
-"""
-
     def perform_update(self, download_url: str, file_hash: str) -> None:
-        """Auto-download and install update (game-like, no confirmation)."""
+        """Auto-download and install update (game-like, no confirmation).
+
+        The server now provides an Inno Setup installer as the download artifact.
+        After downloading and verifying the hash, the installer is launched in
+        silent mode (/VERYSILENT) which handles closing the app, replacing files,
+        and restarting automatically.
+        """
         from ui.windows.update_dialog import UpdateProgressDialog
 
         if not download_url:
@@ -426,7 +390,7 @@ exit /b 1
 
         import tempfile
         temp_dir = tempfile.gettempdir()
-        new_exe_path = os.path.join(temp_dir, "new_ssmaker.exe")
+        installer_path = os.path.join(temp_dir, "SSMaker_Setup_update.exe")
 
         self.update_progress_dialog = UpdateProgressDialog(
             version=self._latest_version,
@@ -434,14 +398,14 @@ exit /b 1
         )
         self.update_progress_dialog.show()
 
-        self.download_worker = DownloadWorker(download_url, new_exe_path, file_hash)
+        self.download_worker = DownloadWorker(download_url, installer_path, file_hash)
         self.download_worker.progress.connect(self.update_progress_dialog.set_progress)
 
         def on_download_finished(success: bool, result: str):
             if success:
                 self.update_progress_dialog.set_status("설치 준비 중...")
                 self.update_progress_dialog.set_progress(100)
-                QtCore.QTimer.singleShot(500, lambda: self._run_updater(result))
+                QtCore.QTimer.singleShot(500, lambda: self._run_installer(result))
             else:
                 self.update_progress_dialog.close()
                 logger.error(f"Update verification failed: {result}")
@@ -457,82 +421,49 @@ exit /b 1
         self.download_worker.finished.connect(on_download_finished)
         self.download_worker.start()
 
-    def _run_updater(self, new_exe_path: str) -> None:
-        """Launch update process and terminate current process."""
+    def _run_installer(self, installer_path: str) -> None:
+        """Launch Inno Setup installer in silent mode and exit the app.
+
+        The installer handles:
+        1. Closing any remaining running instances (CloseApplications=force)
+        2. Replacing all files in the install directory
+        3. Restarting the app after installation (skipifnotsilent Run entry)
+        """
         import subprocess
-        import tempfile
-        import shutil
 
         if hasattr(self, "update_progress_dialog") and self.update_progress_dialog:
-            self.update_progress_dialog.set_status("앱 재시작 중...")
+            self.update_progress_dialog.set_status("설치 프로그램 실행 중...")
 
         try:
+            # Save update info BEFORE restarting so post-restart can show complete dialog
+            self._save_pending_update(self._latest_version, self._release_notes)
+
             if getattr(sys, "frozen", False):
-                current_exe = os.path.abspath(sys.executable)
-                exe_dir = os.path.dirname(current_exe) or os.getcwd()
-                current_pid = os.getpid()
                 creation_flags = self._windows_creation_flags()
 
-                # Save update info BEFORE restarting so post-restart can show complete dialog
-                self._save_pending_update(self._latest_version, self._release_notes)
+                logger.info(f"Launching Inno Setup installer (silent): {installer_path}")
+                subprocess.Popen(
+                    [
+                        installer_path,
+                        "/VERYSILENT",
+                        "/SUPPRESSMSGBOXES",
+                        "/CLOSEAPPLICATIONS",
+                        "/SP-",
+                    ],
+                    creationflags=creation_flags,
+                    shell=False,
+                    close_fds=True,
+                )
 
-                # 1) Primary path: updater bundled inside the frozen archive.
-                # Do not trust updater.exe placed next to the installed executable.
-                updater_candidates = []
-                meipass = getattr(sys, "_MEIPASS", "")
-                if meipass:
-                    updater_candidates.append(os.path.join(meipass, "updater.exe"))
-
-                updater_src = next((cand for cand in updater_candidates if os.path.exists(cand)), "")
-                if updater_src:
-                    runtime_updater = os.path.join(
-                        tempfile.gettempdir(),
-                        f"ssmaker_updater_{current_pid}.exe",
-                    )
-                    try:
-                        shutil.copy2(updater_src, runtime_updater)
-                    except Exception:
-                        runtime_updater = updater_src
-
-                    logger.info(f"Launching updater executable: {runtime_updater}")
-                    subprocess.Popen(
-                        [runtime_updater, new_exe_path, current_exe, current_exe, str(current_pid)],
-                        cwd=exe_dir,
-                        creationflags=creation_flags,
-                        shell=False,
-                        close_fds=True,
-                    )
-                else:
-                    # 2) Fallback path: robust self-deleting batch updater.
-                    batch_content = self._build_fallback_update_batch(
-                        current_pid=current_pid,
-                        current_exe=current_exe,
-                        new_exe_path=new_exe_path,
-                    )
-                    batch_path = os.path.join(
-                        tempfile.gettempdir(),
-                        f"ssmaker_update_{current_pid}.bat",
-                    )
-                    with open(batch_path, "w", encoding="mbcs", errors="replace") as f:
-                        f.write(batch_content)
-
-                    logger.info(f"Launching fallback batch updater: {batch_path}")
-                    subprocess.Popen(
-                        ["cmd.exe", "/c", batch_path],
-                        cwd=exe_dir,
-                        creationflags=creation_flags,
-                        shell=False,
-                        close_fds=True,
-                    )
-
-                # Exit immediately and release file lock on current exe.
-                QtCore.QTimer.singleShot(200, lambda: os._exit(0))
+                # Exit the app so the installer can replace files.
+                # The installer's [Run] section will restart ssmaker.exe after install.
+                logger.info("Installer launched. Exiting app for update...")
+                QtCore.QTimer.singleShot(500, lambda: os._exit(0))
 
             else:
+                # Development mode: just restart
                 base_dir = os.getcwd()
                 logger.info("Development mode: Restarting application...")
-
-                self._save_pending_update(self._latest_version, self._release_notes)
 
                 python_exe = sys.executable
                 script_path = os.path.join(base_dir, "ssmaker.py")

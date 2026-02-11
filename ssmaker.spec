@@ -120,10 +120,8 @@ for dist_name in ("imageio", "imageio-ffmpeg", "moviepy"):
     except Exception:
         pass
 
-# Include updater.exe in the bundle (auto-update extracts it next to ssmaker.exe).
-_updater_exe = os.path.join(project_root, "dist", "updater.exe")
-if os.path.exists(_updater_exe):
-    datas.append((_updater_exe, "."))
+# Note: updater.exe is no longer bundled. Updates are handled by
+# downloading and running the Inno Setup installer silently.
 
 if os.path.exists('faster_whisper_models'):
     # Include only materialized flat files to avoid shipping HF cache symlinks.
@@ -166,24 +164,21 @@ a = Analysis(
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. PYZ & EXE (One-File 모드로 통합)
+# 3. PYZ & EXE + COLLECT (One-Dir 모드 — Inno Setup 인스톨러와 함께 배포)
 # ─────────────────────────────────────────────────────────────────────────────
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,   # 바이너리 직접 포함
-    a.zipfiles,   # zip파일 직접 포함
-    a.datas,      # 모든 데이터 직접 포함
-    [],
+    [],                       # onedir: 바이너리/데이터는 COLLECT에서 처리
+    exclude_binaries=True,    # EXE에 바이너리 포함하지 않음
     name='ssmaker',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     upx_exclude=[],
-    runtime_tmpdir=None, # 실행 시 임시 폴더에 압축 해제
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
@@ -192,4 +187,16 @@ exe = EXE(
     entitlements_file=None,
     icon='resource/app_icon.ico' if os.path.exists('resource/app_icon.ico') else None,
     uac_admin=False,
+    contents_directory='.',   # 모든 파일을 EXE와 같은 디렉토리에 배치 (flat 구조)
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.zipfiles,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name='ssmaker',
 )

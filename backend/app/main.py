@@ -13,7 +13,7 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from app.errors import AppError
-from app.routers import auth, registration, admin, subscription, payment
+from app.routers import auth, registration, admin, subscription, payment, logs
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
 from app.database import init_db
@@ -362,8 +362,6 @@ if not os.path.exists(static_dir):
     os.makedirs(static_dir, exist_ok=True)
     logger.info(f"Created missing static directory at {static_dir}")
 
-from app.routers import auth, registration, admin, subscription, payment, logs
-
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 @app.get("/")
@@ -401,7 +399,7 @@ APP_VERSION_INFO = {
 - 보안 및 인증 프로세스가 강화되었습니다.""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "7a0abc3085e152ae2a168096e5cde7a3d813174566f3a3372ddd987e2837bca3",
+    "file_hash": "955002783a1dae5a977f2003667fbcec709422a8aec9152e4a9d6a74bdceeb94",
 }
 
 

@@ -41,7 +41,7 @@ import requests
 from ui.design_system_v2 import get_design_system, get_color, set_dark_mode
 
 # Extracted dialog components
-from ui.admin_dialogs import ApproveDialog, RejectDialog, ExtendDialog, LoginHistoryDialog
+from ui.admin_dialogs import ExtendDialog, LoginHistoryDialog
 
 # Initialize design system and set dark mode
 ds = get_design_system()
@@ -371,61 +371,6 @@ class AdminDashboard(QMainWindow):
         lbl.setStyleSheet(f"color: {get_color('text_primary')}; background: transparent;")
         return lbl
 
-    def _create_tab_buttons(self):
-        """탭 버튼 생성 (회원가입 요청 탭 제거 - 자동 승인됨)"""
-        self.tab_users = QPushButton("사용자 관리", self.central)
-        self.tab_users.setGeometry(40, 180, 130, 42)
-        self.tab_users.setFont(QFont(FONT_FAMILY, ds.typography.size_base , QFont.Weight.Bold))  # 16 -> 12pt
-        self.tab_users.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.tab_users.clicked.connect(lambda: self._switch_tab(0))
-
-        self.tab_subscriptions = QPushButton("구독 요청", self.central)
-        self.tab_subscriptions.setGeometry(180, 180, 130, 42)
-        self.tab_subscriptions.setFont(QFont(FONT_FAMILY, ds.typography.size_base ))  # 16 -> 12pt
-        self.tab_subscriptions.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.tab_subscriptions.clicked.connect(lambda: self._switch_tab(1))
-
-        self._update_tab_styles()
-
-    def _update_tab_styles(self):
-        """탭 스타일 업데이트"""
-        active = f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {get_color('primary')};
-                border: none;
-                border-bottom: 2px solid {get_color('primary')};
-                border-radius: {ds.radius.none}px;
-                font-weight: bold;
-            }}
-        """
-        inactive = f"""
-            QPushButton {{
-                background-color: transparent;
-                color: {get_color('text_muted')};
-                border: none;
-                border-bottom: 2px solid transparent;
-                border-radius: {ds.radius.none}px;
-            }}
-            QPushButton:hover {{
-                color: {get_color('text_primary')};
-            }}
-        """
-        self.tab_users.setStyleSheet(active if self.current_tab == 0 else inactive)
-        self.tab_subscriptions.setStyleSheet(active if self.current_tab == 1 else inactive)
-
-    def _switch_tab(self, tab_index):
-        """탭 전환 (0: 사용자 관리, 1: 구독 요청)"""
-        logger.info("[Admin UI] Switch tab -> %s", "사용자" if tab_index == 0 else "구독요청")
-        self.current_tab = tab_index
-        self._update_tab_styles()
-        self.users_table.setVisible(tab_index == 0)
-        self.subscriptions_table.setVisible(tab_index == 1)
-        self.search_edit.setVisible(tab_index == 0)
-        self.search_label.setVisible(tab_index == 0)
-        self.sub_filter_combo.setVisible(tab_index == 1)
-        self.sub_filter_label.setVisible(tab_index == 1)
-
     def _create_filter_area(self):
         """필터/검색 영역 생성"""
         # 사용자 검색 (기본 표시)
@@ -595,9 +540,10 @@ class AdminDashboard(QMainWindow):
             self._set_cell(self.users_table, row, 1, user.get("name") or "-")
             # 2: Username
             self._set_cell(self.users_table, row, 2, user.get("username", ""))
-            # 3: Password (Hash truncated)
-            pw_hash = user.get("hashed_password", "")
-            self._set_cell(self.users_table, row, 3, pw_hash[:10] + "..." if pw_hash else "-")
+            # 3: Password (has_password flag from API)
+            has_pw = user.get("has_password", False)
+            self._set_cell(self.users_table, row, 3, "설정됨" if has_pw else "미설정",
+                           get_color("success") if has_pw else get_color("warning"))
             # 4: Phone
             self._set_cell(self.users_table, row, 4, user.get("phone") or "-")
             # 5: Email
@@ -725,7 +671,7 @@ class AdminDashboard(QMainWindow):
                 user.get("id"),
                 user.get("username"),
                 row,
-                user.get("hashed_password"),
+                user.get("has_password", False),
             )
             self.users_table.setCellWidget(row, 15, widget)
 
@@ -782,7 +728,7 @@ class AdminDashboard(QMainWindow):
         table.setItem(row, col, item)
 
     def _create_user_actions(
-        self, user_id, username, row: int = 0, hashed_password: str = None
+        self, user_id, username, row: int = 0, has_password: bool = False
     ) -> QWidget:
         """사용자 작업 버튼 - 미니멀 디자인"""
         widget = QWidget()
@@ -820,7 +766,7 @@ class AdminDashboard(QMainWindow):
         c_norm = get_color("text_muted")
         c_hov = get_color("border")
         pw_btn.setStyleSheet(base_style % (c_norm, ds.radius.sm, c_norm, ds.typography.size_2xs , c_hov))
-        pw_btn.clicked.connect(lambda: self._show_password_info(username, hashed_password))
+        pw_btn.clicked.connect(lambda: self._show_password_info(username, has_password))
 
         # 2. Extension (Green/Success)
         ext_btn = QPushButton("연장", widget)
@@ -857,79 +803,37 @@ class AdminDashboard(QMainWindow):
 
         return widget
 
-    def _show_password_info(self, username, hashed_password):
-        """비밀번호 정보 표시 (보안 마스킹 적용)"""
-        if not hashed_password:
-            hashed_password = "(정보 없음)"
-            masked_hash = hashed_password
-        else:
-            # 보안을 위해 해시 마스킹 (처음 8자와 마지막 8자만 표시)
-            if len(hashed_password) > 16:
-                masked_hash = f"{hashed_password[:8]}...{hashed_password[-8:]}"
-            else:
-                # 짧은 해시는 전체 표시하지 않음
-                masked_hash = "******** (보안상 전체 표시 불가)"
+    def _show_password_info(self, username, has_password: bool):
+        """비밀번호 설정 상태 표시 (보안 정책: 해시값 미노출)"""
+        status_text = "설정됨 (bcrypt 해시 저장)" if has_password else "미설정"
+        status_color = get_color("success") if has_password else get_color("warning")
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"'{username}' 비밀번호 정보")
-        dialog.setFixedSize(500, 320)  # 크기 증가
+        dialog.setFixedSize(500, 220)
         dialog.setStyleSheet(f"background-color: {get_color('surface')};")
 
-        title_lbl = QLabel(f"'{username}' 비밀번호 해시 정보:", dialog)
+        title_lbl = QLabel(f"'{username}' 비밀번호 상태:", dialog)
         title_lbl.setGeometry(30, 25, 440, 25)
         title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
         title_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
-        # 보안 경고 메시지 강화
-        warning_lbl = QLabel("⚠️ 보안 경고: 비밀번호 해시는 민감한 정보입니다.", dialog)
-        warning_lbl.setGeometry(30, 55, 440, 20)
-        warning_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2, QFont.Weight.Bold))
-        warning_lbl.setStyleSheet(f"color: {get_color('warning')};")
-
-        warning2_lbl = QLabel("이 정보는 관리자 권한으로만 확인 가능합니다.", dialog)
-        warning2_lbl.setGeometry(30, 75, 440, 20)
-        warning2_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
-        warning2_lbl.setStyleSheet(f"color: {get_color('error')};")
-
-        info_lbl = QLabel("필요한 경우에만 확인하고, 무단 공유를 금지합니다.", dialog)
-        info_lbl.setGeometry(30, 95, 440, 20)
-        info_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
-        info_lbl.setStyleSheet(f"color: {get_color('text_muted')};")
-
-        hash_edit = QLineEdit(dialog)
-        hash_edit.setGeometry(30, 125, 440, 40)
-        hash_edit.setText(masked_hash)
-        hash_edit.setReadOnly(True)
-        hash_edit.setFont(QFont("Consolas", ds.typography.size_2xs // 2))
-        hash_edit.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {get_color('background')};
-                color: {get_color('text_primary')};
-                border: 1px solid {get_color('border')};
-                border-radius: {ds.radius.base}px;
-                padding: {ds.spacing.space_2}px;
-            }}
-        """)
+        status_lbl = QLabel(status_text, dialog)
+        status_lbl.setGeometry(30, 65, 440, 30)
+        status_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2, QFont.Weight.Bold))
+        status_lbl.setStyleSheet(f"color: {status_color};")
 
         note_lbl = QLabel(
-            "※ 보안상 비밀번호는 해시 형태로만 저장됩니다.\n   원본 비밀번호는 복구할 수 없습니다.",
+            "※ 보안 정책에 따라 비밀번호 해시값은 API에서 제공되지 않습니다.\n"
+            "※ 비밀번호는 bcrypt 해시로 안전하게 저장되며, 원본 복구는 불가합니다.",
             dialog,
         )
-        note_lbl.setGeometry(30, 175, 440, 40)
+        note_lbl.setGeometry(30, 110, 440, 40)
         note_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
         note_lbl.setStyleSheet(f"color: {get_color('text_muted')};")
 
-        # 추가 보안 정보
-        security_lbl = QLabel(
-            "※ 해시 알고리즘: bcrypt (안전한 비밀번호 저장)\n※ 마스킹 처리: 보안상 전체 해시 표시 제한",
-            dialog,
-        )
-        security_lbl.setGeometry(30, 215, 440, 40)
-        security_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
-        security_lbl.setStyleSheet(f"color: {get_color('info')};")
-
         close_btn = QPushButton("닫기", dialog)
-        close_btn.setGeometry(370, 265, 100, 35)
+        close_btn.setGeometry(370, 170, 100, 35)
         close_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         close_btn.setStyleSheet(f"""
             QPushButton {{
@@ -949,178 +853,6 @@ class AdminDashboard(QMainWindow):
     def _on_search_changed(self, text):
         logger.info("[Admin UI] Search changed: %s", text)
         self._load_users()
-
-    def _on_sub_filter_changed(self, text):
-        logger.info("[Admin UI] Subscription filter: %s", text)
-        self._load_subscriptions()
-
-    def _load_subscriptions(self):
-        """구독 요청 목록 로드"""
-        status_filter = self.sub_filter_combo.currentText()
-        url = f"{self.api_base_url}/user/subscription/requests"
-        if status_filter != "전체":
-            status_map = {
-                "대기 중": "PENDING",
-                "승인됨": "APPROVED",
-                "거부됨": "REJECTED",
-            }
-            url += f"?status={status_map.get(status_filter, '')}"
-
-        logger.info("[Admin UI] Load subscriptions | filter=%s", status_filter)
-        worker = ApiWorker("GET", url, self._get_headers())
-        worker.data_ready.connect(self._on_subscriptions_loaded)
-        worker.error.connect(self._on_error)
-        worker.finished.connect(lambda: self._cleanup_worker(worker))
-        self.workers.append(worker)
-        worker.start()
-
-    def _on_subscriptions_loaded(self, data: dict):
-        """구독 요청 목록 로드 완료"""
-        logger.info("[Admin UI] Subscriptions loaded (%d)", len(data.get("requests", [])))
-        items = data.get("requests", [])
-        self.subscriptions_table.setRowCount(len(items))
-
-        for row, req in enumerate(items):
-            self.subscriptions_table.setRowHeight(row, 50)
-
-            # 0: ID
-            self._set_cell(self.subscriptions_table, row, 0, str(req.get("id", "")))
-            # 1: 사용자ID
-            self._set_cell(self.subscriptions_table, row, 1, str(req.get("user_id", "")))
-            # 2: 아이디 (username)
-            self._set_cell(self.subscriptions_table, row, 2, req.get("username", "-"))
-            # 3: 메시지
-            self._set_cell(self.subscriptions_table, row, 3, req.get("message", "") or "-")
-
-            # 4: 요청일시
-            created = req.get("created_at", "")
-            if created:
-                try:
-                    dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
-                    created = dt.strftime("%Y-%m-%d %H:%M")
-                except (ValueError, TypeError) as e:
-                    logger.warning(f"Created_at parsing failed: {e}")
-            self._set_cell(self.subscriptions_table, row, 4, created or "-")
-
-            # 5: 상태
-            status = req.get("status", "")
-            status_text = {
-                "PENDING": "대기 중",
-                "APPROVED": "승인됨",
-                "REJECTED": "거부됨",
-            }.get(status, status)
-            status_color = {
-                "PENDING": get_color("warning"),
-                "APPROVED": get_color("success"),
-                "REJECTED": get_color("error"),
-            }.get(status, get_color("text_primary"))
-            self._set_cell(self.subscriptions_table, row, 5, status_text, status_color)
-
-            # 6: 작업 버튼
-            if status == "PENDING":
-                widget = self._create_subscription_actions(req.get("id"), row)
-                self.subscriptions_table.setCellWidget(row, 6, widget)
-            else:
-                self._set_cell(self.subscriptions_table, row, 6, "-")
-        
-        # 정확한 통계를 위해 별도 API 호출
-        self._load_subscription_stats()
-    
-    def _load_subscription_stats(self):
-        """구독 요청 통계 로드 (정확한 카운트)"""
-        url = f"{self.api_base_url}/user/subscription/stats"
-        worker = ApiWorker("GET", url, self._get_headers())
-        worker.data_ready.connect(self._on_subscription_stats_loaded)
-        worker.error.connect(lambda e: logger.warning("[Admin UI] Failed to load subscription stats: %s", e))
-        worker.finished.connect(lambda: self._cleanup_worker(worker))
-        self.workers.append(worker)
-        worker.start()
-    
-    def _on_subscription_stats_loaded(self, data: dict):
-        """구독 요청 통계 로드 완료"""
-        self.pending_label.setText(str(data.get("pending", 0)))
-        self.approved_label.setText(str(data.get("approved", 0)))
-        self.rejected_label.setText(str(data.get("rejected", 0)))
-
-    def _create_subscription_actions(self, request_id, row: int = 0) -> QWidget:
-        """구독 요청 작업 버튼"""
-        widget = QWidget()
-        widget.setMinimumSize(200, 50)
-        bg_color = get_color("surface_variant") if row % 2 == 1 else get_color("surface")
-        widget.setStyleSheet(f"background-color: {bg_color};")
-
-        approve_btn = QPushButton("승인", widget)
-        approve_btn.setGeometry(10, 10, 80, 30)
-        approve_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
-        approve_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color('success')};
-                color: white;
-                border: none;
-                border-radius: {ds.radius.sm}px;
-            }}
-            QPushButton:hover {{
-                background-color: #00e676;
-            }}
-        """)
-        approve_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        approve_btn.clicked.connect(lambda: self._approve_subscription(request_id))
-
-        reject_btn = QPushButton("거부", widget)
-        reject_btn.setGeometry(100, 10, 80, 30)
-        reject_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
-        reject_btn.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {get_color('error')};
-                color: white;
-                border: none;
-                border-radius: {ds.radius.sm}px;
-            }}
-            QPushButton:hover {{
-                background-color: #ff8a80;
-            }}
-        """)
-        reject_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        reject_btn.clicked.connect(lambda: self._reject_subscription(request_id))
-
-        return widget
-
-    def _approve_subscription(self, request_id):
-        """구독 승인 다이얼로그"""
-        logger.info("[Admin UI] Approve clicked | request_id=%s", request_id)
-        dialog = ApproveDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            days = dialog.get_days()
-            work_count = dialog.get_work_count()
-            url = f"{self.api_base_url}/user/subscription/approve"
-            data = {
-                "request_id": request_id,
-                "subscription_days": days,
-                "work_count": work_count,
-            }
-            logger.info("[Admin UI] Approve request | request_id=%s days=%s work_count=%s", request_id, days, work_count)
-            worker = ApiWorker("POST", url, self._get_headers(), data)
-            worker.data_ready.connect(lambda d: self._on_action_done("구독 승인", d))
-            worker.error.connect(self._on_error)
-            worker.finished.connect(lambda: self._cleanup_worker(worker))
-            self.workers.append(worker)
-            worker.start()
-
-    def _reject_subscription(self, request_id):
-        """구독 거부 다이얼로그"""
-        logger.info("[Admin UI] Reject clicked | request_id=%s", request_id)
-        dialog = RejectDialog(self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            reason = dialog.get_reason()
-            url = f"{self.api_base_url}/user/subscription/reject"
-            data = {"request_id": request_id, "admin_response": reason}
-            logger.info("[Admin UI] Reject request | request_id=%s reason=%s", request_id, reason)
-            worker = ApiWorker("POST", url, self._get_headers(), data)
-            worker.data_ready.connect(lambda d: self._on_action_done("구독 거부", d))
-            worker.error.connect(self._on_error)
-            worker.finished.connect(lambda: self._cleanup_worker(worker))
-            self.workers.append(worker)
-            worker.start()
 
     def _extend_subscription(self, user_id, username):
         """구독 연장"""
@@ -1259,103 +991,6 @@ class AdminDashboard(QMainWindow):
         layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignCenter)
         
         dialog.exec()
-
-    def _show_login_history(self, user_id, username):
-        """로그인 이력 보기"""
-        dialog = LoginHistoryDialog(
-            username, user_id, self.api_base_url, self._get_headers(), self
-        )
-        dialog.exec()
-
-    def _delete_user(self, user_id, username):
-        """사용자 삭제"""
-        logger.info("[Admin UI] Delete user clicked | user_id=%s username=%s", user_id, username)
-        if not _styled_question_box(
-            self,
-            "사용자 삭제",
-            f"'{username}' 사용자를 삭제하시겠습니까?\n이 작업은 되돌릴 수 없습니다.",
-        ):
-            return
-
-        url = f"{self.api_base_url}/user/admin/users/{user_id}"
-        worker = ApiWorker("DELETE", url, self._get_headers())
-        worker.data_ready.connect(lambda d: self._on_action_done("삭제", d))
-        worker.error.connect(lambda e: self._on_action_error("삭제", e))
-        worker.finished.connect(lambda: self._cleanup_worker(worker))
-        self.workers.append(worker)
-        worker.start()
-
-    def _on_action_error(self, action, error):
-        """작업 실패 시 에러 메시지 표시"""
-        self._on_error(error)
-        msg = _styled_msg_box(self, "오류", f"{action} 실패: {error}", "error")
-        msg.exec()
-        self._load_data()
-
-    def _on_action_done(self, action, data):
-        if data.get("success"):
-            msg = _styled_msg_box(
-                self, "완료", f"{action} 처리가 완료되었습니다.", "info"
-            )
-            msg.exec()
-            self._load_data()
-        else:
-            msg = _styled_msg_box(
-                self,
-                "오류",
-                data.get("message", "처리 중 오류가 발생했습니다."),
-                "warning",
-            )
-            msg.exec()
-
-    def _on_error(self, error):
-        self.connection_label.setText("연결 오류")
-        self.connection_label.setStyleSheet(f"color: {get_color('error')};")
-        logger.error("[Admin API] Error: %s", error)
-        if "429" in str(error):
-            self._handle_rate_limit(error)
-
-    def _handle_rate_limit(self, error_text: str):
-        """429 발생 시 Retry-After 헤더 기반 자동 재시도
-
-        In production, the server should send a Retry-After header that could be parsed here.
-        The Retry-After header can specify seconds (numeric) or an HTTP-date (RFC 7231).
-
-        Example:
-            - Retry-After: 120 (retry after 120 seconds)
-            - Retry-After: Wed, 21 Oct 2025 07:28:00 GMT (retry at specific time)
-        """
-        if self._rate_limited:
-            return
-
-        self._rate_limited = True
-        self.connection_label.setText("요청 제한 - 잠시 후 자동 재시도")
-        self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
-
-        if hasattr(self, "refresh_timer") and self.refresh_timer.isActive():
-            self.refresh_timer.stop()
-
-        # Default: 5 minutes (300 seconds = 300000 ms)
-        # TODO: Parse Retry-After header from response if available
-        # retry_delay_seconds = int(response_headers.get('Retry-After', '300'))
-        retry_delay_ms = RETRY_DELAY_MS
-
-        logger.warning("[Admin UI] Rate limit triggered. Pausing for %d seconds. Detail: %s", retry_delay_ms // 1000, error_text)
-        QTimer.singleShot(retry_delay_ms, self._resume_after_rate_limit)
-
-    def _resume_after_rate_limit(self):
-        self._rate_limited = False
-        self.connection_label.setText("재시도 중...")
-        self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
-        if hasattr(self, "refresh_timer"):
-            self.refresh_timer.start(REFRESH_INTERVAL_MS)
-        self._load_data()
-
-
-# Dialog classes have been extracted to ui/admin_dialogs.py
-
-
-
 
     def _show_login_history(self, user_id, username):
         """로그인 이력 보기"""
