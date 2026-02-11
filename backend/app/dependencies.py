@@ -7,8 +7,48 @@ API 인증 및 권한 검사를 위한 의존성 함수들
 import secrets
 from fastapi import Header, HTTPException, status
 from app.configuration import get_settings
+from app.utils.jwt_handler import decode_access_token
 
 settings = get_settings()
+
+
+async def get_current_user_id(
+    authorization: str = Header(..., alias="Authorization", description="Bearer JWT token")
+) -> int:
+    """
+    JWT 토큰에서 현재 사용자 ID 추출
+    Extract current user ID from JWT token
+
+    Args:
+        authorization: Authorization header (Bearer <token>)
+
+    Returns:
+        User ID (int)
+
+    Raises:
+        HTTPException: 401 if token is invalid or missing
+    """
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authorization header",
+        )
+
+    token = authorization[7:]  # Remove "Bearer " prefix
+    try:
+        payload = decode_access_token(token)
+        user_id = payload.get("sub")
+        if user_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token payload",
+            )
+        return int(user_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(e),
+        )
 
 
 async def verify_admin_api_key(
