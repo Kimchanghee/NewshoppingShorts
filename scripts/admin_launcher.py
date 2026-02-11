@@ -23,9 +23,15 @@ from PyQt6.QtCore import QTimer
 from ui.components.admin_loading_splash import AdminLoadingSplash
 
 # Load environment variables from .env file
+# PyInstaller bundles .env into _internal/ (sys._MEIPASS), so check there first.
 try:
     from dotenv import load_dotenv
-    load_dotenv()
+    _base = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+    _env_path = os.path.join(_base, '.env')
+    if os.path.exists(_env_path):
+        load_dotenv(_env_path)
+    else:
+        load_dotenv()
 except ImportError:
     pass
 
@@ -89,6 +95,9 @@ def main():
 
     splash.update_progress(40, "관리자 권한 확인 중...")
 
+    # GC 방지용 참조 보관 (로컬 변수는 함수 종료 시 삭제됨)
+    _dashboard_ref = [None]
+
     def load_dashboard():
         """Load dashboard in background with lazy import"""
         try:
@@ -99,6 +108,7 @@ def main():
 
             splash.update_progress(80, "서버 연결 중...")
             dashboard = AdminDashboard(DEFAULT_API_URL, admin_key)
+            _dashboard_ref[0] = dashboard  # prevent GC
 
             splash.update_progress(100, "완료!")
 
@@ -109,7 +119,6 @@ def main():
         except Exception as e:
             logging.error(f"Failed to load dashboard: {e}", exc_info=True)
             splash.close_splash()
-            # In a real app, show a message box here
 
     # Load dashboard after 100ms to allow splash to render first
     QTimer.singleShot(100, load_dashboard)

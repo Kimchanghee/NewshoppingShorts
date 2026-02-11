@@ -251,10 +251,22 @@ class ProgressPanel(QFrame, ThemedMixin):
         """)
 
         if progress is not None:
-            indicator['progress_label'].setText(f"{progress}%")
-            indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
+            if progress >= 100 and status != 'completed':
+                # 100% 도달 시 자동으로 completed 상태로 전환
+                icon, icon_color, text_color, bg_color = status_config['completed']
+                indicator['status_label'].setText(icon)
+                indicator['status_label'].setStyleSheet(f"font-size: 11px; color: {icon_color}; font-weight: bold;")
+                indicator['title_label'].setStyleSheet(f"font-size: 12px; color: {text_color};")
+                indicator['progress_label'].setText("100%")
+                indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
+                # 블링크 중이면 중지
+                if self._blink_step == step_key:
+                    self.stop_blink()
+            else:
+                indicator['progress_label'].setText(f"{progress}%")
+                indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
         elif status == 'completed':
-            indicator['progress_label'].setText("완료")
+            indicator['progress_label'].setText("100%")
             indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
         elif status == 'active':
             indicator['progress_label'].setText("진행중")

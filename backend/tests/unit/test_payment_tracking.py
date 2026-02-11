@@ -80,7 +80,7 @@ class TestSubscriptionManager:
     def test_check_subscription_expiry_not_subscriber(self):
         """비구독자의 만료 확인"""
         user = MagicMock()
-        user.user_type = UserType.FREE
+        user.user_type = UserType.TRIAL
         
         is_expired, days = check_subscription_expiry(user)
         assert is_expired is False
@@ -119,10 +119,10 @@ class TestSubscriptionManager:
     def test_get_effective_user_type_free_user(self):
         """무료 사용자의 유효 타입"""
         user = MagicMock()
-        user.user_type = UserType.FREE
+        user.user_type = UserType.TRIAL
         
         effective = get_effective_user_type(user)
-        assert effective == UserType.FREE
+        assert effective == UserType.TRIAL
 
     def test_get_effective_user_type_active_subscriber(self):
         """활성 구독자의 유효 타입"""
@@ -140,7 +140,7 @@ class TestSubscriptionManager:
         user.subscription_expires_at = datetime.now(timezone.utc) - timedelta(days=5)
         
         effective = get_effective_user_type(user)
-        assert effective == UserType.FREE
+        assert effective == UserType.TRIAL
 
     def test_free_user_work_limit_constant(self):
         """무료 사용자 작업 한도 상수"""
@@ -160,7 +160,7 @@ class TestSubscriptionExpiry:
         result = expire_subscription(db, user, reason="test")
         
         assert result is True
-        assert user.user_type == UserType.FREE
+        assert user.user_type == UserType.TRIAL
         assert user.work_count == FREE_USER_WORK_LIMIT
         db.commit.assert_called_once()
 

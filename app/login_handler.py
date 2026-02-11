@@ -112,18 +112,19 @@ class LoginHandler:
             return
 
         loop_count = 0
+        last_user_type = self.app.login_data.get("data", {}).get("data", {}).get("user_type")
         while not getattr(self.app, "_login_watch_stop", False):
             loop_count += 1
             try:
                 if loop_count % 12 == 0: # 1분마다 로그 남기기 (5초 * 12)
                     logger.debug(f"[watch_loop] Heartbeat check... (seq={loop_count})")
-                    
+
                 current_task = getattr(self.app.state, 'current_task_var', None)
                 app_version = self._get_app_version()
                 data = {"userId": userId, "key": "ssmaker", "ip": userIp, "current_task": current_task, "app_version": app_version}
                 res = rest.loginCheck(**data)
                 st = res.get("status") if isinstance(res, dict) else None
-                
+
                 if st == "skip":
                     # 검증 실패 - 조용히 재시도
                     if loop_count % 12 == 0:
@@ -139,7 +140,7 @@ class LoginHandler:
                     else:
                         QTimer.singleShot(0, self._on_auth_required)
                     break
-                    
+
                 if st == "EU003":
                     logger.warning("[watch_loop] Duplicate login detected (EU003)")
                     # 스레드 안전 UI 콜백 (ui_callback_signal 사용)
@@ -157,6 +158,21 @@ class LoginHandler:
                     else:
                         QTimer.singleShot(0, lambda: self.error_program_force_close("EU004"))
                     break
+
+                # 구독 상태 실시간 감지: heartbeat 응답의 user_type이 변경되면 UI 즉시 갱신
+                if st is True and isinstance(res, dict):
+                    server_user_type = res.get("user_type")
+                    if server_user_type and last_user_type and server_user_type != last_user_type:
+                        logger.info(
+                            f"[watch_loop] user_type changed: {last_user_type} -> {server_user_type}"
+                        )
+                        last_user_type = server_user_type
+                        cb_signal = getattr(self.app, 'ui_callback_signal', None)
+                        refresh_fn = getattr(self.app, 'refresh_user_status', None)
+                        if cb_signal is not None and refresh_fn is not None:
+                            cb_signal.emit(refresh_fn)
+                    elif server_user_type:
+                        last_user_type = server_user_type
             except Exception as e:
                 # 네트워크 오류 등은 무시하고 재시도 (Network errors are ignored and retried)
                 if loop_count % 12 == 0:

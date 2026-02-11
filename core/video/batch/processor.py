@@ -486,6 +486,10 @@ def dynamic_batch_processing_thread(app):
                         app.add_log(
                             f"\n[Batch] ({current_index}/{total_in_queue}) URL 처리 시작: {url[:50]}..."
                         )
+                        try:
+                            rest.log_user_action("영상 처리 시작", f"[{current_index}/{total_in_queue}] URL 처리 시작")
+                        except Exception:
+                            pass
                     else:
                         app.add_log(
                             f"[Batch] 재시도 {retry_count}/{max_retries} 진행 중: {url[:50]}..."
@@ -523,6 +527,10 @@ def dynamic_batch_processing_thread(app):
                     _safe_set_url_status(app, url, "completed")
                     successful_count += 1
                     app.add_log(f"[OK] [{current_index}/{total_in_queue}] 완료!")
+                    try:
+                        rest.log_user_action("영상 처리 완료", f"[{current_index}/{total_in_queue}] 영상 처리 완료")
+                    except Exception:
+                        pass
 
                     # 작업 횟수 차감 (Work count decrement)
                     try:
@@ -787,16 +795,22 @@ def dynamic_batch_processing_thread(app):
                             "forbidden", "403", "suspended",
                             "invalid api key", "unauthorized",
                         ]
-                        if any(ind in lowered for ind in permission_indicators):
+                        # API 키 만료/무효도 키 교체 시도
+                        key_invalid_indicators = [
+                            "api_key_invalid", "api key expired",
+                            "invalid api key", "renew the api key",
+                        ]
+
+                        if any(ind in lowered for ind in permission_indicators + key_invalid_indicators):
                             api_mgr = getattr(app, "api_key_manager", None)
                             perm_key_name = getattr(api_mgr, "current_key", "unknown") if api_mgr else "unknown"
                             app.add_log(
-                                f"[WARN] API 403 권한 오류 (키: {perm_key_name}). "
+                                f"[WARN] API 키 오류 (키: {perm_key_name}). "
                                 f"키 차단 후 교체 중... | {error_msg[:80]}"
                             )
                             rotated, blocked, new_name = try_rotate_key(app)
                             if rotated:
-                                app.add_log(f"[키 교체] {blocked} -> {new_name} (403 권한 오류, {KEY_BLOCK_DURATION_MINUTES}분 차단)")
+                                app.add_log(f"[키 교체] {blocked} -> {new_name} (키 오류, {KEY_BLOCK_DURATION_MINUTES}분 차단)")
                                 continue
 
                             app.add_log("[WARN] 사용 가능한 API 키 없음")
@@ -806,11 +820,36 @@ def dynamic_batch_processing_thread(app):
                             if resumed:
                                 continue
 
+                        # 복구 불가 에러: 팝업 띄우고 배치 중지
                         _safe_set_url_status(app, url, "failed")
                         app.url_status_message[url] = _get_short_error_message(e)
                         failed_count += 1
                         translated_error_msg = _translate_error_message(error_msg)
                         app.add_log(f"실패: {translated_error_msg[:100]}")
+
+                        # 배치 작업 중지
+                        app.batch_processing = False
+
+                        # 에러 팝업 표시
+                        popup_msg = translated_error_msg
+                        def show_error_popup():
+                            try:
+                                show_error(
+                                    app,
+                                    "영상 처리 오류",
+                                    f"{popup_msg}\n\n"
+                                    f"작업이 중지되었습니다.\n"
+                                    f"설정을 확인한 후 다시 시도해주세요.",
+                                )
+                            except Exception as dlg_err:
+                                logger.error("에러 팝업 표시 실패: %s", dlg_err)
+
+                        signal = getattr(app, "ui_callback_signal", None)
+                        if signal is not None:
+                            signal.emit(show_error_popup)
+                        else:
+                            QTimer.singleShot(0, show_error_popup)
+
                         try:
                             app._auto_save_session()
                         except Exception as session_err:
@@ -864,6 +903,14 @@ def dynamic_batch_processing_thread(app):
                 f"미처리 URL {len(pending_remaining)}건은 대기 상태로 남아 있습니다."
             )
         app.add_log("=" * 60)
+        try:
+            rest.log_user_action(
+                "영상 생성 종료",
+                f"성공 {successful_count}건 / 실패 {failed_count}건"
+                + (f" (미처리 {len(pending_remaining)}건)" if pending_remaining else "")
+            )
+        except Exception:
+            pass
 
     except Exception as e:
         translated_error = _translate_error_message(str(e))

@@ -105,7 +105,7 @@ class LoginHistoryResponse(BaseModel):
 # ===== Endpoints =====
 
 @router.get("/users", response_model=UserListResponse)
-@limiter.limit("100/hour")
+@limiter.limit("600/hour")
 async def list_users(
     request: Request,
     search: Optional[str] = Query(None, description="아이디 검색"),
@@ -163,7 +163,7 @@ async def list_users(
 
 
 @router.get("/users/{user_id}", response_model=UserResponse)
-@limiter.limit("100/hour")
+@limiter.limit("600/hour")
 async def get_user(
     request: Request,
     user_id: int,
@@ -185,7 +185,7 @@ async def get_user(
 
 
 @router.get("/users/{user_id}/history", response_model=LoginHistoryResponse)
-@limiter.limit("50/hour")
+@limiter.limit("300/hour")
 async def get_user_login_history(
     request: Request,
     user_id: int,
@@ -210,7 +210,7 @@ async def get_user_login_history(
 
 
 @router.post("/users/{user_id}/extend", response_model=AdminActionResponse)
-@limiter.limit("50/hour")
+@limiter.limit("300/hour")
 async def extend_subscription(
     request: Request,
     user_id: int,
@@ -267,7 +267,7 @@ async def extend_subscription(
 
 
 @router.post("/users/{user_id}/toggle-active", response_model=AdminActionResponse)
-@limiter.limit("50/hour")
+@limiter.limit("300/hour")
 async def toggle_user_active(
     request: Request,
     user_id: int,
@@ -314,8 +314,72 @@ async def toggle_user_active(
         )
 
 
+@router.post("/users/{user_id}/revoke-subscription", response_model=AdminActionResponse)
+@limiter.limit("300/hour")
+async def revoke_subscription(
+    request: Request,
+    user_id: int,
+    db: Session = Depends(get_db),
+    _admin: bool = Depends(verify_admin_api_key)
+):
+    """
+    구독 박탈 - 유료 → 무료 전환 (관리자용)
+    Revoke subscription - convert paid to free (for admin)
+
+    Requires X-Admin-API-Key header.
+    """
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+
+        if not user:
+            return AdminActionResponse(
+                success=False,
+                message="사용자를 찾을 수 없습니다."
+            )
+
+        if user.user_type == UserType.TRIAL:
+            return AdminActionResponse(
+                success=False,
+                message="이미 무료 계정입니다."
+            )
+
+        old_type = user.user_type.value if hasattr(user.user_type, 'value') else str(user.user_type)
+        old_expiry = user.subscription_expires_at
+
+        user.user_type = UserType.TRIAL
+        user.subscription_expires_at = None
+        user.work_count = 5  # 기본 무료 작업 횟수
+        user.work_used = 0
+        db.commit()
+
+        logger.info(
+            f"Subscription revoked: user_id={user_id}, "
+            f"username={user.username}, "
+            f"old_type={old_type}, old_expiry={old_expiry}"
+        )
+
+        return AdminActionResponse(
+            success=True,
+            message=f"'{user.username}' 구독이 박탈되었습니다. (무료 계정으로 전환)",
+            data={
+                "user_id": user_id,
+                "username": user.username,
+                "old_type": old_type,
+                "new_type": "trial"
+            }
+        )
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Database error during subscription revocation: {e}")
+        return AdminActionResponse(
+            success=False,
+            message="구독 박탈 중 오류가 발생했습니다."
+        )
+
+
 @router.delete("/users/{user_id}", response_model=AdminActionResponse)
-@limiter.limit("20/hour")
+@limiter.limit("100/hour")
 async def delete_user(
     request: Request,
     user_id: int,
@@ -360,7 +424,7 @@ async def delete_user(
 
 
 @router.get("/stats", response_model=dict)
-@limiter.limit("100/hour")
+@limiter.limit("600/hour")
 async def get_stats(
     request: Request,
     db: Session = Depends(get_db),

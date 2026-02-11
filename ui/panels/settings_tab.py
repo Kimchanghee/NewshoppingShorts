@@ -147,7 +147,7 @@ class SettingsTab(QWidget, ThemedMixin):
             QPushButton {{
                 background-color: {c.primary};
                 color: white;
-                padding: 10px 20px;
+                padding: 10px 16px;
                 border-radius: {ds.radius.sm}px;
                 font-weight: bold;
                 font-size: {ds.typography.size_sm}px;
@@ -158,7 +158,26 @@ class SettingsTab(QWidget, ThemedMixin):
         """)
         self.folder_btn.clicked.connect(self._select_folder)
         folder_layout.addWidget(self.folder_btn)
-        
+
+        self.folder_open_btn = QPushButton("폴더 열기")
+        self.folder_open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.folder_open_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                padding: 10px 16px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                font-weight: bold;
+                font-size: {ds.typography.size_sm}px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.surface};
+            }}
+        """)
+        self.folder_open_btn.clicked.connect(self._open_folder)
+        folder_layout.addWidget(self.folder_open_btn)
+
         output_section.add_row("저장 위치", folder_container)
         content_layout.addWidget(output_section)
 
@@ -228,6 +247,12 @@ class SettingsTab(QWidget, ThemedMixin):
         
         # =================== SECTION: API Key Management ===================
         self.api_section = SettingsSection("API 키 설정 (최대 8개)")
+
+        # API KEY 발급 안내 링크 (타이틀 바로 아래)
+        api_guide_link = QLabel('<a href="https://ssmaker.lovable.app/notice" style="color: #3B82F6; text-decoration: none;">API KEY 발급 안내 →</a>')
+        api_guide_link.setOpenExternalLinks(True)
+        api_guide_link.setStyleSheet(f"border: none; background: transparent; font-size: 12px;")
+        self.api_section.content_layout.addWidget(api_guide_link)
 
         # 설명 라벨
         desc_label = QLabel("여러 개의 API 키를 등록하면 자동으로 로테이션됩니다. Rate Limit 발생 시 다음 키로 자동 전환됩니다.")
@@ -542,6 +567,15 @@ class SettingsTab(QWidget, ThemedMixin):
                 self.gui.output_folder_path = folder
             from managers.settings_manager import get_settings_manager
             get_settings_manager().set_output_folder(folder)
+
+    def _open_folder(self):
+        """Open the output folder in file explorer"""
+        folder_path = self.folder_input.text().strip()
+        if folder_path and os.path.isdir(folder_path):
+            os.startfile(folder_path)
+        else:
+            from ui.components.custom_dialog import show_warning
+            show_warning(self, "알림", "저장 폴더가 설정되지 않았거나 존재하지 않습니다.")
     
     @staticmethod
     def _extract_user_id_from_login_data(login_data):

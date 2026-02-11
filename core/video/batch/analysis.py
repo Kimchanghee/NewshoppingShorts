@@ -169,21 +169,34 @@ def _analyze_video_for_batch(app):
                 )
 
                 def call_gemini_api_internal():
-                    is_gemini_3 = "gemini-3" in config.GEMINI_VIDEO_MODEL.lower()
-                    if is_gemini_3:
-                        thinking_level = (
-                            types.ThinkingLevel.LOW
-                            if config.GEMINI_THINKING_LEVEL == "low"
-                            else types.ThinkingLevel.HIGH
-                        )
-                        generation_config = types.GenerateContentConfig(
-                            thinking_config=types.ThinkingConfig(thinking_level=thinking_level),
-                            temperature=config.GEMINI_TEMPERATURE,
-                        )
+                    model_lower = config.GEMINI_VIDEO_MODEL.lower()
+                    # thinking_config is only supported on gemini-2.5+ and gemini-3+ models
+                    supports_thinking = any(
+                        tag in model_lower
+                        for tag in ("gemini-2.5", "gemini-3", "gemini-exp")
+                    )
+
+                    if supports_thinking:
+                        is_gemini_3 = "gemini-3" in model_lower
+                        if is_gemini_3:
+                            thinking_level = (
+                                types.ThinkingLevel.LOW
+                                if config.GEMINI_THINKING_LEVEL == "low"
+                                else types.ThinkingLevel.HIGH
+                            )
+                            generation_config = types.GenerateContentConfig(
+                                thinking_config=types.ThinkingConfig(thinking_level=thinking_level),
+                                temperature=config.GEMINI_TEMPERATURE,
+                            )
+                        else:
+                            thinking_budget = 0 if config.GEMINI_THINKING_LEVEL == "low" else 24576
+                            generation_config = types.GenerateContentConfig(
+                                thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
+                                temperature=config.GEMINI_TEMPERATURE,
+                            )
                     else:
-                        thinking_budget = 0 if config.GEMINI_THINKING_LEVEL == "low" else 24576
+                        # gemini-2.0-flash etc. - no thinking support
                         generation_config = types.GenerateContentConfig(
-                            thinking_config=types.ThinkingConfig(thinking_budget=thinking_budget),
                             temperature=config.GEMINI_TEMPERATURE,
                         )
 
@@ -214,16 +227,22 @@ def _analyze_video_for_batch(app):
                 last_error = str(e)
                 logger.error(f"[배치 분석] API 호출 실패 (시도 {attempt}): {e}")
 
-                # 429 Quota Exceeded 또는 403 Permission Denied 처리 (키 교체)
-                is_quota_error = "429" in str(e) and ("RESOURCE_EXHAUSTED" in str(e) or "quota" in str(e).lower())
-                is_permission_error = "403" in str(e) or "PERMISSION_DENIED" in str(e) or "permission denied" in str(e).lower()
+                # 429 Quota / 403 Permission / 400 API_KEY_INVALID 처리 (키 교체)
+                error_str = str(e)
+                error_lower = error_str.lower()
+                is_quota_error = "429" in error_str and ("RESOURCE_EXHAUSTED" in error_str or "quota" in error_lower)
+                is_permission_error = "403" in error_str or "PERMISSION_DENIED" in error_str or "permission denied" in error_lower
+                is_key_invalid = "API_KEY_INVALID" in error_str or "api key expired" in error_lower or "invalid api key" in error_lower
 
-                if is_quota_error or is_permission_error:
+                if is_quota_error or is_permission_error or is_key_invalid:
                     blocked_key = getattr(api_mgr, 'current_key', 'unknown') if api_mgr else 'unknown'
                     short_err = str(e)[:80]
                     if is_quota_error:
                         logger.warning(f"[배치 분석] API 키 할당량 초과(429) 감지. 현재 키: {blocked_key}")
                         app.add_log(f"[분석] API 429 할당량 초과 (키: {blocked_key}) - {short_err}")
+                    elif is_key_invalid:
+                        logger.warning(f"[배치 분석] API 키 만료/무효(400) 감지. 현재 키: {blocked_key}")
+                        app.add_log(f"[분석] API 키 만료/무효 (키: {blocked_key}) - {short_err}")
                     else:
                         logger.warning(f"[배치 분석] API 키 권한 오류(403) 감지. 현재 키: {blocked_key}")
                         app.add_log(f"[분석] API 403 권한 오류 (키: {blocked_key}) - {short_err}")

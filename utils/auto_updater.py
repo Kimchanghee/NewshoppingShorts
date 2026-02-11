@@ -19,19 +19,29 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, Tuple
 
+from urllib.parse import urlparse
+
 import requests
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
 # ?꾩옱 ??踰꾩쟾 (鍮뚮뱶 ????媛믪쓣 ?낅뜲?댄듃)
-CURRENT_VERSION = "1.3.31"
+CURRENT_VERSION = "1.3.32"
 
 # 踰꾩쟾 ?뺤씤 API ?붾뱶?ъ씤??
 UPDATE_CHECK_URL = os.getenv(
     "UPDATE_CHECK_URL",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app/app/version"
 )
+
+# Allowed domains for update downloads (security: prevent redirect to malicious hosts)
+_ALLOWED_DOWNLOAD_DOMAINS: frozenset[str] = frozenset({
+    "github.com",
+    "objects.githubusercontent.com",
+    "storage.googleapis.com",
+    "ssmaker-auth-api-1049571775048.us-central1.run.app",
+})
 
 
 def get_current_version() -> str:
@@ -207,8 +217,14 @@ class UpdateChecker:
                         result["error"] = "Missing file_hash in update metadata"
                         logger.error("Update metadata missing file_hash; refusing unsafe update")
                     else:
-                        result["update_available"] = True
-                        logger.info(f"Update available: {self.current_version} -> {latest_version}")
+                        # Validate download URL domain before accepting update
+                        dl_parsed = urlparse(result["download_url"])
+                        if dl_parsed.scheme != "https" or dl_parsed.hostname not in _ALLOWED_DOWNLOAD_DOMAINS:
+                            result["error"] = f"Untrusted download domain: {dl_parsed.hostname}"
+                            logger.error(f"[Security] Rejecting update from untrusted domain: {dl_parsed.hostname}")
+                        else:
+                            result["update_available"] = True
+                            logger.info(f"Update available: {self.current_version} -> {latest_version}")
                 else:
                     logger.info(f"No update needed. Current: {self.current_version}, Latest: {latest_version}")
             else:
@@ -249,7 +265,16 @@ class UpdateChecker:
         if not download_url:
             logger.error("Download URL is empty")
             return None
-        
+
+        # Security: validate download URL domain against allowlist
+        parsed_url = urlparse(download_url)
+        if parsed_url.scheme != "https":
+            logger.error(f"[Security] Rejecting non-HTTPS download URL: {parsed_url.scheme}")
+            return None
+        if parsed_url.hostname not in _ALLOWED_DOWNLOAD_DOMAINS:
+            logger.error(f"[Security] Rejecting download from untrusted domain: {parsed_url.hostname}")
+            return None
+
         try:
             logger.info(f"Downloading update from: {download_url}")
             

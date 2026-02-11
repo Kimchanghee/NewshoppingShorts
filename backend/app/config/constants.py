@@ -29,5 +29,5 @@ ADMIN_PAGE_SIZE_MAX = 100  # 최대 페이지 크기
 
 # Rate Limiting
 REGISTRATION_RATE_LIMIT = "5/hour"  # 회원가입 요청 제한
-ADMIN_LIST_RATE_LIMIT = "100/hour"  # 관리자 목록 조회 제한
-ADMIN_ACTION_RATE_LIMIT = "50/hour"  # 관리자 작업 제한
+ADMIN_LIST_RATE_LIMIT = "600/hour"  # 관리자 목록 조회 제한
+ADMIN_ACTION_RATE_LIMIT = "300/hour"  # 관리자 작업 제한

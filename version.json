@@ -1,8 +1,8 @@
 {
-    "version": "1.3.31",
-    "build_date": "2026-02-10",
-    "updated_at": "2026-02-10",
-    "build_number": "37",
+    "version": "1.3.32",
+    "build_date": "2026-02-11",
+    "updated_at": "2026-02-11",
+    "build_number": "38",
     "min_required_version": "1.0.0",
     "update_channel": "stable"
 }

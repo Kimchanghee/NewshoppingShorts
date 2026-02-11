@@ -411,10 +411,14 @@ class AuthService:
                     user.current_task = current_task
                 if app_version is not None:
                     user.app_version = app_version
-            
+
             self.db.commit()
 
-            return {"status": True}
+            result = {"status": True}
+            if user:
+                ut = user.user_type
+                result["user_type"] = ut.value if hasattr(ut, "value") else str(ut)
+            return result
 
         except ValueError as e:
             if "expired" in str(e).lower():

@@ -63,7 +63,7 @@ def get_effective_user_type(user: User) -> UserType:
     if user.user_type == UserType.SUBSCRIBER:
         is_expired, _ = check_subscription_expiry(user)
         if is_expired:
-            return UserType.FREE
+            return UserType.TRIAL
     return user.user_type
 
 
@@ -81,7 +81,7 @@ def expire_subscription(db: Session, user: User, reason: str = "expiry") -> bool
     """
     try:
         prev_type = user.user_type
-        user.user_type = UserType.FREE
+        user.user_type = UserType.TRIAL
         user.work_count = FREE_USER_WORK_LIMIT
         # work_used는 유지 (다음 달 초기화는 별도 로직)
         

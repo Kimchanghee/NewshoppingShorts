@@ -582,6 +582,10 @@ class ProgressManager(ProgressObserver):
         # Register as observer
         self._model.add_observer(self)
 
+        # 단계별 마지막 로깅 상태 추적 (중복 방지)
+        # Track last logged status per step (deduplication)
+        self._last_logged_status: Dict[str, str] = {}
+
         # GUI의 progress_states를 모델과 동기화 (하위 호환성)
         # Sync GUI's progress_states with model (backward compatibility)
         self._sync_gui_states()
@@ -644,16 +648,24 @@ class ProgressManager(ProgressObserver):
             except Exception as e:
                 logger.debug(f"[ProgressManager] refresh_stage_indicator error: {e}")
 
-            # Log significant status changes
-            if status in ('processing', 'completed', 'error') and progress in (0, 100):
-                try:
-                    from caller.rest import log_user_action
-                    log_user_action(
-                        f"단계 {status}", 
-                        f"'{step}' 단계가 {status} 상태입니다. (진행률: {progress}%)"
-                    )
-                except Exception:
-                    pass
+            # Log step status transitions to server (deduplicated, non-blocking)
+            step_name_kr = getattr(self.gui, 'step_titles', {}).get(step, step)
+            prev_logged = self._last_logged_status.get(step)
+            if status in ('processing', 'completed', 'error') and status != prev_logged:
+                self._last_logged_status[step] = status
+                _action = {
+                    'processing': ("작업 진행", f"[{step_name_kr}] 단계 시작", "INFO"),
+                    'completed': ("작업 완료", f"[{step_name_kr}] 단계 완료", "INFO"),
+                    'error': ("작업 오류", f"[{step_name_kr}] 단계 오류 발생", "ERROR"),
+                }.get(status)
+                if _action:
+                    def _send_log(a=_action):
+                        try:
+                            from caller.rest import log_user_action
+                            log_user_action(a[0], a[1], a[2])
+                        except Exception:
+                            pass
+                    threading.Thread(target=_send_log, daemon=True).start()
 
             # ★ ProgressPanel 직접 업데이트 (가장 확실한 경로)
             # Direct ProgressPanel update (most reliable path)
@@ -692,14 +704,21 @@ class ProgressManager(ProgressObserver):
                 self.gui.current_task_label.setText(highlight_message)
 
             # Update state for heartbeat
+            # For heartbeat: use short status for error (don't send full error details to server)
+            heartbeat_task = highlight_message
+            if status == 'error':
+                heartbeat_task = "오류 발생"
+            elif status == 'completed':
+                heartbeat_task = "대기 중"
+
             if hasattr(self.gui, 'state'):
-                self.gui.state.current_task_var = highlight_message
+                self.gui.state.current_task_var = heartbeat_task
             elif hasattr(self.gui, 'current_task_var'):
                 var = self.gui.current_task_var
                 if hasattr(var, 'set'):
-                    var.set(highlight_message)
+                    var.set(heartbeat_task)
                 else:
-                    self.gui.current_task_var = highlight_message
+                    self.gui.current_task_var = heartbeat_task
 
             # Status bar update
             status_bar = getattr(self.gui, 'status_bar', None)
@@ -748,6 +767,10 @@ class ProgressManager(ProgressObserver):
                         progress_panel.update_step_status(step_key, 'pending', 0)
                     except Exception:
                         pass
+
+            # 로그 상태 추적 초기화 (새 배치에서 다시 로깅)
+            # Clear log status tracking (re-log on new batch)
+            self._last_logged_status.clear()
 
             secondary = getattr(self.gui, 'secondary_text', '#6B7280')
             for indicator in getattr(self.gui, 'step_indicators', {}).values():
