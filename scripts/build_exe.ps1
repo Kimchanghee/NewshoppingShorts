@@ -39,9 +39,9 @@ function Invoke-Native {
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
-$Python = Join-Path $Root "venv311\\Scripts\\python.exe"
+$Python = Join-Path $Root "venv311\Scripts\python.exe"
 if (-not (Test-Path $Python)) {
-  $Python = Join-Path $Root "venv314\\Scripts\\python.exe"
+  $Python = Join-Path $Root "venv314\Scripts\python.exe"
 }
 if (-not (Test-Path $Python)) {
   $Python = "python"
@@ -66,16 +66,16 @@ try {
     (Join-Path $Root "build"), `
     (Join-Path $Root "dist"), `
     (Join-Path $Root "build_staging"), `
-    (Join-Path $Root "scripts\\build"), `
-    (Join-Path $Root "scripts\\dist") `
+    (Join-Path $Root "scripts\build"), `
+    (Join-Path $Root "scripts\dist") `
     -Recurse -Force -ErrorAction SilentlyContinue
 
   Invoke-Native "[1.5/5] Materializing faster-whisper models (dereference HF cache symlinks)..." $Python @(
-    (Join-Path $Root "scripts\\materialize_whisper_models.py")
+    (Join-Path $Root "scripts\materialize_whisper_models.py")
   )
 
   Write-Host "`n[1.7/5] Staging Tesseract OCR runtime (for end-user OCR/blur)..."
-  $stageRoot = Join-Path $Root "build_staging\\tesseract"
+  $stageRoot = Join-Path $Root "build_staging\tesseract"
   Remove-Item -Path $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
   New-Item -ItemType Directory -Path $stageRoot | Out-Null
 
@@ -91,9 +91,9 @@ try {
 
   $candidates = @(
     $tesseractExe,
-    "C:\\Program Files\\Tesseract-OCR\\tesseract.exe",
-    "C:\\Program Files (x86)\\Tesseract-OCR\\tesseract.exe",
-    (Join-Path $env:LOCALAPPDATA "Programs\\Tesseract-OCR\\tesseract.exe")
+    "C:\Program Files\Tesseract-OCR\tesseract.exe",
+    "C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+    (Join-Path $env:LOCALAPPDATA "Programs\Tesseract-OCR\tesseract.exe")
   ) | Where-Object { $_ -and (Test-Path $_) }
 
   $tesseractExe = $candidates | Select-Object -First 1
@@ -142,7 +142,7 @@ try {
     (Join-Path $Root "ssmaker.spec")
   )
 
-  $distDir = Join-Path $Root "dist\\ssmaker"
+  $distDir = Join-Path $Root "dist\ssmaker"
   $ssmakerExe = Join-Path $distDir "ssmaker.exe"
 
   if (-not (Test-Path $ssmakerExe)) {
@@ -167,20 +167,20 @@ try {
     "imageio_ffmpeg",
 
     # ── Korean Fonts (전체) ──
-    "fonts\\Pretendard-ExtraBold.ttf",
-    "fonts\\Pretendard-Bold.ttf",
-    "fonts\\Pretendard-SemiBold.ttf",
-    "fonts\\GmarketSansTTFBold.ttf",
-    "fonts\\SpoqaHanSansNeo-Bold.ttf",
-    "fonts\\Paperlogy-9Black.ttf",
-    "fonts\\SeoulHangangB.ttf",
-    "fonts\\IBMPlexSansKR-Bold.ttf",
+    "fonts\Pretendard-ExtraBold.ttf",
+    "fonts\Pretendard-Bold.ttf",
+    "fonts\Pretendard-SemiBold.ttf",
+    "fonts\GmarketSansTTFBold.ttf",
+    "fonts\SpoqaHanSansNeo-Bold.ttf",
+    "fonts\Paperlogy-9Black.ttf",
+    "fonts\SeoulHangangB.ttf",
+    "fonts\IBMPlexSansKR-Bold.ttf",
 
     # ── Tesseract OCR runtime ──
-    "tesseract\\tesseract.exe",
-    "tesseract\\tessdata\\eng.traineddata",
-    "tesseract\\tessdata\\kor.traineddata",
-    "tesseract\\tessdata\\chi_sim.traineddata",
+    "tesseract\tesseract.exe",
+    "tesseract\tessdata\eng.traineddata",
+    "tesseract\tessdata\kor.traineddata",
+    "tesseract\tessdata\chi_sim.traineddata",
 
     # ── Python packages (UI) ──
     "PyQt6",
@@ -265,8 +265,9 @@ try {
   $iscc = $null
   $isccCandidates = @(
     (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
-    "C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe",
-    "C:\\Program Files\\Inno Setup 6\\ISCC.exe"
+    "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+    "C:\Program Files\Inno Setup 6\ISCC.exe",
+    (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
   ) | Where-Object { $_ -and (Test-Path $_) }
   $iscc = $isccCandidates | Select-Object -First 1
 
@@ -280,7 +281,7 @@ try {
     $issFile
   )
 
-  $installerExe = Join-Path $Root "dist\\SSMaker_Setup_v${AppVersion}.exe"
+  $installerExe = Join-Path $Root "dist\SSMaker_Setup_v${AppVersion}.exe"
   if (-not (Test-Path $installerExe)) {
     throw "Installer output missing: ${installerExe}"
   }

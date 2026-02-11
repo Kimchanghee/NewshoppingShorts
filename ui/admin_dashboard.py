@@ -897,7 +897,11 @@ class AdminDashboard(QMainWindow):
     def _show_logs_dialog(self, username: str, data: dict):
         """로그 목록 다이얼로그 표시"""
         logs = data.get("logs", [])
-        
+
+        if not logs:
+            QMessageBox.information(self, "활동 로그", f"'{username}' 사용자의 최근 24시간 활동 로그가 없습니다.")
+            return
+
         dialog = QDialog(self)
         dialog.setWindowTitle(f"'{username}' 활동 로그 (최근 24시간)")
         dialog.setFixedSize(900, 600)
