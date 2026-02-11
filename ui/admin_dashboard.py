@@ -24,13 +24,10 @@ from PyQt6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QHeaderView,
-    QComboBox,
     QLineEdit,
     QMessageBox,
     QDialog,
-    QScrollArea,
     QAbstractItemView,
-    QFrame,
     QVBoxLayout,
 )
 from PyQt6.QtGui import QFont, QColor, QBrush, QIcon
