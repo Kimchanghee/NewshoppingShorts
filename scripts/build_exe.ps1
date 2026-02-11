@@ -157,20 +157,58 @@ try {
     $_.FullName.Substring($distDir.Length + 1)
   }
 
-  # Must-have items
+  # Must-have items — 빌드에 반드시 포함되어야 하는 모든 핵심 항목
   $mustContain = @(
+    # ── Core ──
     "ssmaker.exe",
     "version.json",
-    # ffmpeg binary (imageio_ffmpeg)
+
+    # ── Video / FFmpeg ──
     "imageio_ffmpeg",
-    # Korean font assets
+
+    # ── Korean Fonts (전체) ──
     "fonts\\Pretendard-ExtraBold.ttf",
-    # Tesseract OCR runtime
+    "fonts\\Pretendard-Bold.ttf",
+    "fonts\\Pretendard-SemiBold.ttf",
+    "fonts\\GmarketSansTTFBold.ttf",
+    "fonts\\SpoqaHanSansNeo-Bold.ttf",
+    "fonts\\Paperlogy-9Black.ttf",
+    "fonts\\SeoulHangangB.ttf",
+    "fonts\\IBMPlexSansKR-Bold.ttf",
+
+    # ── Tesseract OCR runtime ──
     "tesseract\\tesseract.exe",
+    "tesseract\\tessdata\\eng.traineddata",
+    "tesseract\\tessdata\\kor.traineddata",
     "tesseract\\tessdata\\chi_sim.traineddata",
-    # Automation modules
+
+    # ── Python packages (UI) ──
+    "PyQt6",
+
+    # ── Python packages (AI / ML) ──
+    "faster_whisper",
+    "ctranslate2",
+
+    # ── Python packages (Video / Audio) ──
+    "moviepy",
+    "cv2",
+    "pydub",
+    "edge_tts",
+    "av",
+
+    # ── Python packages (Network / API) ──
+    "requests",
+
+    # ── Python packages (Automation) ──
     "selenium",
-    "webdriver_manager"
+    "webdriver_manager",
+    "bs4",
+
+    # ── Python packages (OCR) ──
+    "pytesseract",
+
+    # ── TLS / CA certificates ──
+    "certifi"
   )
 
   foreach ($item in $mustContain) {
@@ -215,7 +253,10 @@ try {
       throw "Unexpected .pem file in build output: ${pem}"
     }
   }
-  Write-Host "OK: build output verified."
+  # Summary: file count and total size
+  $fileCount = ($allFiles | Measure-Object).Count
+  $totalSizeMB = [math]::Round(((Get-ChildItem -Path $distDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
+  Write-Host "OK: build output verified. ($fileCount files, ${totalSizeMB} MB)"
 
   # ── Inno Setup: create installer ───────────────────────────────────────────
   Write-Host "`n[4/5] Building Windows installer with Inno Setup..."
