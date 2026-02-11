@@ -67,6 +67,25 @@ def run_auto_migration():
             ]
         }
         
+        # Ensure user_logs table exists
+        try:
+            conn.execute(text("""
+                CREATE TABLE IF NOT EXISTS `user_logs` (
+                    `id` INTEGER NOT NULL AUTO_INCREMENT,
+                    `user_id` INTEGER NOT NULL,
+                    `level` VARCHAR(20) NOT NULL DEFAULT 'INFO',
+                    `action` VARCHAR(255) NOT NULL,
+                    `content` TEXT NULL,
+                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY (`id`),
+                    INDEX `ix_user_logs_user_id` (`user_id`),
+                    INDEX `ix_user_logs_created_at` (`created_at`)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+            """))
+            logger.info("user_logs table ensured.")
+        except Exception as e:
+            logger.warning(f"user_logs table creation: {e}")
+
         for table, columns in migrations.items():
             for col, type_def in columns:
                 try:

@@ -738,17 +738,8 @@ def submitRegistrationRequest(
     if not validate_user_id(username):
         return {"success": False, "message": "Username format is invalid."}
 
-    if not password or len(password) < 6:
-        return {"success": False, "message": "Password must be at least 6 characters."}
-
-    # 연락처: 숫자/하이픈만 허용되므로 미리 정제
-    import re
-    cleaned_contact = re.sub(r"[^0-9\-]", "", contact or "")
-    if not cleaned_contact or len(cleaned_contact) < 10:
-        return {
-            "success": False,
-            "message": "연락처는 숫자/하이픈 10자리 이상 입력해주세요.",
-        }
+    if not password or len(password) < 8:
+        return {"success": False, "message": "비밀번호는 8자 이상이어야 합니다."}
 
     # Email validation (simple check)
     if not email or "@" not in email or "." not in email:
@@ -761,7 +752,7 @@ def submitRegistrationRequest(
         "name": name.strip(),
         "username": username.strip().lower(),
         "password": password,
-        "contact": cleaned_contact,
+        "contact": contact.strip(),
         "email": email.strip()
     }
 
@@ -769,7 +760,8 @@ def submitRegistrationRequest(
         logger.info(
             f"Sending registration request to: {main_server}/user/register/request"
         )
-        masked_contact = cleaned_contact[:3] + "****" + cleaned_contact[-4:] if len(cleaned_contact) >= 7 else "****"
+        _contact = contact.strip()
+        masked_contact = _contact[:3] + "****" + _contact[-4:] if len(_contact) >= 7 else "****"
         logger.info(
             "Registration payload: name=%s username=%s contact=%s",
             _sanitize_user_id_for_logging(name),

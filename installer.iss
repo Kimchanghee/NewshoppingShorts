@@ -36,10 +36,7 @@ DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 ; Refuse to downgrade
 MinVersion=10.0
-; If previous install exists, use its directory (Inno Setup default behavior via AppId)
-UsePreviousDir=yes
-UsePreviousGroup=yes
-UsePreviousTasks=yes
+; If previous install exists, Inno Setup automatically uses its directory via AppId (default behavior).
 ; Output
 OutputDir=dist
 OutputBaseFilename=SSMaker_Setup_v{#MyAppVersion}

@@ -459,7 +459,7 @@ class RegistrationRequestDialog(QWidget):
         self.passwordEdit = QLineEdit(self)
         self.passwordEdit.setGeometry(QtCore.QRect(30, 420, 340, ds.button_sizes['md'].height))
         self.passwordEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
-        self.passwordEdit.setPlaceholderText("6자 이상 입력")
+        self.passwordEdit.setPlaceholderText("8자 이상, 영문+숫자 포함")
         self.passwordEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.passwordEdit)
 
@@ -467,7 +467,7 @@ class RegistrationRequestDialog(QWidget):
         self.passwordHintLabel.setGeometry(QtCore.QRect(30, 464, 340, 18))
         self.passwordHintLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.passwordHintLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
-        self.passwordHintLabel.setText("※ 영문, 숫자 포함 6자 이상 권장")
+        self.passwordHintLabel.setText("※ 영문+숫자 포함 8자 이상 필수")
 
         # 비밀번호 확인 (Shifted down +75)
         self.passwordConfirmLabel = QLabel(self)
@@ -553,8 +553,28 @@ class RegistrationRequestDialog(QWidget):
 
     def _validate_form(self):
         """Update realtime hints. Final validation runs on submit."""
+        import re
         password = self.passwordEdit.text()
         password_confirm = self.passwordConfirmEdit.text()
+
+        # Real-time password strength feedback
+        if password:
+            pw_issues = []
+            if len(password) < 8:
+                pw_issues.append("8자 이상")
+            if not re.search(r'[a-zA-Z]', password):
+                pw_issues.append("영문 포함")
+            if not re.search(r'[0-9]', password):
+                pw_issues.append("숫자 포함")
+            if pw_issues:
+                self.passwordHintLabel.setText(f"※ 필요: {', '.join(pw_issues)}")
+                self.passwordHintLabel.setStyleSheet(f"color: {login_color('error')}; background: transparent;")
+            else:
+                self.passwordHintLabel.setText("※ 사용 가능한 비밀번호입니다")
+                self.passwordHintLabel.setStyleSheet(f"color: {login_color('success')}; background: transparent;")
+        else:
+            self.passwordHintLabel.setText("※ 영문+숫자 포함 8자 이상 필수")
+            self.passwordHintLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
 
         if password_confirm:
             if password != password_confirm:
@@ -608,8 +628,12 @@ class RegistrationRequestDialog(QWidget):
 
         if not password:
             issues.append(("비밀번호", "비밀번호를 입력해주세요.", self.passwordEdit, "missing"))
-        elif len(password) < 6:
-            issues.append(("비밀번호", "비밀번호는 6자 이상이어야 합니다.", self.passwordEdit, "invalid"))
+        elif len(password) < 8:
+            issues.append(("비밀번호", "비밀번호는 8자 이상이어야 합니다.", self.passwordEdit, "invalid"))
+        elif not re.search(r'[a-zA-Z]', password):
+            issues.append(("비밀번호", "비밀번호에 영문자를 1자 이상 포함해주세요.", self.passwordEdit, "invalid"))
+        elif not re.search(r'[0-9]', password):
+            issues.append(("비밀번호", "비밀번호에 숫자를 1자 이상 포함해주세요.", self.passwordEdit, "invalid"))
 
         if not password_confirm:
             issues.append(("비밀번호 확인", "비밀번호 확인을 입력해주세요.", self.passwordConfirmEdit, "missing"))
