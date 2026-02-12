@@ -427,7 +427,7 @@ APP_VERSION_INFO = {
 - 시작 오류 수정: 일부 사용자에서 발생하던 ipsum.txt 오류 해결.""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "PLACEHOLDER_HASH",
+    "file_hash": "71563131d6c0f1d474a597a3975232785882551dc8954bff778281e94eaf1ea2",
 }
 
 
