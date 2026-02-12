@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color
@@ -628,7 +628,7 @@ class UploadPanel(QFrame, ThemedMixin):
         dialog = QDialog(self)
         dialog.setWindowTitle("유튜브 채널 연결")
         dialog.setFixedSize(460, 240)
-        dialog.setStyleSheet(f"background-color: {c.bg_main}; color: {c.text_primary};")
+        dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
         layout = QVBoxLayout(dialog)
         layout.setSpacing(12)
