@@ -428,7 +428,7 @@ APP_VERSION_INFO = {
 - 구독 연장 날짜 계산 검증 및 안정성 개선.""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "PLACEHOLDER_HASH",
+    "file_hash": "81214d72662d8b913b7431308d71fee02a22e564ca1750da0c0ccfa2dfd7e34b",
 }
 
 
