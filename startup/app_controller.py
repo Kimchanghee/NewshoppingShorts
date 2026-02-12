@@ -226,9 +226,11 @@ class AppController:
             # Check for pending update notification (saved before restart)
             pending = self._consume_pending_update()
             if pending:
+                # Show dialog BEFORE closing loading window to prevent
+                # quitOnLastWindowClosed from terminating the app.
+                self._show_update_complete(pending)
                 if self.loading_window:
                     self.loading_window.close()
-                self._show_update_complete(pending)
             else:
                 self.launch_main_app()
         except Exception as e:

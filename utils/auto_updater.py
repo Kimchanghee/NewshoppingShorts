@@ -27,7 +27,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # ?꾩옱 ??踰꾩쟾 (鍮뚮뱶 ????媛믪쓣 ?낅뜲?댄듃)
-CURRENT_VERSION = "1.3.38"
+CURRENT_VERSION = "1.3.39"
 
 # 踰꾩쟾 ?뺤씤 API ?붾뱶?ъ씤??
 UPDATE_CHECK_URL = os.getenv(
