@@ -1117,7 +1117,7 @@ def _process_single_video(app, url, current_number, total_urls):
                 pass
             _safe_set_url_status(app, url, "skipped")
             app.url_status_message[url] = f"길이초과{int(original_video_duration)}초"
-            app.update_url_listbox()
+            QTimer.singleShot(0, app.update_url_listbox)
 
             # 팝업 제거 - 로그만 남기고 다음 영상으로 진행
 

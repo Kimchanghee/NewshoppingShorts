@@ -139,6 +139,15 @@ def global_exception_handler(exc_type, exc_value, exc_traceback):
     logger.error("Uncaught exception", exc_info=(exc_type, exc_value, exc_traceback))
 
 
+def thread_exception_handler(args):
+    """threading.excepthook - 스레드에서 발생한 미처리 예외 로깅"""
+    logger.error(
+        "Uncaught exception in thread '%s'",
+        args.thread.name if args.thread else "unknown",
+        exc_info=(args.exc_type, args.exc_value, args.exc_traceback),
+    )
+
+
 def handle_errors(
     fallback_return=None,
     user_message: str = "",

@@ -55,7 +55,7 @@ from ui.theme_manager import get_theme_manager
 from ui.design_system_v2 import get_design_system
 from pathlib import Path
 from utils.logging_config import get_logger, AppLogger
-from utils.error_handlers import global_exception_handler
+from utils.error_handlers import global_exception_handler, thread_exception_handler
 from utils.token_cost_calculator import TokenCostCalculator
 from core.providers import VertexGeminiProvider
 from core.api import ApiKeyManager
@@ -266,6 +266,8 @@ class VideoAnalyzerGUI(
 
 def main():
     sys.excepthook = global_exception_handler
+    import threading
+    threading.excepthook = thread_exception_handler
     AppLogger.setup(Path("logs"), level="INFO")
 
     # DPI awareness (must be before QApplication)

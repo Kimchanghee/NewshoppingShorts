@@ -288,6 +288,13 @@ class BatchHandler:
         try:
             self.app.add_log("영상 만들기 시작!")
             DynamicBatch.dynamic_batch_processing_thread(self.app)
+        except Exception as e:
+            logger.error("[배치] 처리 중 오류 발생: %s", e, exc_info=True)
+            self.app.add_log(f"오류 발생: {e}")
+        except BaseException as e:
+            # MemoryError, SystemExit 등 심각한 오류도 잡아서 로깅
+            logger.critical("[배치] 심각한 오류로 처리 중단: %s", e, exc_info=True)
+            self.app.add_log(f"심각한 오류: {type(e).__name__}")
         finally:
             self.app.batch_processing_lock.release()
             self.app.add_log("영상 만들기 완료!")
