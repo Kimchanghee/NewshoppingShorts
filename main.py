@@ -235,6 +235,7 @@ class VideoAnalyzerGUI(
         self.cta_panel = widgets["cta_panel"]
         self.font_panel = widgets["font_panel"]
         self.watermark_panel = widgets["watermark_panel"]
+        self.upload_panel = widgets["upload_panel"]
         self.queue_panel = widgets["queue_panel"]
         self.settings_tab = widgets["settings_tab"]
         self.subscription_panel = widgets["subscription_panel"]
