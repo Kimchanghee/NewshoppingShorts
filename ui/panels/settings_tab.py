@@ -811,8 +811,21 @@ class SettingsTab(QWidget, ThemedMixin):
     
     @staticmethod
     def _load_version_info() -> dict:
-        """version.json에서 앱 버전 정보 로드"""
+        """version.json에서 앱 버전 정보 로드 (PyInstaller frozen 빌드 지원)"""
         import json
+        import sys
+        try:
+            # 1순위: auto_updater의 경로 탐색 (frozen/dev 모두 지원)
+            from utils.auto_updater import get_version_file_path, get_current_version
+            version_path = get_version_file_path()
+            if version_path and version_path.exists():
+                with open(version_path, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            # fallback: 버전 문자열만 반환
+            return {"version": get_current_version(), "updated_at": "알 수 없음"}
+        except Exception:
+            pass
+        # 2순위: 소스 기반 상대 경로 (개발 환경)
         try:
             version_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "version.json")
             with open(version_path, 'r', encoding='utf-8') as f:
