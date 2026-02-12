@@ -428,7 +428,7 @@ APP_VERSION_INFO = {
 - 세션 체크 IP 누락 수정 (user_api_client.py)""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "71563131d6c0f1d474a597a3975232785882551dc8954bff778281e94eaf1ea2",
+    "file_hash": "17151d05ca75c0e035278e377535bc16556a6b1fd11dcc4c8d3369ba923e3f38",
 }
 
 
