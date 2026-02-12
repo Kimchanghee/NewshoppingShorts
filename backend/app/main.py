@@ -61,6 +61,7 @@ def run_auto_migration():
                 ("last_heartbeat", "TIMESTAMP NULL"),
                 ("app_version", "VARCHAR(20) NULL"),
                 ("trial_cycle_started_at", "TIMESTAMP NULL"),
+                ("program_type", "ENUM('ssmaker', 'stmaker') DEFAULT 'ssmaker'"),
             ],
             "registration_requests": [
                 ("email", "VARCHAR(255) NULL")
@@ -404,20 +405,22 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.34/SSMaker_Setup_v1.3.34.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.35/SSMaker_Setup_v1.3.35.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.34",
+    "version": "1.3.35",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.34 변경사항
-- 틱톡 다운로드 제거: 도우인(抖音) 전용 다운로드로 변경.
-- 다운로드 실패 오류 표시 수정: API 오류로 표시되던 문제 해결.
-- 모든 팝업/경고 다이얼로그가 다크 테마에 맞게 통일.""",
+    "release_notes": """### v1.3.35 변경사항
+- 소셜 미디어 업로드 설정: 좌측 메뉴에 업로드 설정 추가, 채널별 프롬프트 관리.
+- 유튜브 채널 연결: OAuth 인증 및 수동 연결 지원.
+- 유튜브 자동 댓글: 영상 업로드 후 자동 댓글 기능 추가.
+- 영상 작업 중 크래시 방지: 배치 처리, 로그인 감시, 스레드 예외 처리 개선.
+- 다운로드 오류 표시 수정 및 다크 테마 다이얼로그 통일.""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "ce25fc76cbf226b909b7d095c72a5cf3b73e39d45a1af4ccdf451dc756ff5b29",
+    "file_hash": "71e9f556054f3ad6fd7e78b3d5484faad5634f04d96294287796fc7e01aab549",
 }
 
 
