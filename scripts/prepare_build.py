@@ -55,15 +55,6 @@ def build_apps():
         print(f"ShortsMaker build failed: {e}")
         return False
 
-    # 2. Admin Dashboard
-    print("\nBuilding AdminDashboard...")
-    try:
-        subprocess.run(["pyinstaller", "--noconfirm", "--clean", "admin.spec"], check=True)
-        print("AdminDashboard build finished successfully.")
-    except subprocess.CalledProcessError as e:
-        print(f"AdminDashboard build failed: {e}")
-        return False
-    
     return True
 
 def package_results():
@@ -75,7 +66,6 @@ def package_results():
     
     print(f"Build artifacts are available in {dist_path.absolute()}")
     print("- ShortsMaker/")
-    print("- AdminDashboard/")
 
 if __name__ == "__main__":
     prepare_whisper_models()

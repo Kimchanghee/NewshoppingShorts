@@ -41,6 +41,8 @@ packages_to_collect = [
     'selenium',
     'webdriver_manager',
     'bs4',
+    # pkg_resources runtime hook requires jaraco.text data files
+    'jaraco',
 ]
 
 hidden_imports = [
@@ -168,7 +170,7 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'test', 'unittest', 'matplotlib', 'onnxruntime', 'setuptools', 'pkg_resources'],
+    excludes=['tkinter', 'test', 'unittest', 'matplotlib', 'onnxruntime'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
