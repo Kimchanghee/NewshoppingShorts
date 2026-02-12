@@ -203,9 +203,13 @@ class LoginHandler:
                 QTimer.singleShot(0, self._safe_exit)
                 return
         try:
-            # 배치 처리 중지
+            # 배치 처리 중이면 스레드 종료 대기
             self.app.batch_processing = False
             self.app.dynamic_processing = False
+            batch_thread = getattr(self.app, "batch_thread", None)
+            if batch_thread is not None and batch_thread.is_alive():
+                logger.info("[LoginHandler] Waiting for batch thread to finish (max 15s)...")
+                batch_thread.join(timeout=15)
 
             # 서버 로그아웃
             if self.app.login_data and isinstance(self.app.login_data, dict):
