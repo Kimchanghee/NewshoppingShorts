@@ -65,8 +65,6 @@ class SettingsManager:
         # Automation Settings
         "coupang_access_key": "",
         "coupang_secret_key": "",
-        "coupang_access_key": "",
-        "coupang_secret_key": "",
         "cookies_inpock": {},  # Dict to store Inpock Link cookies
         "cookies_1688": {},  # Dict to store 1688 cookies
     }
@@ -510,7 +508,6 @@ class SettingsManager:
             "instagram_connected": self._settings.get("instagram_connected", False),
             "threads_connected": self._settings.get("threads_connected", False),
             "x_connected": self._settings.get("x_connected", False),
-            "coupang_connected": bool(self._settings.get("coupang_access_key") and self._settings.get("coupang_secret_key")),
             "coupang_connected": bool(self._settings.get("coupang_access_key") and self._settings.get("coupang_secret_key")),
             "inpock_connected": bool(self._settings.get("cookies_inpock")),
         }
