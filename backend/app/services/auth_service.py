@@ -405,12 +405,13 @@ class AuthService:
 
             user = self.db.query(User).filter(User.id == numeric_user_id).first()
             if user:
-                user.last_heartbeat = datetime.now(timezone.utc)
-                user.is_online = True
-                if current_task is not None:
-                    user.current_task = current_task
-                if app_version is not None:
-                    user.app_version = app_version
+                # user.last_heartbeat = datetime.now(timezone.utc)
+                # user.is_online = True
+                # if current_task is not None:
+                #     user.current_task = current_task
+                # if app_version is not None:
+                #     user.app_version = app_version
+                pass
 
             self.db.commit()
 

@@ -102,6 +102,21 @@ class TopBarPanel(QFrame):
         self.gui.last_login_label.setStyleSheet(f"color: {c.text_muted};")
         layout.addWidget(self.gui.last_login_label)
 
+        # Connection status dot
+        self.gui.connection_dot = QLabel("")
+        self.gui.connection_dot.setFixedSize(8, 8)
+        self.gui.connection_dot.setStyleSheet(
+            f"background-color: {c.text_muted}; border-radius: 4px;"
+        )
+        layout.addWidget(self.gui.connection_dot)
+
+        self.gui.connection_label = QLabel("접속 확인 중")
+        self.gui.connection_label.setFont(
+            QFont(d.typography.font_family_body, d.typography.size_2xs)
+        )
+        self.gui.connection_label.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(self.gui.connection_label)
+
         # Subscription Badge
         self.gui.sub_badge = QPushButton("게스트")
         self.gui.sub_badge.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -158,6 +173,22 @@ class TopBarPanel(QFrame):
         self.gui.subscribe_btn.clicked.connect(self.show_subscription_panel)
         self.gui.subscribe_btn.hide()
         layout.addWidget(self.gui.subscribe_btn)
+
+    def update_connection_status(self, connected: bool):
+        """Update connection status dot and label."""
+        c = self.design.colors
+        if connected:
+            self.gui.connection_dot.setStyleSheet(
+                f"background-color: {c.success}; border-radius: 4px;"
+            )
+            self.gui.connection_label.setText("서버 접속 중")
+            self.gui.connection_label.setStyleSheet(f"color: {c.success};")
+        else:
+            self.gui.connection_dot.setStyleSheet(
+                f"background-color: {c.error}; border-radius: 4px;"
+            )
+            self.gui.connection_label.setText("서버 연결 끊김")
+            self.gui.connection_label.setStyleSheet(f"color: {c.error};")
 
     def show_subscription_panel(self):
         """Navigate to subscription panel."""

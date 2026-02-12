@@ -29,6 +29,14 @@ from PyQt6.QtWidgets import (
     QDialog,
     QAbstractItemView,
     QVBoxLayout,
+    QHBoxLayout,
+    QTabWidget,
+    QFrame,
+    QSizePolicy,
+    QApplication,
+    QSpinBox,
+    QRadioButton,
+    QButtonGroup,
 )
 from PyQt6.QtGui import QFont, QColor, QBrush, QIcon
 from datetime import datetime, timedelta, timezone
@@ -38,7 +46,7 @@ import requests
 from ui.design_system_v2 import get_design_system, get_color, set_dark_mode
 
 # Extracted dialog components
-from ui.admin_dialogs import ExtendDialog, LoginHistoryDialog
+from ui.admin_dialogs import ExtendDialog, LoginHistoryDialog, RevokeDialog
 
 # Initialize design system and set dark mode
 ds = get_design_system()
@@ -70,8 +78,6 @@ def get_status_color(status: str) -> str:
     return color_map.get(status, get_color("text_primary"))
 
 # Constants
-WINDOW_WIDTH = 1840
-WINDOW_HEIGHT = 900
 API_TIMEOUT = 30
 REFRESH_INTERVAL_MS = 60000
 RETRY_DELAY_MS = 300000
@@ -265,30 +271,53 @@ class AdminDashboard(QMainWindow):
 
     def _setup_ui(self):
         self.setWindowTitle("관리자 대시보드")
-        self.setFixedSize(WINDOW_WIDTH, WINDOW_HEIGHT)
+
+        # Screen-aware window sizing (fits any monitor)
+        screen = QApplication.primaryScreen()
+        if screen:
+            available = screen.availableGeometry()
+            target_w = min(1840, int(available.width() * 0.92))
+            target_h = min(900, int(available.height() * 0.92))
+            target_w = max(1200, target_w)
+            target_h = max(700, target_h)
+            self.resize(target_w, target_h)
+            self.move(
+                available.x() + (available.width() - target_w) // 2,
+                available.y() + (available.height() - target_h) // 2,
+            )
+        else:
+            self.resize(1840, 900)
+
+        self.setMinimumSize(1200, 700)
         self.setStyleSheet(f"background-color: {get_color('background')};")
 
-        # 중앙 위젯
+        # Central widget with layout
         self.central = QWidget(self)
         self.setCentralWidget(self.central)
 
-        # 타이틀
-        title = QLabel("관리자 대시보드", self.central)
-        title.setGeometry(40, 20, 400, 40)
-        title.setFont(QFont(FONT_FAMILY, ds.typography.size_2xl , QFont.Weight.Bold))  # 32 -> 24pt
+        main_layout = QVBoxLayout(self.central)
+        main_layout.setContentsMargins(20, 15, 20, 15)
+        main_layout.setSpacing(10)
+
+        # --- Top bar (horizontal) ---
+        top_bar = QHBoxLayout()
+        top_bar.setSpacing(12)
+
+        title = QLabel("관리자 대시보드")
+        title.setFont(QFont(FONT_FAMILY, ds.typography.size_2xl, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {get_color('text_primary')};")
+        top_bar.addWidget(title)
 
-        # 마지막 업데이트 시간 라벨
-        self.last_update_label = QLabel("마지막 업데이트: -", self.central)
-        self.last_update_label.setGeometry(1060, 25, 300, 30)
-        self.last_update_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
+        top_bar.addStretch()
+
+        self.last_update_label = QLabel("마지막 업데이트: -")
+        self.last_update_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.last_update_label.setStyleSheet(f"color: {get_color('text_muted')};")
-        self.last_update_label.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        top_bar.addWidget(self.last_update_label)
 
-        # 새로고침 버튼
-        refresh_btn = QPushButton("새로고침", self.central)
-        refresh_btn.setGeometry(1460, 20, 120, 40)
-        refresh_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm , QFont.Weight.Bold))  # 14 -> 10pt
+        refresh_btn = QPushButton("새로고침")
+        refresh_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
+        refresh_btn.setFixedSize(120, 36)
         refresh_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: {get_color('surface')};
@@ -303,51 +332,141 @@ class AdminDashboard(QMainWindow):
         """)
         refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         refresh_btn.clicked.connect(self._load_data)
+        top_bar.addWidget(refresh_btn)
 
-        # 연결 상태 표시
-        self.connection_label = QLabel("", self.central)
-        self.connection_label.setGeometry(1600, 25, 200, 30)
-        self.connection_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
+        self.connection_label = QLabel("")
+        self.connection_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.connection_label.setStyleSheet(f"color: {get_color('success')};")
+        self.connection_label.setMinimumWidth(120)
+        top_bar.addWidget(self.connection_label)
 
-        # 통계 카드들 (Y: 75)
-        self._create_stat_cards()
+        main_layout.addLayout(top_bar)
 
-        # 탭 버튼들 (제거됨 - 단일 뷰)
-        # self._create_tab_buttons()
+        # --- Tab Widget ---
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{
+                background-color: {get_color('background')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.radius.sm}px;
+                top: -1px;
+            }}
+            QTabBar::tab {{
+                background-color: {get_color('surface')};
+                color: {get_color('text_muted')};
+                border: 1px solid {get_color('border')};
+                border-bottom: none;
+                border-top-left-radius: {ds.radius.base}px;
+                border-top-right-radius: {ds.radius.base}px;
+                padding: 10px 30px;
+                margin-right: 4px;
+                min-width: 160px;
+                font-weight: bold;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {get_color('background')};
+                color: {get_color('primary')};
+                border-bottom: 2px solid {get_color('primary')};
+            }}
+            QTabBar::tab:hover:!selected {{
+                background-color: {get_color('surface_variant')};
+                color: {get_color('text_primary')};
+            }}
+        """)
 
-        # 필터/검색 영역 (Y: 180 으로 이동)
-        self._create_filter_area()
+        self.ss_tab = QWidget()
+        self.tab_widget.addTab(self.ss_tab, "쇼핑쇼츠메이커")
+        self._build_tab_content(self.ss_tab, "ss")
 
-        # 테이블 (Y: 230 으로 이동)
-        self._create_tables()
+        self.st_tab = QWidget()
+        self.tab_widget.addTab(self.st_tab, "쇼츠스레드메이커")
+        self._build_tab_content(self.st_tab, "st")
+
+        self.tab_widget.currentChanged.connect(self._on_tab_changed)
+
+        main_layout.addWidget(self.tab_widget)
+
+    def _on_tab_changed(self, index):
+        """탭 전환 시 현재 탭의 데이터 갱신"""
+        self._load_data()
+
+    def _current_tab_prefix(self):
+        """현재 선택된 탭의 prefix 반환"""
+        return "st" if self.tab_widget.currentIndex() == 1 else "ss"
+
+    def _build_tab_content(self, parent: QWidget, prefix: str):
+        """탭 내부 콘텐츠 구성 (통계카드, 필터, 테이블) - 레이아웃 기반"""
+        layout = QVBoxLayout(parent)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # 통계 카드들
+        self._create_stat_cards_for(layout, prefix)
+        # 필터/검색 영역
+        self._create_filter_area_for(layout, prefix)
+        # 테이블
+        self._create_tables_for(layout, prefix)
 
     def _create_stat_cards(self):
-        """Create top stat cards."""
-        card_y = 75
-        card_h = 80
-        total_w = 1760
-        gap = ds.spacing.space_4  # 16px
-        start_x = 40
+        """Legacy - no longer used directly."""
+        pass
+
+    def _create_stat_cards_for(self, parent_layout: QVBoxLayout, prefix: str):
+        """Create top stat cards for a specific tab - 레이아웃 기반."""
+        cards_layout = QHBoxLayout()
+        cards_layout.setSpacing(ds.spacing.space_4)
 
         items = [
-            ("전체 사용자", get_color("primary"), "users_label"),
-            ("접속 사용자", get_color("success"), "online_label"),
-            ("활성 구독", get_color("secondary"), "active_sub_label"),
-            ("총 작업 수", get_color("info"), "total_work_used_label"),
+            ("전체 사용자", get_color("primary"), f"{prefix}_users_label"),
+            ("접속 사용자", get_color("success"), f"{prefix}_online_label"),
+            ("활성 구독", get_color("secondary"), f"{prefix}_active_sub_label"),
+            ("총 작업 수", get_color("info"), f"{prefix}_total_work_used_label"),
         ]
-        card_count = len(items)
-        card_w = (total_w - (gap * (card_count - 1))) // card_count
 
-        for i, (title, color, attr_name) in enumerate(items):
-            x = start_x + i * (card_w + gap)
-            self._create_card(x, card_y, card_w, card_h, title, color)
-            lbl = self._get_value_label(x, card_y, card_w, card_h)
-            setattr(self, attr_name, lbl)
+        for title, color, attr_name in items:
+            card, value_lbl = self._create_stat_card(title, color)
+            setattr(self, attr_name, value_lbl)
+            cards_layout.addWidget(card)
+
+        parent_layout.addLayout(cards_layout)
+
+    def _create_stat_card(self, title: str, accent_color: str):
+        """통계 카드 위젯 생성 (레이아웃 기반)"""
+        card = QFrame()
+        card.setFixedHeight(80)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {get_color('surface')};
+                border-radius: {ds.radius.md}px;
+                border-left: 4px solid {accent_color};
+            }}
+        """)
+
+        card_layout = QVBoxLayout(card)
+        card_layout.setContentsMargins(15, 10, 15, 10)
+        card_layout.setSpacing(2)
+
+        title_lbl = QLabel(title)
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
+        title_lbl.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent; border: none;")
+        card_layout.addWidget(title_lbl)
+
+        value_lbl = QLabel("0")
+        value_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_xl, QFont.Weight.Bold))
+        value_lbl.setStyleSheet(f"color: {get_color('text_primary')}; background: transparent; border: none;")
+        card_layout.addWidget(value_lbl)
+
+        return card, value_lbl
 
     def _create_card(self, x, y, w, h, title, color):
-        """카드 생성"""
-        card = QWidget(self.central)
+        """카드 생성 (legacy)"""
+        self._create_card_on(self.central, x, y, w, h, title, color)
+
+    def _create_card_on(self, parent, x, y, w, h, title, color):
+        """카드 생성 (지정 부모)"""
+        card = QWidget(parent)
         card.setGeometry(x, y, w, h)
         card.setStyleSheet(f"""
             background-color: {get_color('surface')};
@@ -357,30 +476,41 @@ class AdminDashboard(QMainWindow):
 
         title_lbl = QLabel(title, card)
         title_lbl.setGeometry(15, 10, w - 30, 20)
-        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))
         title_lbl.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
 
     def _get_value_label(self, x, y, w, h) -> QLabel:
-        """값 라벨 생성 및 반환"""
-        lbl = QLabel("0", self.central)
+        """값 라벨 생성 및 반환 (legacy)"""
+        return self._get_value_label_on(self.central, x, y, w, h)
+
+    def _get_value_label_on(self, parent, x, y, w, h) -> QLabel:
+        """값 라벨 생성 및 반환 (지정 부모)"""
+        lbl = QLabel("0", parent)
         lbl.setGeometry(x + 15, y + 35, w - 30, 40)
-        lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_xl , QFont.Weight.Bold))  # 24 -> 18pt
+        lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_xl , QFont.Weight.Bold))
         lbl.setStyleSheet(f"color: {get_color('text_primary')}; background: transparent;")
         return lbl
 
     def _create_filter_area(self):
-        """필터/검색 영역 생성"""
-        # 사용자 검색 (기본 표시)
-        self.search_label = QLabel("아이디 검색:", self.central)
-        self.search_label.setGeometry(40, 185, 90, 30)
-        self.search_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
-        self.search_label.setStyleSheet(f"color: {get_color('text_primary')};")
+        """Legacy - no longer used directly."""
+        pass
 
-        self.search_edit = QLineEdit(self.central)
-        self.search_edit.setGeometry(135, 182, 200, 36)
-        self.search_edit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm ))  # 14 -> 10pt
-        self.search_edit.setPlaceholderText("검색어 입력...")
-        self.search_edit.setStyleSheet(f"""
+    def _create_filter_area_for(self, parent_layout: QVBoxLayout, prefix: str):
+        """필터/검색 영역 생성 (탭별) - 레이아웃 기반"""
+        filter_layout = QHBoxLayout()
+        filter_layout.setSpacing(8)
+
+        search_label = QLabel("아이디 검색:")
+        search_label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
+        search_label.setStyleSheet(f"color: {get_color('text_primary')};")
+        filter_layout.addWidget(search_label)
+
+        search_edit = QLineEdit()
+        search_edit.setFixedHeight(36)
+        search_edit.setMaximumWidth(250)
+        search_edit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
+        search_edit.setPlaceholderText("검색어 입력...")
+        search_edit.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {get_color('surface')};
                 color: {get_color('text_primary')};
@@ -392,20 +522,25 @@ class AdminDashboard(QMainWindow):
                 color: {get_color('text_muted')};
             }}
         """)
-        self.search_edit.textChanged.connect(self._on_search_changed)
+        search_edit.textChanged.connect(self._on_search_changed)
+        setattr(self, f"{prefix}_search_edit", search_edit)
+        if prefix == "ss":
+            self.search_edit = search_edit
+        filter_layout.addWidget(search_edit)
+
+        filter_layout.addStretch()
+
+        parent_layout.addLayout(filter_layout)
 
     def _create_tables(self):
-        """테이블 생성"""
-        table_x = 40
-        table_y = 230
-        table_w = 1760
-        table_h = 640  # 높이 증가
+        """Legacy - no longer used directly."""
+        pass
 
-        # 사용자 관리 테이블 (확장된 컨럼 + 비밀번호 + 버전)
-        self.users_table = QTableWidget(self.central)
-        self.users_table.setGeometry(table_x, table_y, table_w, table_h)
-        self.users_table.setColumnCount(16)  # 컬럼 수 변경 (버전 추가)
-        self.users_table.setHorizontalHeaderLabels(
+    def _create_tables_for(self, parent_layout: QVBoxLayout, prefix: str):
+        """테이블 생성 (탭별) - 레이아웃 기반"""
+        table = QTableWidget()
+        table.setColumnCount(16)
+        table.setHorizontalHeaderLabels(
             [
                 "번호",
                 "이름",
@@ -426,14 +561,18 @@ class AdminDashboard(QMainWindow):
             ]
         )
         self._style_table(
-             # Increased Action column (last) to 330px to prevent button overflow
-            self.users_table, [40, 80, 100, 80, 115, 160, 70, 125, 75, 55, 130, 110, 80, 90, 60, 330]
+            table, [40, 80, 100, 80, 115, 160, 70, 125, 75, 55, 130, 110, 80, 90, 60, 310]
         )
-        # 사용자 테이블이 기본 표시됨
+        table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        setattr(self, f"{prefix}_users_table", table)
+        if prefix == "ss":
+            self.users_table = table
+
+        parent_layout.addWidget(table, stretch=1)
 
     def _style_table(self, table: QTableWidget, widths: list):
         """테이블 스타일"""
-        table.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))  # 10 -> 7pt
+        table.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs ))
         table.setStyleSheet(f"""
             QTableWidget {{
                 background-color: {get_color('surface')};
@@ -471,17 +610,21 @@ class AdminDashboard(QMainWindow):
                 height: 0px;
             }}
         """)
-        # 기본 교차 색상 비활성화 (직접 행 배경색 설정)
         table.setAlternatingRowColors(False)
         table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         table.verticalHeader().setVisible(False)
         table.verticalHeader().setDefaultSectionSize(50)
 
+        header = table.horizontalHeader()
         for i, w in enumerate(widths):
-            table.setColumnWidth(i, w)
+            if i == len(widths) - 1:
+                # Last column (작업) stretches to fill remaining space
+                header.setSectionResizeMode(i, QHeaderView.ResizeMode.Stretch)
+            else:
+                table.setColumnWidth(i, w)
 
     def _load_data(self):
-        """데이터 로드 (회원가입 요청 제거 - 자동 승인됨)"""
+        """데이터 로드 - 현재 활성 탭의 데이터만 로드"""
         if not self.admin_api_key:
             self.connection_label.setText("관리자 키가 없습니다")
             self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
@@ -493,33 +636,38 @@ class AdminDashboard(QMainWindow):
             return
         self.connection_label.setText("연결 중...")
         self.connection_label.setStyleSheet(f"color: {get_color('warning')};")
-        logger.info("[Admin UI] Load data start")
+        prefix = self._current_tab_prefix()
+        logger.info("[Admin UI] Load data start (tab: %s)", prefix)
         self._admin_stats_loaded = False
-        self._load_admin_stats()
-        self._load_users()
+        self._load_admin_stats(prefix)
+        self._load_users(prefix)
         self._update_last_refresh_time()
 
-    def _load_users(self):
+    def _load_users(self, prefix: str = "ss"):
         """사용자 목록 로드"""
-        search = self.search_edit.text().strip()
-        url = f"{self.api_base_url}/user/admin/users"
+        search_edit = getattr(self, f"{prefix}_search_edit", None)
+        search = search_edit.text().strip() if search_edit else ""
+        # prefix -> program_type 매핑
+        program_type = "stmaker" if prefix == "st" else "ssmaker"
+        url = f"{self.api_base_url}/user/admin/users?program_type={program_type}"
         if search:
-            url += f"?search={search}"
+            url += f"&search={search}"
 
-        logger.info("[Admin UI] Load users | search=%s", search)
+        logger.info("[Admin UI] Load users | tab=%s program=%s search=%s", prefix, program_type, search)
         worker = ApiWorker("GET", url, self._get_headers())
-        worker.data_ready.connect(self._on_users_loaded)
+        worker.data_ready.connect(lambda data: self._on_users_loaded(data, prefix))
         worker.error.connect(self._on_error)
         worker.finished.connect(lambda: self._cleanup_worker(worker))
         self.workers.append(worker)
         worker.start()
 
-    def _on_users_loaded(self, data: dict):
-        """Handle loaded user list."""
-        logger.info("[Admin UI] Users loaded (%d)", len(data.get("users", [])))
+    def _on_users_loaded(self, data: dict, prefix: str = "ss"):
+        """Handle loaded user list for the specified tab."""
+        logger.info("[Admin UI] Users loaded (%d) for tab %s", len(data.get("users", [])), prefix)
         items = data.get("users", [])
         total_count = data.get("total", len(items))
-        self.users_table.setRowCount(len(items))
+        table = getattr(self, f"{prefix}_users_table", self.users_table)
+        table.setRowCount(len(items))
         self.connection_label.setText("연결됨")
         self.connection_label.setStyleSheet(f"color: {get_color('success')};")
 
@@ -529,22 +677,22 @@ class AdminDashboard(QMainWindow):
         now = datetime.now(timezone.utc)
 
         for row, user in enumerate(items):
-            self.users_table.setRowHeight(row, 50)
+            table.setRowHeight(row, 50)
 
             # 0: ID
-            self._set_cell(self.users_table, row, 0, str(user.get("id", "")))
+            self._set_cell(table, row, 0, str(user.get("id", "")))
             # 1: Name
-            self._set_cell(self.users_table, row, 1, user.get("name") or "-")
+            self._set_cell(table, row, 1, user.get("name") or "-")
             # 2: Username
-            self._set_cell(self.users_table, row, 2, user.get("username", ""))
+            self._set_cell(table, row, 2, user.get("username", ""))
             # 3: Password (has_password flag from API)
             has_pw = user.get("has_password", False)
-            self._set_cell(self.users_table, row, 3, "설정됨" if has_pw else "미설정",
+            self._set_cell(table, row, 3, "설정됨" if has_pw else "미설정",
                            get_color("success") if has_pw else get_color("warning"))
             # 4: Phone
-            self._set_cell(self.users_table, row, 4, user.get("phone") or "-")
+            self._set_cell(table, row, 4, user.get("phone") or "-")
             # 5: Email
-            self._set_cell(self.users_table, row, 5, user.get("email") or "-")
+            self._set_cell(table, row, 5, user.get("email") or "-")
 
             # 6: Type
             utype = user.get("user_type", "trial")
@@ -558,12 +706,11 @@ class AdminDashboard(QMainWindow):
                 "subscriber": get_color("primary"),
                 "admin": get_color("warning"),
             }.get(utype, get_color("text_primary"))
-            self._set_cell(self.users_table, row, 6, utype_text, utype_color)
+            self._set_cell(table, row, 6, utype_text, utype_color)
 
             # 7: Subscription Expires
             expires_utc = user.get("subscription_expires_at")
             
-            # 무료 계정(trial)인 경우 만료일 표시 안 함 (사용자 요청)
             if utype == "trial":
                 expires_str = "-"
                 color = get_color("text_muted")
@@ -585,7 +732,7 @@ class AdminDashboard(QMainWindow):
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Subscription expiry parsing failed for user: {e}")
             
-            self._set_cell(self.users_table, row, 7, expires_str, color)
+            self._set_cell(table, row, 7, expires_str, color)
 
             # 8: Work usage
             raw_work_count = user.get("work_count", -1)
@@ -607,19 +754,18 @@ class AdminDashboard(QMainWindow):
                 remaining = max(0, work_count - work_used)
                 work_str = f"{remaining}/{work_count} | {work_used}"
                 color = get_color("warning") if remaining <= 10 else get_color("text_primary")
-            self._set_cell(self.users_table, row, 8, work_str, color)
+            self._set_cell(table, row, 8, work_str, color)
 
             # 9: Login Count
-            self._set_cell(self.users_table, row, 9, str(user.get("login_count", 0)))
+            self._set_cell(table, row, 9, str(user.get("login_count", 0)))
 
             # 10: Last Login
             last_login = self._convert_to_kst(user.get("last_login_at"))
-            self._set_cell(self.users_table, row, 10, last_login)
+            self._set_cell(table, row, 10, last_login)
 
             # 11: IP
-            self._set_cell(self.users_table, row, 11, user.get("last_login_ip", "-"))
+            self._set_cell(table, row, 11, user.get("last_login_ip", "-"))
 
-            # 12: Online Status
             # 12: Online Status
             is_online = user.get("is_online", False)
             last_heartbeat_str = user.get("last_heartbeat")
@@ -629,30 +775,24 @@ class AdminDashboard(QMainWindow):
                     hb_dt = datetime.fromisoformat(last_heartbeat_str.replace("Z", "+00:00"))
                     if hb_dt.tzinfo is None:
                         hb_dt = hb_dt.replace(tzinfo=timezone.utc)
-                    
-                    # 90초(1분 30초) 이상 지났으면 오프라인으로 간주 (네트워크 지연 고려)
-                    # 클라이언트는 5초마다 핑을 보내므로 90초면 충분히 오프라인임
                     if (now - hb_dt).total_seconds() > 90:
                         is_online = False
                 except Exception:
                     pass
             elif is_online and not last_heartbeat_str:
-                # 온라인인데 하트비트가 없으면 오프라인 처리
                 is_online = False
 
             if is_online:
                 online_count += 1
 
             self._set_cell(
-                self.users_table,
-                row,
-                12,
+                table, row, 12,
                 "온라인" if is_online else "오프라인",
                 get_color("success") if is_online else get_color("text_muted"),
             )
 
             # 13: Current Task
-            self._set_cell(self.users_table, row, 13, user.get("current_task", "-"))
+            self._set_cell(table, row, 13, user.get("current_task", "-"))
 
             # 14: App Version
             app_version = user.get("app_version") or "-"
@@ -661,7 +801,7 @@ class AdminDashboard(QMainWindow):
                 if app_version in ("-", "unknown")
                 else get_color("success")
             )
-            self._set_cell(self.users_table, row, 14, app_version, version_color)
+            self._set_cell(table, row, 14, app_version, version_color)
 
             # 15: Actions
             widget = self._create_user_actions(
@@ -671,19 +811,28 @@ class AdminDashboard(QMainWindow):
                 user.get("has_password", False),
                 user_type=utype,
             )
-            self.users_table.setCellWidget(row, 15, widget)
+            table.setCellWidget(row, 15, widget)
 
         if not self._admin_stats_loaded:
-            self.users_label.setText(str(total_count))
-            self.online_label.setText(str(online_count))
-            self.active_sub_label.setText(str(active_sub_count))
-            self.total_work_used_label.setText(str(fallback_total_work_used))
+            users_lbl = getattr(self, f"{prefix}_users_label", None)
+            online_lbl = getattr(self, f"{prefix}_online_label", None)
+            active_sub_lbl = getattr(self, f"{prefix}_active_sub_label", None)
+            total_work_lbl = getattr(self, f"{prefix}_total_work_used_label", None)
+            if users_lbl:
+                users_lbl.setText(str(total_count))
+            if online_lbl:
+                online_lbl.setText(str(online_count))
+            if active_sub_lbl:
+                active_sub_lbl.setText(str(active_sub_count))
+            if total_work_lbl:
+                total_work_lbl.setText(str(fallback_total_work_used))
 
-    def _load_admin_stats(self):
+    def _load_admin_stats(self, prefix: str = "ss"):
         """Load admin summary stats."""
-        url = f"{self.api_base_url}/user/admin/stats"
+        program_type = "stmaker" if prefix == "st" else "ssmaker"
+        url = f"{self.api_base_url}/user/admin/stats?program_type={program_type}"
         worker = ApiWorker("GET", url, self._get_headers())
-        worker.data_ready.connect(self._on_admin_stats_loaded)
+        worker.data_ready.connect(lambda data: self._on_admin_stats_loaded(data, prefix))
         worker.error.connect(
             lambda e: logger.warning("[Admin UI] Failed to load admin stats: %s", e)
         )
@@ -691,24 +840,33 @@ class AdminDashboard(QMainWindow):
         self.workers.append(worker)
         worker.start()
 
-    def _on_admin_stats_loaded(self, data: dict):
+    def _on_admin_stats_loaded(self, data: dict, prefix: str = "ss"):
         """Update stat cards from admin stats response."""
         users = data.get("users", {}) or {}
         work = data.get("work", {}) or {}
 
-        self.users_label.setText(str(users.get("total", 0)))
-        self.online_label.setText(str(users.get("online", users.get("active", 0))))
-        self.active_sub_label.setText(str(users.get("with_subscription", 0)))
-        self.total_work_used_label.setText(str(work.get("total_used", 0)))
+        users_lbl = getattr(self, f"{prefix}_users_label", None)
+        online_lbl = getattr(self, f"{prefix}_online_label", None)
+        active_sub_lbl = getattr(self, f"{prefix}_active_sub_label", None)
+        total_work_lbl = getattr(self, f"{prefix}_total_work_used_label", None)
 
-        avg_used = work.get("avg_used_per_user", 0)
-        users_with_work = work.get("users_with_work", 0)
-        in_progress_users = work.get("in_progress_users", 0)
-        self.total_work_used_label.setToolTip(
-            f"Users with work history: {users_with_work}\n"
-            f"Users currently working: {in_progress_users}\n"
-            f"Average work per user: {avg_used}"
-        )
+        if users_lbl:
+            users_lbl.setText(str(users.get("total", 0)))
+        if online_lbl:
+            online_lbl.setText(str(users.get("online", users.get("active", 0))))
+        if active_sub_lbl:
+            active_sub_lbl.setText(str(users.get("with_subscription", 0)))
+        if total_work_lbl:
+            total_work_lbl.setText(str(work.get("total_used", 0)))
+
+            avg_used = work.get("avg_used_per_user", 0)
+            users_with_work = work.get("users_with_work", 0)
+            in_progress_users = work.get("in_progress_users", 0)
+            total_work_lbl.setToolTip(
+                f"Users with work history: {users_with_work}\n"
+                f"Users currently working: {in_progress_users}\n"
+                f"Average work per user: {avg_used}"
+            )
         self._admin_stats_loaded = True
 
     def _set_cell(self, table, row, col, text, color=None):
@@ -865,8 +1023,9 @@ class AdminDashboard(QMainWindow):
         dialog.exec()
 
     def _on_search_changed(self, text):
-        logger.info("[Admin UI] Search changed: %s", text)
-        self._load_users()
+        prefix = self._current_tab_prefix()
+        logger.info("[Admin UI] Search changed (tab: %s): %s", prefix, text)
+        self._load_users(prefix)
 
     def _extend_subscription(self, user_id, username):
         """구독 연장"""
@@ -885,23 +1044,34 @@ class AdminDashboard(QMainWindow):
             worker.start()
 
     def _revoke_subscription(self, user_id, username):
-        """구독 박탈 (유료 → 무료 전환)"""
+        """구독 박탈 또는 기간 조정"""
         logger.info("[Admin UI] Revoke clicked | user_id=%s username=%s", user_id, username)
-        if not _styled_question_box(
-            self, "구독 박탈",
-            f"'{username}' 사용자의 구독을 박탈하시겠습니까?\n\n"
-            "유료 계정 → 무료 계정으로 전환됩니다.\n"
-            "클라이언트에 실시간으로 반영됩니다."
-        ):
+        dialog = RevokeDialog(username, self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
 
-        url = f"{self.api_base_url}/user/admin/users/{user_id}/revoke-subscription"
-        worker = ApiWorker("POST", url, self._get_headers(), {})
-        worker.data_ready.connect(lambda d: self._on_action_done("구독 박탈", d))
-        worker.error.connect(self._on_error)
-        worker.finished.connect(lambda: self._cleanup_worker(worker))
-        self.workers.append(worker)
-        worker.start()
+        mode = dialog.get_mode()  # "full" or "reduce"
+
+        if mode == "full":
+            # 완전 박탈
+            url = f"{self.api_base_url}/user/admin/users/{user_id}/revoke-subscription"
+            worker = ApiWorker("POST", url, self._get_headers(), {})
+            worker.data_ready.connect(lambda d: self._on_action_done("구독 박탈", d))
+            worker.error.connect(self._on_error)
+            worker.finished.connect(lambda: self._cleanup_worker(worker))
+            self.workers.append(worker)
+            worker.start()
+        else:
+            # 기간 축소
+            days = dialog.get_reduce_days()
+            url = f"{self.api_base_url}/user/admin/users/{user_id}/reduce-subscription"
+            data = {"days": days}
+            worker = ApiWorker("POST", url, self._get_headers(), data)
+            worker.data_ready.connect(lambda d: self._on_action_done("구독 기간 축소", d))
+            worker.error.connect(self._on_error)
+            worker.finished.connect(lambda: self._cleanup_worker(worker))
+            self.workers.append(worker)
+            worker.start()
 
     def _toggle_user(self, user_id, username):
         """사용자 상태 토글"""

@@ -18,6 +18,7 @@ from ui.components.custom_dialog import (
 import core.video.DynamicBatch as DynamicBatch
 from utils.logging_config import get_logger
 from caller import rest
+from ui.design_system_v2 import get_design_system, get_color
 import config
 
 logger = get_logger(__name__)
@@ -243,6 +244,7 @@ class BatchHandler:
         start_btn = getattr(self.app, "start_batch_button", None)
         stop_btn = getattr(self.app, "stop_batch_button", None)
         if start_btn is not None:
+            self._reset_start_button_style(start_btn)
             start_btn.setEnabled(False)
         if stop_btn is not None:
             stop_btn.setEnabled(True)
@@ -313,6 +315,18 @@ class BatchHandler:
             if stop_btn is not None:
                 stop_btn.setEnabled(False)
 
+            # Check if there were skipped/stopped items → red button
+            has_interrupted = False
+            url_status = getattr(self.app, "url_status", {})
+            for status in url_status.values():
+                normalized = status.strip().lower() if isinstance(status, str) else ""
+                if normalized in ("skipped", "건너뜀", "waiting", "대기"):
+                    has_interrupted = True
+                    break
+
+            if has_interrupted and start_btn is not None:
+                self._set_start_button_red(start_btn)
+
             self._play_completion_alarm()
         except Exception as e:
             logger.error(f"Failed to reset batch UI state: {e}")
@@ -330,6 +344,57 @@ class BatchHandler:
             logger.warning("[알람] winsound 모듈이 없어 알람을 재생할 수 없습니다.")
         except Exception as e:
             logger.error(f"[알람] 알람 재생 실패: {e}")
+
+    def _set_start_button_red(self, btn):
+        """작업 중지/건너뜀 시 시작 버튼을 빨간색으로 표시"""
+        try:
+            _ds = get_design_system()
+            btn.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {get_color('error')};
+                    color: white;
+                    border-radius: {_ds.radius.base}px;
+                    padding: {_ds.spacing.space_2}px {_ds.spacing.space_4}px;
+                    font-weight: bold;
+                    border: none;
+                    font-size: {_ds.typography.size_sm}px;
+                }}
+                QPushButton:hover {{
+                    background-color: #FF6B6B;
+                }}
+                QPushButton:disabled {{
+                    background-color: {get_color('text_muted')};
+                }}
+            """)
+        except Exception as e:
+            logger.warning(f"Failed to set red button style: {e}")
+
+    def _reset_start_button_style(self, btn):
+        """시작 버튼 스타일을 기본(primary)으로 복구"""
+        try:
+            if hasattr(btn, "apply_theme"):
+                btn.apply_theme()
+            else:
+                _ds = get_design_system()
+                btn.setStyleSheet(f"""
+                    QPushButton {{
+                        background-color: {get_color('primary')};
+                        color: white;
+                        border-radius: {_ds.radius.base}px;
+                        padding: {_ds.spacing.space_2}px {_ds.spacing.space_4}px;
+                        font-weight: bold;
+                        border: none;
+                        font-size: {_ds.typography.size_sm}px;
+                    }}
+                    QPushButton:hover {{
+                        background-color: {get_color('secondary')};
+                    }}
+                    QPushButton:disabled {{
+                        background-color: {get_color('text_muted')};
+                    }}
+                """)
+        except Exception as e:
+            logger.warning(f"Failed to reset button style: {e}")
 
     def stop_batch_processing(self):
         """배치 처리 중지 (현재 URL 완료 후 중지)"""
@@ -360,11 +425,12 @@ class BatchHandler:
             except Exception as e:
                 self.app.add_log(f"[세션] 저장 실패: {e}")
 
-            # UI 상태 복구
+            # UI 상태 복구 - 빨간색으로 표시 (중지됨)
             def enable_start_btn():
                 start_btn = getattr(self.app, "start_batch_button", None)
                 if start_btn is not None:
                     start_btn.setEnabled(True)
+                    self._set_start_button_red(start_btn)
             QTimer.singleShot(0, enable_start_btn)
 
         threading.Thread(target=wait_for_thread_finish, daemon=True).start()

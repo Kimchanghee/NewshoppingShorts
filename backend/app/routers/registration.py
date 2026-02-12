@@ -24,7 +24,7 @@ from app.utils.password import hash_password
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.registration_request import RegistrationRequest, RequestStatus
-from app.models.user import User, UserType
+from app.models.user import User, UserType, ProgramType
 from app.models.session import SessionModel
 from app.utils.jwt_handler import create_access_token
 from app.utils.subscription_utils import get_trial_cycle_start
@@ -164,6 +164,10 @@ async def submit_registration_request(
         # 가입 시점 기준 무료 체험 횟수 결정
         trial_work_count = get_free_trial_work_count()
 
+        # program_type 결정 (ssmaker 또는 stmaker) - Temporarily disabled
+        # pt = data.program_type if data.program_type in ('ssmaker', 'stmaker') else 'ssmaker'
+        # program_type_enum = ProgramType.STMAKER if pt == 'stmaker' else ProgramType.SSMAKER
+
         new_user = User(
             username=username_clean,
             password_hash=password_hash,
@@ -177,6 +181,7 @@ async def submit_registration_request(
             phone=data.contact,
             name=data.name,
             registration_ip=client_ip,  # 가입 IP 저장 (중복 가입 감지용)
+            # program_type=program_type_enum,
         )
 
         db.add(new_user)

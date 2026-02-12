@@ -25,6 +25,7 @@ class RegistrationRequestCreate(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
     contact: str = Field(..., min_length=1, max_length=50)
     email: Optional[str] = Field(None, max_length=255)
+    program_type: Optional[str] = Field("ssmaker", description="프로그램 유형 (ssmaker/stmaker)")
 
     @field_validator('password')
     @classmethod

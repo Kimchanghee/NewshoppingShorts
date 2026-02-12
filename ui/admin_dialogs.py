@@ -22,6 +22,8 @@ from PyQt6.QtWidgets import (
     QTextEdit,
     QTableWidget,
     QTableWidgetItem,
+    QRadioButton,
+    QButtonGroup,
 )
 from PyQt6.QtGui import QFont, QColor, QBrush
 import requests
@@ -239,24 +241,24 @@ class RejectDialog(QDialog):
 
 
 class ExtendDialog(QDialog):
-    """구독 연장 다이얼로그 - 다크모드"""
+    """구독 연장 다이얼로그 - 다크모드 + 예상 만료일 미리보기"""
 
     def __init__(self, username: str, parent=None):
         super().__init__(parent)
         self.username = username
         self.setWindowTitle("구독 연장")
-        self.setFixedSize(380, 200)
+        self.setFixedSize(380, 240)
         self.setStyleSheet(f"background-color: {get_color('surface')};")
         self._setup_ui()
 
     def _setup_ui(self):
         lbl = QLabel(f"'{self.username}' 구독 연장 기간:", self)
-        lbl.setGeometry(30, 30, 320, 25)
+        lbl.setGeometry(30, 25, 320, 25)
         lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
         self.days_spin = QSpinBox(self)
-        self.days_spin.setGeometry(30, 70, 120, 40)
+        self.days_spin.setGeometry(30, 60, 120, 40)
         self.days_spin.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2))
         self.days_spin.setRange(1, 365)
         self.days_spin.setValue(30)
@@ -269,14 +271,28 @@ class ExtendDialog(QDialog):
                 padding: {ds.spacing.space_2}px;
             }}
         """)
+        self.days_spin.valueChanged.connect(self._update_preview)
 
         day_lbl = QLabel("일 추가", self)
-        day_lbl.setGeometry(160, 78, 60, 25)
+        day_lbl.setGeometry(160, 68, 60, 25)
         day_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         day_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
 
+        # Preview label showing expected new expiry
+        from datetime import timedelta
+        self._preview_lbl = QLabel("", self)
+        self._preview_lbl.setGeometry(30, 110, 320, 20)
+        self._preview_lbl.setFont(QFont(FONT_FAMILY, max(8, ds.typography.size_2xs // 2)))
+        self._preview_lbl.setStyleSheet(f"color: {get_color('info')};")
+        self._update_preview()
+
+        note_lbl = QLabel("※ 기존 만료일이 남아있으면 해당 날짜 기준으로 연장됩니다.", self)
+        note_lbl.setGeometry(30, 132, 320, 18)
+        note_lbl.setFont(QFont(FONT_FAMILY, max(8, ds.typography.size_2xs // 2 - 1)))
+        note_lbl.setStyleSheet(f"color: {get_color('text_muted')};")
+
         cancel_btn = QPushButton("취소", self)
-        cancel_btn.setGeometry(150, 140, 100, 40)
+        cancel_btn.setGeometry(150, 175, 100, 40)
         cancel_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
         cancel_btn.setStyleSheet(f"""
             QPushButton {{
@@ -292,7 +308,7 @@ class ExtendDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
 
         ok_btn = QPushButton("연장", self)
-        ok_btn.setGeometry(260, 140, 100, 40)
+        ok_btn.setGeometry(260, 175, 100, 40)
         ok_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
         ok_btn.setStyleSheet(f"""
             QPushButton {{
@@ -306,6 +322,15 @@ class ExtendDialog(QDialog):
             }}
         """)
         ok_btn.clicked.connect(self.accept)
+
+    def _update_preview(self):
+        """Update preview label with expected new expiry (from today)"""
+        from datetime import timedelta
+        days = self.days_spin.value()
+        expected = datetime.now() + timedelta(days=days)
+        self._preview_lbl.setText(
+            f"오늘 기준 예상 만료일: {expected.strftime('%Y-%m-%d %H:%M')}"
+        )
 
     def get_days(self):
         return self.days_spin.value()
@@ -430,3 +455,130 @@ class LoginHistoryDialog(QDialog):
         item.setForeground(QBrush(QColor(color if color else get_color("text_primary"))))
         item.setBackground(QBrush(QColor(get_color("surface"))))
         self.history_table.setItem(row, col, item)
+
+
+class RevokeDialog(QDialog):
+    """구독 박탈/기간 조정 다이얼로그"""
+
+    def __init__(self, username: str, parent=None):
+        super().__init__(parent)
+        self.username = username
+        self.setWindowTitle("구독 박탈 / 기간 조정")
+        self.setFixedSize(420, 320)
+        self.setStyleSheet(f"background-color: {get_color('surface')};")
+        self._setup_ui()
+
+    def _setup_ui(self):
+        title_lbl = QLabel(f"'{self.username}' 구독 관리:", self)
+        title_lbl.setGeometry(30, 20, 360, 25)
+        title_lbl.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
+        title_lbl.setStyleSheet(f"color: {get_color('text_primary')};")
+
+        # Radio buttons for mode selection
+        self.btn_group = QButtonGroup(self)
+
+        self.radio_full = QRadioButton("완전 박탈 (무료 계정으로 전환)", self)
+        self.radio_full.setGeometry(30, 55, 360, 25)
+        self.radio_full.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
+        self.radio_full.setStyleSheet(f"color: {get_color('text_primary')};")
+        self.radio_full.setChecked(True)
+        self.btn_group.addButton(self.radio_full, 0)
+
+        self.radio_reduce = QRadioButton("구독 기간 축소", self)
+        self.radio_reduce.setGeometry(30, 90, 360, 25)
+        self.radio_reduce.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
+        self.radio_reduce.setStyleSheet(f"color: {get_color('text_primary')};")
+        self.btn_group.addButton(self.radio_reduce, 1)
+
+        # Days spinner for reduction
+        self.reduce_label = QLabel("축소할 일수:", self)
+        self.reduce_label.setGeometry(50, 130, 100, 25)
+        self.reduce_label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs // 2))
+        self.reduce_label.setStyleSheet(f"color: {get_color('text_muted')};")
+
+        self.reduce_spin = QSpinBox(self)
+        self.reduce_spin.setGeometry(50, 160, 120, 40)
+        self.reduce_spin.setFont(QFont(FONT_FAMILY, ds.typography.size_md // 2))
+        self.reduce_spin.setRange(1, 365)
+        self.reduce_spin.setValue(30)
+        self.reduce_spin.setEnabled(False)
+        self.reduce_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.radius.base}px;
+                padding: {ds.spacing.space_2}px;
+            }}
+            QSpinBox:disabled {{
+                color: {get_color('text_muted')};
+            }}
+        """)
+
+        day_unit = QLabel("일", self)
+        day_unit.setGeometry(180, 168, 30, 25)
+        day_unit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        day_unit.setStyleSheet(f"color: {get_color('text_primary')};")
+
+        # Note label
+        self.note_label = QLabel("※ 완전 박탈: 유료 → 무료 전환, 작업 횟수 초기화", self)
+        self.note_label.setGeometry(30, 215, 360, 20)
+        self.note_label.setFont(QFont(FONT_FAMILY, max(8, ds.typography.size_2xs // 2 - 1)))
+        self.note_label.setStyleSheet(f"color: {get_color('text_muted')};")
+
+        self.note_label2 = QLabel("※ 기간 축소: 만료일을 앞당김 (만료 시 자동 무료 전환)", self)
+        self.note_label2.setGeometry(30, 235, 360, 20)
+        self.note_label2.setFont(QFont(FONT_FAMILY, max(8, ds.typography.size_2xs // 2 - 1)))
+        self.note_label2.setStyleSheet(f"color: {get_color('text_muted')};")
+
+        # Toggle spinner based on radio
+        self.radio_full.toggled.connect(self._on_mode_changed)
+        self.radio_reduce.toggled.connect(self._on_mode_changed)
+
+        # Buttons
+        cancel_btn = QPushButton("취소", self)
+        cancel_btn.setGeometry(190, 265, 100, 40)
+        cancel_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2))
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border')};
+                border-radius: {ds.radius.base}px;
+            }}
+            QPushButton:hover {{
+                background-color: {get_color('border')};
+            }}
+        """)
+        cancel_btn.clicked.connect(self.reject)
+
+        ok_btn = QPushButton("확인", self)
+        ok_btn.setGeometry(300, 265, 100, 40)
+        ok_btn.setFont(QFont(FONT_FAMILY, ds.typography.size_sm // 2, QFont.Weight.Bold))
+        ok_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #FF6B35;
+                color: white;
+                border: none;
+                border-radius: {ds.radius.base}px;
+            }}
+            QPushButton:hover {{
+                background-color: #FF8A5C;
+            }}
+        """)
+        ok_btn.clicked.connect(self.accept)
+
+    def _on_mode_changed(self):
+        is_reduce = self.radio_reduce.isChecked()
+        self.reduce_spin.setEnabled(is_reduce)
+        self.reduce_label.setStyleSheet(
+            f"color: {get_color('text_primary')};" if is_reduce
+            else f"color: {get_color('text_muted')};"
+        )
+
+    def get_mode(self) -> str:
+        """'full' or 'reduce'"""
+        return "reduce" if self.radio_reduce.isChecked() else "full"
+
+    def get_reduce_days(self) -> int:
+        return self.reduce_spin.value()

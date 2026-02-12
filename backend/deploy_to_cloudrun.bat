@@ -45,7 +45,7 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 echo [2/3] Deploying Cloud Run service...
 cd /d "%~dp0"
-call gcloud run deploy %SERVICE_NAME% --source . --region %REGION% --platform managed --allow-unauthenticated --add-cloudsql-instances %CLOUDSQL_CONN% --set-env-vars "DB_USER=ssmaker_user,DB_NAME=ssmaker_auth,CLOUD_SQL_CONNECTION_NAME=%CLOUDSQL_CONN%,ENVIRONMENT=production,ALLOWED_ORIGINS=%ALLOWED_ORIGINS%,PAYMENT_API_BASE_URL=%PAYMENT_API_BASE_URL%" --set-secrets "DB_PASSWORD=%DB_PASSWORD_SECRET%:latest,JWT_SECRET_KEY=%JWT_SECRET_KEY_SECRET%:latest,ADMIN_API_KEY=%ADMIN_API_KEY_SECRET%:latest,BILLING_KEY_ENCRYPTION_KEY=%BILLING_KEY_ENCRYPTION_KEY_SECRET%:latest,PAYAPP_USERID=%PAYAPP_USERID_SECRET%:latest,PAYAPP_LINKKEY=%PAYAPP_LINKKEY_SECRET%:latest,PAYAPP_LINKVAL=%PAYAPP_LINKVAL_SECRET%:latest" --quiet
+call gcloud run deploy %SERVICE_NAME% --source . --region %REGION% --platform managed --allow-unauthenticated --add-cloudsql-instances %CLOUDSQL_CONN% --set-env-vars "DB_USER=ssmaker_user,DB_NAME=ssmaker_auth,CLOUD_SQL_CONNECTION_NAME=%CLOUDSQL_CONN%,ENVIRONMENT=production,ALLOWED_ORIGINS=%ALLOWED_ORIGINS%,PAYMENT_API_BASE_URL=%PAYMENT_API_BASE_URL%" --set-secrets "DB_PASSWORD=%DB_PASSWORD_SECRET%:latest,JWT_SECRET_KEY=%JWT_SECRET_KEY_SECRET%:latest,ADMIN_API_KEY=%ADMIN_API_KEY_SECRET%:latest,BILLING_KEY_ENCRYPTION_KEY=%BILLING_KEY_ENCRYPTION_KEY_SECRET%:latest" --quiet
 if %ERRORLEVEL% NEQ 0 (
   echo ERROR: Cloud Run deploy failed.
   exit /b 1
