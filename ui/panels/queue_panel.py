@@ -41,7 +41,10 @@ class QueuePanel(QFrame, ThemedMixin):
         
         self.clear_waiting_btn = create_rounded_button(self, "대기중 삭제", self.gui.clear_waiting_only, style="secondary")
         control_layout.addWidget(self.clear_waiting_btn)
-        
+
+        self.clear_completed_btn = create_rounded_button(self, "완료 삭제", self.gui.clear_completed_only, style="secondary")
+        control_layout.addWidget(self.clear_completed_btn)
+
         control_layout.addStretch()
         self.main_layout.addLayout(control_layout)
         

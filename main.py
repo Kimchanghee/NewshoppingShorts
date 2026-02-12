@@ -28,6 +28,16 @@ FFMPEG_FALLBACK = r"C:\Program Files (x86)\UltData\Resources\ffmpegs"
 if os.path.isdir(FFMPEG_FALLBACK) and FFMPEG_FALLBACK not in os.environ.get("PATH", ""):
     os.environ["PATH"] = FFMPEG_FALLBACK + os.pathsep + os.environ.get("PATH", "")
 
+# imageio-ffmpeg / moviepy 호환: IMAGEIO_FFMPEG_EXE 설정
+import shutil as _shutil
+_ffmpeg_exe = _shutil.which("ffmpeg")
+if not _ffmpeg_exe:
+    _candidate = os.path.join(FFMPEG_FALLBACK, "ffmpeg.exe")
+    if os.path.isfile(_candidate):
+        _ffmpeg_exe = _candidate
+if _ffmpeg_exe:
+    os.environ.setdefault("IMAGEIO_FFMPEG_EXE", _ffmpeg_exe)
+
 from app.state import AppState
 from app.mixins import (
     StateBridgeMixin,

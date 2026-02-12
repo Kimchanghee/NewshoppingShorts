@@ -51,53 +51,62 @@ def run_auto_migration():
     """Directly attempt to add missing columns and ignore if already exists (1060)"""
     logger.info("Starting schema auto-migration...")
     
-    with engine.connect() as conn:
-        # Tables and columns to ensure
-        migrations = {
-            "users": [
-                ("user_type", "ENUM('trial', 'subscriber', 'admin') DEFAULT 'trial'"),
-                ("current_task", "VARCHAR(255) NULL"),
-                ("is_online", "BOOLEAN DEFAULT FALSE"),
-                ("last_heartbeat", "TIMESTAMP NULL"),
-                ("app_version", "VARCHAR(20) NULL"),
-                ("trial_cycle_started_at", "TIMESTAMP NULL"),
-                ("program_type", "ENUM('ssmaker', 'stmaker') DEFAULT 'ssmaker'"),
-            ],
-            "registration_requests": [
-                ("email", "VARCHAR(255) NULL")
-            ]
-        }
-        
-        # Ensure user_logs table exists
-        try:
-            conn.execute(text("""
-                CREATE TABLE IF NOT EXISTS `user_logs` (
-                    `id` INTEGER NOT NULL AUTO_INCREMENT,
-                    `user_id` INTEGER NOT NULL,
-                    `level` VARCHAR(20) NOT NULL DEFAULT 'INFO',
-                    `action` VARCHAR(255) NOT NULL,
-                    `content` TEXT NULL,
-                    `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    PRIMARY KEY (`id`),
-                    INDEX `ix_user_logs_user_id` (`user_id`),
-                    INDEX `ix_user_logs_created_at` (`created_at`)
-                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-            """))
-            logger.info("user_logs table ensured.")
-        except Exception as e:
-            logger.warning(f"user_logs table creation: {e}")
+    # Use AUTOCOMMIT for DDL operations to prevent transaction issues
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            # Tables and columns to ensure
+            migrations = {
+                "users": [
+                    ("user_type", "ENUM('trial', 'subscriber', 'admin') DEFAULT 'trial' NOT NULL"),
+                    ("current_task", "VARCHAR(255) NULL"),
+                    ("is_online", "BOOLEAN DEFAULT FALSE"),
+                    ("last_heartbeat", "TIMESTAMP NULL"),
+                    ("app_version", "VARCHAR(20) NULL"),
+                    ("trial_cycle_started_at", "TIMESTAMP NULL"),
+                    ("program_type", "ENUM('ssmaker', 'stmaker') DEFAULT 'ssmaker' NOT NULL"),
+                ],
+                "registration_requests": [
+                    ("email", "VARCHAR(255) NULL")
+                ]
+            }
+            
+            # Ensure user_logs table exists
+            try:
+                conn.execute(text("""
+                    CREATE TABLE IF NOT EXISTS `user_logs` (
+                        `id` INTEGER NOT NULL AUTO_INCREMENT,
+                        `user_id` INTEGER NOT NULL,
+                        `level` VARCHAR(20) NOT NULL DEFAULT 'INFO',
+                        `action` VARCHAR(255) NOT NULL,
+                        `content` TEXT NULL,
+                        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        PRIMARY KEY (`id`),
+                        INDEX `ix_user_logs_user_id` (`user_id`),
+                        INDEX `ix_user_logs_created_at` (`created_at`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                """))
+                logger.info("user_logs table ensured.")
+            except Exception as e:
+                logger.warning(f"user_logs table creation warning: {e}")
 
-        for table, columns in migrations.items():
-            for col, type_def in columns:
-                try:
-                    # Direct ALTER TABLE attempt
-                    conn.execute(text(f"ALTER TABLE `{table}` ADD COLUMN `{col}` {type_def}"))
-                    logger.info(f"Successfully added column {table}.{col}")
-                except Exception as e:
-                    # Ignore "Duplicate column name" error (1060)
-                    if "1060" in str(e) or "Duplicate column" in str(e):
-                        logger.info(f"Column {table}.{col} already exists, skipping.")
-        conn.commit()
+            for table, columns in migrations.items():
+                for col, type_def in columns:
+                    try:
+                        # Direct ALTER TABLE attempt
+                        conn.execute(text(f"ALTER TABLE `{table}` ADD COLUMN `{col}` {type_def}"))
+                        logger.info(f"Successfully added column {table}.{col}")
+                    except Exception as e:
+                        # Ignore "Duplicate column name" error (1060)
+                        msg = str(e).lower()
+                        if "1060" in msg or "duplicate column" in msg:
+                            logger.debug(f"Column {table}.{col} already exists.")
+                        else:
+                            # Log other errors but try to proceed
+                            logger.warning(f"Migration warning for {table}.{col}: {e}")
+                            
+    except Exception as e:
+        logger.error(f"Migration critical error: {e}", exc_info=True)
+    
     logger.info("Schema auto-migration finished.")
 
 @app.on_event("startup")
@@ -405,22 +414,21 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.35/SSMaker_Setup_v1.3.35.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.36/SSMaker_Setup_v1.3.36.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.35",
+    "version": "1.3.36",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.35 변경사항
-- 소셜 미디어 업로드 설정: 좌측 메뉴에 업로드 설정 추가, 채널별 프롬프트 관리.
-- 유튜브 채널 연결: OAuth 인증 및 수동 연결 지원.
-- 유튜브 자동 댓글: 영상 업로드 후 자동 댓글 기능 추가.
-- 영상 작업 중 크래시 방지: 배치 처리, 로그인 감시, 스레드 예외 처리 개선.
-- 다운로드 오류 표시 수정 및 다크 테마 다이얼로그 통일.""",
+    "release_notes": """### v1.3.36 변경사항
+- 관리자 대시보드 레이아웃: 모든 모니터 해상도에 맞게 반응형 레이아웃 적용.
+- 작업 대기열: 중지/건너뜀 시 시작 버튼 빨간색 리셋, 완료 삭제 버튼 추가.
+- 구독 관리: 박탈 기능에 기간 축소 옵션 추가, 연장 시 예상 만료일 미리보기.
+- 구독 연장 날짜 계산 검증 및 안정성 개선.""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "71e9f556054f3ad6fd7e78b3d5484faad5634f04d96294287796fc7e01aab549",
+    "file_hash": "PLACEHOLDER_HASH",
 }
 
 

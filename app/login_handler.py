@@ -132,6 +132,12 @@ class LoginHandler:
                     time.sleep(5)
                     continue
 
+                # 접속 상태 UI 업데이트
+                if st is True:
+                    self._update_connection_ui(True)
+                else:
+                    self._update_connection_ui(False)
+
                 if st == "AUTH_REQUIRED":
                     logger.warning("[watch_loop] Auth token missing/expired (AUTH_REQUIRED)")
                     cb_signal = getattr(self.app, 'ui_callback_signal', None)
@@ -175,9 +181,21 @@ class LoginHandler:
                         last_user_type = server_user_type
             except Exception as e:
                 # 네트워크 오류 등은 무시하고 재시도 (Network errors are ignored and retried)
+                self._update_connection_ui(False)
                 if loop_count % 12 == 0:
                     logger.debug(f"[watch_loop] Check exception: {e}")
             time.sleep(5)
+
+    def _update_connection_ui(self, connected: bool):
+        """접속 상태를 topbar UI에 반영 (스레드 안전)"""
+        topbar = getattr(self.app, "topbar", None)
+        if topbar is None or not hasattr(topbar, "update_connection_status"):
+            return
+        cb_signal = getattr(self.app, 'ui_callback_signal', None)
+        if cb_signal is not None:
+            cb_signal.emit(lambda: topbar.update_connection_status(connected))
+        else:
+            QTimer.singleShot(0, lambda: topbar.update_connection_status(connected))
 
     def _on_auth_required(self):
         """토큰 만료/유실 등으로 세션 확인이 불가능할 때 사용자에게 안내 후 종료."""

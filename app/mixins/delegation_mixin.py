@@ -112,6 +112,10 @@ class DelegationMixin:
         """Clear only waiting URLs from queue."""
         self.queue_manager.clear_waiting_only()
 
+    def clear_completed_only(self):
+        """Clear only completed URLs from queue."""
+        self.queue_manager.clear_completed_only()
+
     # ================================================================
     # Batch processing (delegated to BatchHandler)
     # ================================================================

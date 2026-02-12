@@ -334,6 +334,31 @@ class QueueManager:
         self.update_queue_count()
         self.add_log("대기 중 링크를 삭제했습니다.")
 
+    def clear_completed_only(self):
+        """완료된 작업만 삭제"""
+        completed_urls = [
+            url
+            for url, status in self.gui.url_status.items()
+            if self._normalize_status(status) == "completed"
+        ]
+        if not completed_urls:
+            show_info(self.gui, "안내", "완료된 작업이 없습니다.")
+            return
+        if not show_question(self.gui, "확인", f"완료된 작업 {len(completed_urls)}건을 삭제할까요?"):
+            return
+
+        for key in completed_urls:
+            if key in self.gui.url_queue:
+                self.gui.url_queue.remove(key)
+            self.gui.url_status.pop(key, None)
+            self.gui.url_status_message.pop(key, None)
+            self.gui.url_remarks.pop(key, None)
+            self._remove_mix_job(key)
+
+        self.update_url_listbox()
+        self.update_queue_count()
+        self.add_log(f"완료된 작업 {len(completed_urls)}건을 삭제했습니다.")
+
     # ----------------------- UI sync helpers -----------------------
     def update_url_listbox(self):
         tree: QTreeWidget = getattr(self.gui, "url_listbox", None)

@@ -21,7 +21,7 @@ from pydantic import BaseModel
 
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
-from app.models.user import User, UserType
+from app.models.user import User, UserType, ProgramType
 from app.models.login_attempt import LoginAttempt
 from app.utils.subscription_utils import calculate_subscription_expiry
 from app.services.auth_service import AuthService
@@ -58,6 +58,7 @@ class UserResponse(BaseModel):
     work_count: int = -1  # -1 = 무제한
     work_used: int = 0
     user_type: str = "trial"
+    program_type: str = "ssmaker"  # ssmaker or stmaker
 
     is_online: bool = False
     last_heartbeat: Optional[datetime] = None
@@ -77,6 +78,23 @@ class UserListResponse(BaseModel):
 class ExtendSubscriptionRequest(BaseModel):
     """구독 연장 요청 스키마"""
     days: int
+
+
+class ReduceSubscriptionRequest(BaseModel):
+    """구독 기간 축소 요청 스키마"""
+    days: int  # Must be > 0 and <= 365, validated by Field
+
+    class Config:
+        json_schema_extra = {"example": {"days": 30}}
+
+    from pydantic import field_validator
+
+    @field_validator("days")
+    @classmethod
+    def validate_days(cls, v):
+        if v <= 0 or v > 365:
+            raise ValueError("days must be between 1 and 365")
+        return v
 
 
 class AdminActionResponse(BaseModel):
@@ -109,6 +127,7 @@ class LoginHistoryResponse(BaseModel):
 async def list_users(
     request: Request,
     search: Optional[str] = Query(None, description="아이디 검색"),
+    program_type: Optional[str] = Query(None, description="프로그램 유형 필터 (ssmaker/stmaker)"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     page_size: int = Query(50, ge=1, le=100, description="페이지 크기"),
     db: Session = Depends(get_db),
@@ -124,6 +143,10 @@ async def list_users(
     await AuthService(db).cleanup_offline_users()
     
     query = db.query(User)
+
+    # Filter by program type - Temporarily disabled
+    # if program_type and program_type in ('ssmaker', 'stmaker'):
+    #     query = query.filter(User.program_type == program_type)
 
     # Search by username, name, email, or phone
     # Security: Escape LIKE wildcards and validate input length
@@ -378,6 +401,104 @@ async def revoke_subscription(
         )
 
 
+@router.post("/users/{user_id}/reduce-subscription", response_model=AdminActionResponse)
+@limiter.limit("300/hour")
+async def reduce_subscription(
+    request: Request,
+    user_id: int,
+    data: ReduceSubscriptionRequest,
+    db: Session = Depends(get_db),
+    _admin: bool = Depends(verify_admin_api_key)
+):
+    """
+    구독 기간 축소 (관리자용)
+    Reduce subscription period (for admin)
+
+    If reduction causes expiry to be in the past, fully revokes to trial.
+    Requires X-Admin-API-Key header.
+    """
+    from datetime import timedelta
+
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+
+        if not user:
+            return AdminActionResponse(
+                success=False,
+                message="사용자를 찾을 수 없습니다."
+            )
+
+        if user.user_type == UserType.TRIAL:
+            return AdminActionResponse(
+                success=False,
+                message="이미 무료 계정입니다."
+            )
+
+        if not user.subscription_expires_at:
+            return AdminActionResponse(
+                success=False,
+                message="구독 만료일이 설정되어 있지 않습니다."
+            )
+
+        old_expiry = user.subscription_expires_at
+        # Ensure timezone-aware for safe comparison
+        if old_expiry.tzinfo is None:
+            old_expiry = old_expiry.replace(tzinfo=timezone.utc)
+        new_expiry = old_expiry - timedelta(days=data.days)
+        now = datetime.now(timezone.utc)
+
+        if new_expiry <= now:
+            # Reduction makes subscription expired → revoke to trial
+            user.user_type = UserType.TRIAL
+            user.subscription_expires_at = None
+            user.work_count = 5
+            user.work_used = 0
+            db.commit()
+
+            logger.info(
+                f"Subscription reduced to expiry (revoked): user_id={user_id}, "
+                f"old_expiry={old_expiry}, attempted_new={new_expiry}"
+            )
+
+            return AdminActionResponse(
+                success=True,
+                message=f"'{user.username}' 구독이 만료되어 무료 계정으로 전환되었습니다.",
+                data={
+                    "user_id": user_id,
+                    "username": user.username,
+                    "old_expiry": old_expiry.isoformat(),
+                    "revoked": True,
+                }
+            )
+        else:
+            user.subscription_expires_at = new_expiry
+            db.commit()
+
+            logger.info(
+                f"Subscription reduced: user_id={user_id}, "
+                f"old_expiry={old_expiry}, new_expiry={new_expiry}, reduced_days={data.days}"
+            )
+
+            return AdminActionResponse(
+                success=True,
+                message=f"구독 기간이 {data.days}일 축소되었습니다.",
+                data={
+                    "user_id": user_id,
+                    "username": user.username,
+                    "old_expiry": old_expiry.isoformat(),
+                    "new_expiry": new_expiry.isoformat(),
+                }
+            )
+
+    except SQLAlchemyError as e:
+        db.rollback()
+        logger.error(f"Database error during subscription reduction: {e}")
+        return AdminActionResponse(
+            success=False,
+            message="구독 기간 축소 중 오류가 발생했습니다."
+        )
+
+
 @router.delete("/users/{user_id}", response_model=AdminActionResponse)
 @limiter.limit("100/hour")
 async def delete_user(
@@ -427,6 +548,7 @@ async def delete_user(
 @limiter.limit("600/hour")
 async def get_stats(
     request: Request,
+    program_type: Optional[str] = Query(None, description="프로그램 유형 필터 (ssmaker/stmaker)"),
     db: Session = Depends(get_db),
     _admin: bool = Depends(verify_admin_api_key)
 ):
@@ -438,29 +560,42 @@ async def get_stats(
     """
     from app.models.registration_request import RegistrationRequest, RequestStatus
 
+    # Base query with optional program_type filter
+    base_query = db.query(User)
+    # if program_type and program_type in ('ssmaker', 'stmaker'):
+    #     base_query = base_query.filter(User.program_type == program_type)
+
     # User stats
-    total_users = db.query(User).count()
-    active_users = db.query(User).filter(User.is_active.is_(True)).count()
-    online_users = db.query(User).filter(User.is_online.is_(True)).count()
+    total_users = base_query.count()
+    active_users = base_query.filter(User.is_active.is_(True)).count()
+    # online_users = base_query.filter(User.is_online.is_(True)).count()
+    online_users = 0
 
     # Users with active subscription
     now = datetime.now(timezone.utc)
-    active_subscriptions = db.query(User).filter(
+    sub_query = base_query.filter(
         User.subscription_expires_at > now,
         User.is_active.is_(True)
-    ).count()
-
-    # Work usage stats (cumulative)
-    total_work_used = int(
-        db.query(func.coalesce(func.sum(User.work_used), 0)).scalar() or 0
     )
-    users_with_work = db.query(User).filter(User.work_used > 0).count()
-    task_text = func.lower(func.trim(func.coalesce(User.current_task, "")))
-    in_progress_users = db.query(User).filter(
-        User.is_online.is_(True),
-        task_text != "",
-        task_text.notin_(["idle", "pending", "waiting", "\ub300\uae30 \uc911"]),
-    ).count()
+    active_subscriptions = sub_query.count()
+
+    # Work usage stats (cumulative) - apply program_type filter
+    work_base = db.query(User)
+    # if program_type and program_type in ('ssmaker', 'stmaker'):
+    #     work_base = work_base.filter(User.program_type == program_type)
+
+    total_work_used = int(
+        work_base.with_entities(func.coalesce(func.sum(User.work_used), 0)).scalar() or 0
+    )
+    users_with_work = work_base.filter(User.work_used > 0).count()
+    # task_text = func.lower(func.trim(func.coalesce(User.current_task, "")))
+    # in_progress_query = work_base.filter(
+    #     User.is_online.is_(True),
+    #     task_text != "",
+    #     task_text.notin_(["idle", "pending", "waiting", "\ub300\uae30 \uc911"]),
+    # )
+    # in_progress_users = in_progress_query.count()
+    in_progress_users = 0
     avg_work_used_per_user = round(total_work_used / total_users, 2) if total_users else 0
 
     # Registration request stats

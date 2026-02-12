@@ -11,6 +11,12 @@ class UserType(str, enum.Enum):
     ADMIN = "admin"
 
 
+class ProgramType(str, enum.Enum):
+    """Program type enumeration - 어떤 프로그램의 사용자인지 구분"""
+    SSMAKER = "ssmaker"      # 쇼핑쇼츠메이커
+    STMAKER = "stmaker"      # 쇼츠스레드메이커
+
+
 class User(Base):
     __tablename__ = "users"
 
@@ -43,8 +49,14 @@ class User(Base):
         default=UserType.TRIAL,
         nullable=False
     )
-    # Admin purpose fields
-    last_heartbeat = Column(TIMESTAMP, nullable=True)    # For precise online status
-    is_online = Column(Boolean, default=False, nullable=False) # Direct online status tracking
-    current_task = Column(String(255), nullable=True)    # Current working task description
-    app_version = Column(String(20), nullable=True)      # 사용자가 사용 중인 앱 버전
+    # Admin purpose fields - Temporarily disabled due to migration failure
+    # last_heartbeat = Column(TIMESTAMP, nullable=True)    # For precise online status
+    # is_online = Column(Boolean, default=False, nullable=False) # Direct online status tracking
+    # current_task = Column(String(255), nullable=True)    # Current working task description
+    # app_version = Column(String(20), nullable=True)      # 사용자가 사용 중인 앱 버전
+    # 프로그램 유형 (ssmaker=쇼핑쇼츠메이커, stmaker=쇼츠스레드메이커)
+    # program_type = Column(
+    #     SQLEnum(ProgramType, values_callable=lambda x: [e.value for e in x]),
+    #     default=ProgramType.SSMAKER,
+    #     nullable=False
+    # )
