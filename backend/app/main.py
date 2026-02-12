@@ -417,7 +417,7 @@ APP_VERSION_INFO = {
 - 모든 팝업/경고 다이얼로그가 다크 테마에 맞게 통일.""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "",
+    "file_hash": "ce25fc76cbf226b909b7d095c72a5cf3b73e39d45a1af4ccdf451dc756ff5b29",
 }
 
 
