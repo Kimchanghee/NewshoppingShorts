@@ -414,21 +414,20 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.36/SSMaker_Setup_v1.3.36.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.37/SSMaker_Setup_v1.3.37.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.36",
+    "version": "1.3.37",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.36 변경사항
-- 관리자 대시보드 레이아웃: 모든 모니터 해상도에 맞게 반응형 레이아웃 적용.
-- 작업 대기열: 중지/건너뜀 시 시작 버튼 빨간색 리셋, 완료 삭제 버튼 추가.
-- 구독 관리: 박탈 기능에 기간 축소 옵션 추가, 연장 시 예상 만료일 미리보기.
-- 구독 연장 날짜 계산 검증 및 안정성 개선.""",
-    "is_mandatory": False,
+    "release_notes": """### v1.3.37 변경사항
+- 접속 상태 감지: 관리자 대시보드에서 온라인/오프라인 상태 정확히 표시.
+- 프로그램 구분: 쇼핑쇼츠메이커/쇼츠스레드메이커 사용자 분류 활성화.
+- 시작 오류 수정: 일부 사용자에서 발생하던 ipsum.txt 오류 해결.""",
+    "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "81214d72662d8b913b7431308d71fee02a22e564ca1750da0c0ccfa2dfd7e34b",
+    "file_hash": "PLACEHOLDER_HASH",
 }
 
 

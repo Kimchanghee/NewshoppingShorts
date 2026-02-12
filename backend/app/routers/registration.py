@@ -164,9 +164,9 @@ async def submit_registration_request(
         # 가입 시점 기준 무료 체험 횟수 결정
         trial_work_count = get_free_trial_work_count()
 
-        # program_type 결정 (ssmaker 또는 stmaker) - Temporarily disabled
-        # pt = data.program_type if data.program_type in ('ssmaker', 'stmaker') else 'ssmaker'
-        # program_type_enum = ProgramType.STMAKER if pt == 'stmaker' else ProgramType.SSMAKER
+        # program_type 결정 (ssmaker 또는 stmaker)
+        pt = data.program_type if data.program_type in ('ssmaker', 'stmaker') else 'ssmaker'
+        program_type_enum = ProgramType.STMAKER if pt == 'stmaker' else ProgramType.SSMAKER
 
         new_user = User(
             username=username_clean,
@@ -181,7 +181,7 @@ async def submit_registration_request(
             phone=data.contact,
             name=data.name,
             registration_ip=client_ip,  # 가입 IP 저장 (중복 가입 감지용)
-            # program_type=program_type_enum,
+            program_type=program_type_enum,
         )
 
         db.add(new_user)
