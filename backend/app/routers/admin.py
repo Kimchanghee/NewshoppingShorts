@@ -144,9 +144,9 @@ async def list_users(
     
     query = db.query(User)
 
-    # Filter by program type - Temporarily disabled
-    # if program_type and program_type in ('ssmaker', 'stmaker'):
-    #     query = query.filter(User.program_type == program_type)
+    # Filter by program type
+    if program_type and program_type in ('ssmaker', 'stmaker'):
+        query = query.filter(User.program_type == program_type)
 
     # Search by username, name, email, or phone
     # Security: Escape LIKE wildcards and validate input length
@@ -562,14 +562,13 @@ async def get_stats(
 
     # Base query with optional program_type filter
     base_query = db.query(User)
-    # if program_type and program_type in ('ssmaker', 'stmaker'):
-    #     base_query = base_query.filter(User.program_type == program_type)
+    if program_type and program_type in ('ssmaker', 'stmaker'):
+        base_query = base_query.filter(User.program_type == program_type)
 
     # User stats
     total_users = base_query.count()
     active_users = base_query.filter(User.is_active.is_(True)).count()
-    # online_users = base_query.filter(User.is_online.is_(True)).count()
-    online_users = 0
+    online_users = base_query.filter(User.is_online.is_(True)).count()
 
     # Users with active subscription
     now = datetime.now(timezone.utc)
@@ -581,8 +580,8 @@ async def get_stats(
 
     # Work usage stats (cumulative) - apply program_type filter
     work_base = db.query(User)
-    # if program_type and program_type in ('ssmaker', 'stmaker'):
-    #     work_base = work_base.filter(User.program_type == program_type)
+    if program_type and program_type in ('ssmaker', 'stmaker'):
+        work_base = work_base.filter(User.program_type == program_type)
 
     total_work_used = int(
         work_base.with_entities(func.coalesce(func.sum(User.work_used), 0)).scalar() or 0

@@ -49,14 +49,14 @@ class User(Base):
         default=UserType.TRIAL,
         nullable=False
     )
-    # Admin purpose fields - Temporarily disabled due to migration failure
-    # last_heartbeat = Column(TIMESTAMP, nullable=True)    # For precise online status
-    # is_online = Column(Boolean, default=False, nullable=False) # Direct online status tracking
-    # current_task = Column(String(255), nullable=True)    # Current working task description
-    # app_version = Column(String(20), nullable=True)      # 사용자가 사용 중인 앱 버전
+    # Admin purpose fields
+    last_heartbeat = Column(TIMESTAMP, nullable=True)
+    is_online = Column(Boolean, default=False, nullable=False)
+    current_task = Column(String(255), nullable=True)
+    app_version = Column(String(20), nullable=True)
     # 프로그램 유형 (ssmaker=쇼핑쇼츠메이커, stmaker=쇼츠스레드메이커)
-    # program_type = Column(
-    #     SQLEnum(ProgramType, values_callable=lambda x: [e.value for e in x]),
-    #     default=ProgramType.SSMAKER,
-    #     nullable=False
-    # )
+    program_type = Column(
+        SQLEnum(ProgramType, values_callable=lambda x: [e.value for e in x]),
+        default=ProgramType.SSMAKER,
+        nullable=False
+    )
