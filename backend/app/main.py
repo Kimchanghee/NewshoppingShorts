@@ -414,17 +414,18 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.37/SSMaker_Setup_v1.3.37.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.38/SSMaker_Setup_v1.3.38.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.37",
+    "version": "1.3.38",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.37 변경사항
-- 접속 상태 감지: 관리자 대시보드에서 온라인/오프라인 상태 정확히 표시.
-- 프로그램 구분: 쇼핑쇼츠메이커/쇼츠스레드메이커 사용자 분류 활성화.
-- 시작 오류 수정: 일부 사용자에서 발생하던 ipsum.txt 오류 해결.""",
+    "release_notes": """### v1.3.38 변경사항
+- ipsum.txt 시작 오류 완전 수정 (PyInstaller setuptools/jaraco 번들링)
+- 모드 선택 아이콘 깨짐 수정 (Segoe UI Emoji 폰트 적용)
+- Admin 빌드 단계 제거 (prepare_build.py 정리)
+- 세션 체크 IP 누락 수정 (user_api_client.py)""",
     "is_mandatory": True,
     "update_channel": "stable",
     "file_hash": "71563131d6c0f1d474a597a3975232785882551dc8954bff778281e94eaf1ea2",

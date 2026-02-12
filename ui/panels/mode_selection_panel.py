@@ -46,7 +46,7 @@ class ModeCard(QFrame):
 
         # Icon (large)
         self.icon_label = QLabel(icon)
-        self.icon_label.setFont(QFont("Segoe UI Symbol", 48))
+        self.icon_label.setFont(QFont("Segoe UI Emoji", 48))
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header_layout.addWidget(self.icon_label)
 
