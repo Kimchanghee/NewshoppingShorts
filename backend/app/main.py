@@ -417,7 +417,7 @@ APP_VERSION_INFO = {
 - 관리자 활동 로그에서 실제 작업 진행 상황을 확인할 수 있습니다.""",
     "is_mandatory": False,
     "update_channel": "stable",
-    "file_hash": "2f4b1b3671c4172a20aa976101d77d06dd9851b31d52bb22f79b4504309b5c1a",
+    "file_hash": "f1400cd218bb9d767f30455e079ecf10b36b592bc78e54c05e4d2808231462dd",
 }
 
 
