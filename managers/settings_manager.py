@@ -39,11 +39,29 @@ class SettingsManager:
         "youtube_channel_name": "",
         "youtube_auto_upload": False,
         "youtube_upload_interval": 60,  # 분 단위 (60, 120, 180, 240)
+        # 업로드 프롬프트 설정 (채널별)
+        "youtube_title_prompt": "",
+        "youtube_description_prompt": "",
+        "youtube_hashtag_prompt": "",
+        "youtube_comment_enabled": False,
+        "youtube_comment_prompt": "",
         # COMING SOON 플랫폼
         "tiktok_connected": False,
+        "tiktok_title_prompt": "",
+        "tiktok_description_prompt": "",
+        "tiktok_hashtag_prompt": "",
         "instagram_connected": False,
+        "instagram_title_prompt": "",
+        "instagram_description_prompt": "",
+        "instagram_hashtag_prompt": "",
         "threads_connected": False,
+        "threads_title_prompt": "",
+        "threads_description_prompt": "",
+        "threads_hashtag_prompt": "",
         "x_connected": False,
+        "x_title_prompt": "",
+        "x_description_prompt": "",
+        "x_hashtag_prompt": "",
         # Automation Settings
         "coupang_access_key": "",
         "coupang_secret_key": "",
@@ -496,6 +514,45 @@ class SettingsManager:
             "coupang_connected": bool(self._settings.get("coupang_access_key") and self._settings.get("coupang_secret_key")),
             "inpock_connected": bool(self._settings.get("cookies_inpock")),
         }
+
+    # ============ Upload Prompt Settings ============
+
+    def get_platform_prompts(self, platform: str) -> Dict[str, str]:
+        """Get upload prompts for a platform (title, description, hashtag)"""
+        return {
+            "title_prompt": self._settings.get(f"{platform}_title_prompt", ""),
+            "description_prompt": self._settings.get(f"{platform}_description_prompt", ""),
+            "hashtag_prompt": self._settings.get(f"{platform}_hashtag_prompt", ""),
+        }
+
+    def set_platform_prompts(self, platform: str, title_prompt: str = "",
+                             description_prompt: str = "", hashtag_prompt: str = "") -> bool:
+        """Save upload prompts for a platform"""
+        with self._lock:
+            self._settings[f"{platform}_title_prompt"] = title_prompt
+            self._settings[f"{platform}_description_prompt"] = description_prompt
+            self._settings[f"{platform}_hashtag_prompt"] = hashtag_prompt
+        return self._save_settings()
+
+    def get_youtube_comment_enabled(self) -> bool:
+        """Get YouTube comment auto-upload setting"""
+        return self._settings.get("youtube_comment_enabled", False)
+
+    def set_youtube_comment_enabled(self, enabled: bool) -> bool:
+        """Save YouTube comment auto-upload setting"""
+        with self._lock:
+            self._settings["youtube_comment_enabled"] = bool(enabled)
+        return self._save_settings()
+
+    def get_youtube_comment_prompt(self) -> str:
+        """Get YouTube auto-comment prompt"""
+        return self._settings.get("youtube_comment_prompt", "")
+
+    def set_youtube_comment_prompt(self, prompt: str) -> bool:
+        """Save YouTube auto-comment prompt"""
+        with self._lock:
+            self._settings["youtube_comment_prompt"] = prompt
+        return self._save_settings()
 
     # ============ Automation Settings ============
 
