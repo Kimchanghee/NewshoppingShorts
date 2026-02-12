@@ -69,11 +69,13 @@ class OutputManager:
         issues: List[str] = []
 
         error_patterns = {
+            "다운로드 오류": ["다운로드 실패", "download fail", "영상 다운로드", "다운로드 오류"],
             "싱크 불일치": ["sync", "싱크", "synchronization", "timing mismatch"],
             "TTS 실패": ["tts 실패", "tts fail", "음성 생성 실패", "voice generation failed"],
             "자막 오류": ["subtitle error", "자막 오류", "srt error"],
             "인코딩 오류": ["encoding error", "인코딩 오류", "ffmpeg error", "codec error"],
-            "API 오류": ["api error", "api 오류", "500 internal"],
+            "API 오류": ["api 할당량", "api 인증", "api 키", "api_key_invalid", "resource_exhausted"],
+            "서버 오류": ["500 internal", "503", "서버 과부하", "overloaded"],
         }
 
         log_lower = log_text.lower()

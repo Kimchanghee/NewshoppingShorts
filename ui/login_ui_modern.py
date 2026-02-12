@@ -20,7 +20,6 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QCheckBox,
-    QMessageBox,
     QDialog,
     QVBoxLayout,
     QFormLayout,
@@ -28,6 +27,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont, QIcon, QPixmap
 
 from ui.design_system_v2 import get_design_system, ColorPalette
+from ui.components.custom_dialog import show_info, show_warning, show_error, show_success
 
 # Initialize design system and ALWAYS use light palette for login
 ds = get_design_system()
@@ -753,7 +753,7 @@ class RegistrationRequestDialog(QWidget):
                 email=email,
             )
             if result.get("success"):
-                QMessageBox.information(self, "\uC644\uB8CC", "\uD68C\uC6D0\uAC00\uC785\uC774 \uC644\uB8CC\uB418\uC5C8\uC2B5\uB2C8\uB2E4! \uBC14\uB85C \uB85C\uADF8\uC778\uD574\uC8FC\uC138\uC694.")
+                show_success(self, "완료", "회원가입이 완료되었습니다! 바로 로그인해주세요.")
                 logger.info("[UI] Registration success | username=%s", username)
                 self.registrationRequested.emit(name, username, password, contact, email)
                 self.close()
@@ -766,7 +766,7 @@ class RegistrationRequestDialog(QWidget):
                 self._show_error(result.get("message", "\uC54C \uC218 \uC5C6\uB294 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4."))
         except Exception as e:
             logger.exception("[UI] Registration exception")
-            QMessageBox.critical(self, "\uC624\uB958", str(e))
+            show_error(self, "오류", str(e))
 
     def _show_missing_field_alert(self, missing_issues):
         """Show a clear alert describing exactly which required fields are missing."""
@@ -784,12 +784,7 @@ class RegistrationRequestDialog(QWidget):
         self._show_error(message, title="입력 누락")
 
     def _show_error(self, message: str, title: str = "입력 오류"):
-        msgBox = QMessageBox(self)
-        msgBox.setIcon(QMessageBox.Icon.Warning)
-        msgBox.setWindowTitle(title)
-        msgBox.setText(message)
-        msgBox.setStandardButtons(QMessageBox.StandardButton.Ok)
-        msgBox.exec()
+        show_warning(self, title, message)
 
     def clear_fields(self):
         self.nameEdit.clear()

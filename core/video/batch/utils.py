@@ -127,6 +127,12 @@ def _translate_error_message(error_text: str) -> str:
     """
     error_lower = error_text.lower()
 
+    # ★ 다운로드 오류 체크 (API 오류보다 먼저)
+    download_keywords = ['다운로드 실패', 'download fail', '영상 다운로드', '다운로드 오류',
+                         '영상을 찾을 수 없', '파일이 너무 작', 'hls', 'ts 파일']
+    if any(kw in error_lower for kw in download_keywords):
+        return "영상 다운로드 실패 - 링크를 확인하고 다시 시도해주세요"
+
     # ★ 프레임 읽기 오류 (블러 처리 후 원본 파일 참조 끊김) - 인코딩 오류보다 먼저 체크
     if 'failed to read' in error_lower and 'frame' in error_lower:
         return "비디오 프레임 읽기 오류 - 원본 파일 접근 불가 (블러 처리 관련)"
@@ -282,7 +288,12 @@ def _get_short_error_message(error: Exception) -> str:
     # 특정 오류 메시지 패턴 감지
     error_lower = error_str.lower()
 
-    # ★ 인코딩/영상 처리 오류 먼저 체크 (API 오류보다 우선)
+    # ★ 다운로드 오류 먼저 체크 (API 오류보다 우선)
+    if '다운로드 실패' in error_str or '다운로드 오류' in error_str or \
+       ('download' in error_lower and ('fail' in error_lower or 'error' in error_lower)):
+        return '다운로드실패'
+
+    # ★ 인코딩/영상 처리 오류 체크 (API 오류보다 우선)
     encoding_keywords = ['ffmpeg', 'encoder', 'encoding', 'codec', 'moviepy', 'write_videofile', 'libx264', 'h264', 'aac']
     if any(kw in error_lower for kw in encoding_keywords):
         return '인코딩오류'

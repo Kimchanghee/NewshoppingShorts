@@ -32,7 +32,7 @@ class TutorialOverlay(QWidget):
         },
         {
             "title": "🔗 1단계: 소스 입력",
-            "description": "변환할 영상의 URL을 입력하세요.\n도우인 영상 링크를 지원합니다.",
+            "description": "변환할 영상의 URL을 입력하세요.\n도우인(抖音) 영상 링크를 지원합니다.",
             "details": [
                 "• 도우인(抖音) 영상 링크 지원",
                 "• URL 붙여넣기 후 '추가' 버튼 클릭",

@@ -13,11 +13,12 @@ import webbrowser
 from datetime import datetime, timezone
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QMessageBox, QFrame, QProgressBar,
+    QPushButton, QFrame, QProgressBar,
     QSpacerItem, QSizePolicy, QTextEdit, QLineEdit,
     QStackedWidget, QScrollArea, QGridLayout,
     QButtonGroup
 )
+from ui.components.custom_dialog import show_info, show_warning, show_error
 from PyQt6.QtCore import Qt, QTimer
 
 import config
@@ -1372,9 +1373,9 @@ class SubscriptionPanel(QWidget):
                 self.current_plan_card.refresh_btn.setEnabled(True)
                 self.current_plan_card.refresh_btn.setText("🔄")
                 if success:
-                    QMessageBox.information(self, "완료", "구독 상태가 새로고침되었습니다.")
+                    show_info(self, "완료", "구독 상태가 새로고침되었습니다.")
                 else:
-                    QMessageBox.warning(self, "오류", "구독 상태를 새로고침하지 못했습니다.")
+                    show_warning(self, "오류", "구독 상태를 새로고침하지 못했습니다.")
 
             # Run in main thread
             cb_signal = getattr(self.gui, 'ui_callback_signal', None) if self.gui else None
@@ -1390,7 +1391,7 @@ class SubscriptionPanel(QWidget):
     def _checkout(self):
         """Start PayApp checkout process."""
         if not self.selected_plan:
-            QMessageBox.warning(self, "알림", "플랜을 먼저 선택해주세요.")
+            show_warning(self, "알림", "플랜을 먼저 선택해주세요.")
             return
 
         import re as _re
@@ -1398,20 +1399,20 @@ class SubscriptionPanel(QWidget):
         phone = self.payment_form.phone_input.text().strip()
         phone_digits = _re.sub(r"[^0-9]", "", phone)
         if not phone_digits or len(phone_digits) < 10 or len(phone_digits) > 11:
-            QMessageBox.warning(self, "알림", "전화번호를 정확히 입력해주세요.")
+            show_warning(self, "알림", "전화번호를 정확히 입력해주세요.")
             return
         if not _re.match(r"^01[016789]\d{7,8}$", phone_digits):
-            QMessageBox.warning(self, "알림", "올바른 휴대폰 번호를 입력해주세요.\n(예: 010-1234-5678)")
+            show_warning(self, "알림", "올바른 휴대폰 번호를 입력해주세요.\n(예: 010-1234-5678)")
             return
 
         user_id = self._extract_user_id()
         auth_token = self._extract_auth_token()
 
         if not user_id:
-            QMessageBox.warning(self, "알림", "로그인 사용자 정보를 찾을 수 없습니다.")
+            show_warning(self, "알림", "로그인 사용자 정보를 찾을 수 없습니다.")
             return
         if not auth_token:
-            QMessageBox.warning(self, "로그인 필요", "결제를 위해 다시 로그인해주세요.")
+            show_warning(self, "로그인 필요", "결제를 위해 다시 로그인해주세요.")
             return
 
         try:
@@ -1460,11 +1461,11 @@ class SubscriptionPanel(QWidget):
         except RuntimeError as e:
             message = str(e).strip() or "결제 요청에 실패했습니다. 잠시 후 다시 시도해주세요."
             logger.error("[Subscription] PayApp checkout failed: %s", message)
-            QMessageBox.critical(self, "오류", message)
+            show_error(self, "오류", message)
             self.payment_form.set_status(message)
         except Exception as e:
             logger.exception("[Subscription] PayApp checkout failed unexpectedly")
-            QMessageBox.critical(self, "오류", "결제 요청에 실패했습니다.\n잠시 후 다시 시도해주세요.")
+            show_error(self, "오류", "결제 요청에 실패했습니다.\n잠시 후 다시 시도해주세요.")
             self.payment_form.set_status("결제 요청 오류")
 
     def _cancel_payment(self):
@@ -1499,7 +1500,7 @@ class SubscriptionPanel(QWidget):
 
         if self.poll_tries >= config.CHECKOUT_POLL_MAX_TRIES:
             self._stop_poll()
-            QMessageBox.information(
+            show_info(
                 self, "타임아웃",
                 "결제 확인 시간이 초과되었습니다.\n"
                 "입금을 완료하셨다면 잠시 후 앱을 재시작하면 구독이 자동으로 반영됩니다.\n"
@@ -1545,13 +1546,13 @@ class SubscriptionPanel(QWidget):
 
         if status in ("paid", "success", "succeeded"):
             self._stop_poll()
-            QMessageBox.information(self, "완료", "결제가 완료되었습니다! 구독이 활성화됩니다.")
+            show_info(self, "완료", "결제가 완료되었습니다! 구독이 활성화됩니다.")
             self.payment_form.hide()
             self.plans_container.hide()
             self._verify_subscription_server()
         elif status in ("failed", "canceled", "cancelled"):
             self._stop_poll()
-            QMessageBox.warning(self, "실패", "결제가 실패/취소되었습니다.")
+            show_warning(self, "실패", "결제가 실패/취소되었습니다.")
             self.payment_form.set_status("결제 실패/취소")
 
     def _handle_poll_error(self):

@@ -18,6 +18,7 @@ from PyQt6.QtGui import QIcon
 
 from caller import rest, ui_controller
 from ui.login_Ui import Ui_LoginWindow
+from ui.components.custom_dialog import show_info, show_warning, show_error, show_question
 from utils.logging_config import get_logger
 from startup.constants import DEFAULT_PROCESS_PORT
 
@@ -191,14 +192,12 @@ class Login(QMainWindow, Ui_LoginWindow):
             elif res.get("status") == "EU003":
                 # 중복 로그인 감지 - 사용자 확인 후 강제 로그인
                 logger.info("Duplicate login detected (EU003).")
-                reply = QtWidgets.QMessageBox.question(
+                reply = show_question(
                     self,
                     "중복 로그인",
-                    "다른 곳에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 여기서 로그인하시겠습니까?",
-                    QtWidgets.QMessageBox.StandardButton.Yes | QtWidgets.QMessageBox.StandardButton.No,
-                    QtWidgets.QMessageBox.StandardButton.No
+                    "다른 곳에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 여기서 로그인하시겠습니까?"
                 )
-                if reply == QtWidgets.QMessageBox.StandardButton.Yes and not force:
+                if reply and not force:
                     self._loginCheck(force=True)
             else:
                 # Use friendly message converter
@@ -246,10 +245,7 @@ class Login(QMainWindow, Ui_LoginWindow):
         self.reg_dialog.show()
 
     def showCustomMessageBox(self, title, message):
-        msg = QtWidgets.QMessageBox(self)
-        msg.setWindowTitle(title)
-        msg.setText(message)
-        msg.exec()
+        show_warning(self, title, message)
 
     def _on_registration_requested(self, name, username, password, contact, email):
         logger.info(
