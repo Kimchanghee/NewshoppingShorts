@@ -173,7 +173,7 @@ class URLInputPanel(QWidget):
 
         self.gui.url_entry = QTextEdit()
         self.gui.url_entry.setFixedHeight(120)
-        self.gui.url_entry.setPlaceholderText("https://www.tiktok.com/@user/video/...\nhttps://smartstore.naver.com/...")
+        self.gui.url_entry.setPlaceholderText("https://v.douyin.com/xxxxx/\nhttps://smartstore.naver.com/...")
         self.gui.url_entry.setStyleSheet(self._get_input_style())
         single_layout.addWidget(self.gui.url_entry)
 

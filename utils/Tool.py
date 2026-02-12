@@ -23,17 +23,7 @@ ALLOWED_DOWNLOAD_DOMAINS: FrozenSet[str] = frozenset({
     'v3-web.douyinvod.com',
     'v9-web.douyinvod.com',
     'v26-web.douyinvod.com',
-    # TikTok domains
-    'vm.tiktok.com',
-    'vt.tiktok.com',
-    'www.tiktok.com',
-    'v16-webapp-prime.tiktok.com',
-    'v19-webapp-prime.tiktok.com',
-    # CDN domains
-    'tiktokcdn.com',
-    'tiktokcdn-us.com',
-    'musical.ly',
-    'muscdn.com',
+    # CDN domains (Douyin/ByteDance)
     'byteoversea.com',
     'ibytedtos.com',
 })

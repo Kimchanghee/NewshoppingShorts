@@ -185,7 +185,7 @@ class SessionSettings:
 
 @dataclass(frozen=True)
 class VideoDurationLimits:
-    """Video duration constraints for TikTok/Douyin short videos"""
+    """Video duration constraints for Douyin short videos"""
 
     MAX_VIDEO_DURATION_SECONDS: int = 35  # Maximum video duration
     MIN_VIDEO_DURATION_SECONDS: int = 10  # Minimum video duration

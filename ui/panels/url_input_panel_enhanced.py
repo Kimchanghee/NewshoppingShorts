@@ -66,7 +66,7 @@ class EnhancedURLInputPanel(QFrame, ThemedMixin):
 
         # Example hint
         self.example_label = create_label(
-            "예: https://www.tiktok.com/@username/video/...",
+            "예: https://v.douyin.com/xxxxx/",
             variant="tertiary"
         )
         self.main_layout.addWidget(self.example_label)
@@ -127,7 +127,7 @@ class EnhancedURLInputPanel(QFrame, ThemedMixin):
         self.gui.url_entry = QTextEdit()
         self.gui.url_entry.setFixedHeight(80)  # Increased from 60
         self.gui.url_entry.setPlaceholderText(
-            "URL을 입력하거나 붙여넣으세요...\n\n예: https://www.tiktok.com/@..."
+            "URL을 입력하거나 붙여넣으세요...\n\n예: https://v.douyin.com/xxxxx/"
         )
         self.main_layout.addWidget(self.gui.url_entry)
 

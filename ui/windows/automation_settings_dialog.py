@@ -4,9 +4,10 @@ Automation Settings Dialog
 """
 
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, 
-    QPushButton, QGroupBox, QMessageBox, QScrollArea, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit,
+    QPushButton, QGroupBox, QScrollArea, QWidget
 )
+from ui.components.custom_dialog import show_info, show_warning, show_error
 from PyQt6.QtCore import Qt
 from managers.settings_manager import get_settings_manager
 from managers.coupang_manager import get_coupang_manager
@@ -115,7 +116,7 @@ class AutomationSettingsDialog(QDialog):
         
         # Inpock cookies are saved via manual login, no manual token entry needed
         
-        QMessageBox.information(self, "저장 완료", "설정이 저장되었습니다.")
+        show_info(self, "저장 완료", "설정이 저장되었습니다.")
         self.accept()
 
     def test_coupang_connection(self):
@@ -127,24 +128,24 @@ class AutomationSettingsDialog(QDialog):
         
         manager = get_coupang_manager()
         if manager.check_connection():
-            QMessageBox.information(self, "성공", "쿠팡 파트너스 API 연동 성공!")
+            show_info(self, "성공", "쿠팡 파트너스 API 연동 성공!")
         else:
-            QMessageBox.warning(self, "실패", "API 연동 실패. 키를 확인해주세요.")
+            show_warning(self, "실패", "API 연동 실패. 키를 확인해주세요.")
 
     def open_1688_login(self):
         try:
             manager = get_sourcing_manager()
-            QMessageBox.information(self, "알림", "브라우저가 열리면 1688에 로그인해주세요.\n로그인이 완료되면 자동으로 인식합니다 (최대 5분 대기).")
+            show_info(self, "알림", "브라우저가 열리면 1688에 로그인해주세요.\n로그인이 완료되면 자동으로 인식합니다 (최대 5분 대기).")
             manager.login_manual()
-            QMessageBox.information(self, "완료", "로그인 쿠키가 저장되었습니다.")
+            show_info(self, "완료", "로그인 쿠키가 저장되었습니다.")
         except Exception as e:
-            QMessageBox.critical(self, "오류", f"로그인 프로세스 시작 실패: {e}")
+            show_error(self, "오류", f"로그인 프로세스 시작 실패: {e}")
 
     def open_inpock_login(self):
         try:
             manager = get_inpock_manager()
-            QMessageBox.information(self, "알림", "브라우저가 열리면 인포크링크에 로그인해주세요.\n로그인이 완료되면 자동으로 인식합니다 (최대 5분 대기).")
+            show_info(self, "알림", "브라우저가 열리면 인포크링크에 로그인해주세요.\n로그인이 완료되면 자동으로 인식합니다 (최대 5분 대기).")
             manager.login_manual()
-            QMessageBox.information(self, "완료", "로그인 쿠키가 저장되었습니다.")
+            show_info(self, "완료", "로그인 쿠키가 저장되었습니다.")
         except Exception as e:
-            QMessageBox.critical(self, "오류", f"로그인 프로세스 시작 실패: {e}")
+            show_error(self, "오류", f"로그인 프로세스 시작 실패: {e}")

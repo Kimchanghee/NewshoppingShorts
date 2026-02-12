@@ -54,7 +54,7 @@ class URLContentPanel(TabContent):
         card_layout = QVBoxLayout(card)
         card_layout.setContentsMargins(20, 20, 20, 20)
         
-        card_title = QLabel("틱톡 / 더우인 링크를 입력하세요")
+        card_title = QLabel("도우인(抖音) 영상 링크를 입력하세요")
         card_title.setStyleSheet(f"color: {self.get_color('text_primary')}; font-size: 14px; font-weight: bold; border: none;")
         card_layout.addWidget(card_title)
         
@@ -87,7 +87,7 @@ class URLContentPanel(TabContent):
         card_layout.addWidget(self.url_entry)
         
         # Example text
-        example = QLabel("예: https://v.douyin.com/xxxxx/ 또는 https://vm.tiktok.com/xxxxx/")
+        example = QLabel("예: https://v.douyin.com/xxxxx/")
         example.setStyleSheet(f"color: {self.get_color('text_disabled')}; font-size: 12px; border: none;")
         card_layout.addWidget(example)
         card_layout.addSpacing(16)

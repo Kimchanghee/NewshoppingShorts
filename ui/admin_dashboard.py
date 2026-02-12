@@ -935,7 +935,8 @@ class AdminDashboard(QMainWindow):
         logs = data.get("logs", [])
 
         if not logs:
-            QMessageBox.information(self, "활동 로그", f"'{username}' 사용자의 최근 24시간 활동 로그가 없습니다.")
+            msg = _styled_msg_box(self, "활동 로그", f"'{username}' 사용자의 최근 24시간 활동 로그가 없습니다.", "info")
+            msg.exec()
             return
 
         dialog = QDialog(self)
