@@ -15,19 +15,20 @@ from ui.theme_manager import get_theme_manager
 
 
 def _build_colors():
-    """Build shared color palette from theme manager."""
+    """Build shared color palette from theme manager (dark theme matching main app)."""
     tm = get_theme_manager()
     return {
-        "bg": "#FFFFFF",
+        "bg": tm.get_color("bg_card"),
+        "bg_outer": tm.get_color("bg_main"),
         "primary": tm.get_color("primary"),
         "gradient_start": tm.get_color("gradient_start"),
         "gradient_end": tm.get_color("gradient_end"),
-        "text_primary": "#111827",
-        "text_secondary": "#6B7280",
-        "border": "#E5E7EB",
-        "surface": "#F9FAFB",
-        "progress_bg": "#F3F4F6",
-        "success": "#10B981",
+        "text_primary": tm.get_color("text_primary"),
+        "text_secondary": tm.get_color("text_secondary"),
+        "border": tm.get_color("border_light"),
+        "surface": tm.get_color("bg_input"),
+        "progress_bg": tm.get_color("progress_bg"),
+        "success": tm.get_color("success"),
     }
 
 
