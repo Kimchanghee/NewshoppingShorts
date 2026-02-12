@@ -414,21 +414,18 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.38/SSMaker_Setup_v1.3.38.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.39/SSMaker_Setup_v1.3.39.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.38",
+    "version": "1.3.39",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.38 변경사항
-- ipsum.txt 시작 오류 완전 수정 (PyInstaller setuptools/jaraco 번들링)
-- 모드 선택 아이콘 깨짐 수정 (Segoe UI Emoji 폰트 적용)
-- Admin 빌드 단계 제거 (prepare_build.py 정리)
-- 세션 체크 IP 누락 수정 (user_api_client.py)""",
+    "release_notes": """### v1.3.39 변경사항
+- 업데이트 후 메인 화면 안열리는 버그 수정 (quitOnLastWindowClosed 타이밍 이슈)""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "17151d05ca75c0e035278e377535bc16556a6b1fd11dcc4c8d3369ba923e3f38",
+    "file_hash": "PLACEHOLDER",
 }
 
 
