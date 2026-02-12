@@ -223,4 +223,4 @@ coll = COLLECT(
 #       /sha1 <CERT_THUMBPRINT> dist\ssmaker\ssmaker.exe
 #
 # Then build the installer:
-#   iscc /DMyAppVersion=1.3.33 /DSignToolAvailable installer.iss
+#   iscc /DMyAppVersion=1.3.34 /DSignToolAvailable installer.iss
