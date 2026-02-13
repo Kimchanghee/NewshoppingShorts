@@ -425,7 +425,7 @@ APP_VERSION_INFO = {
 - 업데이트 후 메인 화면 안열리는 버그 수정 (quitOnLastWindowClosed 타이밍 이슈)""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "PLACEHOLDER",
+    "file_hash": "6b989f62dcb44001e071f550c18a7864aa2ba1c8604d12ccb871543d6627e84d",
 }
 
 
