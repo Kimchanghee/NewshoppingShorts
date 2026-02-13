@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 import os
-from PyInstaller.utils.hooks import collect_all, copy_metadata, collect_submodules
+from PyInstaller.utils.hooks import collect_all, copy_metadata, collect_submodules, collect_data_files
 
 block_cipher = None
 project_root = os.path.abspath('.')
@@ -41,8 +41,6 @@ packages_to_collect = [
     'selenium',
     'webdriver_manager',
     'bs4',
-    # pkg_resources runtime hook requires jaraco.text data files
-    'jaraco',
 ]
 
 hidden_imports = [
@@ -60,6 +58,12 @@ datas = [
     ('resource', 'resource'),
     ('version.json', '.'),
 ]
+
+
+def append_data_unique(data_list, src, dst):
+    item = (src, dst)
+    if item not in data_list:
+        data_list.append(item)
 
 # Bundle .env file for GLM-OCR API key (if present at build time)
 # Bundle .env file was previously included here, but is now excluded for security.
@@ -118,9 +122,51 @@ for package in packages_to_collect:
     binaries += tmp_ret[1]
     hidden_imports += tmp_ret[2]
 
+# pkg_resources runtime hook may require jaraco.text's "Lorem ipsum.txt".
+# On some environments, top-level `jaraco` is not installed, but setuptools
+# still vendors this file under `setuptools._vendor.jaraco.text`.
+for jaraco_pkg in ("setuptools._vendor.jaraco.text", "jaraco.text"):
+    try:
+        jaraco_datas = collect_data_files(jaraco_pkg, includes=["**/Lorem ipsum.txt"])
+    except Exception as e:
+        print(f"[spec] WARNING: collect_data_files('{jaraco_pkg}') failed: {e!r}")
+        continue
+    if jaraco_datas:
+        for src, dst in jaraco_datas:
+            append_data_unique(datas, src, dst)
+        print(f"[spec] Included jaraco text data from {jaraco_pkg}: {len(jaraco_datas)} file(s)")
+
+# Normalize jaraco resource placement for runtime compatibility:
+# include the same Lorem file under both possible lookup paths.
+_jaraco_lorem_sources = []
+for src_path, dst_path in datas:
+    if src_path.lower().endswith("lorem ipsum.txt"):
+        if "jaraco\\text" in dst_path.replace("/", "\\").lower():
+            _jaraco_lorem_sources.append(src_path)
+for src_path in set(_jaraco_lorem_sources):
+    append_data_unique(datas, src_path, os.path.join("jaraco", "text"))
+    append_data_unique(datas, src_path, os.path.join("setuptools", "_vendor", "jaraco", "text"))
+if _jaraco_lorem_sources:
+    print("[spec] Ensured jaraco Lorem resource under both jaraco/text and setuptools/_vendor/jaraco/text")
+
 # Some packages are imported dynamically at runtime (lazy imports) and might be missed by Analysis.
 # Force-include their submodules so end-users do not see ModuleNotFoundError.
-for mod_name in ("selenium", "webdriver_manager", "bs4", "pydub", "edge_tts", "av", "psutil", "jwt", "colorama", "dotenv", "cryptography"):
+for mod_name in (
+    "selenium",
+    "webdriver_manager",
+    "bs4",
+    "pydub",
+    "edge_tts",
+    "av",
+    "psutil",
+    "jwt",
+    "colorama",
+    "dotenv",
+    "cryptography",
+    "setuptools._vendor.jaraco.text",
+    "setuptools._vendor.jaraco.context",
+    "setuptools._vendor.jaraco.functools",
+):
     try:
         hidden_imports += collect_submodules(mod_name)
     except Exception as e:

@@ -17,6 +17,23 @@ logger = get_logger(__name__)
 class SettingsManager:
     """Manages persistent storage of UI preferences (thread-safe)"""
 
+    DEFAULT_PLATFORM_PROMPTS = {
+        "youtube": {
+            "title_prompt": (
+                "상품명, 핵심 기능, 타깃 고객을 반영해 유튜브 쇼츠 제목 1개를 작성하세요. "
+                "30자 내외로 짧고 클릭을 유도하되 허위·과장은 금지합니다."
+            ),
+            "description_prompt": (
+                "아래 상품 정보를 바탕으로 유튜브 게시글을 작성하세요. "
+                "1) 한 줄 요약 2) 핵심 장점 2개 3) 구매 유도 CTA 1개 순서로 3~4문장 구성."
+            ),
+            "hashtag_prompt": (
+                "상품 카테고리, 사용 상황, 타깃 키워드를 반영한 해시태그를 8~10개 작성하세요. "
+                "#을 포함하고 중복 없이 작성합니다."
+            ),
+        },
+    }
+
     DEFAULT_SETTINGS = {
         "cta_id": "default",
         "font_id": "seoul_hangang",
@@ -548,10 +565,15 @@ class SettingsManager:
 
     def get_platform_prompts(self, platform: str) -> Dict[str, str]:
         """Get upload prompts for a platform (title, description, hashtag)"""
+        defaults = self.DEFAULT_PLATFORM_PROMPTS.get(platform, {})
+        title_prompt = self._settings.get(f"{platform}_title_prompt", "")
+        description_prompt = self._settings.get(f"{platform}_description_prompt", "")
+        hashtag_prompt = self._settings.get(f"{platform}_hashtag_prompt", "")
+
         return {
-            "title_prompt": self._settings.get(f"{platform}_title_prompt", ""),
-            "description_prompt": self._settings.get(f"{platform}_description_prompt", ""),
-            "hashtag_prompt": self._settings.get(f"{platform}_hashtag_prompt", ""),
+            "title_prompt": str(title_prompt).strip() or defaults.get("title_prompt", ""),
+            "description_prompt": str(description_prompt).strip() or defaults.get("description_prompt", ""),
+            "hashtag_prompt": str(hashtag_prompt).strip() or defaults.get("hashtag_prompt", ""),
         }
 
     def set_platform_prompts(self, platform: str, title_prompt: str = "",

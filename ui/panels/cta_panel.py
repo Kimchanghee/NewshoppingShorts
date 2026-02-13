@@ -46,7 +46,10 @@ class CTACard(QFrame, ThemedMixin):
         header = QHBoxLayout()
         icon_text = "📍" if self.option["id"] == "default" else "📝" if self.option["id"] == "option1" else "🔥"
         self.title_label = QLabel(f"{icon_text} {self.option['name']}")
-        self.title_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: 14px; color: #FFFFFF;")
+        self.title_label.setStyleSheet(
+            f"font-weight: {ds.typography.weight_bold}; font-size: 14px; color: #FFFFFF; "
+            "background-color: transparent; border: none;"
+        )
         header.addWidget(self.title_label)
         header.addStretch()
         layout.addLayout(header)
@@ -59,14 +62,16 @@ class CTACard(QFrame, ThemedMixin):
         
         for line in self.option["lines"]:
             lbl = QLabel(line)
-            lbl.setStyleSheet(f"font-size: 12px; color: #FFFFFF;")
+            lbl.setStyleSheet("font-size: 12px; color: #FFFFFF; background-color: transparent; border: none;")
             preview_layout.addWidget(lbl)
             
         layout.addWidget(self.preview_box)
         
         # Description
         self.desc_label = QLabel(self.option["description"])
-        self.desc_label.setStyleSheet(f"font-size: 12px; color: #B8B8B8;")
+        self.desc_label.setStyleSheet(
+            "font-size: 12px; color: #B8B8B8; background-color: transparent; border: none;"
+        )
         self.desc_label.setWordWrap(True)
         layout.addWidget(self.desc_label)
 
@@ -86,6 +91,10 @@ class CTACard(QFrame, ThemedMixin):
                 border: {thickness}px solid {border};
                 border-radius: {ds.radius.base}px;
             }}
+            CTACard QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
         """)
         
         # No background on preview box - transparent
@@ -101,8 +110,13 @@ class CTACard(QFrame, ThemedMixin):
         
         primary_color = get_color('primary')
         text_primary = get_color('text_primary')
-        self.title_label.setStyleSheet(f"color: {primary_color if self.is_selected else '#FFFFFF'}; border: none; font-weight: {ds.typography.weight_bold}; font-size: 14px;")
-        self.desc_label.setStyleSheet(f"color: #B8B8B8; border: none; font-size: 12px;")
+        self.title_label.setStyleSheet(
+            f"color: {primary_color if self.is_selected else '#FFFFFF'}; border: none; "
+            f"font-weight: {ds.typography.weight_bold}; font-size: 14px; background-color: transparent;"
+        )
+        self.desc_label.setStyleSheet(
+            "color: #B8B8B8; border: none; font-size: 12px; background-color: transparent;"
+        )
 
 class CTAPanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):
@@ -122,7 +136,10 @@ class CTAPanel(QFrame, ThemedMixin):
         # Header
         header = QHBoxLayout()
         title = QLabel("CTA 선택")
-        title.setStyleSheet(f"font-size: 16px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
+        title.setStyleSheet(
+            f"font-size: 16px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF; "
+            "background-color: transparent; border: none;"
+        )
         header.addWidget(title)
         
         header.addStretch()
@@ -143,6 +160,19 @@ class CTAPanel(QFrame, ThemedMixin):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {get_color('surface')};
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: {get_color('surface')};
+            }}
+            QScrollArea QWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
         
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout(self.grid_widget)
@@ -181,8 +211,7 @@ class CTAPanel(QFrame, ThemedMixin):
         ds = self.ds
         bg = get_color('surface')
         self.setStyleSheet(f"background-color: {bg}; border: none;")
-        self.scroll.setStyleSheet(f"background-color: {bg};")
-        self.grid_widget.setStyleSheet(f"background-color: {bg};")
+        self.grid_widget.setStyleSheet("background-color: transparent; border: none;")
 
 def get_selected_cta_lines(gui) -> list:
     selected_id = getattr(gui, 'selected_cta_id', 'default')

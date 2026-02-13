@@ -9,8 +9,8 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QLineEdit, QPushButton, QScrollArea, QFileDialog
 )
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtGui import QFont, QDesktopServices
 from ui.design_system_v2 import get_design_system
 from ui.components.base_widget import ThemedMixin
 from utils.secrets_manager import SecretsManager
@@ -492,6 +492,34 @@ class SettingsTab(QWidget, ThemedMixin):
 
         content_layout.addWidget(sub_section)
 
+        # =================== SECTION: Contact ===================
+        contact_section = SettingsSection("문의하기")
+
+        contact_desc = QLabel("이용 중 불편사항이나 문의가 있으시면 카카오 오픈채팅으로 연락주세요.")
+        contact_desc.setWordWrap(True)
+        contact_desc.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        contact_section.content_layout.addWidget(contact_desc)
+
+        self.contact_btn = QPushButton("문의하기")
+        self.contact_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.contact_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #FACC15;
+                color: #111827;
+                padding: 12px 24px;
+                border-radius: {ds.radius.sm}px;
+                font-weight: bold;
+                font-size: {ds.typography.size_sm}px;
+            }}
+            QPushButton:hover {{
+                background-color: #EAB308;
+            }}
+        """)
+        self.contact_btn.clicked.connect(self._open_contact_link)
+        contact_section.content_layout.addWidget(self.contact_btn)
+
+        content_layout.addWidget(contact_section)
+
         # Spacer
         content_layout.addStretch()
         
@@ -785,6 +813,10 @@ class SettingsTab(QWidget, ThemedMixin):
         """구독 관리 페이지로 이동"""
         if self.gui and hasattr(self.gui, '_on_step_selected'):
             self.gui._on_step_selected("subscription")
+
+    def _open_contact_link(self):
+        """Open Kakao inquiry link."""
+        QDesktopServices.openUrl(QUrl("https://open.kakao.com/o/sVkZPsfi"))
 
     def showEvent(self, event):
         super().showEvent(event)

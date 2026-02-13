@@ -11,6 +11,9 @@ Handles:
 
 import json
 import os
+import shutil
+import stat
+import subprocess
 import threading
 import time
 from datetime import datetime
@@ -103,17 +106,24 @@ class YouTubeManager:
 
     # ============ Settings Persistence ============
 
-    def _get_settings_path(self) -> str:
-        """Get full path to settings file"""
+    def _get_app_base_dir(self) -> str:
+        """Get base directory for app runtime files."""
         try:
             import sys
             if getattr(sys, 'frozen', False):
-                base_dir = os.path.dirname(sys.executable)
-            else:
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                return os.path.dirname(sys.executable)
+            return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         except Exception as e:
-            logger.debug(f"[YouTube] 기본 경로 감지 실패, cwd 사용: {e}")
-            base_dir = os.getcwd()
+            logger.debug(f"[YouTube] 앱 기본 경로 감지 실패, cwd 사용: {e}")
+            return os.getcwd()
+
+    def _get_credentials_dir(self) -> str:
+        """Get protected credentials directory under app base folder."""
+        return os.path.join(self._get_app_base_dir(), ".ssmaker_credentials", "youtube")
+
+    def _get_settings_path(self) -> str:
+        """Get full path to settings file"""
+        base_dir = self._get_app_base_dir()
         return os.path.join(base_dir, self.settings_file)
 
     def _load_settings(self) -> None:
@@ -243,6 +253,14 @@ class YouTubeManager:
                         client_secrets_file = self._get_client_secrets_path()
 
                     if not os.path.exists(client_secrets_file):
+                        legacy_secrets_path = self._get_legacy_client_secrets_path()
+                        if os.path.exists(legacy_secrets_path):
+                            try:
+                                client_secrets_file = self.install_client_secrets(legacy_secrets_path)
+                            except Exception as migrate_error:
+                                logger.debug(f"[YouTube] 레거시 OAuth 파일 마이그레이션 실패: {migrate_error}")
+
+                    if not os.path.exists(client_secrets_file):
                         logger.warning("[YouTube] OAuth 클라이언트 설정 파일이 없습니다.")
                         return False
 
@@ -298,29 +316,75 @@ class YouTubeManager:
 
     def _get_token_path(self) -> str:
         """Get OAuth token file path"""
-        try:
-            import sys
-            if getattr(sys, 'frozen', False):
-                base_dir = os.path.dirname(sys.executable)
-            else:
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        except Exception as e:
-            logger.debug(f"[YouTube] 토큰 경로 감지 실패, cwd 사용: {e}")
-            base_dir = os.getcwd()
+        base_dir = self._get_app_base_dir()
         return os.path.join(base_dir, "youtube_token.json")
 
     def _get_client_secrets_path(self) -> str:
         """Get OAuth client secrets file path"""
+        return os.path.join(self._get_credentials_dir(), "client_secrets.json")
+
+    def _get_legacy_client_secrets_path(self) -> str:
+        """Get old client_secrets.json location in app root."""
+        return os.path.join(self._get_app_base_dir(), "client_secrets.json")
+
+    def _protect_credentials_file(self, path: str) -> None:
+        """Apply basic protection flags to credentials file."""
         try:
-            import sys
-            if getattr(sys, 'frozen', False):
-                base_dir = os.path.dirname(sys.executable)
-            else:
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            os.chmod(path, stat.S_IREAD)
         except Exception as e:
-            logger.debug(f"[YouTube] 클라이언트 시크릿 경로 감지 실패, cwd 사용: {e}")
-            base_dir = os.getcwd()
-        return os.path.join(base_dir, "client_secrets.json")
+            logger.debug(f"[YouTube] OAuth 파일 읽기 전용 설정 실패: {e}")
+
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["attrib", "+H", "+R", path],
+                    check=False,
+                    capture_output=True,
+                    text=True
+                )
+                subprocess.run(
+                    ["attrib", "+H", os.path.dirname(path)],
+                    check=False,
+                    capture_output=True,
+                    text=True
+                )
+            except Exception as e:
+                logger.debug(f"[YouTube] OAuth 파일 hidden/readonly 속성 설정 실패: {e}")
+
+    def install_client_secrets(self, source_path: str) -> str:
+        """
+        Copy OAuth client secrets file into protected app credentials directory.
+
+        Args:
+            source_path: User-selected source json file path.
+
+        Returns:
+            Destination path used by YouTube OAuth flow.
+
+        Raises:
+            FileNotFoundError: source file missing.
+            OSError: copy/protection failed.
+        """
+        if not source_path or not os.path.exists(source_path):
+            raise FileNotFoundError("OAuth JSON 파일을 찾을 수 없습니다.")
+
+        destination = self._get_client_secrets_path()
+        os.makedirs(os.path.dirname(destination), exist_ok=True)
+
+        source_abs = os.path.abspath(source_path)
+        destination_abs = os.path.abspath(destination)
+
+        if source_abs != destination_abs:
+            if os.path.exists(destination_abs):
+                try:
+                    os.chmod(destination_abs, stat.S_IREAD | stat.S_IWRITE)
+                except Exception:
+                    pass
+            shutil.copy2(source_abs, destination_abs)
+
+        self._protect_credentials_file(destination_abs)
+        logger.info(f"[YouTube] OAuth JSON 설치 완료: {destination_abs}")
+        return destination_abs
 
     def _fetch_channel_info(self) -> None:
         """Fetch connected channel information"""

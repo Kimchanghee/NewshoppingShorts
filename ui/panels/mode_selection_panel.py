@@ -4,10 +4,10 @@ Mode Selection Panel for PyQt6
 """
 from typing import Optional, Dict
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QWidget
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QWidget, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
-from PyQt6.QtGui import QFont
+from PyQt6.QtGui import QFont, QFontMetricsF
 from ui.design_system_v2 import get_design_system, get_color
 
 
@@ -42,12 +42,25 @@ class ModeCard(QFrame):
 
         # Icon + Title row
         header_layout = QVBoxLayout()
-        header_layout.setSpacing(ds.spacing.space_3)
+        header_layout.setSpacing(max(ds.spacing.space_3, 12))
 
         # Icon (large)
-        self.icon_label = QLabel(icon)
-        self.icon_label.setFont(QFont("Segoe UI Emoji", 48))
-        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # NOTE:
+        # Emoji glyphs can be clipped at startup on some DPI/font fallback paths.
+        # Reserve explicit vertical space and strip variation selector to stabilize metrics.
+        normalized_icon = (icon or "").replace("\ufe0f", "")
+        self.icon_label = QLabel(normalized_icon)
+        icon_font = QFont("Segoe UI Emoji", 32)
+        self.icon_label.setFont(icon_font)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
+        self.icon_label.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed
+        )
+        self.icon_label.setContentsMargins(0, 4, 0, 0)
+        # Emoji rendering on Windows is larger than font metrics report.
+        # Use a generous fixed height to prevent overlap with title.
+        self.icon_label.setFixedHeight(60)
         header_layout.addWidget(self.icon_label)
 
         # Title
@@ -58,6 +71,7 @@ class ModeCard(QFrame):
             QFont.Weight.Bold
         ))
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.title_label.setContentsMargins(0, 2, 0, 0)
         header_layout.addWidget(self.title_label)
 
         # Subtitle

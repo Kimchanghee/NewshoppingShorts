@@ -8,12 +8,13 @@ hashtags), and YouTube-specific comment auto-upload settings.
 from typing import Optional, Dict, TYPE_CHECKING
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QSizePolicy
+    QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog,
+    QStackedWidget
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from ui.design_system_v2 import get_design_system, get_color
+from ui.design_system_v2 import get_design_system
 from ui.components.base_widget import ThemedMixin
 from ui.components.social_auth_card import SocialAuthCard, PLATFORM_CONFIG
 from managers.settings_manager import get_settings_manager
@@ -99,8 +100,30 @@ class PromptInputGroup(QFrame):
             input_style, max_height=60
         )
 
-        # Save button
+        # Action buttons
         btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        self.default_btn = QPushButton("기본 프롬프트 불러오기")
+        self.default_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.default_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_secondary};
+                padding: 8px 14px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                font-weight: 600;
+                font-size: 12px;
+            }}
+            QPushButton:hover {{
+                background-color: {c.surface};
+                color: {c.text_primary};
+            }}
+        """)
+        self.default_btn.clicked.connect(self._apply_default_prompts)
+        btn_row.addWidget(self.default_btn)
+
         btn_row.addStretch()
 
         self.save_btn = QPushButton("프롬프트 저장")
@@ -146,9 +169,42 @@ class PromptInputGroup(QFrame):
     def _load_prompts(self):
         """Load saved prompts from settings."""
         prompts = self.settings.get_platform_prompts(self.platform_id)
-        self.title_prompt.setPlainText(prompts.get("title_prompt", ""))
-        self.description_prompt.setPlainText(prompts.get("description_prompt", ""))
-        self.hashtag_prompt.setPlainText(prompts.get("hashtag_prompt", ""))
+        defaults = self._get_default_prompts()
+        self.title_prompt.setPlainText(prompts.get("title_prompt", "") or defaults.get("title_prompt", ""))
+        self.description_prompt.setPlainText(prompts.get("description_prompt", "") or defaults.get("description_prompt", ""))
+        self.hashtag_prompt.setPlainText(prompts.get("hashtag_prompt", "") or defaults.get("hashtag_prompt", ""))
+
+    def _get_default_prompts(self) -> Dict[str, str]:
+        """Get platform-specific default prompt templates."""
+        defaults = dict(self.settings.DEFAULT_PLATFORM_PROMPTS.get(self.platform_id, {}))
+        if defaults:
+            return defaults
+
+        platform_name = PLATFORM_CONFIG.get(self.platform_id, {}).get("name", self.platform_id.title())
+        return {
+            "title_prompt": (
+                f"{platform_name}용 짧은 영상 제목 1개를 작성하세요. "
+                "상품명과 핵심 장점을 반영하고 클릭을 유도하되 과장 표현은 피하세요."
+            ),
+            "description_prompt": (
+                f"{platform_name} 게시글용 설명을 작성하세요. "
+                "한 줄 요약, 핵심 포인트 2개, 행동 유도 문구(CTA) 1개를 포함하세요."
+            ),
+            "hashtag_prompt": (
+                f"{platform_name}에 맞는 해시태그를 8~10개 생성하세요. "
+                "상품 카테고리, 사용 상황, 타깃 키워드를 반영하고 중복은 제외하세요."
+            ),
+        }
+
+    def _apply_default_prompts(self):
+        """Fill editors with default templates (does not auto-save)."""
+        from ui.components.custom_dialog import show_info
+
+        defaults = self._get_default_prompts()
+        self.title_prompt.setPlainText(defaults.get("title_prompt", ""))
+        self.description_prompt.setPlainText(defaults.get("description_prompt", ""))
+        self.hashtag_prompt.setPlainText(defaults.get("hashtag_prompt", ""))
+        show_info(self, "기본 프롬프트 적용", "기본 프롬프트를 불러왔습니다. 필요하면 수정 후 저장하세요.")
 
     def _save_prompts(self):
         """Save prompts to settings."""
@@ -195,6 +251,8 @@ class YouTubeCommentSection(QFrame):
             QCheckBox {{
                 color: {c.text_primary};
                 spacing: 8px;
+                background-color: transparent;
+                border: none;
             }}
             QCheckBox::indicator {{
                 width: 18px;
@@ -327,6 +385,8 @@ class YouTubeUploadSettingsSection(QFrame):
             QCheckBox {{
                 color: {c.text_primary};
                 spacing: 8px;
+                background-color: transparent;
+                border: none;
             }}
             QCheckBox::indicator {{
                 width: 18px;
@@ -487,6 +547,78 @@ class PlatformComingSoonCard(QFrame):
         layout.addWidget(badge)
 
 
+class UploadWorkflowSection(QFrame):
+    """Step-based section wrapper for clearer upload workflow."""
+
+    def __init__(self, step: str, title: str, description: str, parent: Optional[QWidget] = None):
+        super().__init__(parent)
+        self.ds = get_design_system()
+        self._setup_ui(step, title, description)
+
+    def _setup_ui(self, step: str, title: str, description: str):
+        ds = self.ds
+        c = ds.colors
+
+        self.setStyleSheet(f"""
+            UploadWorkflowSection {{
+                background-color: {c.surface};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+            UploadWorkflowSection QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        header_row = QHBoxLayout()
+        header_row.setSpacing(8)
+
+        step_badge = QLabel(step)
+        step_badge.setFont(QFont(ds.typography.font_family_primary, 10, QFont.Weight.Bold))
+        step_badge.setStyleSheet(f"""
+            background-color: {c.primary_light};
+            color: {c.primary};
+            border: 1px solid {c.primary};
+            border-radius: 10px;
+            padding: 2px 8px;
+        """)
+        header_row.addWidget(step_badge, 0, Qt.AlignmentFlag.AlignTop)
+
+        title_desc_wrap = QWidget(self)
+        title_desc_wrap.setStyleSheet("background-color: transparent; border: none;")
+        title_desc_layout = QVBoxLayout(title_desc_wrap)
+        title_desc_layout.setContentsMargins(0, 0, 0, 0)
+        title_desc_layout.setSpacing(2)
+
+        title_label = QLabel(title)
+        title_label.setFont(QFont(ds.typography.font_family_primary, 13, QFont.Weight.Bold))
+        title_label.setStyleSheet(f"color: {c.text_primary}; background-color: transparent; border: none;")
+        title_desc_layout.addWidget(title_label)
+
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        desc_label.setFont(QFont(ds.typography.font_family_primary, 10))
+        desc_label.setStyleSheet(f"color: {c.text_muted}; background-color: transparent; border: none;")
+        title_desc_layout.addWidget(desc_label)
+
+        header_row.addWidget(title_desc_wrap, 1)
+        layout.addLayout(header_row)
+
+        self.content_layout = QVBoxLayout()
+        self.content_layout.setContentsMargins(0, 0, 0, 0)
+        self.content_layout.setSpacing(10)
+        layout.addLayout(self.content_layout)
+
+    def add_widget(self, widget: QWidget):
+        """Append a widget inside the section body."""
+        self.content_layout.addWidget(widget)
+
+
 class UploadPanel(QFrame, ThemedMixin):
     """Social media upload settings panel.
 
@@ -514,75 +646,442 @@ class UploadPanel(QFrame, ThemedMixin):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet(f"background-color: {c.background}; border: none;")
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: transparent;
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: transparent;
+            }}
+            QScrollArea QWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
 
         content = QWidget()
+        content.setStyleSheet("background-color: transparent; border: none;")
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
-        content_layout.setSpacing(16)
+        content_layout.setContentsMargins(12, 10, 12, 10)
+        content_layout.setSpacing(14)
 
-        # ─── YouTube Section ────────────────────────────────────────
-        yt_header = QLabel("유튜브")
-        yt_header.setFont(QFont(ds.typography.font_family_primary, 15, QFont.Weight.Bold))
-        yt_header.setStyleSheet(f"color: {c.text_primary}; border: none; background: transparent;")
-        content_layout.addWidget(yt_header)
+        content_layout.addWidget(self._create_intro_card(content))
 
-        # YouTube channel connection card
-        yt_connected = self.settings.get_youtube_connected()
-        yt_channel = self.settings.get_youtube_channel_info()
-        self.youtube_card = SocialAuthCard(
-            platform_id="youtube",
-            is_connected=yt_connected,
-            channel_info={"name": yt_channel.get("channel_name", "")},
-            coming_soon=False,
-            parent=content
-        )
-        self.youtube_card.connect_clicked.connect(self._connect_youtube)
-        self.youtube_card.disconnect_clicked.connect(self._disconnect_youtube)
-        content_layout.addWidget(self.youtube_card)
+        main_body = QWidget(content)
+        main_body.setStyleSheet("background-color: transparent; border: none;")
+        body_layout = QHBoxLayout(main_body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(12)
 
-        # YouTube upload prompts (only visible when connected)
-        self._yt_settings_container = QWidget()
-        yt_settings_layout = QVBoxLayout(self._yt_settings_container)
-        yt_settings_layout.setContentsMargins(0, 0, 0, 0)
-        yt_settings_layout.setSpacing(12)
+        self._channel_tabs: Dict[str, QPushButton] = {}
+        self._channel_index: Dict[str, int] = {}
+        self._active_channel: str = "youtube"
+        self._platform_order = ["youtube", "tiktok", "instagram", "threads", "x"]
+        body_layout.addWidget(self._create_channel_sidebar(main_body))
 
-        # Upload interval settings
-        self._yt_upload_settings = YouTubeUploadSettingsSection(self.gui, parent=content)
-        yt_settings_layout.addWidget(self._yt_upload_settings)
+        self._channel_stack = QStackedWidget(main_body)
+        self._channel_stack.setStyleSheet("background-color: transparent; border: none;")
 
-        # Upload prompts
-        self._yt_prompts = PromptInputGroup("youtube", parent=content)
-        yt_settings_layout.addWidget(self._yt_prompts)
+        stack_card = QFrame(main_body)
+        stack_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+            QFrame QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+        stack_layout = QVBoxLayout(stack_card)
+        stack_layout.setContentsMargins(12, 12, 12, 12)
+        stack_layout.setSpacing(0)
+        stack_layout.addWidget(self._channel_stack)
 
-        # Comment settings
-        self._yt_comment = YouTubeCommentSection(parent=content)
-        yt_settings_layout.addWidget(self._yt_comment)
+        # YouTube page
+        yt_page = self._build_youtube_channel_page(parent=content)
+        self._channel_index["youtube"] = self._channel_stack.count()
+        self._channel_stack.addWidget(yt_page)
 
-        content_layout.addWidget(self._yt_settings_container)
-        self._yt_settings_container.setVisible(yt_connected)
-
-        # Separator
-        sep = QFrame()
-        sep.setFrameShape(QFrame.Shape.HLine)
-        sep.setFixedHeight(1)
-        sep.setStyleSheet(f"background-color: {c.border_light};")
-        content_layout.addWidget(sep)
-
-        # ─── Other Platforms (Coming Soon) ──────────────────────────
-        other_header = QLabel("기타 플랫폼")
-        other_header.setFont(QFont(ds.typography.font_family_primary, 14, QFont.Weight.Bold))
-        other_header.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
-        content_layout.addWidget(other_header)
-
+        # Other platform pages
         for platform_id in ["tiktok", "instagram", "threads", "x"]:
-            card = PlatformComingSoonCard(platform_id, parent=content)
-            content_layout.addWidget(card)
+            page = self._build_generic_channel_page(platform_id=platform_id, parent=content)
+            self._channel_index[platform_id] = self._channel_stack.count()
+            self._channel_stack.addWidget(page)
+
+        body_layout.addWidget(stack_card, 1)
+        content_layout.addWidget(main_body, 1)
 
         content_layout.addStretch()
 
         scroll.setWidget(content)
         main_layout.addWidget(scroll)
+        self._refresh_channel_tab_labels()
+        self._set_active_channel("youtube")
+
+    def _create_intro_card(self, parent: Optional[QWidget] = None) -> QFrame:
+        """Top summary card explaining workflow and channel switching."""
+        ds = self.ds
+        c = ds.colors
+
+        card = QFrame(parent)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+            QFrame QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(8)
+
+        title = QLabel("소셜 미디어 업로드 설정")
+        title.setFont(QFont(ds.typography.font_family_primary, 15, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {c.text_primary}; background-color: transparent; border: none;")
+        layout.addWidget(title)
+
+        subtitle = QLabel("왼쪽에서 채널을 고르고, 오른쪽에서 연결 → 자동 업로드 → 프롬프트 순서로 설정하세요.")
+        subtitle.setWordWrap(True)
+        subtitle.setFont(QFont(ds.typography.font_family_primary, 11))
+        subtitle.setStyleSheet(f"color: {c.text_muted}; background-color: transparent; border: none;")
+        layout.addWidget(subtitle)
+
+        flow_row = QHBoxLayout()
+        flow_row.setContentsMargins(0, 2, 0, 0)
+        flow_row.setSpacing(8)
+        flow_steps = [
+            ("1", "채널 연결"),
+            ("2", "자동 업로드"),
+            ("3", "프롬프트 저장"),
+        ]
+        for num, text in flow_steps:
+            pill = QLabel(f"{num}. {text}")
+            pill.setFont(QFont(ds.typography.font_family_primary, 10, QFont.Weight.Bold))
+            pill.setStyleSheet(f"""
+                background-color: {c.surface_variant};
+                color: {c.text_secondary};
+                border: 1px solid {c.border_light};
+                border-radius: 12px;
+                padding: 3px 10px;
+            """)
+            flow_row.addWidget(pill)
+        flow_row.addStretch()
+        layout.addLayout(flow_row)
+
+        return card
+
+    def _create_channel_sidebar(self, parent: Optional[QWidget] = None) -> QFrame:
+        """Create channel selection sidebar for clearer separation."""
+        ds = self.ds
+        c = ds.colors
+
+        sidebar = QFrame(parent)
+        sidebar.setFixedWidth(210)
+        sidebar.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+            QFrame QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+
+        layout = QVBoxLayout(sidebar)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(10)
+
+        title = QLabel("채널 목록")
+        title.setFont(QFont(ds.typography.font_family_primary, 13, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {c.text_primary};")
+        layout.addWidget(title)
+
+        helper = QLabel("채널을 클릭하면 해당 설정으로 즉시 전환됩니다.")
+        helper.setWordWrap(True)
+        helper.setFont(QFont(ds.typography.font_family_primary, 10))
+        helper.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(helper)
+
+        for platform_id in self._platform_order:
+            tab_btn = QPushButton()
+            tab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            tab_btn.setCheckable(True)
+            tab_btn.setMinimumHeight(58)
+            tab_btn.clicked.connect(lambda checked, pid=platform_id: self._set_active_channel(pid))
+            self._channel_tabs[platform_id] = tab_btn
+            layout.addWidget(tab_btn)
+
+        layout.addStretch()
+        return sidebar
+
+    def _create_channel_banner(self, platform_id: str, title: str, description: str, parent: Optional[QWidget] = None) -> QFrame:
+        """Create per-channel summary banner."""
+        ds = self.ds
+        c = ds.colors
+        platform_cfg = PLATFORM_CONFIG.get(platform_id, {})
+        platform_color = platform_cfg.get("color", c.primary)
+
+        banner = QFrame(parent)
+        banner.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+            QFrame QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+        layout = QVBoxLayout(banner)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(6)
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        icon = QLabel(platform_cfg.get("icon", "•"))
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setFixedSize(26, 26)
+        icon.setFont(QFont("Segoe UI Symbol", 13))
+        icon.setStyleSheet(f"""
+            background-color: {platform_color};
+            color: white;
+            border-radius: 6px;
+            border: none;
+        """)
+        header.addWidget(icon)
+
+        title_label = QLabel(title)
+        title_label.setFont(QFont(ds.typography.font_family_primary, 13, QFont.Weight.Bold))
+        title_label.setStyleSheet(f"color: {c.text_primary};")
+        header.addWidget(title_label)
+        header.addStretch()
+        layout.addLayout(header)
+
+        desc_label = QLabel(description)
+        desc_label.setWordWrap(True)
+        desc_label.setFont(QFont(ds.typography.font_family_primary, 10))
+        desc_label.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(desc_label)
+
+        return banner
+
+    def _build_youtube_channel_page(self, parent: Optional[QWidget] = None) -> QWidget:
+        """Build the YouTube settings page."""
+        yt_connected = self.settings.get_youtube_connected()
+        yt_channel = self.settings.get_youtube_channel_info()
+        c = self.ds.colors
+
+        page = QWidget(parent)
+        page.setStyleSheet("background-color: transparent; border: none;")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        layout.addWidget(
+            self._create_channel_banner(
+                "youtube",
+                "유튜브 채널 설정",
+                "채널 연결 후 자동 업로드와 프롬프트를 설정하면 상품별 게시글이 자동 생성됩니다.",
+                parent=page,
+            )
+        )
+
+        self._yt_connection_state = QLabel()
+        self._yt_connection_state.setWordWrap(True)
+        self._yt_connection_state.setFont(QFont(self.ds.typography.font_family_primary, 10, QFont.Weight.Medium))
+        self._yt_connection_state.setStyleSheet(
+            f"color: {c.text_secondary}; background-color: transparent; border: none; padding: 2px 0;"
+        )
+        layout.addWidget(self._yt_connection_state)
+
+        self.youtube_card = SocialAuthCard(
+            platform_id="youtube",
+            is_connected=yt_connected,
+            channel_info={"name": yt_channel.get("channel_name", "")},
+            coming_soon=False,
+            parent=page,
+        )
+        self.youtube_card.connect_clicked.connect(self._connect_youtube)
+        self.youtube_card.disconnect_clicked.connect(self._disconnect_youtube)
+        connect_section = UploadWorkflowSection(
+            "1단계",
+            "채널 연결",
+            "채널명을 입력할 필요 없이 OAuth JSON 파일만 업로드하면 자동으로 연결됩니다.",
+            parent=page,
+        )
+        connect_section.add_widget(self.youtube_card)
+        layout.addWidget(connect_section)
+
+        self._yt_upload_settings = YouTubeUploadSettingsSection(self.gui, parent=page)
+        upload_section = UploadWorkflowSection(
+            "2단계",
+            "자동 업로드 설정",
+            "업로드 간격과 자동 업로드 활성화 여부를 설정하세요.",
+            parent=page,
+        )
+        upload_section.add_widget(self._yt_upload_settings)
+        layout.addWidget(upload_section)
+
+        self._yt_prompts = PromptInputGroup("youtube", parent=page)
+        prompt_section = UploadWorkflowSection(
+            "3단계",
+            "업로드 프롬프트 설정",
+            "제목, 게시글, 해시태그 기본 프롬프트를 작성하고 저장하세요.",
+            parent=page,
+        )
+        prompt_section.add_widget(self._yt_prompts)
+        layout.addWidget(prompt_section)
+
+        self._yt_comment = YouTubeCommentSection(parent=page)
+        comment_section = UploadWorkflowSection(
+            "4단계(선택)",
+            "자동 댓글 설정",
+            "영상 업로드 후 자동으로 달릴 댓글 문구를 설정하세요.",
+            parent=page,
+        )
+        comment_section.add_widget(self._yt_comment)
+        layout.addWidget(comment_section)
+
+        layout.addStretch()
+        self._set_youtube_feature_enabled(yt_connected)
+        return page
+
+    def _build_generic_channel_page(self, platform_id: str, parent: Optional[QWidget] = None) -> QWidget:
+        """Build settings page for non-YouTube channels."""
+        config = PLATFORM_CONFIG.get(platform_id, {})
+
+        page = QWidget(parent)
+        page.setStyleSheet("background-color: transparent; border: none;")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        layout.addWidget(
+            self._create_channel_banner(
+                platform_id,
+                f"{config.get('name', platform_id.title())} 업로드 설정",
+                "채널 연결 기능은 준비 중입니다. 프롬프트는 미리 작성/저장할 수 있습니다.",
+                parent=page,
+            )
+        )
+
+        coming_soon_section = UploadWorkflowSection(
+            "1단계",
+            "채널 연결",
+            "해당 채널 연결 기능은 현재 준비 중입니다.",
+            parent=page,
+        )
+        coming_soon_section.add_widget(PlatformComingSoonCard(platform_id, parent=page))
+        layout.addWidget(coming_soon_section)
+
+        prompt_section = UploadWorkflowSection(
+            "2단계",
+            "업로드 프롬프트 설정",
+            "미리 프롬프트를 저장해두면 기능 오픈 후 바로 사용할 수 있습니다.",
+            parent=page,
+        )
+        prompt_section.add_widget(PromptInputGroup(platform_id, parent=page))
+        layout.addWidget(prompt_section)
+
+        layout.addStretch()
+        return page
+
+    def _set_active_channel(self, platform_id: str):
+        """Switch visible channel settings page."""
+        if platform_id not in self._channel_index:
+            return
+
+        self._active_channel = platform_id
+        self._channel_stack.setCurrentIndex(self._channel_index[platform_id])
+
+        for pid, btn in self._channel_tabs.items():
+            is_active = pid == platform_id
+            btn.setChecked(is_active)
+            self._apply_channel_tab_style(btn, platform_id=pid, active=is_active)
+
+    def _get_channel_status_text(self, platform_id: str) -> str:
+        """Get short status text for channel tab."""
+        if platform_id == "youtube":
+            return "연결됨" if self.settings.get_youtube_connected() else "연결 필요"
+        return "준비중"
+
+    def _refresh_channel_tab_labels(self):
+        """Refresh tab text and status hints."""
+        for platform_id, button in self._channel_tabs.items():
+            cfg = PLATFORM_CONFIG.get(platform_id, {})
+            icon = cfg.get("icon", "•")
+            name = cfg.get("name", platform_id.title())
+            status = self._get_channel_status_text(platform_id)
+            button.setText(f"{icon}  {name}\n{status}")
+            button.setToolTip(f"{name} - {status}")
+
+    def _update_youtube_state_hint(self, connected: bool):
+        """Update YouTube state helper text."""
+        if not hasattr(self, "_yt_connection_state"):
+            return
+
+        c = self.ds.colors
+        if connected:
+            self._yt_connection_state.setText("현재 상태: 채널 연결 완료. 자동 업로드 기능을 사용할 수 있습니다.")
+            self._yt_connection_state.setStyleSheet(
+                f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
+            )
+            return
+
+        self._yt_connection_state.setText("현재 상태: 채널 미연결. 먼저 1단계 채널 연결을 완료하세요.")
+        self._yt_connection_state.setStyleSheet(
+            f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
+        )
+
+    def _apply_channel_tab_style(self, button: QPushButton, platform_id: str, active: bool):
+        """Apply visual style for channel tab buttons."""
+        ds = self.ds
+        c = ds.colors
+        platform_color = PLATFORM_CONFIG.get(platform_id, {}).get("color", c.primary)
+
+        if active:
+            button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {c.surface};
+                    color: {c.text_primary};
+                    border: 1px solid {platform_color};
+                    border-radius: {ds.radius.sm}px;
+                    padding: 8px 10px;
+                    font-size: 11px;
+                    font-weight: 700;
+                    text-align: left;
+                    line-height: 1.3em;
+                }}
+            """)
+        else:
+            button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {c.surface_variant};
+                    color: {c.text_secondary};
+                    border: 1px solid {c.border_light};
+                    border-radius: {ds.radius.sm}px;
+                    padding: 8px 10px;
+                    font-size: 11px;
+                    font-weight: 500;
+                    text-align: left;
+                    line-height: 1.3em;
+                }}
+                QPushButton:hover {{
+                    background-color: {c.surface};
+                    color: {c.text_primary};
+                }}
+            """)
 
     # ─── YouTube connection handlers ─────────────────────────────
 
@@ -596,38 +1095,29 @@ class UploadPanel(QFrame, ThemedMixin):
                 success = yt_manager.connect_channel()
                 if success:
                     channel_info = yt_manager.get_channel_info()
-                    channel_name = channel_info.get("title", "유튜브 채널")
-                    channel_id = channel_info.get("id", "")
-
-                    self.settings.set_youtube_connected(True, channel_id, channel_name)
-                    self.youtube_card.set_connected(True, {"name": channel_name})
-                    self._yt_settings_container.setVisible(True)
-
-                    if hasattr(self.gui, 'state'):
-                        self.gui.state.youtube_connected = True
-                        self.gui.state.youtube_channel_info = channel_info
-
+                    channel_name = self._apply_youtube_connected_state(channel_info)
                     show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
                     return
 
-            # Fallback: manual connection dialog
-            self._show_youtube_manual_connect()
+            # OAuth JSON 업로드 연결
+            self._show_youtube_json_connect()
 
         except Exception as e:
             logger.error(f"[UploadPanel] YouTube 연결 실패: {e}")
             show_error(self, "연결 실패", f"유튜브 채널 연결에 실패했습니다.\n\n{e}")
 
-    def _show_youtube_manual_connect(self):
-        """Fallback manual connection dialog when OAuth isn't configured."""
-        from ui.components.custom_dialog import show_info
-        from PyQt6.QtWidgets import QDialog, QLineEdit
+    def _show_youtube_json_connect(self):
+        """Upload OAuth client JSON and connect YouTube channel."""
+        from ui.components.custom_dialog import show_info, show_error
+        from PyQt6.QtWidgets import QDialog
 
         ds = self.ds
         c = ds.colors
+        selected_file = {"path": ""}
 
         dialog = QDialog(self)
         dialog.setWindowTitle("유튜브 채널 연결")
-        dialog.setFixedSize(460, 240)
+        dialog.setFixedSize(520, 300)
         dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
         layout = QVBoxLayout(dialog)
@@ -635,40 +1125,45 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.setContentsMargins(24, 20, 24, 20)
 
         inst = QLabel(
-            "유튜브 채널을 연결하려면 OAuth 인증이 필요합니다.\n\n"
+            "채널명을 직접 입력할 필요 없이 OAuth JSON 파일만 업로드하면 됩니다.\n\n"
             "1. 구글 클라우드 콘솔에서 OAuth 클라이언트 ID를 생성하세요.\n"
-            "2. client_secrets.json 파일을 앱 폴더에 저장하세요.\n"
-            "3. 또는 아래에 채널 이름을 입력하여 수동 연결할 수 있습니다."
+            "2. 다운로드한 client_secrets.json 파일을 선택하세요.\n"
+            "3. 파일은 앱 설치 폴더 내부 보안 경로에 복사되어 보관됩니다."
         )
         inst.setWordWrap(True)
         inst.setFont(QFont(ds.typography.font_family_primary, 11))
         inst.setStyleSheet(f"color: {c.text_secondary};")
         layout.addWidget(inst)
 
-        name_layout = QHBoxLayout()
-        name_label = QLabel("채널 이름:")
-        name_label.setFont(QFont(ds.typography.font_family_primary, 11))
-        name_label.setStyleSheet(f"color: {c.text_secondary};")
-        name_input = QLineEdit()
-        name_input.setPlaceholderText("유튜브 채널 이름 입력")
-        name_input.setStyleSheet(f"""
-            QLineEdit {{
+        file_info = QLabel("선택된 파일: 없음")
+        file_info.setWordWrap(True)
+        file_info.setFont(QFont(ds.typography.font_family_primary, 10))
+        file_info.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(file_info)
+
+        select_btn = QPushButton("OAuth JSON 파일 선택")
+        select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        select_btn.setStyleSheet(f"""
+            QPushButton {{
                 background-color: {c.surface_variant};
                 color: {c.text_primary};
-                padding: 8px 12px;
+                padding: 8px 14px;
                 border: 1px solid {c.border_light};
                 border-radius: {ds.radius.sm}px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {c.surface};
             }}
         """)
-        name_layout.addWidget(name_label)
-        name_layout.addWidget(name_input, stretch=1)
-        layout.addLayout(name_layout)
+        layout.addWidget(select_btn)
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
         connect_btn = QPushButton("연결")
         connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        connect_btn.setEnabled(False)
         connect_btn.setStyleSheet(f"""
             QPushButton {{
                 background-color: #FF0000;
@@ -678,6 +1173,10 @@ class UploadPanel(QFrame, ThemedMixin):
                 font-weight: bold;
             }}
             QPushButton:hover {{ background-color: #CC0000; }}
+            QPushButton:disabled {{
+                background-color: {c.surface_variant};
+                color: {c.text_muted};
+            }}
         """)
 
         cancel_btn = QPushButton("취소")
@@ -694,23 +1193,85 @@ class UploadPanel(QFrame, ThemedMixin):
         """)
         cancel_btn.clicked.connect(dialog.reject)
 
-        def do_connect():
-            channel_name = name_input.text().strip() or "내 유튜브 채널"
-            self.settings.set_youtube_connected(True, channel_id="manual", channel_name=channel_name)
-            self.youtube_card.set_connected(True, {"name": channel_name})
-            self._yt_settings_container.setVisible(True)
-            if self.gui and hasattr(self.gui, 'state'):
-                self.gui.state.youtube_connected = True
-                self.gui.state.youtube_channel_info = {"name": channel_name}
-            dialog.accept()
-            show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
+        def choose_file():
+            file_path, _ = QFileDialog.getOpenFileName(
+                dialog,
+                "OAuth JSON 파일 선택",
+                "",
+                "JSON 파일 (*.json)"
+            )
+            if not file_path:
+                return
+            selected_file["path"] = file_path
+            file_info.setText(f"선택된 파일: {file_path}")
+            connect_btn.setEnabled(True)
 
+        def do_connect():
+            if not selected_file["path"]:
+                return
+
+            if not (self.gui and hasattr(self.gui, 'youtube_manager') and self.gui.youtube_manager):
+                show_error(self, "연결 실패", "YouTube 매니저를 초기화하지 못했습니다.")
+                return
+
+            try:
+                yt_manager = self.gui.youtube_manager
+                installed_json = yt_manager.install_client_secrets(selected_file["path"])
+                success = yt_manager.connect_channel(client_secrets_file=installed_json)
+
+                if not success:
+                    show_error(
+                        self,
+                        "연결 실패",
+                        "선택한 JSON으로 인증에 실패했습니다.\n"
+                        "OAuth 클라이언트 타입/리디렉션 설정을 확인해주세요."
+                    )
+                    return
+
+                channel_info = yt_manager.get_channel_info()
+                channel_name = self._apply_youtube_connected_state(channel_info)
+                dialog.accept()
+                show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
+            except Exception as e:
+                logger.error(f"[UploadPanel] OAuth JSON 연결 실패: {e}")
+                show_error(self, "연결 실패", f"OAuth JSON 처리 중 오류가 발생했습니다.\n\n{e}")
+
+        select_btn.clicked.connect(choose_file)
         connect_btn.clicked.connect(do_connect)
         btn_layout.addWidget(connect_btn)
         btn_layout.addWidget(cancel_btn)
         layout.addLayout(btn_layout)
 
         dialog.exec()
+
+    def _set_youtube_feature_enabled(self, connected: bool):
+        """Enable features that require an actual connected channel."""
+        self._yt_upload_settings.setEnabled(connected)
+        self._yt_comment.setEnabled(connected)
+        self._update_youtube_state_hint(connected)
+        self._refresh_channel_tab_labels()
+
+    def _apply_youtube_connected_state(self, channel_info: Optional[Dict[str, str]]) -> str:
+        """Persist and apply connected YouTube channel state."""
+        channel_info = channel_info or {}
+        channel_name = (
+            channel_info.get("title")
+            or channel_info.get("channel_name")
+            or channel_info.get("name")
+            or "유튜브 채널"
+        )
+        channel_id = channel_info.get("id") or channel_info.get("channel_id", "")
+
+        self.settings.set_youtube_connected(True, channel_id, channel_name)
+        self.youtube_card.set_connected(True, {"name": channel_name})
+        self._set_youtube_feature_enabled(True)
+        self._refresh_channel_tab_labels()
+
+        if self.gui and hasattr(self.gui, 'state'):
+            self.gui.state.youtube_connected = True
+            self.gui.state.youtube_channel_info = channel_info
+
+        return channel_name
 
     def _disconnect_youtube(self, platform_id: str):
         """Disconnect YouTube channel."""
@@ -722,7 +1283,8 @@ class UploadPanel(QFrame, ThemedMixin):
         self.settings.set_youtube_connected(False, "", "")
         self.settings.set_youtube_auto_upload(False)
         self.youtube_card.set_connected(False)
-        self._yt_settings_container.setVisible(False)
+        self._set_youtube_feature_enabled(False)
+        self._refresh_channel_tab_labels()
 
         if self.gui and hasattr(self.gui, 'state'):
             self.gui.state.youtube_connected = False
@@ -739,7 +1301,19 @@ class UploadPanel(QFrame, ThemedMixin):
 
     def _apply_theme(self):
         c = self.ds.colors
-        self.setStyleSheet(f"background-color: {c.background}; border: none;")
+        self.setStyleSheet(f"""
+            UploadPanel {{
+                background-color: {c.background};
+                border: none;
+            }}
+            UploadPanel QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+            UploadPanel QCheckBox {{
+                background-color: transparent;
+            }}
+        """)
 
     def refresh(self):
         """Refresh panel state when navigated to."""
@@ -749,4 +1323,6 @@ class UploadPanel(QFrame, ThemedMixin):
             self.youtube_card.set_connected(True, {"name": channel.get("channel_name", "")})
         else:
             self.youtube_card.set_connected(False)
-        self._yt_settings_container.setVisible(yt_connected)
+        self._refresh_channel_tab_labels()
+        self._set_youtube_feature_enabled(yt_connected)
+        self._set_active_channel(getattr(self, "_active_channel", "youtube"))

@@ -111,13 +111,17 @@ class SocialAuthCard(QFrame):
         # Platform name
         name_label = QLabel(config.get("name", self.platform_id.title()))
         name_label.setFont(QFont(ds.typography.font_family_primary, 13, QFont.Weight.Bold))
-        name_label.setStyleSheet(f"color: {c.text_primary}; border: none; background: transparent;")
+        name_label.setStyleSheet(
+            f"color: {c.text_primary}; border: none; background-color: transparent;"
+        )
         info_layout.addWidget(name_label)
 
         # Status / Description
         self._status_label = QLabel(config.get("description", ""))
         self._status_label.setFont(QFont(ds.typography.font_family_primary, 11))
-        self._status_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        self._status_label.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background-color: transparent;"
+        )
         info_layout.addWidget(self._status_label)
 
         layout.addLayout(info_layout, stretch=1)
@@ -176,7 +180,9 @@ class SocialAuthCard(QFrame):
             # Connected state
             channel_name = self._channel_info.get("name", self._channel_info.get("channel_name", "연결됨"))
             self._status_label.setText(f"✓ {channel_name}")
-            self._status_label.setStyleSheet(f"color: {c.success}; border: none; background: transparent;")
+            self._status_label.setStyleSheet(
+                f"color: {c.success}; border: none; background-color: transparent;"
+            )
 
             self._action_btn.setText("연결 해제")
             self._action_btn.setStyleSheet(f"""
@@ -196,7 +202,9 @@ class SocialAuthCard(QFrame):
         else:
             # Disconnected state
             self._status_label.setText(config.get("description", ""))
-            self._status_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+            self._status_label.setStyleSheet(
+                f"color: {c.text_secondary}; border: none; background-color: transparent;"
+            )
 
             self._action_btn.setText("연결")
             self._action_btn.setStyleSheet(f"""

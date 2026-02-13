@@ -124,6 +124,7 @@ class URLInputPanel(QWidget):
 
     def create_widgets(self):
         ds = self.ds
+        self.setStyleSheet("QLabel { background-color: transparent; border: none; }")
 
         # Main vertical layout
         self.main_layout = QVBoxLayout(self)
@@ -141,7 +142,7 @@ class URLInputPanel(QWidget):
 
         self.mode_label = QLabel("단일 영상 모드")
         self.mode_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
-        self.mode_label.setStyleSheet(f"color: {get_color('text_primary')};")
+        self.mode_label.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
         mode_layout.addWidget(self.mode_label)
 
         mode_layout.addStretch()
@@ -168,7 +169,7 @@ class URLInputPanel(QWidget):
 
         lbl = QLabel("쇼핑몰 상품 링크 또는 영상 URL 입력")
         lbl.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
-        lbl.setStyleSheet(f"color: {get_color('text_primary')};")
+        lbl.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
         single_layout.addWidget(lbl)
 
         self.gui.url_entry = QTextEdit()
@@ -179,7 +180,7 @@ class URLInputPanel(QWidget):
 
         hint = QLabel("💡 팁: 여러 개의 링크를 붙여넣으면 자동으로 분리하여 목록에 추가됩니다.")
         hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        hint.setStyleSheet(f"color: {get_color('text_muted')};")
+        hint.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
         single_layout.addWidget(hint)
 
         # Single mode action buttons
@@ -211,12 +212,12 @@ class URLInputPanel(QWidget):
 
         mix_header = QLabel("같은 상품의 영상 URL 입력 (최대 5개)")
         mix_header.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
-        mix_header.setStyleSheet(f"color: {get_color('text_primary')};")
+        mix_header.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
         mix_layout.addWidget(mix_header)
 
         mix_desc = QLabel("동일 상품의 여러 영상을 입력하면 랜덤으로 장면을 믹스하여 새로운 영상을 만듭니다.")
         mix_desc.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        mix_desc.setStyleSheet(f"color: {get_color('text_muted')};")
+        mix_desc.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
         mix_desc.setWordWrap(True)
         mix_layout.addWidget(mix_desc)
 
@@ -238,7 +239,7 @@ class URLInputPanel(QWidget):
 
         self.url_count_label = QLabel("1/5")
         self.url_count_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self.url_count_label.setStyleSheet(f"color: {get_color('text_muted')};")
+        self.url_count_label.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
         add_url_layout.addWidget(self.url_count_label)
 
         mix_layout.addLayout(add_url_layout)

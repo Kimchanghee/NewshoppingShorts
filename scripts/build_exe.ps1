@@ -218,6 +218,24 @@ try {
     }
   }
 
+  # pkg_resources runtime hook may need jaraco.text's sample resource file.
+  # Accept either standalone jaraco path or setuptools vendored path.
+  $jaracoCandidates = @(
+    "jaraco\text\Lorem ipsum.txt",
+    "setuptools\_vendor\jaraco\text\Lorem ipsum.txt"
+  )
+  $jaracoFound = $false
+  foreach ($candidate in $jaracoCandidates) {
+    $match = $allFiles | Where-Object { $_ -like "*$candidate*" }
+    if ($match) {
+      $jaracoFound = $true
+      break
+    }
+  }
+  if (-not $jaracoFound) {
+    throw "Missing jaraco text resource file (required by pkg_resources runtime hook): $($jaracoCandidates -join ' OR ')"
+  }
+
   # imageio dist-info metadata
   $imageioMeta = $allFiles | Where-Object { $_ -like "*imageio*dist-info*METADATA*" }
   if (-not $imageioMeta) {

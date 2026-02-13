@@ -132,13 +132,18 @@ class WatermarkFontCard(QFrame, ThemedMixin):
         layout.addWidget(self.radio_label)
 
         self.name_label = QLabel(self.option["name"])
-        self.name_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: 13px; color: #FFFFFF;")
+        self.name_label.setStyleSheet(
+            f"font-weight: {ds.typography.weight_bold}; font-size: 13px; color: #FFFFFF; "
+            "background-color: transparent; border: none;"
+        )
         layout.addWidget(self.name_label)
 
         layout.addStretch()
 
         self.desc_label = QLabel(self.option["description"])
-        self.desc_label.setStyleSheet("font-size: 11px; color: #B8B8B8;")
+        self.desc_label.setStyleSheet(
+            "font-size: 11px; color: #B8B8B8; background-color: transparent; border: none;"
+        )
         layout.addWidget(self.desc_label)
 
     def mousePressEvent(self, event):
@@ -157,12 +162,22 @@ class WatermarkFontCard(QFrame, ThemedMixin):
                 border: {thickness}px solid {border};
                 border-radius: {ds.radius.sm}px;
             }}
+            WatermarkFontCard QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
         """)
 
         text_secondary = get_color('text_secondary')
-        self.name_label.setStyleSheet(f"color: #FFFFFF; border: none; font-weight: {ds.typography.weight_bold}; font-size: 13px;")
-        self.desc_label.setStyleSheet("color: #B8B8B8; border: none; font-size: 11px;")
-        self.radio_label.setStyleSheet(f"color: {get_color('primary') if self.is_selected else text_secondary}; border: none;")
+        self.name_label.setStyleSheet(
+            f"color: #FFFFFF; border: none; font-weight: {ds.typography.weight_bold}; "
+            "font-size: 13px; background-color: transparent;"
+        )
+        self.desc_label.setStyleSheet("color: #B8B8B8; border: none; font-size: 11px; background-color: transparent;")
+        self.radio_label.setStyleSheet(
+            f"color: {get_color('primary') if self.is_selected else text_secondary}; "
+            "border: none; background-color: transparent;"
+        )
 
 
 class WatermarkPanel(QFrame, ThemedMixin):
@@ -191,6 +206,19 @@ class WatermarkPanel(QFrame, ThemedMixin):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {get_color('surface')};
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: {get_color('surface')};
+            }}
+            QScrollArea QWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
         self.scroll = scroll
 
         scroll_content = QWidget()
@@ -225,7 +253,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
 
         self.char_count_label = QLabel("0 / 50")
         self.char_count_label.setAlignment(Qt.AlignmentFlag.AlignRight)
-        self.char_count_label.setStyleSheet("font-size: 11px; color: #888;")
+        self.char_count_label.setStyleSheet("font-size: 11px; color: #888; background-color: transparent; border: none;")
         text_section.layout().addWidget(self.char_count_label)
 
         content_layout.addWidget(text_section)
@@ -305,11 +333,14 @@ class WatermarkPanel(QFrame, ThemedMixin):
         layout.setSpacing(ds.spacing.space_2)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"font-size: 14px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
+        title_label.setStyleSheet(
+            f"font-size: 14px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF; "
+            "background-color: transparent; border: none;"
+        )
         layout.addWidget(title_label)
 
         desc_label = QLabel(description)
-        desc_label.setStyleSheet("font-size: 12px; color: #888888;")
+        desc_label.setStyleSheet("font-size: 12px; color: #888888; background-color: transparent; border: none;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
@@ -472,9 +503,11 @@ class WatermarkPanel(QFrame, ThemedMixin):
     def apply_theme(self):
         ds = self.ds
         bg = get_color('surface')
-        self.setStyleSheet(f"background-color: {bg}; border: none;")
-        self.scroll.setStyleSheet(f"background-color: {bg};")
-        self.scroll_content.setStyleSheet(f"background-color: {bg};")
+        self.setStyleSheet(f"""
+            background-color: {bg};
+            border: none;
+        """)
+        self.scroll_content.setStyleSheet("background-color: transparent; border: none;")
 
         # Text input styling
         self.text_input.setStyleSheet(f"""
