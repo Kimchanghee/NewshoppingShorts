@@ -73,7 +73,7 @@ class VoiceCard(QFrame, ThemedMixin):
         self.desc_label = QLabel(self.profile["description"])
         self.desc_label.setWordWrap(True)
         self.desc_label.setStyleSheet(
-            "font-size: 12px; color: #FFFFFF; background-color: transparent; border: none;"
+            "font-size: 16px; color: #FFFFFF; background-color: transparent; border: none;"
         )
         layout.addWidget(self.desc_label)
 
@@ -109,7 +109,7 @@ class VoiceCard(QFrame, ThemedMixin):
         
         text_primary = get_color('text_primary')
         text_secondary = get_color('text_secondary')
-        self.desc_label.setStyleSheet(f"color: #FFFFFF; border: none; font-size: 12px;")
+        self.desc_label.setStyleSheet(f"color: #FFFFFF; border: none; font-size: 16px;")
 
 class VoicePanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):

@@ -923,24 +923,32 @@ class SubtitleDetector:
                             y_values = xp.array([r['y'] for r in cluster], dtype=xp.float32)
                             width_values = xp.array([r['width'] for r in cluster], dtype=xp.float32)
                             height_values = xp.array([r['height'] for r in cluster], dtype=xp.float32)
-                            avg_x = int(xp.mean(x_values).get())
-                            avg_y = int(xp.mean(y_values).get())
-                            avg_width = int(xp.mean(width_values).get())
-                            avg_height = int(xp.mean(height_values).get())
+                            left = float(xp.min(x_values).get())
+                            top = float(xp.min(y_values).get())
+                            right = float(xp.max(x_values + width_values).get())
+                            bottom = float(xp.max(y_values + height_values).get())
                         else:
                             x_values = np.array([r['x'] for r in cluster], dtype=np.float32)
                             y_values = np.array([r['y'] for r in cluster], dtype=np.float32)
                             width_values = np.array([r['width'] for r in cluster], dtype=np.float32)
                             height_values = np.array([r['height'] for r in cluster], dtype=np.float32)
-                            avg_x = int(np.mean(x_values))
-                            avg_y = int(np.mean(y_values))
-                            avg_width = int(np.mean(width_values))
-                            avg_height = int(np.mean(height_values))
+                            left = float(np.min(x_values))
+                            top = float(np.min(y_values))
+                            right = float(np.max(x_values + width_values))
+                            bottom = float(np.max(y_values + height_values))
                     except Exception:
-                        avg_x = int(sum(r['x'] for r in cluster) / len(cluster))
-                        avg_y = int(sum(r['y'] for r in cluster) / len(cluster))
-                        avg_width = int(sum(r['width'] for r in cluster) / len(cluster))
-                        avg_height = int(sum(r['height'] for r in cluster) / len(cluster))
+                        left = float(min(r['x'] for r in cluster))
+                        top = float(min(r['y'] for r in cluster))
+                        right = float(max(r['x'] + r['width'] for r in cluster))
+                        bottom = float(max(r['y'] + r['height'] for r in cluster))
+
+                    # Keep a union envelope so edges are never clipped by mean-box shrinkage.
+                    cluster_x = max(0.0, left - 2.0)
+                    cluster_y = max(0.0, top - 2.0)
+                    cluster_right = min(100.0, right + 2.0)
+                    cluster_bottom = min(100.0, bottom + 2.0)
+                    cluster_width = max(1.0, cluster_right - cluster_x)
+                    cluster_height = max(1.0, cluster_bottom - cluster_y)
 
                     sample_text = next((r.get('text', '') for r in cluster if r.get('text')), '')
 
@@ -953,10 +961,10 @@ class SubtitleDetector:
 
                     source_name = 'opencv_ocr_gpu' if GPU_ACCEL_AVAILABLE else 'opencv_ocr_numpy'
                     reliable_regions.append({
-                        'x': max(0, avg_x - 2),
-                        'y': max(0, avg_y - 2),
-                        'width': min(100, avg_width + 4),
-                        'height': min(100, avg_height + 4),
+                        'x': cluster_x,
+                        'y': cluster_y,
+                        'width': cluster_width,
+                        'height': cluster_height,
                         'frequency': len(cluster),
                         'language': 'chinese',
                         'source': source_name,
@@ -966,7 +974,7 @@ class SubtitleDetector:
                         'cluster_id': f"{time_key}_{cluster_idx}",
                         # ★ 자막 vs 상품 텍스트 구분용 메타데이터
                         # 클러스터 평균 Y만 사용 (개별 박스 Y는 OCR 노이즈로 분산 부풀림 방지)
-                        'y_positions': [avg_y],  # 시간 그룹별 대표 Y좌표
+                        'y_positions': [float(r.get('y', 0)) for r in cluster],
                         'time_group_count': 1,  # 출현 시간 그룹 수 (병합 시 누적)
                     })
 
@@ -983,16 +991,33 @@ class SubtitleDetector:
 
                     # ★ 같은 트랙 조건: IoU 임계값 낮춤 (0.4 -> 0.25)
                     # 공간적으로 분리된 자막은 IoU가 낮아 병합되지 않음
-                    if (iou > OCRThresholds.IOU_MERGE_THRESHOLD and existing['end_time'] >= region['start_time'] - 1.0):
+                    existing_right = existing['x'] + existing['width']
+                    existing_bottom = existing['y'] + existing['height']
+                    region_right = region['x'] + region['width']
+                    region_bottom = region['y'] + region['height']
+                    y_center_existing = existing['y'] + (existing['height'] / 2.0)
+                    y_center_region = region['y'] + (region['height'] / 2.0)
+                    same_row = abs(y_center_existing - y_center_region) <= max(existing['height'], region['height']) * 0.8
+                    horizontal_gap = max(0.0, max(region['x'] - existing_right, existing['x'] - region_right))
+                    proximity_merge = same_row and horizontal_gap <= 6.0
+
+                    if ((iou > OCRThresholds.IOU_MERGE_THRESHOLD or proximity_merge)
+                        and existing['end_time'] >= region['start_time'] - 1.0):
                         # 시간 범위 확장 (공간은 평균으로 갱신)
                         total_freq = existing['frequency'] + region['frequency']
-                        existing['x'] = int((existing['x'] * existing['frequency'] + region['x'] * region['frequency']) / total_freq)
-                        existing['y'] = int((existing['y'] * existing['frequency'] + region['y'] * region['frequency']) / total_freq)
-                        existing['width'] = int((existing['width'] * existing['frequency'] + region['width'] * region['frequency']) / total_freq)
-                        existing['height'] = int((existing['height'] * existing['frequency'] + region['height'] * region['frequency']) / total_freq)
+                        merged_left = min(existing['x'], region['x'])
+                        merged_top = min(existing['y'], region['y'])
+                        merged_right = max(existing_right, region_right)
+                        merged_bottom = max(existing_bottom, region_bottom)
+                        existing['x'] = merged_left
+                        existing['y'] = merged_top
+                        existing['width'] = max(1.0, merged_right - merged_left)
+                        existing['height'] = max(1.0, merged_bottom - merged_top)
                         existing['start_time'] = min(existing['start_time'], region['start_time'])
                         existing['end_time'] = max(existing['end_time'], region['end_time'])
                         existing['frequency'] = total_freq
+                        if len(str(region.get('sample_text', ''))) > len(str(existing.get('sample_text', ''))):
+                            existing['sample_text'] = region.get('sample_text', '')
                         # ★ 자막 판별용 메타데이터 누적
                         existing.setdefault('y_positions', []).extend(region.get('y_positions', []))
                         existing['time_group_count'] = existing.get('time_group_count', 1) + region.get('time_group_count', 1)
