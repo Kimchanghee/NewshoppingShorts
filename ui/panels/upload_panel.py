@@ -784,7 +784,7 @@ class UploadPanel(QFrame, ThemedMixin):
         c = ds.colors
 
         sidebar = QFrame(parent)
-        sidebar.setFixedWidth(210)
+        sidebar.setFixedWidth(228)
         sidebar.setStyleSheet(f"""
             QFrame {{
                 background-color: {c.surface};
@@ -802,7 +802,7 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.setSpacing(10)
 
         title = QLabel("채널 목록")
-        title.setFont(QFont(ds.typography.font_family_primary, 13, QFont.Weight.Bold))
+        title.setFont(QFont(ds.typography.font_family_primary, 14, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {c.text_primary};")
         layout.addWidget(title)
 
@@ -812,11 +812,23 @@ class UploadPanel(QFrame, ThemedMixin):
         helper.setStyleSheet(f"color: {c.text_muted};")
         layout.addWidget(helper)
 
+        self._channel_summary_label = QLabel()
+        self._channel_summary_label.setWordWrap(True)
+        self._channel_summary_label.setFont(QFont(ds.typography.font_family_primary, 10, QFont.Weight.Medium))
+        self._channel_summary_label.setStyleSheet(f"""
+            background-color: {c.surface_variant};
+            color: {c.text_secondary};
+            border: 1px solid {c.border_light};
+            border-radius: {ds.radius.sm}px;
+            padding: 8px;
+        """)
+        layout.addWidget(self._channel_summary_label)
+
         for platform_id in self._platform_order:
             tab_btn = QPushButton()
             tab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             tab_btn.setCheckable(True)
-            tab_btn.setMinimumHeight(58)
+            tab_btn.setMinimumHeight(62)
             tab_btn.clicked.connect(lambda checked, pid=platform_id: self._set_active_channel(pid))
             self._channel_tabs[platform_id] = tab_btn
             layout.addWidget(tab_btn)
@@ -1014,17 +1026,28 @@ class UploadPanel(QFrame, ThemedMixin):
         """Get short status text for channel tab."""
         if platform_id == "youtube":
             return "연결됨" if self.settings.get_youtube_connected() else "연결 필요"
+        if self.settings.get_social_connection_status(platform_id):
+            return "연결됨"
         return "준비중"
 
     def _refresh_channel_tab_labels(self):
         """Refresh tab text and status hints."""
+        connected_count = 0
         for platform_id, button in self._channel_tabs.items():
             cfg = PLATFORM_CONFIG.get(platform_id, {})
-            icon = cfg.get("icon", "•")
             name = cfg.get("name", platform_id.title())
             status = self._get_channel_status_text(platform_id)
-            button.setText(f"{icon}  {name}\n{status}")
+            if status == "연결됨":
+                connected_count += 1
+            button.setText(f"{name}\n상태: {status}")
             button.setToolTip(f"{name} - {status}")
+
+        if hasattr(self, "_channel_summary_label"):
+            active_name = PLATFORM_CONFIG.get(self._active_channel, {}).get("name", self._active_channel)
+            self._channel_summary_label.setText(
+                f"연결된 채널: {connected_count}/{len(self._platform_order)}\n"
+                f"현재 선택: {active_name}"
+            )
 
     def _update_youtube_state_hint(self, connected: bool):
         """Update YouTube state helper text."""
@@ -1057,8 +1080,8 @@ class UploadPanel(QFrame, ThemedMixin):
                     color: {c.text_primary};
                     border: 1px solid {platform_color};
                     border-radius: {ds.radius.sm}px;
-                    padding: 8px 10px;
-                    font-size: 11px;
+                    padding: 9px 10px;
+                    font-size: 12px;
                     font-weight: 700;
                     text-align: left;
                     line-height: 1.3em;
@@ -1071,8 +1094,8 @@ class UploadPanel(QFrame, ThemedMixin):
                     color: {c.text_secondary};
                     border: 1px solid {c.border_light};
                     border-radius: {ds.radius.sm}px;
-                    padding: 8px 10px;
-                    font-size: 11px;
+                    padding: 9px 10px;
+                    font-size: 12px;
                     font-weight: 500;
                     text-align: left;
                     line-height: 1.3em;

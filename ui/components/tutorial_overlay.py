@@ -75,7 +75,18 @@ class TutorialOverlay(QWidget):
             "highlight": "font_panel",
         },
         {
-            "title": "📋 5단계: 대기/진행",
+            "title": "📝 5단계: 자막 설정",
+            "description": "한국어 자막의 위치와 배치 방식을 설정합니다.",
+            "details": [
+                "• 중국어 자막 위 배치 여부 설정",
+                "• 프리뷰에서 자막 위치 직접 선택",
+                "• 영상별 가독성 최적화",
+            ],
+            "page": "subtitle_settings",
+            "highlight": "subtitle_settings_panel",
+        },
+        {
+            "title": "📋 6단계: 대기/진행",
             "description": "추가된 영상들의 처리 상태를 확인하고\n관리합니다.",
             "details": [
                 "• 대기 중인 영상 목록 확인",
@@ -112,7 +123,7 @@ class TutorialOverlay(QWidget):
             "description": "이제 쇼핑 숏폼 제작을 시작하세요!",
             "details": [
                 "1️⃣ URL 입력 → 영상 추가",
-                "2️⃣ 스타일 선택 (음성, CTA, 폰트)",
+                "2️⃣ 스타일 선택 (음성, CTA, 폰트, 자막 설정)",
                 "3️⃣ 대기열에서 작업 시작",
                 "4️⃣ 완료 후 다운로드!",
             ],

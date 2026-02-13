@@ -69,6 +69,16 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "tooltip_y": 224,
     },
     {
+        "id": "subtitle_settings",
+        "title": "자막 설정",
+        "description": "한국어 자막의 위치와 배치 방식을 설정하세요.\n중국어 자막 위 배치 여부와 직접 위치 선택으로\n가독성을 최적화할 수 있습니다.",
+        "target_type": "sidebar",
+        "target_id": "subtitle_settings",
+        "navigate_to": "subtitle_settings",
+        "tooltip_x": 260,
+        "tooltip_y": 272,
+    },
+    {
         "id": "watermark",
         "title": "워터마크 설정",
         "description": "영상에 채널 이름 워터마크를 추가하세요.\n텍스트, 위치, 크기, 폰트를\n자유롭게 설정할 수 있습니다.",
@@ -76,7 +86,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "watermark",
         "navigate_to": "watermark",
         "tooltip_x": 260,
-        "tooltip_y": 272,
+        "tooltip_y": 320,
     },
     {
         "id": "upload",
@@ -86,7 +96,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "upload",
         "navigate_to": "upload",
         "tooltip_x": 260,
-        "tooltip_y": 320,
+        "tooltip_y": 368,
     },
     {
         "id": "queue",
@@ -96,7 +106,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "queue",
         "navigate_to": "queue",
         "tooltip_x": 260,
-        "tooltip_y": 368,
+        "tooltip_y": 416,
     },
     {
         "id": "settings",
@@ -106,7 +116,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_id": "settings",
         "navigate_to": "settings",
         "tooltip_x": 260,
-        "tooltip_y": 416,
+        "tooltip_y": 464,
     },
     {
         "id": "progress",
