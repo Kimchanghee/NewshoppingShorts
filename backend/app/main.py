@@ -414,19 +414,15 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.40/SSMaker_Setup_v1.3.40.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.41/SSMaker_Setup_v1.3.41.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.40",
+    "version": "1.3.41",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.40 변경사항
-- 자막 설정 메뉴 추가 (위치 선택, 직접 드래그 배치, 중국어 자막 위 배치)
-- CTA 프로필 링크형 추가
-- 자막 위치 설정이 실제 렌더링에 반영되도록 수정
-- 중국어 자막 vs 상품 텍스트 구분 로직 개선 (다중 프레임 + 위치 안정성)
-- 진행률 패널 자막 분석 초록색 체크 안 뜨는 버그 수정""",
+    "release_notes": """### v1.3.41 변경사항
+- 구독 페이지 하단에 카카오톡 문의하기 버튼 추가""",
     "is_mandatory": True,
     "update_channel": "stable",
     "file_hash": "e97591c3461b31b085ecfeb50d5c816898e2b7da42e971bc9df9d1a9d15a07da",
