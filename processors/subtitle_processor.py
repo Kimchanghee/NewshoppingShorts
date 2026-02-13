@@ -213,7 +213,7 @@ class SubtitleProcessor:
             self.gui.update_step_progress("subtitle", 60)
 
             w, h = video.size
-            blurred_video = self.apply_opencv_blur_enhanced(
+            blurred_video = self.apply_opencv_blur_enhanced_v2(
                 video, chinese_positions, w, h
             )
 
@@ -434,6 +434,286 @@ class SubtitleProcessor:
         clip = VideoClip(
             lambda t: _feather_blur(video.get_frame, t), duration=video.duration
         )
+        if video.audio:
+            clip = clip.set_audio(video.audio)
+        if hasattr(video, "fps"):
+            clip.fps = video.fps
+        return clip
+
+    def _merge_spatial_boxes(
+        self, boxes: List[List[int]], frame_width: int
+    ) -> List[List[int]]:
+        """Merge neighboring boxes on the same subtitle row to remove gaps."""
+        if not boxes:
+            return []
+
+        gap_px = max(12, int(frame_width * 0.04))
+        ordered = sorted([list(b) for b in boxes], key=lambda b: (b[1], b[0]))
+        merged: List[List[int]] = []
+
+        for box in ordered:
+            if not merged:
+                merged.append(box)
+                continue
+
+            last = merged[-1]
+            last_h = max(1, last[3] - last[1])
+            box_h = max(1, box[3] - box[1])
+            last_center_y = (last[1] + last[3]) / 2.0
+            box_center_y = (box[1] + box[3]) / 2.0
+            same_row = abs(last_center_y - box_center_y) <= max(last_h, box_h) * 0.9
+            gap = max(0, max(box[0] - last[2], last[0] - box[2]))
+
+            if same_row and gap <= gap_px:
+                last[0] = min(last[0], box[0])
+                last[1] = min(last[1], box[1])
+                last[2] = max(last[2], box[2])
+                last[3] = max(last[3], box[3])
+            else:
+                merged.append(box)
+
+        return merged
+
+    def _build_time_aware_blur_boxes(
+        self, subtitle_positions: List[Dict[str, Any]], w: int, h: int, video_duration: float
+    ) -> List[Dict[str, Any]]:
+        """Build conservative blur boxes with temporal stabilization."""
+        base_height = 1080
+        base_min_pad = 5
+        min_pad = max(2, int(base_min_pad * (h / base_height)))
+        extra_side_pad = int(w * 0.09)
+        row_merge_threshold = max(14, int(h * 0.03))
+        max_time_gap = 0.35
+
+        prepared: List[Dict[str, Any]] = []
+        for pos in subtitle_positions:
+            try:
+                x = float(pos.get("x", 0))
+                y = float(pos.get("y", 0))
+                width = float(pos.get("width", 0))
+                height = float(pos.get("height", 0))
+            except (TypeError, ValueError):
+                continue
+
+            x1 = int(w * x / 100.0)
+            y1 = int(h * y / 100.0)
+            x2 = int(w * (x + width) / 100.0)
+            y2 = int(h * (y + height) / 100.0)
+            if x2 <= x1 or y2 <= y1:
+                continue
+
+            box_width = x2 - x1
+            box_height = y2 - y1
+            pad_x = max(min_pad, int(box_width * 0.12))
+            pad_y = max(min_pad, int(box_height * 0.15))
+            side_pad = max(extra_side_pad, int(box_width * 0.2))
+
+            start_time = pos.get("start_time", 0)
+            end_time = pos.get("end_time", video_duration)
+            try:
+                start_time = float(start_time)
+            except (TypeError, ValueError):
+                start_time = 0.0
+            try:
+                end_time = float(end_time)
+            except (TypeError, ValueError):
+                end_time = video_duration
+
+            if start_time > 0:
+                start_time = max(0.0, start_time - OCRThresholds.TIME_BUFFER_BEFORE)
+            end_time = min(video_duration, end_time + OCRThresholds.TIME_BUFFER_AFTER)
+            if end_time < start_time:
+                end_time = start_time
+
+            final_box = [
+                max(0, x1 - pad_x - side_pad),
+                max(0, y1 - pad_y // 2),
+                min(w - 1, x2 + pad_x + side_pad),
+                min(h - 1, y2 + pad_y),
+            ]
+            if final_box[2] <= final_box[0] or final_box[3] <= final_box[1]:
+                continue
+
+            prepared.append(
+                {
+                    "box": final_box,
+                    "start_time": start_time,
+                    "end_time": end_time,
+                    "text": str(pos.get("text", "") or pos.get("sample_text", ""))[:30],
+                }
+            )
+
+        if not prepared:
+            return []
+
+        prepared.sort(
+            key=lambda e: (
+                (e["box"][1] + e["box"][3]) / 2.0,
+                e["start_time"],
+            )
+        )
+
+        merged: List[Dict[str, Any]] = []
+        for entry in prepared:
+            box = entry["box"]
+            center_y = (box[1] + box[3]) / 2.0
+            was_merged = False
+
+            for existing in merged:
+                ex_box = existing["box"]
+                ex_center_y = (ex_box[1] + ex_box[3]) / 2.0
+                same_row = abs(ex_center_y - center_y) <= row_merge_threshold
+                close_in_time = entry["start_time"] <= existing["end_time"] + max_time_gap
+
+                if same_row and close_in_time:
+                    ex_box[0] = min(ex_box[0], box[0])
+                    ex_box[1] = min(ex_box[1], box[1])
+                    ex_box[2] = max(ex_box[2], box[2])
+                    ex_box[3] = max(ex_box[3], box[3])
+                    existing["start_time"] = min(existing["start_time"], entry["start_time"])
+                    existing["end_time"] = max(existing["end_time"], entry["end_time"])
+                    if len(entry["text"]) > len(existing["text"]):
+                        existing["text"] = entry["text"]
+                    was_merged = True
+                    break
+
+            if not was_merged:
+                merged.append(
+                    {
+                        "box": list(box),
+                        "start_time": entry["start_time"],
+                        "end_time": entry["end_time"],
+                        "text": entry["text"],
+                    }
+                )
+
+        # Row-level horizontal envelope ensures left/right edges stay covered.
+        rows: List[Dict[str, Any]] = []
+        for entry in merged:
+            box = entry["box"]
+            center_y = (box[1] + box[3]) / 2.0
+            assigned = False
+            for row in rows:
+                if abs(row["center_y"] - center_y) <= row_merge_threshold:
+                    row["entries"].append(entry)
+                    row["center_y"] = (row["center_y"] + center_y) / 2.0
+                    row["left"] = min(row["left"], box[0])
+                    row["right"] = max(row["right"], box[2])
+                    assigned = True
+                    break
+            if not assigned:
+                rows.append(
+                    {
+                        "center_y": center_y,
+                        "left": box[0],
+                        "right": box[2],
+                        "entries": [entry],
+                    }
+                )
+
+        row_extra = max(8, int(w * 0.015))
+        for row in rows:
+            row_left = max(0, row["left"] - row_extra)
+            row_right = min(w - 1, row["right"] + row_extra)
+            for entry in row["entries"]:
+                entry["box"][0] = min(entry["box"][0], row_left)
+                entry["box"][2] = max(entry["box"][2], row_right)
+
+        merged.sort(key=lambda e: (e["start_time"], e["box"][1], e["box"][0]))
+        return merged
+
+    def apply_opencv_blur_enhanced_v2(self, video, subtitle_positions, w, h):
+        """Blur pipeline with temporal stabilization + merged mask blending."""
+        import cv2
+        import numpy as np
+        from moviepy.editor import VideoClip
+
+        boxes_with_time = self._build_time_aware_blur_boxes(
+            subtitle_positions=subtitle_positions,
+            w=w,
+            h=h,
+            video_duration=float(video.duration),
+        )
+        logger.info(f"[BLUR APPLY V2] Stabilized region count: {len(boxes_with_time)}")
+        if not boxes_with_time:
+            return video
+
+        base_height = 1080
+        base_kernel = 25
+        min_kernel = max(15, int(base_kernel * (h / base_height)))
+        base_feather = 21
+        feather_size = int(base_feather * (h / base_height))
+        feather_size = feather_size + 1 if feather_size % 2 == 0 else feather_size
+        feather_size = max(11, min(feather_size, 51))
+
+        def _auto_kernel(a: int, b: int) -> int:
+            k = max(min_kernel, ((a + b) // 2) // 12)
+            return k + 1 if k % 2 == 0 else k
+
+        last_log_time = [-1.0]
+
+        def _feather_blur(get_frame, t):
+            frame = get_frame(t).copy()
+            should_log = (int(t) % 5 == 0) and (int(t) != last_log_time[0])
+            if should_log:
+                last_log_time[0] = int(t)
+
+            active = [bt for bt in boxes_with_time if bt["start_time"] <= t <= bt["end_time"]]
+            if not active:
+                return frame
+
+            merged_boxes = self._merge_spatial_boxes(
+                [entry["box"] for entry in active], frame_width=w
+            )
+            if not merged_boxes:
+                return frame
+
+            global_x1 = min(box[0] for box in merged_boxes)
+            global_y1 = min(box[1] for box in merged_boxes)
+            global_x2 = max(box[2] for box in merged_boxes)
+            global_y2 = max(box[3] for box in merged_boxes)
+            if global_x2 <= global_x1 or global_y2 <= global_y1:
+                return frame
+
+            roi = frame[global_y1:global_y2, global_x1:global_x2]
+            if roi.size == 0:
+                return frame
+
+            roi_mask = np.zeros((global_y2 - global_y1, global_x2 - global_x1), np.uint8)
+            for box in merged_boxes:
+                x1, y1, x2, y2 = box
+                rx1 = max(0, x1 - global_x1)
+                ry1 = max(0, y1 - global_y1)
+                rx2 = min(global_x2 - global_x1, x2 - global_x1)
+                ry2 = min(global_y2 - global_y1, y2 - global_y1)
+                if rx2 > rx1 and ry2 > ry1:
+                    cv2.rectangle(roi_mask, (rx1, ry1), (rx2 - 1, ry2 - 1), 255, -1)
+
+            gap_kernel = max(3, int(w * 0.015))
+            if gap_kernel % 2 == 0:
+                gap_kernel += 1
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_kernel, gap_kernel))
+            roi_mask = cv2.morphologyEx(roi_mask, cv2.MORPH_CLOSE, kernel)
+            roi_mask = cv2.dilate(roi_mask, kernel, iterations=1)
+
+            blur_kernel = _auto_kernel(global_x2 - global_x1, global_y2 - global_y1)
+            blurred_roi = cv2.GaussianBlur(roi, (blur_kernel, blur_kernel), 0)
+            feathered = cv2.GaussianBlur(roi_mask, (feather_size, feather_size), 0)
+            m3 = np.dstack([feathered, feathered, feathered]).astype(np.float32) / 255.0
+
+            frame[global_y1:global_y2, global_x1:global_x2] = (
+                blurred_roi.astype(np.float32) * m3
+                + roi.astype(np.float32) * (1 - m3)
+            ).astype(np.uint8)
+
+            if should_log:
+                logger.debug(
+                    f"[BLUR APPLY V2] t={t:.2f}s merged={len(merged_boxes)} "
+                    f"roi={global_x2 - global_x1}x{global_y2 - global_y1}"
+                )
+            return frame
+
+        clip = VideoClip(lambda t: _feather_blur(video.get_frame, t), duration=video.duration)
         if video.audio:
             clip = clip.set_audio(video.audio)
         if hasattr(video, "fps"):

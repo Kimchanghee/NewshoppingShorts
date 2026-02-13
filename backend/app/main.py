@@ -418,12 +418,12 @@ _DEFAULT_DOWNLOAD_URL = os.getenv(
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.42",
+    "version": "1.3.43",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.42 변경사항
-- 모드 선택 패널 아이콘/텍스트 겹침 문제 수정
-- UI 전반 개선 및 버그 수정""",
+    "release_notes": """### v1.3.43 변경사항
+- 자막 블러 영역 정확도 개선 (union envelope + 시간 기반 안정화)
+- 음성 카드 설명 폰트 크기 개선""",
     "is_mandatory": True,
     "update_channel": "stable",
     "file_hash": "669725180d747a3d893ba363f93aa55706eedac0ec7f77fc98ad1e52d47b4ec5",
