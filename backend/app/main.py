@@ -425,7 +425,7 @@ APP_VERSION_INFO = {
 - 구독 페이지 하단에 카카오톡 문의하기 버튼 추가""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "e97591c3461b31b085ecfeb50d5c816898e2b7da42e971bc9df9d1a9d15a07da",
+    "file_hash": "78ca6046f816a87b6c041af532d61b63f270a1a1b8bbeb02ff569a4effb5521e",
 }
 
 
