@@ -245,6 +245,15 @@ class UIInitializer:
                 border: 1px solid {d.colors.border_light};
                 border-radius: {d.radius.xl}px;
             }}
+            #ContentCard QLabel {{
+                background-color: transparent;
+            }}
+            #ContentCard QCheckBox {{
+                background-color: transparent;
+            }}
+            #ContentCard QRadioButton {{
+                background-color: transparent;
+            }}
         """)
 
         card_layout = QVBoxLayout(card)

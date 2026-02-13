@@ -45,7 +45,10 @@ class VoiceCard(QFrame, ThemedMixin):
         gender_icon = "♀" if self.profile.get("gender") == "female" else "♂"
         icon_color = "#FF6B81" if self.profile.get("gender") == "female" else "#5B9BD5"
         self.name_label = QLabel(f"{gender_icon} {self.profile['label']}")
-        self.name_label.setStyleSheet(f"font-weight: {ds.typography.weight_bold}; font-size: 14px; color: {icon_color};")
+        self.name_label.setStyleSheet(
+            f"font-weight: {ds.typography.weight_bold}; font-size: 14px; "
+            f"color: {icon_color}; background-color: transparent; border: none;"
+        )
         top_row.addWidget(self.name_label)
         
         top_row.addStretch()
@@ -69,7 +72,9 @@ class VoiceCard(QFrame, ThemedMixin):
         # Description
         self.desc_label = QLabel(self.profile["description"])
         self.desc_label.setWordWrap(True)
-        self.desc_label.setStyleSheet(f"font-size: 12px; color: #FFFFFF;")
+        self.desc_label.setStyleSheet(
+            "font-size: 12px; color: #FFFFFF; background-color: transparent; border: none;"
+        )
         layout.addWidget(self.desc_label)
 
     def mousePressEvent(self, event):
@@ -87,6 +92,10 @@ class VoiceCard(QFrame, ThemedMixin):
                 background-color: {bg};
                 border: {thickness}px solid {border};
                 border-radius: {ds.radius.base}px;
+            }}
+            VoiceCard QLabel {{
+                background-color: transparent;
+                border: none;
             }}
         """)
         
@@ -121,7 +130,10 @@ class VoicePanel(QFrame, ThemedMixin):
         # Header
         header = QHBoxLayout()
         title = QLabel("음성 선택")
-        title.setStyleSheet(f"font-size: 16px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
+        title.setStyleSheet(
+            f"font-size: 16px; font-weight: {ds.typography.weight_bold}; "
+            "color: #FFFFFF; background-color: transparent; border: none;"
+        )
         header.addWidget(title)
         
         header.addStretch()
@@ -162,6 +174,19 @@ class VoicePanel(QFrame, ThemedMixin):
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {get_color('surface')};
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: {get_color('surface')};
+            }}
+            QScrollArea QWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
         
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout(self.grid_widget)
@@ -257,8 +282,7 @@ class VoicePanel(QFrame, ThemedMixin):
         ds = self.ds
         bg = get_color('surface')
         self.setStyleSheet(f"background-color: {bg}; border: none;")
-        self.scroll_area.setStyleSheet(f"background-color: {bg};")
-        self.grid_widget.setStyleSheet(f"background-color: {bg};")
+        self.grid_widget.setStyleSheet("background-color: transparent; border: none;")
         
         primary = get_color('primary')
         text_primary = get_color('text_primary')

@@ -418,14 +418,15 @@ _DEFAULT_DOWNLOAD_URL = os.getenv(
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.41",
+    "version": "1.3.42",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.41 변경사항
-- 구독 페이지 하단에 카카오톡 문의하기 버튼 추가""",
+    "release_notes": """### v1.3.42 변경사항
+- 모드 선택 패널 아이콘/텍스트 겹침 문제 수정
+- UI 전반 개선 및 버그 수정""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "78ca6046f816a87b6c041af532d61b63f270a1a1b8bbeb02ff569a4effb5521e",
+    "file_hash": "PLACEHOLDER",
 }
 
 

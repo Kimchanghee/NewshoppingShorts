@@ -183,6 +183,7 @@ class UserDashboardClient:
             "pw": password,
             "ip": ip,
             "force": force,
+            "program_type": self.program_type,
         })
 
     def logout(self, user_id: str, token: str) -> Dict[str, Any]:
@@ -276,7 +277,7 @@ class UserDashboardClient:
         Returns:
             {"available": bool, "message": str}
         """
-        return self._request("GET", f"/user/check-username/{username}")
+        return self._request("GET", f"/user/check-username/{username}?program_type={self.program_type}")
 
     # =========================================================================
     # Work Count Management

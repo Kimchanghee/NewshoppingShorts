@@ -51,6 +51,10 @@ class UpdateCheckWorker(QtCore.QThread):
                     self.update_available.emit(data)
                     return
                 self.no_update.emit()
+            elif response.status_code == 404:
+                # Backend deployment may not expose update endpoints.
+                # Treat as "no update" instead of a hard failure.
+                self.no_update.emit()
             else:
                 self.check_failed.emit(f"Server returned {response.status_code}")
         except Exception as e:

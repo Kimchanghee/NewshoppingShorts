@@ -27,7 +27,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # ?꾩옱 ??踰꾩쟾 (鍮뚮뱶 ????媛믪쓣 ?낅뜲?댄듃)
-CURRENT_VERSION = "1.3.41"
+CURRENT_VERSION = "1.3.42"
 
 # 踰꾩쟾 ?뺤씤 API ?붾뱶?ъ씤??
 UPDATE_CHECK_URL = os.getenv(
@@ -227,6 +227,10 @@ class UpdateChecker:
                             logger.info(f"Update available: {self.current_version} -> {latest_version}")
                 else:
                     logger.info(f"No update needed. Current: {self.current_version}, Latest: {latest_version}")
+            elif response.status_code == 404:
+                # Some backend deployments do not include update API routes.
+                # This is not a connectivity failure; just skip update flow.
+                logger.info("Update endpoint not available (404). Skipping update check.")
             else:
                 result["error"] = f"HTTP {response.status_code}"
                 logger.warning(f"Update check failed: HTTP {response.status_code}")
@@ -451,4 +455,3 @@ def check_for_updates_on_startup(
     """
     checker = get_update_checker()
     checker.check_async(callback)
-

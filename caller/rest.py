@@ -366,6 +366,7 @@ def login(**data) -> Dict[str, Any]:
         "key": data.get("key", ""),
         "ip": ip_address,
         "force": data.get("force", False),
+        "program_type": "ssmaker",
     }
 
     try:

@@ -100,7 +100,7 @@ class UsernameCheckWorker(QThread):
             target_url = f"{api_url}user/check-username/{self.username}"
             logger.info(f"[UsernameCheck] 중복확인 요청 중: {target_url}")
 
-            resp = requests.get(target_url, timeout=5)
+            resp = requests.get(target_url, params={"program_type": "ssmaker"}, timeout=5)
 
             if resp.status_code == 200:
                 data = resp.json()

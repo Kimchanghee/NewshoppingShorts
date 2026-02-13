@@ -14,7 +14,7 @@
 ;     uses the previously registered path.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.3.41"
+  #define MyAppVersion "1.3.42"
 #endif
 
 #define MyAppName "SSMaker"

@@ -155,12 +155,18 @@ class Initializer(QtCore.QObject):
             "is_new_version": False,
         }
 
+        base_url = (PAYMENT_API_BASE_URL or "").strip().rstrip("/")
+        if not base_url:
+            logger.info("Update check skipped: PAYMENT_API_BASE_URL is empty")
+            self.checkItemChanged.emit("update_check", "success", "건너뜀")
+            return update_info
+
         try:
             # 현재 버전 확인
             current_version = self._get_current_version()
 
             # 서버에서 최신 버전 정보 가져오기 (config에서 URL 사용)
-            response = requests.get(f"{PAYMENT_API_BASE_URL}/app/version", timeout=5)
+            response = requests.get(f"{base_url}/app/version", timeout=5)
 
             if response.status_code == 200:
                 data = response.json()
@@ -182,6 +188,10 @@ class Initializer(QtCore.QObject):
 
                 self.checkItemChanged.emit("update_check", "success", "확인 완료")
                 self.updateInfoReady.emit(update_info)
+            elif response.status_code == 404:
+                # Backend can run without update routes.
+                logger.info("Update endpoint not available (404). Skipping update check.")
+                self.checkItemChanged.emit("update_check", "success", "건너뜀")
             else:
                 logger.warning(f"Update check returned status {response.status_code}")
                 self.checkItemChanged.emit("update_check", "warning", "확인 실패")
@@ -189,6 +199,9 @@ class Initializer(QtCore.QObject):
         except requests.exceptions.Timeout:
             logger.warning("Update check timed out")
             self.checkItemChanged.emit("update_check", "warning", "시간 초과")
+        except requests.exceptions.ConnectionError:
+            logger.warning("Update check connection error")
+            self.checkItemChanged.emit("update_check", "warning", "연결 실패")
         except Exception as e:
             logger.warning(f"Update check failed: {e}")
             self.checkItemChanged.emit("update_check", "warning", "확인 실패")

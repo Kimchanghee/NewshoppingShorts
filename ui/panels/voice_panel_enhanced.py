@@ -130,6 +130,10 @@ class EnhancedVoiceCard(EnhancedCard):
                 border-color: {c.primary};
                 background-color: {c.bg_hover if not self.is_selected else c.bg_selected};
             }}
+            EnhancedVoiceCard QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
         """)
 
         # Check indicator
@@ -402,6 +406,13 @@ class EnhancedVoicePanel(QFrame, ThemedMixin):
         # Scroll area
         self.scroll_area.setStyleSheet(f"""
             QScrollArea {{
+                background-color: transparent;
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: transparent;
+            }}
+            QScrollArea QWidget {{
                 background-color: transparent;
                 border: none;
             }}

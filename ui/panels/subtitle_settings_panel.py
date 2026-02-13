@@ -234,6 +234,19 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {get_color('surface')};
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: {get_color('surface')};
+            }}
+            QScrollArea QWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
         self.scroll = scroll
 
         scroll_content = QWidget()
@@ -280,7 +293,9 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
 
         # Custom Y value label (shown only in custom mode)
         self.custom_y_label = QLabel("")
-        self.custom_y_label.setStyleSheet("font-size: 12px; color: #B8B8B8;")
+        self.custom_y_label.setStyleSheet(
+            "font-size: 12px; color: #B8B8B8; background-color: transparent; border: none;"
+        )
         self.custom_y_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.custom_y_label.setVisible(False)
         pos_btn_layout.addWidget(self.custom_y_label)
@@ -329,11 +344,14 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
         layout.setSpacing(ds.spacing.space_2)
 
         title_label = QLabel(title)
-        title_label.setStyleSheet(f"font-size: 14px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
+        title_label.setStyleSheet(
+            f"font-size: 14px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF; "
+            "background-color: transparent; border: none;"
+        )
         layout.addWidget(title_label)
 
         desc_label = QLabel(description)
-        desc_label.setStyleSheet("font-size: 12px; color: #888888;")
+        desc_label.setStyleSheet("font-size: 12px; color: #888888; background-color: transparent; border: none;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
@@ -402,16 +420,26 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
                     }}
                 """)
             # 섹션 타이틀/설명 회색 처리
-            self.pos_title_label.setStyleSheet(f"font-size: 14px; font-weight: {ds.typography.weight_bold}; color: #555555;")
-            self.pos_desc_label.setStyleSheet("font-size: 12px; color: #444444;")
+            self.pos_title_label.setStyleSheet(
+                f"font-size: 14px; font-weight: {ds.typography.weight_bold}; color: #555555; "
+                "background-color: transparent; border: none;"
+            )
+            self.pos_desc_label.setStyleSheet(
+                "font-size: 12px; color: #444444; background-color: transparent; border: none;"
+            )
         else:
             # 활성화: 버튼 원래 스타일 복원
             for btn in self.position_buttons.values():
                 btn.setEnabled(True)
             self._update_position_selection(self.position_preview.current_position)
             # 섹션 타이틀/설명 원래 색상
-            self.pos_title_label.setStyleSheet(f"font-size: 14px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
-            self.pos_desc_label.setStyleSheet("font-size: 12px; color: #888888;")
+            self.pos_title_label.setStyleSheet(
+                f"font-size: 14px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF; "
+                "background-color: transparent; border: none;"
+            )
+            self.pos_desc_label.setStyleSheet(
+                "font-size: 12px; color: #888888; background-color: transparent; border: none;"
+            )
 
         is_custom = self.position_preview.current_position == "custom"
         self.custom_y_label.setVisible(not overlay and is_custom)
@@ -497,8 +525,7 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
         ds = self.ds
         bg = get_color('surface')
         self.setStyleSheet(f"background-color: {bg}; border: none;")
-        self.scroll.setStyleSheet(f"background-color: {bg};")
-        self.scroll_content.setStyleSheet(f"background-color: {bg};")
+        self.scroll_content.setStyleSheet("background-color: transparent; border: none;")
 
         # Checkbox styling
         primary = get_color('primary')
@@ -507,6 +534,8 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
                 color: #FFFFFF;
                 font-size: 13px;
                 spacing: 8px;
+                background-color: transparent;
+                border: none;
             }}
             QCheckBox::indicator {{
                 width: 18px;

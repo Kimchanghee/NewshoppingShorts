@@ -83,14 +83,28 @@ class FontCard(QFrame, ThemedMixin):
                 border: {thickness}px solid {border};
                 border-radius: {ds.radius.base}px;
             }}
+            FontCard QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
         """)
         
         text_primary = get_color('text_primary')
         text_secondary = get_color('text_secondary')
-        self.name_label.setStyleSheet(f"color: #FFFFFF; border: none; font-weight: {ds.typography.weight_bold}; font-size: 14px;")
-        self.desc_label.setStyleSheet(f"color: #B8B8B8; border: none; font-size: 12px;")
-        self.radio_label.setStyleSheet(f"color: {get_color('primary') if self.is_selected else text_secondary}; border: none;")
-        self.preview_label.setStyleSheet(f"color: {text_primary}; border: none;")
+        self.name_label.setStyleSheet(
+            f"color: #FFFFFF; border: none; background-color: transparent; "
+            f"font-weight: {ds.typography.weight_bold}; font-size: 14px;"
+        )
+        self.desc_label.setStyleSheet(
+            "color: #B8B8B8; border: none; background-color: transparent; font-size: 12px;"
+        )
+        self.radio_label.setStyleSheet(
+            f"color: {get_color('primary') if self.is_selected else text_secondary}; "
+            "border: none; background-color: transparent;"
+        )
+        self.preview_label.setStyleSheet(
+            f"color: {text_primary}; border: none; background-color: transparent;"
+        )
 
 class FontPanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):
@@ -110,7 +124,10 @@ class FontPanel(QFrame, ThemedMixin):
         # Header
         header = QHBoxLayout()
         title = QLabel("폰트 선택")
-        title.setStyleSheet(f"font-size: 16px; font-weight: {ds.typography.weight_bold}; color: #FFFFFF;")
+        title.setStyleSheet(
+            f"font-size: 16px; font-weight: {ds.typography.weight_bold}; "
+            "color: #FFFFFF; background-color: transparent;"
+        )
         header.addWidget(title)
         
         header.addStretch()
@@ -131,6 +148,19 @@ class FontPanel(QFrame, ThemedMixin):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll.setStyleSheet(f"""
+            QScrollArea {{
+                background-color: {get_color('surface')};
+                border: none;
+            }}
+            QScrollArea > QWidget > QWidget {{
+                background-color: {get_color('surface')};
+            }}
+            QScrollArea QWidget {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
         
         self.scroll_content = QWidget()
         self.scroll_layout = QVBoxLayout(self.scroll_content)
@@ -179,5 +209,4 @@ class FontPanel(QFrame, ThemedMixin):
         ds = self.ds
         bg = get_color('surface')
         self.setStyleSheet(f"background-color: {bg}; border: none;")
-        self.scroll.setStyleSheet(f"background-color: {bg};")
-        self.scroll_content.setStyleSheet(f"background-color: {bg};")
+        self.scroll_content.setStyleSheet("background-color: transparent; border: none;")
