@@ -65,6 +65,12 @@ class OCRThresholds:
     TIME_BUFFER_BEFORE: float = 0.5  # 자막 시작 전 버퍼
     TIME_BUFFER_AFTER: float = 0.8  # 자막 종료 후 버퍼
 
+    # Subtitle vs product text discrimination (자막 vs 상품 텍스트 구분)
+    # 자막: 다중 프레임에서 일정한 위치에 반복 출현
+    # 상품 텍스트: 상품 이동에 따라 위치 변동 → 자동 제외
+    SUBTITLE_MIN_TIME_GROUPS: int = 2  # 최소 시간 그룹(프레임) 수 - 미만이면 자막 미판정
+    SUBTITLE_Y_VARIANCE_MAX: float = 8.0  # Y좌표 표준편차 최대값(%) - 초과하면 이동하는 상품 텍스트
+
 
 @dataclass(frozen=True)
 class VideoSettings:

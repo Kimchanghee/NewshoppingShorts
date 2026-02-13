@@ -125,6 +125,9 @@ class AppState:
         self.generated_videos: List[Dict[str, Any]] = []
         self.korean_subtitle_override = None
         self.korean_subtitle_mode = 'default'
+        self.subtitle_overlay_on_chinese = True
+        self.subtitle_position = 'bottom_center'
+        self.subtitle_custom_y_percent = 80.0
         self.cached_video_width: Optional[int] = None
         self.cached_video_height: Optional[int] = None
 

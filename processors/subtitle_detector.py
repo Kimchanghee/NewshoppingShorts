@@ -610,34 +610,71 @@ class SubtitleDetector:
                              f"w={width_pct:.1f}%, h={height_pct:.1f}% (source={entry.get('source')})")
                 continue
 
-            # === 모든 중국어 텍스트 블러 처리 ===
-            # 위치 관계없이 중국어가 감지되면 블러 적용
-            logger.debug(f"  -> Chinese text blur target: y={y_pct:.1f}%")
-
-            # ★★★ Fallback 영역 조건 완화: OCR이 위치는 맞췄지만 텍스트 인식 실패 시에도 블러 적용 ★★★
-            # source 타입 안전성 확보
+            # ★★★ 자막 vs 상품 텍스트 구분 (다중 프레임 + 위치 안정성) ★★★
             source = str(entry.get('source') or '')
-            # fallback_region이라도 OCR 소스에서 감지된 것이면 블러 적용
-            # (sample_text에 중국어가 없어도 위치 정보가 있으면 적용)
+
+            # Fallback 영역은 별도 처리 (OCR 폴백)
             if source.startswith('fallback_region'):
                 sample_text = str(entry.get('sample_text', '') or '')
                 has_chinese = any('\u4e00' <= ch <= '\u9fff' for ch in sample_text)
-                # 중국어가 있거나, 텍스트가 비어있어도 위치 정보가 유효하면 통과
-                # (OCR이 위치는 맞췄지만 텍스트 인식에 실패한 경우도 블러 적용)
                 if not has_chinese and sample_text.strip():
-                    # 중국어가 아닌 다른 텍스트가 있으면 제외 (영어 등)
                     logger.debug(f"  -> Excluded: Fallback region with non-Chinese text: '{sample_text[:20]}'")
                     continue
-                # sample_text가 비어있으면 통과 (위치 정보만 있는 경우)
                 logger.debug(f"  -> Fallback region accepted: sample_text='{sample_text[:20] if sample_text else '(empty)'}'")
+                logger.debug("  -> Final pass OK (fallback)")
+                safe_filtered.append(entry)
+                continue
 
+            # --- 자막 판별: 다중 프레임 출현 + 위치 일정 ---
+            time_group_count = entry.get('time_group_count', 1)
+            y_positions = entry.get('y_positions', [])
+            region_start_time = entry.get('start_time', 999)
+
+            # 조건 1: 다중 시간 그룹(프레임)에서 출현해야 자막
+            # ★ 단, 영상 시작 부분(~1초)은 면제: 시간 그룹이 충분히 쌓이지 않으므로
+            is_early_region = region_start_time <= 1.0
+            if time_group_count < OCRThresholds.SUBTITLE_MIN_TIME_GROUPS and not is_early_region:
+                logger.debug(f"  -> Excluded: 단일 프레임 출현 (time_groups={time_group_count} < {OCRThresholds.SUBTITLE_MIN_TIME_GROUPS}) → 상품 텍스트로 판정")
+                self.gui.add_log(f"[블러] 상품 텍스트 제외: 단일 프레임 출현 ('{str(entry.get('text', '') or str(entry.get('sample_text', '')))[:15]}...')")
+                continue
+            if is_early_region and time_group_count < OCRThresholds.SUBTITLE_MIN_TIME_GROUPS:
+                logger.debug(f"  -> 영상 시작 구간 면제: start_time={region_start_time:.1f}s, time_groups={time_group_count} (MIN_TIME_GROUPS 조건 면제)")
+
+            # 조건 2: Y좌표 위치가 일정해야 자막 (상품은 움직이므로 위치 불안정)
+            if y_positions and len(y_positions) >= 2:
+                try:
+                    y_std = float(np.std(y_positions)) if NUMPY_AVAILABLE else (
+                        (sum((y - sum(y_positions) / len(y_positions)) ** 2 for y in y_positions) / len(y_positions)) ** 0.5
+                    )
+                except Exception:
+                    y_std = 0.0
+
+                if y_std > OCRThresholds.SUBTITLE_Y_VARIANCE_MAX:
+                    logger.debug(f"  -> Excluded: 위치 불안정 (Y 표준편차={y_std:.1f}% > {OCRThresholds.SUBTITLE_Y_VARIANCE_MAX}%) → 움직이는 상품 텍스트")
+                    self.gui.add_log(f"[블러] 상품 텍스트 제외: 위치 변동 큼 (Y편차={y_std:.1f}%, '{str(entry.get('text', '') or str(entry.get('sample_text', '')))[:15]}...')")
+                    continue
+                logger.debug(f"  -> 위치 안정성 OK: Y 표준편차={y_std:.1f}% (임계값={OCRThresholds.SUBTITLE_Y_VARIANCE_MAX}%)")
+
+            logger.debug(f"  -> 자막으로 판정: {time_group_count}개 프레임 출현, 위치 안정")
             logger.debug("  -> Final pass OK")
             safe_filtered.append(entry)
 
         logger.debug("=" * 60)
-        logger.info(f"[BLUR FILTER] Final blur targets: {len(safe_filtered)} regions")
+        logger.info(f"[BLUR FILTER] Final blur targets: {len(safe_filtered)} regions (filtered from {len(filtered)} Chinese regions)")
         for i, entry in enumerate(safe_filtered):
-            logger.debug(f"  #{i+1}: x={entry.get('x')}%, y={entry.get('y')}%, w={entry.get('width')}%, h={entry.get('height')}%, text='{str(entry.get('text', ''))[:30]}...'")
+            tg = entry.get('time_group_count', '?')
+            yp = entry.get('y_positions', [])
+            y_std_str = ""
+            if yp and len(yp) >= 2:
+                try:
+                    y_std_val = float(np.std(yp)) if NUMPY_AVAILABLE else 0.0
+                    y_std_str = f", Y편차={y_std_val:.1f}%"
+                except Exception:
+                    pass
+            logger.debug(f"  #{i+1}: x={entry.get('x')}%, y={entry.get('y')}%, w={entry.get('width')}%, h={entry.get('height')}%, frames={tg}{y_std_str}, text='{str(entry.get('text', '') or entry.get('sample_text', ''))[:30]}...'")
+        if len(filtered) > len(safe_filtered):
+            excluded = len(filtered) - len(safe_filtered)
+            logger.info(f"[BLUR FILTER] {excluded} regions excluded as product text (단일프레임/위치불안정)")
         logger.debug("=" * 60)
 
         return safe_filtered
@@ -926,7 +963,11 @@ class SubtitleDetector:
                         'sample_text': sample_text,
                         'start_time': start_time,
                         'end_time': end_time,
-                        'cluster_id': f"{time_key}_{cluster_idx}"
+                        'cluster_id': f"{time_key}_{cluster_idx}",
+                        # ★ 자막 vs 상품 텍스트 구분용 메타데이터
+                        # 클러스터 평균 Y만 사용 (개별 박스 Y는 OCR 노이즈로 분산 부풀림 방지)
+                        'y_positions': [avg_y],  # 시간 그룹별 대표 Y좌표
+                        'time_group_count': 1,  # 출현 시간 그룹 수 (병합 시 누적)
                     })
 
             # ★★★ 연속된 시간대의 "동일 트랙" 영역만 병합 (IoU 기반으로 공간 유사성 확인) ★★★
@@ -952,6 +993,9 @@ class SubtitleDetector:
                         existing['start_time'] = min(existing['start_time'], region['start_time'])
                         existing['end_time'] = max(existing['end_time'], region['end_time'])
                         existing['frequency'] = total_freq
+                        # ★ 자막 판별용 메타데이터 누적
+                        existing.setdefault('y_positions', []).extend(region.get('y_positions', []))
+                        existing['time_group_count'] = existing.get('time_group_count', 1) + region.get('time_group_count', 1)
                         merged = True
                         break
 
@@ -960,7 +1004,16 @@ class SubtitleDetector:
 
             logger.info(f"[Multi-subtitle merge] {len(reliable_regions)} -> {len(merged_regions)} independent subtitle regions")
             for i, r in enumerate(merged_regions):
-                logger.debug(f"  Subtitle #{i+1}: pos=({r['x']:.0f}%, {r['y']:.0f}%), size=({r['width']:.0f}%, {r['height']:.0f}%), time={r['start_time']:.1f}s~{r['end_time']:.1f}s, text='{r.get('sample_text', '')[:20]}'")
+                tg = r.get('time_group_count', 1)
+                yp = r.get('y_positions', [])
+                y_std_str = ""
+                if yp and len(yp) >= 2:
+                    try:
+                        y_std_val = float(np.std(yp)) if NUMPY_AVAILABLE else 0.0
+                        y_std_str = f", Y편차={y_std_val:.1f}%"
+                    except Exception:
+                        pass
+                logger.debug(f"  Region #{i+1}: pos=({r['x']:.0f}%, {r['y']:.0f}%), size=({r['width']:.0f}%, {r['height']:.0f}%), time={r['start_time']:.1f}s~{r['end_time']:.1f}s, frames={tg}{y_std_str}, text='{r.get('sample_text', '')[:20]}'")
 
             return merged_regions
         except Exception as e:

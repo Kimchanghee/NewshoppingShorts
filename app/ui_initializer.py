@@ -31,6 +31,7 @@ from ui.panels import (
     ModeSelectionPanel,
     UploadPanel,
 )
+from ui.panels.subtitle_settings_panel import SubtitleSettingsPanel
 from ui.panels.settings_tab import SettingsTab
 from ui.panels.topbar_panel import TopBarPanel
 from ui.components.status_bar import StatusBar
@@ -107,6 +108,7 @@ class UIInitializer:
             ("voice", "음성 선택", "voice"),
             ("cta", "CTA 선택", "cta"),
             ("font", "폰트 선택", "font"),
+            ("subtitle_settings", "자막 설정", "subtitle_settings"),
             ("watermark", "워터마크", "watermark"),
             ("upload", "업로드 설정", "upload"),
             ("queue", "대기/진행", "queue"),
@@ -168,6 +170,7 @@ class UIInitializer:
         voice_panel = VoicePanel(stack, gui, theme_manager=self.theme_manager)
         cta_panel = CTAPanel(stack, gui, theme_manager=self.theme_manager)
         font_panel = FontPanel(stack, gui, theme_manager=self.theme_manager)
+        subtitle_settings_panel = SubtitleSettingsPanel(stack, gui, theme_manager=self.theme_manager)
         watermark_panel = WatermarkPanel(stack, gui, theme_manager=self.theme_manager)
         upload_panel = UploadPanel(stack, gui, theme_manager=self.theme_manager)
         queue_panel = QueuePanel(stack, gui, theme_manager=self.theme_manager)
@@ -180,6 +183,7 @@ class UIInitializer:
             ("voice", "음성 선택", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", voice_panel),
             ("cta", "CTA 선택", "영상 마지막 클릭 유도 멘트를 선택하세요.", cta_panel),
             ("font", "폰트 선택", "자막에 사용할 폰트를 선택하세요.", font_panel),
+            ("subtitle_settings", "자막 설정", "한국어 자막의 위치와 배치 방식을 설정하세요.", subtitle_settings_panel),
             ("watermark", "워터마크 설정", "영상에 표시할 워터마크를 설정하세요.", watermark_panel),
             ("upload", "소셜 미디어 업로드 설정", "채널 연결 및 자동 업로드 프롬프트를 설정합니다.", upload_panel),
             ("queue", "대기/진행", "작업 대기열 및 진행 상황을 관리합니다.", queue_panel),
@@ -211,6 +215,7 @@ class UIInitializer:
             "voice_panel": voice_panel,
             "cta_panel": cta_panel,
             "font_panel": font_panel,
+            "subtitle_settings_panel": subtitle_settings_panel,
             "watermark_panel": watermark_panel,
             "upload_panel": upload_panel,
             "queue_panel": queue_panel,

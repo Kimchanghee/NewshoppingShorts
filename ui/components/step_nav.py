@@ -19,6 +19,7 @@ STEP_ICONS = {
     "voice": "♪",       # Music/voice
     "cta": "▶",         # Play/action
     "font": "A",        # Font
+    "subtitle_settings": "☰",  # Subtitle settings
     "watermark": "◈",   # Watermark
     "upload": "⬆",      # Upload arrow
     "queue": "≡",       # List/queue
