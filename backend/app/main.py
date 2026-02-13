@@ -426,7 +426,7 @@ APP_VERSION_INFO = {
 - 음성 카드 설명 폰트 크기 개선""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "669725180d747a3d893ba363f93aa55706eedac0ec7f77fc98ad1e52d47b4ec5",
+    "file_hash": "774d92a694ad1b41967570729b869981b2113b94d647a573adb5d0a842237e46",
 }
 
 
