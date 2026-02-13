@@ -321,17 +321,11 @@ class ProgressPanel(QFrame, ThemedMixin):
         self._blink_timer.start(500)
 
     def stop_blink(self):
-        """Stop blinking and restore icon"""
+        """Stop blinking - do NOT restore icon (caller will set correct status)"""
         if self._blink_timer is not None:
             self._blink_timer.stop()
             self._blink_timer.deleteLater()
             self._blink_timer = None
-
-        # Restore last blinking step icon to solid
-        if self._blink_step and self._blink_step in self.gui.step_indicators:
-            indicator = self.gui.step_indicators[self._blink_step]
-            indicator['status_label'].setText("●")
-            indicator['status_label'].setStyleSheet("font-size: 11px; color: #FACC15; font-weight: bold;")
 
         self._blink_step = None
         self._blink_visible = True

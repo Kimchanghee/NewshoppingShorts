@@ -448,6 +448,38 @@ class SettingsManager:
             "font_size": self.get_watermark_font_size(),
         }
 
+    # ============ Subtitle Settings ============
+
+    def get_subtitle_settings(self) -> Dict[str, Any]:
+        """Get all subtitle settings as a dictionary"""
+        return {
+            "overlay_on_chinese": self._settings.get("subtitle_overlay_on_chinese", True),
+            "position": self._settings.get("subtitle_position", "bottom_center"),
+            "custom_y_percent": self._settings.get("subtitle_custom_y_percent", 80.0),
+        }
+
+    def set_subtitle_overlay_on_chinese(self, enabled: bool) -> bool:
+        """Save whether to overlay Korean subtitle on Chinese subtitle position"""
+        with self._lock:
+            self._settings["subtitle_overlay_on_chinese"] = bool(enabled)
+        return self._save_settings()
+
+    def set_subtitle_position(self, position: str) -> bool:
+        """Save Korean subtitle position"""
+        valid = ("top_center", "middle_center", "bottom_center", "custom")
+        if position not in valid:
+            position = "bottom_center"
+        with self._lock:
+            self._settings["subtitle_position"] = position
+        return self._save_settings()
+
+    def set_subtitle_custom_y(self, y_percent: float) -> bool:
+        """Save custom subtitle Y position (5-95%)"""
+        y_percent = max(5.0, min(95.0, float(y_percent)))
+        with self._lock:
+            self._settings["subtitle_custom_y_percent"] = y_percent
+        return self._save_settings()
+
     # ============ Social Media Connection Settings ============
 
     def get_youtube_connected(self) -> bool:

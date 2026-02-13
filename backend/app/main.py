@@ -414,15 +414,19 @@ async def health():
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.39/SSMaker_Setup_v1.3.39.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.40/SSMaker_Setup_v1.3.40.exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.39",
+    "version": "1.3.40",
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.39 변경사항
-- 업데이트 후 메인 화면 안열리는 버그 수정 (quitOnLastWindowClosed 타이밍 이슈)""",
+    "release_notes": """### v1.3.40 변경사항
+- 자막 설정 메뉴 추가 (위치 선택, 직접 드래그 배치, 중국어 자막 위 배치)
+- CTA 프로필 링크형 추가
+- 자막 위치 설정이 실제 렌더링에 반영되도록 수정
+- 중국어 자막 vs 상품 텍스트 구분 로직 개선 (다중 프레임 + 위치 안정성)
+- 진행률 패널 자막 분석 초록색 체크 안 뜨는 버그 수정""",
     "is_mandatory": True,
     "update_channel": "stable",
     "file_hash": "6b989f62dcb44001e071f550c18a7864aa2ba1c8604d12ccb871543d6627e84d",

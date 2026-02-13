@@ -338,15 +338,50 @@ def _create_single_line_subtitle(
 
 
 def _resolve_korean_subtitle_bbox(app, desired_w, desired_h, video_width, video_height):
-    """Determine Korean subtitle background box position and size."""
-    # Use only the fixed coordinates requested.
+    """Determine Korean subtitle background box position and size.
+
+    Uses subtitle settings from app state:
+    - subtitle_overlay_on_chinese + korean_subtitle_override: overlay above Chinese subtitle
+    - subtitle_position: preset position (top_center, middle_center, bottom_center)
+    - subtitle_custom_y_percent: custom Y position (0-100%)
+    """
     final_w = max(1, int(desired_w))
     final_h = max(1, int(desired_h))
-
-    # 자막 위치: 화면 하단에서 23% 위치 (화면 하단에서 위로 23% 올라간 곳)
-    # 자막 박스의 하단이 이 위치에 오도록 설정
     final_x = (video_width - final_w) // 2  # 가로 중앙 정렬
-    final_y = int(video_height * 0.75) - final_h  # 하단에서 23% (= 상단에서 77%)
+
+    # 1. 오버레이 모드: 중국어 자막 위에 배치
+    overlay_on = getattr(app, 'subtitle_overlay_on_chinese', False)
+    override = getattr(app, 'korean_subtitle_override', None)
+    if overlay_on and isinstance(override, dict) and 'y' in override:
+        # korean_subtitle_override의 y는 % 단위 (0-100)
+        cn_y_pct = override['y']
+        cn_h_pct = override.get('height', 10)
+        # 중국어 자막 영역 바로 위에 배치 (간격 8px)
+        cn_top_px = int(video_height * cn_y_pct / 100)
+        final_y = cn_top_px - final_h - 8
+        # 화면 밖으로 나가지 않도록 클램프
+        final_y = max(0, final_y)
+        return final_x, final_y, final_w, final_h
+
+    # 2. 사용자 설정 위치 사용
+    position = getattr(app, 'subtitle_position', 'bottom_center')
+    preset_y = {
+        'top_center': 15.0,
+        'middle_center': 45.0,
+        'bottom_center': 80.0,
+    }
+
+    if position == 'custom':
+        y_pct = getattr(app, 'subtitle_custom_y_percent', 80.0)
+    else:
+        y_pct = preset_y.get(position, 80.0)
+
+    # y_pct는 자막 중심의 화면 Y% (0=상단, 100=하단)
+    center_y = int(video_height * y_pct / 100)
+    final_y = center_y - final_h // 2
+
+    # 화면 범위 클램프
+    final_y = max(0, min(video_height - final_h, final_y))
 
     return final_x, final_y, final_w, final_h
 

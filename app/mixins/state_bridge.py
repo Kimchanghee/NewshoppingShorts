@@ -94,6 +94,9 @@ class StateBridgeMixin:
         # --- Subtitle options ---
         self.korean_subtitle_override = state.korean_subtitle_override
         self.korean_subtitle_mode = state.korean_subtitle_mode
+        self.subtitle_overlay_on_chinese = state.subtitle_overlay_on_chinese
+        self.subtitle_position = state.subtitle_position
+        self.subtitle_custom_y_percent = state.subtitle_custom_y_percent
         self.url_gap_seconds = state.url_gap_seconds
         self.center_subtitle_region = state.center_subtitle_region
 
