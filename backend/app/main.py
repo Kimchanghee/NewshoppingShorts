@@ -426,7 +426,7 @@ APP_VERSION_INFO = {
 - UI 전반 개선 및 버그 수정""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "PLACEHOLDER",
+    "file_hash": "669725180d747a3d893ba363f93aa55706eedac0ec7f77fc98ad1e52d47b4ec5",
 }
 
 
