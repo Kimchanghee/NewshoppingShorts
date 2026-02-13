@@ -429,7 +429,7 @@ APP_VERSION_INFO = {
 - 진행률 패널 자막 분석 초록색 체크 안 뜨는 버그 수정""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "6b989f62dcb44001e071f550c18a7864aa2ba1c8604d12ccb871543d6627e84d",
+    "file_hash": "e97591c3461b31b085ecfeb50d5c816898e2b7da42e971bc9df9d1a9d15a07da",
 }
 
 
