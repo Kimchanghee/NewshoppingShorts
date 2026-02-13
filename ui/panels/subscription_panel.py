@@ -1291,6 +1291,14 @@ class SubscriptionPanel(QWidget):
         self.payment_form.hide()
         self.payment_form.set_submit_enabled(False)
         main_layout.addWidget(self.payment_form)
+
+        # ── 문의하기 버튼 (노란색, 카카오톡 오픈채팅) ──
+        inquiry_btn = QPushButton("문의하기")
+        inquiry_btn.setObjectName("inquiry_button")
+        inquiry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        inquiry_btn.clicked.connect(self._contact_support)
+        main_layout.addWidget(inquiry_btn)
+
         main_layout.addStretch()
 
         scroll.setWidget(page)
@@ -1315,6 +1323,25 @@ class SubscriptionPanel(QWidget):
                 color: {ds.colors.text_primary};
                 font-size: {ds.typography.size_md}px;
                 font-weight: {ds.typography.weight_semibold};
+            }}
+
+            #inquiry_button {{
+                background-color: #FACC15;
+                color: #1E1E1E;
+                border: none;
+                border-radius: {ds.radius.md}px;
+                padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
+                font-size: {ds.typography.size_md}px;
+                font-weight: {ds.typography.weight_bold};
+                min-height: {ds.button_sizes['md'].height}px;
+            }}
+
+            #inquiry_button:hover {{
+                background-color: #EAB308;
+            }}
+
+            #inquiry_button:pressed {{
+                background-color: #CA8A04;
             }}
         """)
         
