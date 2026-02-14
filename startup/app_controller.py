@@ -358,8 +358,29 @@ class AppController:
         self.update_complete_dialog = UpdateCompleteDialog(
             version=version, release_notes=notes,
         )
-        self.update_complete_dialog.confirmed.connect(self.launch_main_app)
+        self.update_complete_dialog.confirmed.connect(self._transition_to_main)
         self.update_complete_dialog.show()
+
+        # Pre-import heavy main module while dialog countdown is visible.
+        # This caches ~20+ module imports so launch_main_app is near-instant.
+        QtCore.QTimer.singleShot(500, self._preload_main_module)
+
+    def _preload_main_module(self) -> None:
+        """Pre-import main module during update dialog to reduce transition lag."""
+        try:
+            import main  # noqa: F401
+            logger.debug("Main module pre-imported during update dialog")
+        except Exception as e:
+            logger.warning(f"Failed to pre-import main module: {e}")
+
+    def _transition_to_main(self) -> None:
+        """Smooth transition from update dialog to main app."""
+        dialog = getattr(self, "update_complete_dialog", None)
+        if dialog and hasattr(dialog, "countdown_label"):
+            dialog.countdown_label.setText("메인 화면을 준비하고 있습니다...")
+            self.app.processEvents()
+
+        self.launch_main_app()
 
     # ?? Update download & install ??
 
