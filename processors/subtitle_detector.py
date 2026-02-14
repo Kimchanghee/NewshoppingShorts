@@ -383,7 +383,7 @@ class SubtitleDetector:
                         # ★ Fallback 영역에도 시간 범위 추가 (전체 영상 커버)
                         cluster_times = sorted(set(r.get('time', 0) for r in cluster))
                         fb_start = max(0.0, min(cluster_times) - OCRThresholds.TIME_BUFFER_BEFORE) if cluster_times else 0.0
-                        fb_end = max(cluster_times) + OCRThresholds.TIME_BUFFER_AFTER if cluster_times else total_duration
+                        fb_end = min(total_duration, max(cluster_times) + OCRThresholds.TIME_BUFFER_AFTER) if cluster_times else total_duration
                         fallback_region = {
                             'x': min_x,
                             'y': min_y,
@@ -896,45 +896,49 @@ class SubtitleDetector:
             for region in all_regions:
                 added = False
                 for cluster in spatial_clusters:
-                    # 클러스터의 누적 바운딩 박스와 비교
-                    rep = cluster['bbox']
+                    # 클러스터의 대표 bbox(첫 멤버 기반 중앙값)와 비교하여 드리프트 방지
+                    rep = cluster['representative']
                     iou = self._calculate_iou(region, rep)
 
                     # Y 중심 근접성 체크 (같은 행의 자막)
                     y_center_region = region['y'] + region['height'] / 2.0
                     y_center_cluster = rep['y'] + rep['height'] / 2.0
-                    same_row = abs(y_center_region - y_center_cluster) <= max(region['height'], rep['height']) * 0.8
+                    same_row = abs(y_center_region - y_center_cluster) <= max(region['height'], rep['height']) * OCRThresholds.SAME_ROW_MULTIPLIER
 
                     # 수평 갭 체크
                     region_right = region['x'] + region['width']
                     rep_right = rep['x'] + rep['width']
                     horizontal_gap = max(0.0, max(region['x'] - rep_right, rep['x'] - region_right))
-                    proximity = same_row and horizontal_gap <= 6.0
+                    proximity = same_row and horizontal_gap <= OCRThresholds.HORIZONTAL_GAP_THRESHOLD
 
                     if iou > OCRThresholds.IOU_CLUSTER_THRESHOLD or proximity:
                         cluster['members'].append(region)
-                        # 누적 바운딩 박스 갱신 (union)
-                        new_left = min(rep['x'], region['x'])
-                        new_top = min(rep['y'], region['y'])
-                        new_right = max(rep['x'] + rep['width'], region['x'] + region['width'])
-                        new_bottom = max(rep['y'] + rep['height'], region['y'] + region['height'])
+                        # union bbox 갱신 (출력용)
+                        bbox = cluster['bbox']
+                        new_left = min(bbox['x'], region['x'])
+                        new_top = min(bbox['y'], region['y'])
+                        new_right = max(bbox['x'] + bbox['width'], region['x'] + region['width'])
+                        new_bottom = max(bbox['y'] + bbox['height'], region['y'] + region['height'])
                         cluster['bbox'] = {
                             'x': new_left,
                             'y': new_top,
                             'width': new_right - new_left,
                             'height': new_bottom - new_top,
                         }
+                        # representative는 갱신하지 않음 → 체인 머지 방지
                         added = True
                         break
 
                 if not added:
+                    init_bbox = {
+                        'x': region['x'],
+                        'y': region['y'],
+                        'width': region['width'],
+                        'height': region['height'],
+                    }
                     spatial_clusters.append({
-                        'bbox': {
-                            'x': region['x'],
-                            'y': region['y'],
-                            'width': region['width'],
-                            'height': region['height'],
-                        },
+                        'bbox': dict(init_bbox),
+                        'representative': dict(init_bbox),
                         'members': [region],
                     })
 
@@ -952,14 +956,14 @@ class SubtitleDetector:
                 if not times:
                     continue
 
-                # 연속 시간 구간 분할 (2.0초 이상 갭이면 별도 구간)
+                # 연속 시간 구간 분할 (갭이 임계값 이상이면 별도 구간)
                 # 같은 위치 자막이 잠깐 사라졌다 재출현하는 경우를 처리
                 time_segments = []
                 seg_start = times[0]
                 seg_end = times[0]
 
                 for t in times[1:]:
-                    if t - seg_end <= 2.0:  # 2.0초 갭 허용
+                    if t - seg_end <= OCRThresholds.TIME_SEGMENT_GAP:
                         seg_end = t
                     else:
                         time_segments.append((seg_start, seg_end))
@@ -974,10 +978,11 @@ class SubtitleDetector:
                     buffered_end = seg_end + OCRThresholds.TIME_BUFFER_AFTER
 
                     # 공간 바운딩 박스에 패딩 추가
-                    x = max(0.0, bbox['x'] - 2.0)
-                    y = max(0.0, bbox['y'] - 2.0)
-                    right = min(100.0, bbox['x'] + bbox['width'] + 2.0)
-                    bottom = min(100.0, bbox['y'] + bbox['height'] + 2.0)
+                    pad = OCRThresholds.SPATIAL_PADDING
+                    x = max(0.0, bbox['x'] - pad)
+                    y = max(0.0, bbox['y'] - pad)
+                    right = min(100.0, bbox['x'] + bbox['width'] + pad)
+                    bottom = min(100.0, bbox['y'] + bbox['height'] + pad)
 
                     sample_text = next((m.get('text', '') for m in members if m.get('text')), '')
                     # 이 시간 구간에 속하는 멤버들의 Y 위치 수집
@@ -1508,13 +1513,8 @@ class SubtitleDetector:
             start_frame = int(fps * start_sec)
             end_frame = min(int(fps * end_sec), total_frames)
 
-            # 시스템 최적화에 따른 샘플링 간격
+            # 시스템 최적화 파라미터 가져오기
             optimizer = _get_optimizer(self.gui)
-            if optimizer:
-                ocr_params = optimizer.get_optimized_ocr_params()
-                sample_interval_sec = ocr_params['sample_interval']
-            else:
-                sample_interval_sec = 0.3  # 기본값
 
             # 하이브리드 감지기 확인 및 초기화
             use_hybrid = False
@@ -1530,7 +1530,7 @@ class SubtitleDetector:
                 hybrid_detector.reset()  # 세그먼트별 통계 초기화
                 logger.debug(f"[OCR {segment_name}] Hybrid detection mode activated")
             else:
-                logger.debug(f"[OCR {segment_name}] Default sampling mode ({sample_interval_sec}s interval)")
+                logger.debug(f"[OCR {segment_name}] Default sampling mode (0.15s interval)")
 
             # GLM-OCR 배치 모드 확인
             ocr_reader = getattr(self.gui, 'ocr_reader', None)
@@ -1831,16 +1831,25 @@ class SubtitleDetector:
                 del roi_frame
 
             # ★★★ Phase 2: 자막 경계 정밀 재스캔 (Boundary Refinement) ★★★
-            # 감지된 자막의 시작/끝 근처를 0.05초 간격으로 재스캔하여
+            # 감지된 자막의 시작/끝 경계 근처를 0.05초 간격으로 재스캔하여
             # 정확한 자막 시작/끝 시간을 파악
             if all_regions and frames_with_chinese > 0:
-                # 감지된 시간 범위의 경계 식별
+                # 세그먼트 경계만 스캔: 연속 감지의 첫/마지막 시간 + 갭 경계
                 detected_times = sorted(set(r.get('time', 0) for r in all_regions))
                 if detected_times:
+                    # 경계 시간만 추출 (전체 시간 대신 세그먼트 경계만)
+                    edge_times = set()
+                    edge_times.add(detected_times[0])
+                    edge_times.add(detected_times[-1])
+                    for i in range(1, len(detected_times)):
+                        if detected_times[i] - detected_times[i - 1] > OCRThresholds.TIME_SEGMENT_GAP:
+                            edge_times.add(detected_times[i - 1])
+                            edge_times.add(detected_times[i])
+
                     boundary_frames = set()
                     refine_interval = max(1, int(fps * 0.05))  # 0.05초 간격
 
-                    for det_time in detected_times:
+                    for det_time in edge_times:
                         det_frame = int(det_time * fps)
                         # 감지 시작 직전 구간 (1초 전 ~ 감지 시점)
                         scan_before_start = max(start_frame, det_frame - int(fps * 1.0))
@@ -1853,13 +1862,17 @@ class SubtitleDetector:
                             if f not in sample_frames and f < total_frames:
                                 boundary_frames.add(f)
 
-                    # 중복 제거: 이미 스캔한 감지 시간의 ±0.15초 내의 프레임은 제외
+                    # 중복 제거: 이미 스캔한 프레임 제외
                     scanned_set = set(sample_frames)
                     boundary_frames -= scanned_set
 
+                    # 프레임 수 제한 (성능 보호)
+                    if len(boundary_frames) > OCRThresholds.BOUNDARY_MAX_FRAMES:
+                        boundary_frames = set(sorted(boundary_frames)[:OCRThresholds.BOUNDARY_MAX_FRAMES])
+
                     if boundary_frames:
                         boundary_list = sorted(boundary_frames)
-                        logger.info(f"[OCR {segment_name}] Boundary refinement: scanning {len(boundary_list)} extra frames near detected transitions")
+                        logger.info(f"[OCR {segment_name}] Boundary refinement: scanning {len(boundary_list)} extra frames near {len(edge_times)} edge transitions")
 
                         cap2 = cv2.VideoCapture(video_path)
                         try:
@@ -1871,11 +1884,15 @@ class SubtitleDetector:
                                         continue
                                     time_sec2 = bf / fps
 
-                                    # 다운스케일
+                                    # 다운스케일 (메인 스캔과 동일한 옵티마이저 설정 사용)
                                     scale2 = 1.0
                                     try:
                                         h2, w2 = frame2.shape[:2]
-                                        target_w2 = 1440 if w2 > 1920 else w2
+                                        if optimizer:
+                                            ocr_params_br = optimizer.get_optimized_ocr_params()
+                                            target_w2 = ocr_params_br['downscale_target'] if w2 > ocr_params_br['downscale_target'] else w2
+                                        else:
+                                            target_w2 = 1440 if w2 > 1920 else w2
                                         if w2 > target_w2:
                                             scale2 = target_w2 / float(w2)
                                             new_h2 = max(1, int(h2 * scale2))

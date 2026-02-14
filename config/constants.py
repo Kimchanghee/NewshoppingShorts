@@ -66,6 +66,15 @@ class OCRThresholds:
     TIME_BUFFER_BEFORE: float = 0.8  # 자막 시작 전 버퍼 (0.5 -> 0.8)
     TIME_BUFFER_AFTER: float = 1.2  # 자막 종료 후 버퍼 (0.8 -> 1.2)
 
+    # Spatial clustering (공간-우선 클러스터링)
+    SAME_ROW_MULTIPLIER: float = 0.8  # Y 근접성 판정: height * 이 값 이내이면 같은 행
+    HORIZONTAL_GAP_THRESHOLD: float = 6.0  # 수평 갭 허용치(%)
+    TIME_SEGMENT_GAP: float = 2.0  # 시간 구간 분할 갭(초)
+    SPATIAL_PADDING: float = 2.0  # 공간 바운딩 박스 패딩(%)
+
+    # Boundary refinement (경계 정밀 재스캔)
+    BOUNDARY_MAX_FRAMES: int = 500  # 최대 경계 재스캔 프레임 수
+
     # Subtitle vs product text discrimination (자막 vs 상품 텍스트 구분)
     # 자막: 다중 프레임에서 일정한 위치에 반복 출현
     # 상품 텍스트: 상품 이동에 따라 위치 변동 → 자동 제외
@@ -218,6 +227,12 @@ class PathLimits:
 
     MAX_PATH_LENGTH: int = 260  # Windows MAX_PATH
     MAX_FILENAME_LENGTH: int = 255  # Maximum filename length
+
+    # Local file protocol
+    LOCAL_PROTOCOL: str = "local://"
+    ALLOWED_VIDEO_EXTENSIONS: Tuple[str, ...] = (
+        ".mp4", ".avi", ".mov", ".mkv", ".wmv", ".flv", ".webm", ".m4v",
+    )
 
 
 @dataclass(frozen=True)

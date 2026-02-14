@@ -4,6 +4,7 @@ Queue manager for URL jobs and mix jobs.
 
 from __future__ import annotations
 
+import os
 import re
 from datetime import datetime
 from typing import Dict, Iterable, List, Sequence
@@ -71,7 +72,6 @@ class QueueManager:
     def _to_display_url(self, key: str) -> str:
         # Handle local file entries
         if key.startswith("local://"):
-            import os
             return f"[로컬] {os.path.basename(key[8:])}"
         if not self._is_mix_job(key):
             return self._strip_legacy_queue_prefix(key)

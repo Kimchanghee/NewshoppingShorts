@@ -132,7 +132,7 @@ def _get_mix_job_urls(app, job_key: str) -> List[str]:
         if not isinstance(url, str):
             continue
         clean = url.strip()
-        if clean.startswith("http://") or clean.startswith("https://"):
+        if clean.startswith("http://") or clean.startswith("https://") or clean.startswith("local://"):
             normalized.append(clean)
     return normalized
 
@@ -167,17 +167,18 @@ def _download_mix_sources(app, mix_urls: List[str]) -> List[str]:
     for idx, source_url in enumerate(mix_urls, 1):
         # Handle local:// prefixed files
         if source_url.startswith("local://"):
-            local_path = source_url[len("local://"):]
-            if not os.path.isfile(local_path):
-                raise FileNotFoundError(f"로컬 파일을 찾을 수 없습니다: {local_path}")
+            from core.video.batch.utils import extract_local_path
+            local_path = extract_local_path(source_url)
+            if local_path is None:
+                raise FileNotFoundError(f"로컬 파일을 찾을 수 없거나 허용되지 않는 형식입니다: {source_url}")
             downloaded.append(local_path)
-            app.add_log(f"[Mix] 로컬 소스 {idx}/{total}: {os.path.basename(local_path)}")
+            app.add_log(f"[Mix] Local source {idx}/{total}: {os.path.basename(local_path)}")
         else:
-            app.add_log(f"[Mix] Downloading source {idx}/{total}...")
+            app.add_log(f"[Mix] 소스 {idx}/{total} 다운로드 중...")
             path = DouyinExtract.download_tiktok_douyin_video(source_url)
             downloaded.append(path)
             _register_temp_download_files(app, [path])
-            app.add_log(f"[Mix] Source {idx} ready: {os.path.basename(path)}")
+            app.add_log(f"[Mix] 소스 {idx} 준비 완료: {os.path.basename(path)}")
 
     return downloaded
 
@@ -1065,18 +1066,18 @@ def _process_single_video(app, url, current_number, total_urls):
         # Check if this is a local file (local:// prefix)
         is_local_file = url.startswith("local://")
         if is_local_file:
-            local_path = url[len("local://"):]
-            if not os.path.isfile(local_path):
-                raise FileNotFoundError(f"로컬 파일을 찾을 수 없습니다: {local_path}")
+            from core.video.batch.utils import extract_local_path
+            local_path = extract_local_path(url)
+            if local_path is None:
+                raise FileNotFoundError(f"로컬 파일을 찾을 수 없거나 허용되지 않는 형식입니다: {url}")
             app._temp_downloaded_file = local_path
             app.video_source = "local"
             app.local_file_path = local_path
-            app.add_log(f"[로컬] 로컬 영상 파일 사용: {os.path.basename(local_path)}")
+            app.add_log(f"[다운로드] 로컬 영상 파일 사용: {os.path.basename(local_path)}")
 
-        mix_urls = _get_mix_job_urls(app, url)
         if is_local_file:
             pass  # Already set above
-        elif len(mix_urls) >= MIX_MIN_URLS:
+        elif len(_get_mix_job_urls(app, url)) >= MIX_MIN_URLS:
             mixed_path, _ = _prepare_mix_source_video(app, url)
             app._temp_downloaded_file = mixed_path
         else:

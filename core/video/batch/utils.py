@@ -13,8 +13,30 @@ from typing import List, Tuple, Set
 from utils import Tool
 from caller import ui_controller
 from utils.logging_config import get_logger
+from config.constants import PathLimits
 
 logger = get_logger(__name__)
+
+
+def extract_local_path(url: str) -> str | None:
+    """Extract and validate local file path from a local:// URL.
+
+    Returns the real, normalized path if the URL uses the local:// protocol
+    and the file exists with an allowed video extension. Returns None otherwise.
+    """
+    if not isinstance(url, str) or not url.startswith(PathLimits.LOCAL_PROTOCOL):
+        return None
+    raw = url[len(PathLimits.LOCAL_PROTOCOL):]
+    if not raw:
+        return None
+    real = os.path.realpath(raw)
+    ext = os.path.splitext(real)[1].lower()
+    if ext not in PathLimits.ALLOWED_VIDEO_EXTENSIONS:
+        logger.warning("[local://] 허용되지 않는 확장자: %s", ext)
+        return None
+    if not os.path.isfile(real):
+        return None
+    return real
 
 
 def _extract_product_name(app) -> str:
