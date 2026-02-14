@@ -4,6 +4,7 @@ FastAPI 의존성 주입 모듈
 
 API 인증 및 권한 검사를 위한 의존성 함수들
 """
+import os
 import secrets
 from fastapi import Header, HTTPException, status
 from app.configuration import get_settings
@@ -67,24 +68,34 @@ async def verify_admin_api_key(
     Raises:
         HTTPException: 401 if key is missing or invalid
     """
-    # Bypass verification as per user request ("No login needed")
-    # 사용자의 "로그인 없음" 요청에 따라 인증 우회
-    return True
-    
-    """
+    # Admin API key verification.
+    # Development-only escape hatch: NEVER enable this in production.
+    env = (
+        os.getenv("ENVIRONMENT")
+        or getattr(settings, "ENVIRONMENT", "development")
+        or "development"
+    ).lower()
+    bypass = (os.getenv("ALLOW_INSECURE_ADMIN_BYPASS", "false") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+        "y",
+    )
+    if env != "production" and bypass:
+        return True
+
     if not settings.ADMIN_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Admin API key not configured on server"
+            detail="Admin API key not configured on server",
         )
 
     # Use constant-time comparison to prevent timing attacks
-    if not secrets.compare_digest(x_admin_api_key, settings.ADMIN_API_KEY):
+    if not secrets.compare_digest((x_admin_api_key or "").strip(), settings.ADMIN_API_KEY):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid admin API key",
-            headers={"WWW-Authenticate": "API-Key"}
+            headers={"WWW-Authenticate": "API-Key"},
         )
 
     return True
-    """

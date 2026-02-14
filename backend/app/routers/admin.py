@@ -587,14 +587,13 @@ async def get_stats(
         work_base.with_entities(func.coalesce(func.sum(User.work_used), 0)).scalar() or 0
     )
     users_with_work = work_base.filter(User.work_used > 0).count()
-    # task_text = func.lower(func.trim(func.coalesce(User.current_task, "")))
-    # in_progress_query = work_base.filter(
-    #     User.is_online.is_(True),
-    #     task_text != "",
-    #     task_text.notin_(["idle", "pending", "waiting", "\ub300\uae30 \uc911"]),
-    # )
-    # in_progress_users = in_progress_query.count()
-    in_progress_users = 0
+    task_text = func.lower(func.trim(func.coalesce(User.current_task, "")))
+    in_progress_query = work_base.filter(
+        User.is_online.is_(True),
+        task_text != "",
+        task_text.notin_(["idle", "pending", "waiting", "대기 중"]),
+    )
+    in_progress_users = in_progress_query.count()
     avg_work_used_per_user = round(total_work_used / total_users, 2) if total_users else 0
 
     # Registration request stats

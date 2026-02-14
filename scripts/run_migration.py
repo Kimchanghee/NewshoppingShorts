@@ -4,8 +4,11 @@
 import sys
 import os
 
-# Add backend to path
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), "backend"))
+# Add backend to path (repo_root/backend)
+_backend_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "backend"))
+if not os.path.isdir(_backend_dir):
+    raise SystemExit(f"ERROR: backend directory not found: {_backend_dir}")
+sys.path.insert(0, _backend_dir)
 
 # 환경 변수 설정 (기존 값 사용 또는 사용자 입력 요청)
 # 환경 변수가 설정되지 않았을 경우에만 기본값 사용
@@ -13,27 +16,29 @@ import getpass
 
 
 def get_env_or_input(env_var, prompt, default=None, secret=False):
-    """환경 변수 또는 사용자 입력으로 값 가져오기"""
+    """Get a value from env or prompt the operator (interactive)."""
     value = os.getenv(env_var)
     if value:
-        print(f"✓ {env_var} 환경 변수 사용됨")
+        print(f"[OK] Using env var: {env_var}")
         return value
 
-    if default and os.getenv("CI", "false").lower() == "true":
-        # CI 환경에서는 기본값 사용
-        print(f"⚠️ CI 환경에서 {env_var} 기본값 사용")
+    if os.getenv("CI", "false").lower() == "true":
+        if default is None:
+            raise SystemExit(f"ERROR: {env_var} must be set in CI (no safe default).")
+        print(f"[WARN] CI: using default for {env_var}")
         return default
 
-    # 사용자 입력 요청
-    if secret:
-        value = getpass.getpass(prompt + f" (기본값: {default}): ")
-    else:
-        value = input(prompt + f" (기본값: {default}): ")
+    while True:
+        default_text = f" (default: {default})" if default is not None else ""
+        if secret:
+            value = getpass.getpass(prompt + default_text + ": ")
+        else:
+            value = input(prompt + default_text + ": ")
 
-    if not value.strip():
-        value = default
-
-    return value
+        if value.strip():
+            return value.strip()
+        if default is not None:
+            return default
 
 
 # 데이터베이스 연결 정보
@@ -44,7 +49,7 @@ db_host = get_env_or_input("DB_HOST", "데이터베이스 호스트", "127.0.0.1
 db_port = get_env_or_input("DB_PORT", "데이터베이스 포트", "3307")
 db_user = get_env_or_input("DB_USER", "데이터베이스 사용자명", "migration_admin")
 db_password = get_env_or_input(
-    "DB_PASSWORD", "데이터베이스 비밀번호", "MigAdmin123!", secret=True
+    "DB_PASSWORD", "데이터베이스 비밀번호", None, secret=True
 )
 db_name = get_env_or_input("DB_NAME", "데이터베이스 이름", "ssmaker_auth")
 

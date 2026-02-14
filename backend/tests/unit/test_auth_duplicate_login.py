@@ -2,8 +2,8 @@
 """
 Auth duplicate-login policy tests.
 
-Validates that stale/same-IP sessions do not trigger false EU003 while
-fresh other-IP sessions still do.
+Validates that stale/same-IP sessions do not trigger false EU003, and that
+fresh other-IP sessions are reclaimed (auto-kick) per current policy.
 """
 
 import os
@@ -180,7 +180,7 @@ def test_login_allows_and_reclaims_same_ip_active_session(monkeypatch):
     assert same_ip_active.is_active is False
 
 
-def test_login_blocks_when_other_ip_session_is_fresh(monkeypatch):
+def test_login_allows_and_reclaims_other_ip_active_session(monkeypatch):
     monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
     monkeypatch.setattr(
         "app.services.auth_service.create_access_token",
@@ -201,6 +201,5 @@ def test_login_blocks_when_other_ip_session_is_fresh(monkeypatch):
         )
     )
 
-    assert result == {"status": "EU003", "message": "EU003"}
-    assert other_ip_active.is_active is True
-    assert db.added == []
+    assert result.get("status") is True
+    assert other_ip_active.is_active is False
