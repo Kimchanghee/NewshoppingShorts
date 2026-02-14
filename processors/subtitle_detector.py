@@ -1572,16 +1572,16 @@ class SubtitleDetector:
 
                 logger.debug(f"[OCR {segment_name}] 0-3s intensive sampling: {len([f for f in sample_frames if f < critical_end_frame])} frames (0.1s interval)")
 
-            # 3초 이후: 동적 샘플링 (자막 감지 여부에 따라 간격 조정)
+            # 3초 이후: 촘촘한 샘플링 (0.15초 간격)
+            # ★★★ 개선: 0.3초 → 0.15초로 축소하여 짧은 자막 누락 방지 ★★★
             if end_frame > critical_end_frame:
                 if use_hybrid:
                     # 하이브리드: 더 촘촘한 프레임 스캔 (0.1초 간격)
                     base_interval = max(1, int(fps * 0.1))
                 else:
-                    base_interval = max(1, int(fps * sample_interval_sec))
+                    # ★ 기본 간격 0.15초: 0.3초에서 절반으로 줄여 자막 전환 포착률 향상
+                    base_interval = max(1, int(fps * 0.15))
 
-                # ★★★ 동적 샘플링: 자막 없는 구간은 간격 2배로 확대 ★★★
-                # (실제 감지 여부는 OCR 후에 알 수 있으므로, 일단 기본 간격 사용)
                 scan_interval = base_interval
 
                 regular_start = max(critical_end_frame, start_frame)
@@ -1829,6 +1829,107 @@ class SubtitleDetector:
                 del prev_frame_roi
             if 'roi_frame' in locals():
                 del roi_frame
+
+            # ★★★ Phase 2: 자막 경계 정밀 재스캔 (Boundary Refinement) ★★★
+            # 감지된 자막의 시작/끝 근처를 0.05초 간격으로 재스캔하여
+            # 정확한 자막 시작/끝 시간을 파악
+            if all_regions and frames_with_chinese > 0:
+                # 감지된 시간 범위의 경계 식별
+                detected_times = sorted(set(r.get('time', 0) for r in all_regions))
+                if detected_times:
+                    boundary_frames = set()
+                    refine_interval = max(1, int(fps * 0.05))  # 0.05초 간격
+
+                    for det_time in detected_times:
+                        det_frame = int(det_time * fps)
+                        # 감지 시작 직전 구간 (1초 전 ~ 감지 시점)
+                        scan_before_start = max(start_frame, det_frame - int(fps * 1.0))
+                        for f in range(scan_before_start, det_frame, refine_interval):
+                            if f not in sample_frames and f < total_frames:
+                                boundary_frames.add(f)
+                        # 감지 종료 직후 구간 (감지 시점 ~ 1초 후)
+                        scan_after_end = min(end_frame, det_frame + int(fps * 1.0))
+                        for f in range(det_frame, scan_after_end, refine_interval):
+                            if f not in sample_frames and f < total_frames:
+                                boundary_frames.add(f)
+
+                    # 중복 제거: 이미 스캔한 감지 시간의 ±0.15초 내의 프레임은 제외
+                    scanned_set = set(sample_frames)
+                    boundary_frames -= scanned_set
+
+                    if boundary_frames:
+                        boundary_list = sorted(boundary_frames)
+                        logger.info(f"[OCR {segment_name}] Boundary refinement: scanning {len(boundary_list)} extra frames near detected transitions")
+
+                        cap2 = cv2.VideoCapture(video_path)
+                        try:
+                            if cap2.isOpened():
+                                for bf in boundary_list:
+                                    cap2.set(cv2.CAP_PROP_POS_FRAMES, bf)
+                                    ret2, frame2 = cap2.read()
+                                    if not ret2:
+                                        continue
+                                    time_sec2 = bf / fps
+
+                                    # 다운스케일
+                                    scale2 = 1.0
+                                    try:
+                                        h2, w2 = frame2.shape[:2]
+                                        target_w2 = 1440 if w2 > 1920 else w2
+                                        if w2 > target_w2:
+                                            scale2 = target_w2 / float(w2)
+                                            new_h2 = max(1, int(h2 * scale2))
+                                            frame2 = cv2.resize(frame2, (target_w2, new_h2), interpolation=cv2.INTER_AREA)
+                                    except Exception:
+                                        scale2 = 1.0
+
+                                    results2, calls2 = self._perform_ocr_with_retry(
+                                        frame2, segment_name, bf, "boundary"
+                                    )
+                                    ocr_call_count += calls2
+
+                                    if not results2:
+                                        continue
+
+                                    for result in results2:
+                                        if len(result) == 3:
+                                            bbox2, text2, prob2 = result
+                                        elif len(result) == 2:
+                                            bbox2, text2 = result
+                                            prob2 = 1.0
+                                        else:
+                                            continue
+                                        if prob2 < 0.3:
+                                            continue
+                                        chinese_chars2 = sum(1 for c in text2 if '\u4e00' <= c <= '\u9fff')
+                                        if chinese_chars2 < 1:
+                                            continue
+
+                                        # bbox 스케일 조정
+                                        try:
+                                            if scale2 != 1.0:
+                                                bbox2 = [(x / scale2, y / scale2) for x, y in bbox2]
+                                        except Exception:
+                                            pass
+
+                                        region_info2 = self._gpu_process_bbox_batch([bbox2], W, H)
+                                        if region_info2:
+                                            all_regions.append({
+                                                'x': region_info2[0]['x'],
+                                                'y': region_info2[0]['y'],
+                                                'width': region_info2[0]['width'],
+                                                'height': region_info2[0]['height'],
+                                                'confidence': prob2,
+                                                'time': time_sec2,
+                                                'text': text2,
+                                                'language': 'chinese',
+                                                'source': 'boundary_refine',
+                                            })
+                                            frames_with_chinese += 1
+                        finally:
+                            cap2.release()
+
+                        logger.info(f"[OCR {segment_name}] Boundary refinement complete: {len(all_regions)} total regions (added from boundary scan)")
 
             # ★★★ 성능 통계 출력 ★★★
             total_scanned = len(sample_frames)
