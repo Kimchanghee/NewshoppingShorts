@@ -483,8 +483,8 @@ class SubtitleProcessor:
         min_pad = max(2, int(base_min_pad * (h / base_height)))
         extra_side_pad = int(w * 0.09)
         row_merge_threshold = max(14, int(h * 0.03))
-        # ★ 시간 갭 허용치 확대: 같은 자막의 연속 검출 사이 갭을 허용 (0.35 -> 2.0)
-        max_time_gap = 2.0
+        # ★ 시간 갭 허용치 확대: 같은 자막의 연속 검출 사이 갭을 허용 (0.35 -> 1.0)
+        max_time_gap = 1.0
 
         prepared: List[Dict[str, Any]] = []
         for pos in subtitle_positions:
@@ -520,9 +520,9 @@ class SubtitleProcessor:
             except (TypeError, ValueError):
                 end_time = video_duration
 
-            if start_time > 0:
-                start_time = max(0.0, start_time - OCRThresholds.TIME_BUFFER_BEFORE)
-            end_time = min(video_duration, end_time + OCRThresholds.TIME_BUFFER_AFTER)
+            # 시간 버퍼는 subtitle_detector에서 이미 적용됨 - 여기서는 범위만 클램프
+            start_time = max(0.0, start_time)
+            end_time = min(video_duration, end_time)
             if end_time < start_time:
                 end_time = start_time
 

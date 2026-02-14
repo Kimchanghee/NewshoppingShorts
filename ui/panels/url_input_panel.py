@@ -3,6 +3,8 @@ URL Input Panel for PyQt6
 Refactored to integrity with Main Shell Design System
 Supports both single video mode and mix mode
 """
+import os
+
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel,
     QTextEdit, QWidget, QFrame, QLineEdit,
@@ -588,8 +590,6 @@ class URLInputPanel(QWidget):
 
     def _select_local_file(self, mode: str):
         """Open file dialog to select local video file(s)."""
-        import os
-
         if mode == "mix":
             # Allow multiple file selection for mix mode
             files, _ = QFileDialog.getOpenFileNames(
@@ -597,7 +597,8 @@ class URLInputPanel(QWidget):
                 LOCAL_VIDEO_EXTENSIONS
             )
             if files:
-                for f in files:
+                remaining = MAX_MIX_URLS - len(self._mix_local_paths)
+                for f in files[:remaining]:
                     if f not in self._mix_local_paths:
                         self._mix_local_paths.append(f)
                 self._update_mix_local_ui()
@@ -620,7 +621,6 @@ class URLInputPanel(QWidget):
 
     def _add_local_file_to_queue(self, mode: str):
         """Add selected local file(s) to the processing queue."""
-        import os
         from ui.components.custom_dialog import show_warning, show_success
 
         if mode == "mix":
@@ -685,7 +685,6 @@ class URLInputPanel(QWidget):
 
     def _update_mix_local_ui(self):
         """Update mix mode local file display."""
-        import os
         count = len(self._mix_local_paths)
         if count == 0:
             self.mix_local_file_label.setText("파일을 선택하세요")
