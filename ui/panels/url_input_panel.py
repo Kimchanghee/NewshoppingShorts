@@ -6,13 +6,15 @@ Supports both single video mode and mix mode
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel,
     QTextEdit, QWidget, QFrame, QLineEdit,
-    QPushButton, QScrollArea, QSizePolicy
+    QPushButton, QScrollArea, QSizePolicy,
+    QFileDialog
 )
 from PyQt6.QtCore import Qt, QEvent, pyqtSignal
 from PyQt6.QtGui import QFont
 from ui.design_system_v2 import get_design_system, get_color
 
-# Constants for mix mode
+# Constants for mix mode and local file selection
+LOCAL_VIDEO_EXTENSIONS = "영상 파일 (*.mp4 *.avi *.mov *.mkv *.wmv *.flv *.webm *.m4v);;모든 파일 (*)"
 MIN_MIX_URLS = 2
 MAX_MIX_URLS = 5
 
@@ -167,41 +169,120 @@ class URLInputPanel(QWidget):
         single_layout.setContentsMargins(0, 0, 0, 0)
         single_layout.setSpacing(ds.spacing.space_2)
 
-        lbl = QLabel("쇼핑몰 상품 링크 또는 영상 URL 입력")
+        # --- Horizontal split: URL input (left 50%) | Local file (right 50%) ---
+        single_split = QHBoxLayout()
+        single_split.setSpacing(ds.spacing.space_4)
+
+        # Left side: URL input
+        left_url_widget = QWidget()
+        left_url_layout = QVBoxLayout(left_url_widget)
+        left_url_layout.setContentsMargins(0, 0, 0, 0)
+        left_url_layout.setSpacing(ds.spacing.space_2)
+
+        lbl = QLabel("URL 링크 입력")
         lbl.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         lbl.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
-        single_layout.addWidget(lbl)
+        left_url_layout.addWidget(lbl)
 
         self.gui.url_entry = QTextEdit()
         self.gui.url_entry.setFixedHeight(120)
         self.gui.url_entry.setPlaceholderText("https://v.douyin.com/xxxxx/\nhttps://smartstore.naver.com/...")
         self.gui.url_entry.setStyleSheet(self._get_input_style())
-        single_layout.addWidget(self.gui.url_entry)
+        left_url_layout.addWidget(self.gui.url_entry)
 
-        hint = QLabel("💡 팁: 여러 개의 링크를 붙여넣으면 자동으로 분리하여 목록에 추가됩니다.")
+        hint = QLabel("💡 여러 링크를 붙여넣으면 자동 분리됩니다.")
         hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
         hint.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
-        single_layout.addWidget(hint)
+        left_url_layout.addWidget(hint)
 
-        # Single mode action buttons
-        single_action = QHBoxLayout()
-        single_action.setSpacing(ds.spacing.space_3)
+        # Single mode URL action buttons
+        single_url_action = QHBoxLayout()
+        single_url_action.setSpacing(ds.spacing.space_2)
 
         self.add_btn = QPushButton("목록에 추가")
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.add_btn.setStyleSheet(self._get_button_style("primary", "md"))
+        self.add_btn.setStyleSheet(self._get_button_style("primary", "sm"))
         self.add_btn.clicked.connect(self.gui.add_url_from_entry)
-        single_action.addWidget(self.add_btn)
+        single_url_action.addWidget(self.add_btn)
 
-        self.clipboard_btn = QPushButton("클립보드에서 붙여넣기")
+        self.clipboard_btn = QPushButton("클립보드 붙여넣기")
         self.clipboard_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clipboard_btn.setStyleSheet(self._get_button_style("secondary", "md"))
+        self.clipboard_btn.setStyleSheet(self._get_button_style("secondary", "sm"))
         self.clipboard_btn.clicked.connect(self.gui.paste_and_extract)
-        single_action.addWidget(self.clipboard_btn)
+        single_url_action.addWidget(self.clipboard_btn)
 
-        single_action.addStretch()
-        single_layout.addLayout(single_action)
+        single_url_action.addStretch()
+        left_url_layout.addLayout(single_url_action)
 
+        single_split.addWidget(left_url_widget, 1)
+
+        # Vertical divider
+        divider = QFrame()
+        divider.setFrameShape(QFrame.Shape.VLine)
+        divider.setStyleSheet(f"color: {get_color('border_light')};")
+        single_split.addWidget(divider)
+
+        # Right side: Local file selection
+        right_local_widget = QWidget()
+        right_local_layout = QVBoxLayout(right_local_widget)
+        right_local_layout.setContentsMargins(0, 0, 0, 0)
+        right_local_layout.setSpacing(ds.spacing.space_2)
+
+        local_lbl = QLabel("로컬 영상 파일 선택")
+        local_lbl.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
+        local_lbl.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
+        right_local_layout.addWidget(local_lbl)
+
+        # Drop zone / file display area
+        self.single_local_drop_zone = QFrame()
+        self.single_local_drop_zone.setFixedHeight(120)
+        self.single_local_drop_zone.setStyleSheet(self._get_drop_zone_style())
+        drop_zone_layout = QVBoxLayout(self.single_local_drop_zone)
+        drop_zone_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.single_local_icon = QLabel("📁")
+        self.single_local_icon.setFont(QFont("Segoe UI Symbol", 24))
+        self.single_local_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.single_local_icon.setStyleSheet("background-color: transparent; border: none;")
+        drop_zone_layout.addWidget(self.single_local_icon)
+
+        self.single_local_file_label = QLabel("파일을 선택하세요")
+        self.single_local_file_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self.single_local_file_label.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
+        self.single_local_file_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.single_local_file_label.setWordWrap(True)
+        drop_zone_layout.addWidget(self.single_local_file_label)
+
+        right_local_layout.addWidget(self.single_local_drop_zone)
+
+        local_hint = QLabel("💡 MP4, AVI, MOV 등 영상 파일 지원")
+        local_hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        local_hint.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
+        right_local_layout.addWidget(local_hint)
+
+        # Local file action buttons
+        single_local_action = QHBoxLayout()
+        single_local_action.setSpacing(ds.spacing.space_2)
+
+        self.single_browse_btn = QPushButton("파일 찾기")
+        self.single_browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.single_browse_btn.setStyleSheet(self._get_button_style("primary", "sm"))
+        self.single_browse_btn.clicked.connect(lambda: self._select_local_file("single"))
+        single_local_action.addWidget(self.single_browse_btn)
+
+        self.single_local_add_btn = QPushButton("목록에 추가")
+        self.single_local_add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.single_local_add_btn.setStyleSheet(self._get_button_style("secondary", "sm"))
+        self.single_local_add_btn.clicked.connect(lambda: self._add_local_file_to_queue("single"))
+        self.single_local_add_btn.setEnabled(False)
+        single_local_action.addWidget(self.single_local_add_btn)
+
+        single_local_action.addStretch()
+        right_local_layout.addLayout(single_local_action)
+
+        single_split.addWidget(right_local_widget, 1)
+
+        single_layout.addLayout(single_split)
         self.main_layout.addWidget(self.single_mode_container)
 
         # ========== Mix Mode Container ==========
@@ -210,23 +291,33 @@ class URLInputPanel(QWidget):
         mix_layout.setContentsMargins(0, 0, 0, 0)
         mix_layout.setSpacing(ds.spacing.space_3)
 
-        mix_header = QLabel("같은 상품의 영상 URL 입력 (최대 5개)")
-        mix_header.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
-        mix_header.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
-        mix_layout.addWidget(mix_header)
-
         mix_desc = QLabel("동일 상품의 여러 영상을 입력하면 랜덤으로 장면을 믹스하여 새로운 영상을 만듭니다.")
         mix_desc.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
         mix_desc.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
         mix_desc.setWordWrap(True)
         mix_layout.addWidget(mix_desc)
 
+        # --- Horizontal split: URL input (left 50%) | Local file (right 50%) ---
+        mix_split = QHBoxLayout()
+        mix_split.setSpacing(ds.spacing.space_4)
+
+        # Left side: URL entries
+        left_mix_widget = QWidget()
+        left_mix_layout = QVBoxLayout(left_mix_widget)
+        left_mix_layout.setContentsMargins(0, 0, 0, 0)
+        left_mix_layout.setSpacing(ds.spacing.space_2)
+
+        mix_url_header = QLabel("URL 입력 (최대 5개)")
+        mix_url_header.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
+        mix_url_header.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
+        left_mix_layout.addWidget(mix_url_header)
+
         # URL entries container
         self.mix_entries_container = QWidget()
         self.mix_entries_layout = QVBoxLayout(self.mix_entries_container)
         self.mix_entries_layout.setContentsMargins(0, 0, 0, 0)
         self.mix_entries_layout.setSpacing(ds.spacing.space_2)
-        mix_layout.addWidget(self.mix_entries_container)
+        left_mix_layout.addWidget(self.mix_entries_container)
 
         # Add URL button
         add_url_layout = QHBoxLayout()
@@ -242,31 +333,113 @@ class URLInputPanel(QWidget):
         self.url_count_label.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
         add_url_layout.addWidget(self.url_count_label)
 
-        mix_layout.addLayout(add_url_layout)
+        left_mix_layout.addLayout(add_url_layout)
 
-        # Mix mode action buttons
+        # Mix mode URL action buttons
         mix_action = QHBoxLayout()
-        mix_action.setSpacing(ds.spacing.space_3)
+        mix_action.setSpacing(ds.spacing.space_2)
 
-        self.mix_add_btn = QPushButton("믹스 영상 대기열에 추가")
+        self.mix_add_btn = QPushButton("대기열에 추가")
         self.mix_add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.mix_add_btn.setStyleSheet(self._get_button_style("primary", "md"))
+        self.mix_add_btn.setStyleSheet(self._get_button_style("primary", "sm"))
         self.mix_add_btn.clicked.connect(self._add_mix_to_queue)
         mix_action.addWidget(self.mix_add_btn)
 
         self.mix_clear_btn = QPushButton("모두 지우기")
         self.mix_clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.mix_clear_btn.setStyleSheet(self._get_button_style("ghost", "md"))
+        self.mix_clear_btn.setStyleSheet(self._get_button_style("ghost", "sm"))
         self.mix_clear_btn.clicked.connect(self._clear_mix_entries)
         mix_action.addWidget(self.mix_clear_btn)
 
         mix_action.addStretch()
-        mix_layout.addLayout(mix_action)
+        left_mix_layout.addLayout(mix_action)
+
+        mix_split.addWidget(left_mix_widget, 1)
+
+        # Vertical divider
+        mix_divider = QFrame()
+        mix_divider.setFrameShape(QFrame.Shape.VLine)
+        mix_divider.setStyleSheet(f"color: {get_color('border_light')};")
+        mix_split.addWidget(mix_divider)
+
+        # Right side: Local file selection for mix
+        right_mix_local = QWidget()
+        right_mix_local_layout = QVBoxLayout(right_mix_local)
+        right_mix_local_layout.setContentsMargins(0, 0, 0, 0)
+        right_mix_local_layout.setSpacing(ds.spacing.space_2)
+
+        mix_local_header = QLabel("로컬 영상 파일 선택")
+        mix_local_header.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
+        mix_local_header.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
+        right_mix_local_layout.addWidget(mix_local_header)
+
+        # Drop zone for mix local files
+        self.mix_local_drop_zone = QFrame()
+        self.mix_local_drop_zone.setFixedHeight(120)
+        self.mix_local_drop_zone.setStyleSheet(self._get_drop_zone_style())
+        mix_drop_layout = QVBoxLayout(self.mix_local_drop_zone)
+        mix_drop_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        self.mix_local_icon = QLabel("📁")
+        self.mix_local_icon.setFont(QFont("Segoe UI Symbol", 24))
+        self.mix_local_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.mix_local_icon.setStyleSheet("background-color: transparent; border: none;")
+        mix_drop_layout.addWidget(self.mix_local_icon)
+
+        self.mix_local_file_label = QLabel("파일을 선택하세요")
+        self.mix_local_file_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self.mix_local_file_label.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
+        self.mix_local_file_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.mix_local_file_label.setWordWrap(True)
+        mix_drop_layout.addWidget(self.mix_local_file_label)
+
+        right_mix_local_layout.addWidget(self.mix_local_drop_zone)
+
+        # Selected files list for mix
+        self.mix_local_files_list = QLabel("")
+        self.mix_local_files_list.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self.mix_local_files_list.setStyleSheet(f"color: {get_color('text_secondary')}; background-color: transparent; border: none;")
+        self.mix_local_files_list.setWordWrap(True)
+        right_mix_local_layout.addWidget(self.mix_local_files_list)
+
+        # Mix local file action buttons
+        mix_local_action = QHBoxLayout()
+        mix_local_action.setSpacing(ds.spacing.space_2)
+
+        self.mix_local_browse_btn = QPushButton("파일 추가")
+        self.mix_local_browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mix_local_browse_btn.setStyleSheet(self._get_button_style("primary", "sm"))
+        self.mix_local_browse_btn.clicked.connect(lambda: self._select_local_file("mix"))
+        mix_local_action.addWidget(self.mix_local_browse_btn)
+
+        self.mix_local_add_btn = QPushButton("대기열에 추가")
+        self.mix_local_add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mix_local_add_btn.setStyleSheet(self._get_button_style("secondary", "sm"))
+        self.mix_local_add_btn.clicked.connect(lambda: self._add_local_file_to_queue("mix"))
+        self.mix_local_add_btn.setEnabled(False)
+        mix_local_action.addWidget(self.mix_local_add_btn)
+
+        self.mix_local_clear_btn = QPushButton("초기화")
+        self.mix_local_clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mix_local_clear_btn.setStyleSheet(self._get_button_style("ghost", "sm"))
+        self.mix_local_clear_btn.clicked.connect(self._clear_mix_local_files)
+        mix_local_action.addWidget(self.mix_local_clear_btn)
+
+        mix_local_action.addStretch()
+        right_mix_local_layout.addLayout(mix_local_action)
+
+        mix_split.addWidget(right_mix_local, 1)
+
+        mix_layout.addLayout(mix_split)
 
         self.mix_mode_container.setVisible(False)
         self.main_layout.addWidget(self.mix_mode_container)
 
         self.main_layout.addStretch()
+
+        # Local file state
+        self._single_local_path = ""  # Selected local file for single mode
+        self._mix_local_paths = []  # Selected local files for mix mode
 
         # Initialize with one mix entry
         self._add_mix_entry()
@@ -408,6 +581,162 @@ class URLInputPanel(QWidget):
                     self.gui.add_url_from_entry()
                     return True
         return super().eventFilter(obj, event)
+
+    # ================================================================
+    # Local file selection methods
+    # ================================================================
+
+    def _select_local_file(self, mode: str):
+        """Open file dialog to select local video file(s)."""
+        import os
+
+        if mode == "mix":
+            # Allow multiple file selection for mix mode
+            files, _ = QFileDialog.getOpenFileNames(
+                self, "로컬 영상 파일 선택", "",
+                LOCAL_VIDEO_EXTENSIONS
+            )
+            if files:
+                for f in files:
+                    if f not in self._mix_local_paths:
+                        self._mix_local_paths.append(f)
+                self._update_mix_local_ui()
+        else:
+            # Single file selection
+            file_path, _ = QFileDialog.getOpenFileName(
+                self, "로컬 영상 파일 선택", "",
+                LOCAL_VIDEO_EXTENSIONS
+            )
+            if file_path:
+                self._single_local_path = file_path
+                filename = os.path.basename(file_path)
+                self.single_local_file_label.setText(filename)
+                self.single_local_file_label.setStyleSheet(
+                    f"color: {get_color('text_primary')}; background-color: transparent; border: none;"
+                )
+                self.single_local_icon.setText("🎬")
+                self.single_local_add_btn.setEnabled(True)
+                self.single_local_drop_zone.setStyleSheet(self._get_drop_zone_style(active=True))
+
+    def _add_local_file_to_queue(self, mode: str):
+        """Add selected local file(s) to the processing queue."""
+        import os
+        from ui.components.custom_dialog import show_warning, show_success
+
+        if mode == "mix":
+            if len(self._mix_local_paths) < MIN_MIX_URLS:
+                show_warning(self, "파일 부족",
+                             f"믹스 모드는 최소 {MIN_MIX_URLS}개 이상의 영상 파일이 필요합니다.")
+                return
+
+            # Set state for local processing
+            if hasattr(self.gui, 'state'):
+                self.gui.state.video_source = "local"
+                self.gui.state.mix_video_urls = []
+
+            # Add each local file as a local:// prefixed entry to queue
+            queue_manager = getattr(self.gui, "queue_manager", None)
+            if queue_manager and hasattr(queue_manager, "add_mix_job"):
+                local_urls = [f"local://{p}" for p in self._mix_local_paths]
+                try:
+                    queue_manager.add_mix_job(local_urls)
+                    show_success(self, "추가 완료",
+                                 f"{len(self._mix_local_paths)}개 로컬 영상을 믹스 대기열에 추가했습니다.")
+                    self._clear_mix_local_files()
+                except Exception as exc:
+                    show_warning(self, "오류", f"대기열 추가 실패: {exc}")
+            else:
+                show_warning(self, "오류", "대기열 관리자를 찾을 수 없습니다.")
+        else:
+            # Single mode
+            if not self._single_local_path or not os.path.isfile(self._single_local_path):
+                show_warning(self, "안내", "로컬 영상 파일을 먼저 선택해주세요.")
+                return
+
+            # Set state for local processing
+            if hasattr(self.gui, 'state'):
+                self.gui.state.video_source = "local"
+                self.gui.state.local_file_path = self._single_local_path
+
+            # Add to queue with local:// prefix so queue manager can differentiate
+            queue_manager = getattr(self.gui, "queue_manager", None)
+            if queue_manager and hasattr(queue_manager, "add_url_to_queue"):
+                local_url = f"local://{self._single_local_path}"
+                added = queue_manager.add_url_to_queue(local_url)
+                if added:
+                    show_success(self, "추가 완료",
+                                 f"로컬 영상이 대기열에 추가되었습니다.\n{os.path.basename(self._single_local_path)}")
+                    self._reset_single_local()
+                else:
+                    show_warning(self, "안내", "이미 대기열에 있는 파일입니다.")
+            else:
+                show_warning(self, "오류", "대기열 관리자를 찾을 수 없습니다.")
+
+    def _reset_single_local(self):
+        """Reset single mode local file selection."""
+        self._single_local_path = ""
+        self.single_local_file_label.setText("파일을 선택하세요")
+        self.single_local_file_label.setStyleSheet(
+            f"color: {get_color('text_muted')}; background-color: transparent; border: none;"
+        )
+        self.single_local_icon.setText("📁")
+        self.single_local_add_btn.setEnabled(False)
+        self.single_local_drop_zone.setStyleSheet(self._get_drop_zone_style())
+
+    def _update_mix_local_ui(self):
+        """Update mix mode local file display."""
+        import os
+        count = len(self._mix_local_paths)
+        if count == 0:
+            self.mix_local_file_label.setText("파일을 선택하세요")
+            self.mix_local_file_label.setStyleSheet(
+                f"color: {get_color('text_muted')}; background-color: transparent; border: none;"
+            )
+            self.mix_local_icon.setText("📁")
+            self.mix_local_add_btn.setEnabled(False)
+            self.mix_local_drop_zone.setStyleSheet(self._get_drop_zone_style())
+            self.mix_local_files_list.setText("")
+        else:
+            self.mix_local_file_label.setText(f"{count}개 파일 선택됨")
+            self.mix_local_file_label.setStyleSheet(
+                f"color: {get_color('text_primary')}; background-color: transparent; border: none;"
+            )
+            self.mix_local_icon.setText("🎬")
+            self.mix_local_add_btn.setEnabled(count >= MIN_MIX_URLS)
+            self.mix_local_drop_zone.setStyleSheet(self._get_drop_zone_style(active=True))
+            # Show file names
+            names = [f"  {i+1}. {os.path.basename(p)}" for i, p in enumerate(self._mix_local_paths)]
+            self.mix_local_files_list.setText("\n".join(names))
+
+    def _clear_mix_local_files(self):
+        """Clear mix mode local file selections."""
+        self._mix_local_paths = []
+        self._update_mix_local_ui()
+
+    def _get_drop_zone_style(self, active: bool = False) -> str:
+        """Get style for the file drop zone."""
+        ds = self.ds
+        if active:
+            border_color = get_color('primary')
+            bg_color = get_color('surface_variant')
+        else:
+            border_color = get_color('border_light')
+            bg_color = get_color('surface_variant')
+        return f"""
+            QFrame {{
+                background-color: {bg_color};
+                border: 2px dashed {border_color};
+                border-radius: {ds.radius.base}px;
+            }}
+            QFrame:hover {{
+                border-color: {get_color('primary')};
+                background-color: {get_color('surface_variant')};
+            }}
+        """
+
+    # ================================================================
+    # Style methods
+    # ================================================================
 
     def _get_input_style(self) -> str:
         """Get input style using design system v2."""
