@@ -16,8 +16,15 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 try:
     from startup.environment import setup_dpi_awareness
     setup_dpi_awareness()
-except Exception:
-    pass
+except Exception as e:
+    # Logging isn't configured yet; best-effort stderr for troubleshooting.
+    try:
+        import traceback
+
+        print(f"[WARN] setup_dpi_awareness failed: {e}", file=sys.stderr)
+        traceback.print_exc()
+    except Exception:
+        pass
 
 # PyInstaller --onefile: patch importlib.metadata for packages whose dist-info
 # may not be discovered at runtime (fixes "No package metadata was found for imageio").

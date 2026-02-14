@@ -412,13 +412,18 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
+_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.3.43") or "1.3.43").strip()
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
-    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.3.41/SSMaker_Setup_v1.3.41.exe",
+    "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v"
+    + _DEFAULT_APP_VERSION
+    + "/SSMaker_Setup_v"
+    + _DEFAULT_APP_VERSION
+    + ".exe",
 )
 
 APP_VERSION_INFO = {
-    "version": "1.3.43",
+    "version": _DEFAULT_APP_VERSION,
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
     "release_notes": """### v1.3.43 변경사항

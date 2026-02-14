@@ -23,8 +23,19 @@ os.environ.setdefault("DB_NAME", "test_db")
 os.environ.setdefault("JWT_SECRET_KEY", "a" * 64)
 os.environ.setdefault("ENVIRONMENT", "development")
 
-if "slowapi" not in sys.modules:
+try:
+    import slowapi  # noqa: F401
+except ModuleNotFoundError:
     slowapi_stub = types.ModuleType("slowapi")
+    slowapi_stub.__path__ = []  # mark as package so `slowapi.errors` can be imported
+
+    errors_stub = types.ModuleType("slowapi.errors")
+
+    class RateLimitExceeded(Exception):
+        pass
+
+    errors_stub.RateLimitExceeded = RateLimitExceeded
+    slowapi_stub.errors = errors_stub
 
     class _Limiter:
         def __init__(self, *_args, **_kwargs):
@@ -33,10 +44,12 @@ if "slowapi" not in sys.modules:
         def limit(self, *_args, **_kwargs):
             def _decorator(func):
                 return func
+
             return _decorator
 
     slowapi_stub.Limiter = _Limiter
     sys.modules["slowapi"] = slowapi_stub
+    sys.modules["slowapi.errors"] = errors_stub
 
 payment_path = backend_root / "app" / "routers" / "payment.py"
 _spec = importlib.util.spec_from_file_location("payment_router_for_tests", payment_path)

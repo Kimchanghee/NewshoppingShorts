@@ -38,8 +38,19 @@ from app.models.registration_request import RegistrationRequest, RequestStatus
 
 
 # Test environment may not have slowapi installed; provide a minimal stub.
-if "slowapi" not in sys.modules:
+try:
+    import slowapi  # noqa: F401
+except ModuleNotFoundError:
     slowapi_stub = types.ModuleType("slowapi")
+    slowapi_stub.__path__ = []  # mark as package so `slowapi.errors` can be imported
+
+    errors_stub = types.ModuleType("slowapi.errors")
+
+    class RateLimitExceeded(Exception):
+        pass
+
+    errors_stub.RateLimitExceeded = RateLimitExceeded
+    slowapi_stub.errors = errors_stub
 
     class _DummyLimiter:
         def __init__(self, *args, **kwargs):
@@ -53,6 +64,7 @@ if "slowapi" not in sys.modules:
 
     slowapi_stub.Limiter = _DummyLimiter
     sys.modules["slowapi"] = slowapi_stub
+    sys.modules["slowapi.errors"] = errors_stub
 
 
 _admin_spec = importlib.util.spec_from_file_location(
@@ -137,7 +149,13 @@ def test_admin_stats_includes_work_aggregates():
     )
     db.commit()
 
-    stats = asyncio.run(get_stats(request=None, db=db, _admin=True))
+    # The router is rate-limited via slowapi, which wraps the endpoint and
+    # requires a real starlette Request instance. For unit testing we call the
+    # underlying function directly.
+    fn = get_stats
+    while hasattr(fn, "__wrapped__"):
+        fn = fn.__wrapped__
+    stats = asyncio.run(fn(request=None, db=db, _admin=True))
 
     assert stats["users"]["total"] == 3
     assert stats["users"]["active"] == 2
