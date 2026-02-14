@@ -376,7 +376,7 @@ def _analyze_video_for_batch(app):
         traceback.print_exc()
         ui_controller.write_error_log(e)
         error_text = str(e)
-        translated_error = _translate_error_message(error_text)
+        translated_error = _translate_error_message(error_text, step="analysis")
         logger.error(f"[배치 분석 오류] {translated_error}")
         if "PERMISSION_DENIED" in error_text or "403" in error_text or "권한" in translated_error:
             logger.error("[배치 분석] API 키가 해당 Gemini 모델 또는 파일 업로드 기능을 사용할 권한이 있는지 확인하세요.")
@@ -519,7 +519,7 @@ def _translate_script_for_batch(app):
             logger.info("  번역 미리보기: %s...", preview)
     except Exception as e:
         ui_controller.write_error_log(e)
-        translated_error = _translate_error_message(str(e))
+        translated_error = _translate_error_message(str(e), step="translation")
         logger.error(f"[배치 번역 오류] {translated_error}")
         # traceback 출력 제거 - 한글 메시지만 표시
         raise

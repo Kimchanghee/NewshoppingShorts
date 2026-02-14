@@ -115,23 +115,58 @@ def _get_voice_display_name(voice_name: str) -> str:
     return voice_name
 
 
-def _translate_error_message(error_text: str) -> str:
+def _step_name_kr(step: str) -> str:
+    """처리 단계 영문 → 한글 변환"""
+    return {
+        "download": "다운로드",
+        "analysis": "영상 분석",
+        "translation": "번역",
+        "tts": "음성 합성",
+        "video": "영상 렌더링",
+    }.get(step, step or "처리")
+
+
+def _translate_error_message(error_text: str, step: str = "") -> str:
     """
     영어 오류 메시지를 한글로 번역 (간결하고 사용자 친화적)
 
     Args:
         error_text: 원본 오류 메시지
+        step: 현재 처리 단계 ("download", "analysis", "translation", "tts", "video")
+              단계 정보가 있으면 오류를 더 정확하게 분류합니다.
 
     Returns:
         번역된 오류 메시지
     """
     error_lower = error_text.lower()
 
+    # ★★★ 단계 기반 오류 분류 (최우선) ★★★
+    # 각 단계에서 발생 가능한 오류를 단계 컨텍스트로 구분하여 정확한 메시지 반환
+    # download 단계: HTTP 에러 코드는 다운로드 서버 오류이지 API 오류가 아님
+    # analysis/translation/tts 단계: HTTP 에러 코드는 API 오류
+    # video 단계: 인코딩/렌더링 오류
+
     # ★ 다운로드 오류 체크 (API 오류보다 먼저)
     download_keywords = ['다운로드 실패', 'download fail', '영상 다운로드', '다운로드 오류',
                          '영상을 찾을 수 없', '파일이 너무 작', 'hls', 'ts 파일']
     if any(kw in error_lower for kw in download_keywords):
         return "영상 다운로드 실패 - 링크를 확인하고 다시 시도해주세요"
+
+    # ★★★ download 단계에서 HTTP 에러 코드는 다운로드 서버 오류로 분류 ★★★
+    if step == "download":
+        # download 단계에서의 HTTP 에러 = 영상 서버의 오류 (API 아님)
+        if any(code in error_text for code in ["403", "401", "PERMISSION_DENIED", "Unauthorized", "Forbidden"]):
+            return "영상 다운로드 권한 오류 - 비공개 영상이거나 접근이 차단됨"
+        if "404" in error_text or "Not found" in error_lower:
+            return "영상을 찾을 수 없음 - 삭제되었거나 링크가 잘못됨"
+        if any(code in error_text for code in ["429", "RESOURCE_EXHAUSTED"]):
+            return "영상 서버 요청 제한 - 잠시 후 다시 시도해주세요"
+        if any(code in error_text for code in ["500", "502", "503"]) or "overloaded" in error_lower:
+            return "영상 서버 오류 - 잠시 후 다시 시도해주세요"
+        if "timeout" in error_lower or "timed out" in error_lower:
+            return "영상 다운로드 시간 초과 - 네트워크 확인 필요"
+        if "network" in error_lower or "connection" in error_lower:
+            return "다운로드 연결 오류 - 인터넷 연결 확인 필요"
 
     # ★ 프레임 읽기 오류 (블러 처리 후 원본 파일 참조 끊김) - 인코딩 오류보다 먼저 체크
     if 'failed to read' in error_lower and 'frame' in error_lower:
@@ -147,6 +182,11 @@ def _translate_error_message(error_text: str) -> str:
     if has_encoding_keyword or has_video_with_context:
         return "인코딩 오류 - 영상 합성 중 문제 발생"
 
+    # ★★★ video 단계에서 HTTP 에러 코드는 인코딩/렌더링 오류로 분류 ★★★
+    if step == "video":
+        if any(code in error_text for code in ["403", "401", "500", "503"]):
+            return "영상 렌더링 오류 - 파일 접근 또는 처리 중 문제 발생"
+
     # 429 RESOURCE_EXHAUSTED (할당량 초과) - 가장 흔한 에러
     if "429" in error_text or "RESOURCE_EXHAUSTED" in error_text or "quota" in error_lower:
         return "API 일일 할당량 초과 - 다른 API 키로 자동 전환 중"
@@ -160,9 +200,14 @@ def _translate_error_message(error_text: str) -> str:
     if "API_KEY_INVALID" in error_text or "api key expired" in error_lower or "renew the api key" in error_lower:
         return "API 키가 만료되었거나 유효하지 않습니다 - 설정에서 새 API 키를 입력해주세요"
 
-    # 401/403 권한 오류
+    # 401/403 권한 오류 (API 단계에서만 API 오류로 분류)
     if "401" in error_text or "403" in error_text or "PERMISSION_DENIED" in error_text or "Unauthorized" in error_text:
-        return "API 인증 오류 - API 키 확인 필요"
+        if step in ("analysis", "translation", "tts"):
+            return "API 인증 오류 - API 키 확인 필요"
+        elif step:
+            return f"{_step_name_kr(step)} 중 권한 오류 발생"
+        else:
+            return "API 인증 오류 - API 키 확인 필요"
 
     # 400 잘못된 요청
     if "400" in error_text or "Bad request" in error_text or "validation error" in error_text.lower():
@@ -170,10 +215,16 @@ def _translate_error_message(error_text: str) -> str:
 
     # 404 Not Found
     if "404" in error_text or "Not found" in error_text:
+        if step == "download":
+            return "영상을 찾을 수 없음 - 삭제되었거나 링크가 잘못됨"
         return "리소스를 찾을 수 없음"
 
     # 타임아웃
     if "timeout" in error_text.lower() or "timed out" in error_text.lower():
+        if step == "download":
+            return "영상 다운로드 시간 초과 - 네트워크 확인 필요"
+        elif step in ("analysis", "translation", "tts"):
+            return "API 요청 시간 초과 - 네트워크 확인 필요"
         return "요청 시간 초과 - 네트워크 확인 필요"
 
     # 네트워크 오류
@@ -222,7 +273,7 @@ def _translate_error_message(error_text: str) -> str:
 
     # 알 수 없는 오류 - HTTP 에러 코드만 추출 (실제 HTTP 에러 패턴만 매칭)
     # "HTTP 4XX", "status 5XX", "error 4XX", "[5XX]" 등의 패턴만 추출
-    # ★ 단, API 관련 컨텍스트가 있을 때만 "API 오류"로 표시
+    # ★★★ 단계(step) 정보 + API 관련 키워드로 정확한 오류 유형 판별 ★★★
     http_error_patterns = [
         r'(?:HTTP|http|status|Status)[\s:_-]*(\d{3})',  # HTTP 401, status 500 등
         r'\[(\d{3})\]',  # [404], [500] 등
@@ -230,6 +281,11 @@ def _translate_error_message(error_text: str) -> str:
 
     # API 관련 키워드가 있는지 확인
     is_api_related = any(kw in error_lower for kw in ['api', 'gemini', 'google', 'request', 'response', 'endpoint'])
+    # 단계 정보로 API 관련 여부 보정
+    if step in ("analysis", "translation", "tts"):
+        is_api_related = True  # 이 단계들은 API를 사용하므로
+    elif step in ("download", "video"):
+        is_api_related = False  # 다운로드/영상 렌더링은 API와 무관
 
     for pattern in http_error_patterns:
         error_code_match = re.search(pattern, error_text)
@@ -237,24 +293,29 @@ def _translate_error_message(error_text: str) -> str:
             code = error_code_match.group(1)
             # 4XX 또는 5XX 코드만 유효
             if code.startswith('4') or code.startswith('5'):
-                if is_api_related:
+                if step == "download":
+                    return f"영상 다운로드 오류 (코드 {code}) - 링크 확인 필요"
+                elif step == "video":
+                    return f"영상 렌더링 오류 (코드 {code}) - 재시도 중"
+                elif is_api_related:
                     return f"API 오류 (코드 {code}) - 재시도 중"
                 else:
                     return f"처리 오류 (코드 {code}) - 재시도 중"
 
-    # 완전히 알 수 없는 경우 - 원본 에러 메시지 일부 표시
-    # 에러 메시지가 너무 길면 처음 50자만 표시
+    # 완전히 알 수 없는 경우 - 단계 정보 포함하여 원본 에러 메시지 일부 표시
     short_error = error_text[:50] + "..." if len(error_text) > 50 else error_text
-    logger.debug(f"[알 수 없는 오류] 원본: {error_text}")
-    return f"처리 오류 - {short_error}"
+    logger.debug(f"[알 수 없는 오류] 단계={step}, 원본: {error_text}")
+    step_prefix = f"[{_step_name_kr(step)}] " if step else ""
+    return f"{step_prefix}처리 오류 - {short_error}"
 
 
-def _get_short_error_message(error: Exception) -> str:
+def _get_short_error_message(error: Exception, step: str = "") -> str:
     """
     오류를 분석하여 '비고' 란에 표시할 짧은 한글 메시지 생성 (최대 10자)
 
     Args:
         error: 발생한 예외 객체
+        step: 현재 처리 단계 ("download", "analysis", "translation", "tts", "video")
 
     Returns:
         str: 10자 이내의 한글 오류 메시지
@@ -288,6 +349,16 @@ def _get_short_error_message(error: Exception) -> str:
     # 특정 오류 메시지 패턴 감지
     error_lower = error_str.lower()
 
+    # ★★★ 단계 기반 즉시 분류 (최우선) ★★★
+    if step == "download":
+        # download 단계의 HTTP 에러는 다운로드 오류로 분류 (API 아님)
+        if any(code in error_str for code in ["403", "401", "429", "500", "502", "503"]):
+            return '다운로드실패'
+        if "timeout" in error_lower or "timed out" in error_lower:
+            return '다운로드실패'
+        if "network" in error_lower or "connection" in error_lower:
+            return '연결오류'
+
     # ★ 다운로드 오류 먼저 체크 (API 오류보다 우선)
     if '다운로드 실패' in error_str or '다운로드 오류' in error_str or \
        ('download' in error_lower and ('fail' in error_lower or 'error' in error_lower)):
@@ -311,20 +382,25 @@ def _get_short_error_message(error: Exception) -> str:
         return 'TTS오류'
     elif 'download' in error_lower:
         return '다운로드오류'
-    # API 관련 오류
+    # API 관련 오류 (API 단계에서만)
     elif 'api' in error_lower and ('quota' in error_lower or 'limit' in error_lower):
         return 'API한도초과'
-    elif 'permission' in error_lower or 'denied' in error_lower:
-        return 'API권한없음'
+    elif ('permission' in error_lower or 'denied' in error_lower):
+        if step in ("analysis", "translation", "tts"):
+            return 'API권한없음'
+        elif step == "download":
+            return '다운로드실패'
+        else:
+            return 'API권한없음'
     elif 'rate limit' in error_lower:
         return 'API제한초과'
     # 타임아웃/시간초과 오류 - 구체적인 상황별 메시지 (영어 + 한글)
     elif 'timeout' in error_lower or 'timed out' in error_lower or '시간 초과' in error_str or '타임아웃' in error_str:
         # 다운로드 관련 타임아웃
-        if 'download' in error_lower or '다운로드' in error_str or 'read operation' in error_lower:
+        if step == "download" or 'download' in error_lower or '다운로드' in error_str or 'read operation' in error_lower:
             return '다운로드실패'
         # 분석/API 관련 타임아웃
-        elif 'analysis' in error_lower or '분석' in error_str or 'gemini' in error_lower:
+        elif step in ("analysis", "translation") or 'analysis' in error_lower or '분석' in error_str or 'gemini' in error_lower:
             return '분석시간초과'
         # 연결 관련 타임아웃
         elif 'connect' in error_lower or '연결' in error_str:

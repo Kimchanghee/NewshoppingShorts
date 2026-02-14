@@ -483,7 +483,8 @@ class SubtitleProcessor:
         min_pad = max(2, int(base_min_pad * (h / base_height)))
         extra_side_pad = int(w * 0.09)
         row_merge_threshold = max(14, int(h * 0.03))
-        max_time_gap = 0.35
+        # ★ 시간 갭 허용치 확대: 같은 자막의 연속 검출 사이 갭을 허용 (0.35 -> 2.0)
+        max_time_gap = 2.0
 
         prepared: List[Dict[str, Any]] = []
         for pos in subtitle_positions:
@@ -563,7 +564,9 @@ class SubtitleProcessor:
                 ex_box = existing["box"]
                 ex_center_y = (ex_box[1] + ex_box[3]) / 2.0
                 same_row = abs(ex_center_y - center_y) <= row_merge_threshold
-                close_in_time = entry["start_time"] <= existing["end_time"] + max_time_gap
+                # ★ 양방향 시간 근접성 체크: 두 구간이 서로 겹치거나 가까운 경우
+                close_in_time = (entry["start_time"] <= existing["end_time"] + max_time_gap
+                                 and entry["end_time"] >= existing["start_time"] - max_time_gap)
 
                 if same_row and close_in_time:
                     ex_box[0] = min(ex_box[0], box[0])

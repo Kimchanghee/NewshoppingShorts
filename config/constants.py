@@ -62,8 +62,9 @@ class OCRThresholds:
     MIN_BBOX_HEIGHT: int = 6  # 최소 박스 높이 (낮춤: 8 -> 6)
 
     # Time buffer for blur application (seconds)
-    TIME_BUFFER_BEFORE: float = 0.5  # 자막 시작 전 버퍼
-    TIME_BUFFER_AFTER: float = 0.8  # 자막 종료 후 버퍼
+    # ★ 버퍼 확대: 0.3초 샘플링 간격에서 자막 시작/끝 프레임 누락 방지
+    TIME_BUFFER_BEFORE: float = 0.8  # 자막 시작 전 버퍼 (0.5 -> 0.8)
+    TIME_BUFFER_AFTER: float = 1.2  # 자막 종료 후 버퍼 (0.8 -> 1.2)
 
     # Subtitle vs product text discrimination (자막 vs 상품 텍스트 구분)
     # 자막: 다중 프레임에서 일정한 위치에 반복 출현

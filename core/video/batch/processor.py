@@ -165,11 +165,19 @@ def _download_mix_sources(app, mix_urls: List[str]) -> List[str]:
     total = len(mix_urls)
 
     for idx, source_url in enumerate(mix_urls, 1):
-        app.add_log(f"[Mix] Downloading source {idx}/{total}...")
-        path = DouyinExtract.download_tiktok_douyin_video(source_url)
-        downloaded.append(path)
-        _register_temp_download_files(app, [path])
-        app.add_log(f"[Mix] Source {idx} ready: {os.path.basename(path)}")
+        # Handle local:// prefixed files
+        if source_url.startswith("local://"):
+            local_path = source_url[len("local://"):]
+            if not os.path.isfile(local_path):
+                raise FileNotFoundError(f"로컬 파일을 찾을 수 없습니다: {local_path}")
+            downloaded.append(local_path)
+            app.add_log(f"[Mix] 로컬 소스 {idx}/{total}: {os.path.basename(local_path)}")
+        else:
+            app.add_log(f"[Mix] Downloading source {idx}/{total}...")
+            path = DouyinExtract.download_tiktok_douyin_video(source_url)
+            downloaded.append(path)
+            _register_temp_download_files(app, [path])
+            app.add_log(f"[Mix] Source {idx} ready: {os.path.basename(path)}")
 
     return downloaded
 
@@ -1054,8 +1062,21 @@ def _process_single_video(app, url, current_number, total_urls):
         except Exception:
             pass
 
+        # Check if this is a local file (local:// prefix)
+        is_local_file = url.startswith("local://")
+        if is_local_file:
+            local_path = url[len("local://"):]
+            if not os.path.isfile(local_path):
+                raise FileNotFoundError(f"로컬 파일을 찾을 수 없습니다: {local_path}")
+            app._temp_downloaded_file = local_path
+            app.video_source = "local"
+            app.local_file_path = local_path
+            app.add_log(f"[로컬] 로컬 영상 파일 사용: {os.path.basename(local_path)}")
+
         mix_urls = _get_mix_job_urls(app, url)
-        if len(mix_urls) >= MIX_MIN_URLS:
+        if is_local_file:
+            pass  # Already set above
+        elif len(mix_urls) >= MIX_MIN_URLS:
             mixed_path, _ = _prepare_mix_source_video(app, url)
             app._temp_downloaded_file = mixed_path
         else:
@@ -1523,31 +1544,30 @@ def _process_single_video(app, url, current_number, total_urls):
         logger.error("[처리 오류 스택트레이스]")
         traceback.print_exc()
         ui_controller.write_error_log(exc)
-        error_msg = _translate_error_message(str(exc))
+        # ★★★ 단계(step) 정보를 전달하여 정확한 오류 분류 ★★★
+        error_msg = _translate_error_message(str(exc), step=current_step)
         error_lower = str(exc).lower()
-        logger.error("[처리 오류] %s", error_msg)
+        logger.error("[처리 오류] 단계=%s, 메시지=%s", current_step, error_msg)
         try:
             rest.log_user_action("작업 오류", f"[{current_number}/{total_urls}] 단계: {current_step}, 오류: {error_msg[:100]}", "ERROR")
         except Exception:
             pass
 
-        # ★ API 키 교체 가능한 오류는 'error' 상태로 표시하지 않음 ★
-        # 429(할당량), 403(권한), 503(과부하) 등은 키 교체 후 재시도되므로 진행 중 유지
-        is_api_recoverable = any(
-            token in error_lower
-            for token in [
-                "429",
-                "quota",
-                "resource_exhausted",  # 할당량 초과
-                "403",
-                "permission",
-                "forbidden",  # 권한 오류
-                "503",
-                "overloaded",
-                "unavailable",  # 서버 과부하
-                "500",  # 서버 오류
-            ]
-        )
+        # ★★★ API 키 교체 가능한 오류 판별 (단계 기반) ★★★
+        # download 단계: HTTP 에러 코드(403, 500 등)는 영상 서버 오류 → API 키 교체 불필요
+        # video 단계: 인코딩/렌더링 오류 → API 키 교체 불필요
+        # analysis/translation/tts 단계: HTTP 에러 코드는 API 서버 오류 → 키 교체 가능
+        api_error_tokens = [
+            "429", "quota", "resource_exhausted",  # 할당량 초과
+            "403", "permission", "forbidden",  # 권한 오류
+            "503", "overloaded", "unavailable",  # 서버 과부하
+            "500",  # 서버 오류
+        ]
+        has_api_error_token = any(token in error_lower for token in api_error_tokens)
+
+        # ★ 핵심: API 호출을 하는 단계에서만 API 복구 가능으로 판정
+        is_api_step = current_step in ("analysis", "translation", "tts")
+        is_api_recoverable = has_api_error_token and is_api_step
 
         if not is_api_recoverable:
             # 복구 불가능한 오류만 'error' 상태 표시
@@ -1558,7 +1578,7 @@ def _process_single_video(app, url, current_number, total_urls):
                 app.update_progress_state("finalize", "error", 0, error_msg)
         else:
             # API 오류는 진행 중 상태 유지 (키 교체 후 재시도 예정)
-            logger.info("[API 오류] 키 교체 후 재시도 예정 - 진행 상태 유지")
+            logger.info("[API 오류] 단계=%s, 키 교체 후 재시도 예정 - 진행 상태 유지", current_step)
 
         raise
 
