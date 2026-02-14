@@ -380,6 +380,10 @@ class SubtitleDetector:
                             max_y = min(100, max(y + h for y, h in zip(ys, heights)) + 2)
 
                         source_name = 'fallback_region_gpu' if GPU_ACCEL_AVAILABLE else 'fallback_region_numpy'
+                        # ★ Fallback 영역에도 시간 범위 추가 (전체 영상 커버)
+                        cluster_times = sorted(set(r.get('time', 0) for r in cluster))
+                        fb_start = max(0.0, min(cluster_times) - OCRThresholds.TIME_BUFFER_BEFORE) if cluster_times else 0.0
+                        fb_end = max(cluster_times) + OCRThresholds.TIME_BUFFER_AFTER if cluster_times else total_duration
                         fallback_region = {
                             'x': min_x,
                             'y': min_y,
@@ -389,7 +393,11 @@ class SubtitleDetector:
                             'language': 'unknown',
                             'source': source_name,
                             'sample_text': next((r.get('text') for r in cluster if r.get('text')), ''),
-                            'fallback_cluster': cluster_idx
+                            'fallback_cluster': cluster_idx,
+                            'start_time': fb_start,
+                            'end_time': fb_end,
+                            'y_positions': [float(r.get('y', 0)) for r in cluster],
+                            'time_group_count': len(set(round(r.get('time', 0) * 2) / 2 for r in cluster)),
                         }
                         reliable_regions.append(fallback_region)
                         logger.debug(f"  Fallback region #{cluster_idx+1}: pos=({min_x:.0f}%, {min_y:.0f}%), size=({max_x-min_x:.0f}%, {max_y-min_y:.0f}%)")
@@ -817,11 +825,10 @@ class SubtitleDetector:
                             continue
 
                         regions.append({
-                            'x': int(100 * x_min / W),
-                            'y': int(100 * y_min / H),
-                            'width': int(100 * width / W),
-                            # Use the video height to compute the percentage height of the box
-                            'height': int(100 * height / H),
+                            'x': round(100.0 * x_min / W, 1),
+                            'y': round(100.0 * y_min / H, 1),
+                            'width': max(0.5, round(100.0 * width / W, 1)),
+                            'height': max(0.5, round(100.0 * height / H, 1)),
                             'x_min': x_min,
                             'y_min': y_min,
                             'x_max': x_max,
@@ -861,173 +868,145 @@ class SubtitleDetector:
 
     def _gpu_aggregate_regions(self, all_regions):
         """
-        GPU/NumPy accelerated region frequency calculation and aggregation.
-        ★ 개선: IoU 기반 클러스터링으로 공간적으로 분리된 자막을 개별 추적 ★
+        GPU/NumPy accelerated region aggregation with spatial-first clustering.
+
+        ★★★ 개선: 공간-우선(spatial-first) 클러스터링 ★★★
+        기존 문제: 시간-우선 그룹화 → 시간순 병합 시 Y좌표 미세변동으로 병합 실패 → 시간 갭 발생
+        해결: 모든 시간대의 감지를 공간적으로 먼저 클러스터링 → 각 클러스터의 시간 범위를 연속으로 계산
+
+        Phase 1: 전체 감지 결과를 공간적 유사성(IoU + 행 근접성)으로 클러스터링
+        Phase 2: 각 공간 클러스터에서 감지 시간들을 수집하여 연속 시간 구간 계산
+        Phase 3: 시간 구간별 블러 영역 출력 (동일 위치 자막이 사라졌다 재출현하면 별도 구간)
 
         Args:
-            all_regions: List of all detected regions
+            all_regions: List of all detected regions across all time groups
 
         Returns:
-            List of regions with precise time ranges (each subtitle appearance as separate entry)
+            List of regions with continuous time ranges per spatial cluster
         """
         if not all_regions or not NUMPY_AVAILABLE:
             return []
 
         try:
-            # ★ 핵심 변경 1: 시간별로 먼저 그룹화 (0.5초 단위) ★
-            time_groups = {}
+            # ===== Phase 1: 공간-우선 클러스터링 (전체 시간대 통합) =====
+            # 모든 감지 결과를 공간적 유사성만으로 클러스터링
+            # 이렇게 하면 Y좌표 미세변동에도 같은 자막으로 묶임
+            spatial_clusters = []
 
             for region in all_regions:
-                time_sec = region.get('time', 0)
-                time_key = round(time_sec * 2) / 2  # 0, 0.5, 1.0, 1.5, ...
+                added = False
+                for cluster in spatial_clusters:
+                    # 클러스터의 누적 바운딩 박스와 비교
+                    rep = cluster['bbox']
+                    iou = self._calculate_iou(region, rep)
 
-                if time_key not in time_groups:
-                    time_groups[time_key] = []
-                time_groups[time_key].append(region)
+                    # Y 중심 근접성 체크 (같은 행의 자막)
+                    y_center_region = region['y'] + region['height'] / 2.0
+                    y_center_cluster = rep['y'] + rep['height'] / 2.0
+                    same_row = abs(y_center_region - y_center_cluster) <= max(region['height'], rep['height']) * 0.8
 
-            logger.debug(f"[Multi-subtitle detection] {len(time_groups)} time groups created")
+                    # 수평 갭 체크
+                    region_right = region['x'] + region['width']
+                    rep_right = rep['x'] + rep['width']
+                    horizontal_gap = max(0.0, max(region['x'] - rep_right, rep['x'] - region_right))
+                    proximity = same_row and horizontal_gap <= 6.0
 
-            # ★ 핵심 변경 2: 각 시간대에서 IoU 기반 클러스터링으로 공간 분리 ★
-            reliable_regions = []
+                    if iou > OCRThresholds.IOU_CLUSTER_THRESHOLD or proximity:
+                        cluster['members'].append(region)
+                        # 누적 바운딩 박스 갱신 (union)
+                        new_left = min(rep['x'], region['x'])
+                        new_top = min(rep['y'], region['y'])
+                        new_right = max(rep['x'] + rep['width'], region['x'] + region['width'])
+                        new_bottom = max(rep['y'] + rep['height'], region['y'] + region['height'])
+                        cluster['bbox'] = {
+                            'x': new_left,
+                            'y': new_top,
+                            'width': new_right - new_left,
+                            'height': new_bottom - new_top,
+                        }
+                        added = True
+                        break
 
-            for time_key, regions in time_groups.items():
-                # IoU 기반 클러스터링: 같은 시간대에 공간적으로 분리된 자막들 분리
-                clusters = []
+                if not added:
+                    spatial_clusters.append({
+                        'bbox': {
+                            'x': region['x'],
+                            'y': region['y'],
+                            'width': region['width'],
+                            'height': region['height'],
+                        },
+                        'members': [region],
+                    })
 
-                for region in regions:
-                    added_to_cluster = False
+            logger.debug(f"[Spatial-first clustering] {len(all_regions)} detections -> {len(spatial_clusters)} spatial clusters")
 
-                    # 기존 클러스터 중 IoU가 높은 곳에 추가
-                    for cluster in clusters:
-                        # 클러스터 대표와 IoU 계산
-                        representative = cluster[0]
-                        iou = self._calculate_iou(region, representative)
+            # ===== Phase 2: 각 공간 클러스터에서 연속 시간 구간 계산 =====
+            merged_regions = []
 
-                        # ★ IoU 임계값 낮춤: 별도 자막이 병합되지 않도록 (0.3 -> 0.15)
-                        if iou > OCRThresholds.IOU_CLUSTER_THRESHOLD:
-                            cluster.append(region)
-                            added_to_cluster = True
-                            break
+            for cluster_idx, cluster in enumerate(spatial_clusters):
+                members = cluster['members']
+                bbox = cluster['bbox']
 
-                    # 새로운 클러스터 생성 (공간적으로 분리된 자막)
-                    if not added_to_cluster:
-                        clusters.append([region])
+                # 모든 감지 시간 수집 및 정렬
+                times = sorted(set(round(m.get('time', 0), 2) for m in members))
+                if not times:
+                    continue
 
-                logger.debug(f"  Time {time_key:.1f}s: {len(regions)} boxes -> {len(clusters)} subtitle regions")
+                # 연속 시간 구간 분할 (2.0초 이상 갭이면 별도 구간)
+                # 같은 위치 자막이 잠깐 사라졌다 재출현하는 경우를 처리
+                time_segments = []
+                seg_start = times[0]
+                seg_end = times[0]
 
-                # 각 클러스터(개별 자막)마다 하나의 블러 영역 생성
-                for cluster_idx, cluster in enumerate(clusters):
-                    try:
-                        if GPU_ACCEL_AVAILABLE:
-                            x_values = xp.array([r['x'] for r in cluster], dtype=xp.float32)
-                            y_values = xp.array([r['y'] for r in cluster], dtype=xp.float32)
-                            width_values = xp.array([r['width'] for r in cluster], dtype=xp.float32)
-                            height_values = xp.array([r['height'] for r in cluster], dtype=xp.float32)
-                            left = float(xp.min(x_values).get())
-                            top = float(xp.min(y_values).get())
-                            right = float(xp.max(x_values + width_values).get())
-                            bottom = float(xp.max(y_values + height_values).get())
-                        else:
-                            x_values = np.array([r['x'] for r in cluster], dtype=np.float32)
-                            y_values = np.array([r['y'] for r in cluster], dtype=np.float32)
-                            width_values = np.array([r['width'] for r in cluster], dtype=np.float32)
-                            height_values = np.array([r['height'] for r in cluster], dtype=np.float32)
-                            left = float(np.min(x_values))
-                            top = float(np.min(y_values))
-                            right = float(np.max(x_values + width_values))
-                            bottom = float(np.max(y_values + height_values))
-                    except Exception:
-                        left = float(min(r['x'] for r in cluster))
-                        top = float(min(r['y'] for r in cluster))
-                        right = float(max(r['x'] + r['width'] for r in cluster))
-                        bottom = float(max(r['y'] + r['height'] for r in cluster))
-
-                    # Keep a union envelope so edges are never clipped by mean-box shrinkage.
-                    cluster_x = max(0.0, left - 2.0)
-                    cluster_y = max(0.0, top - 2.0)
-                    cluster_right = min(100.0, right + 2.0)
-                    cluster_bottom = min(100.0, bottom + 2.0)
-                    cluster_width = max(1.0, cluster_right - cluster_x)
-                    cluster_height = max(1.0, cluster_bottom - cluster_y)
-
-                    sample_text = next((r.get('text', '') for r in cluster if r.get('text')), '')
-
-                    # ★★★ 100% 감지 모드: 일관된 시간 버퍼 적용 (constants.py에서 설정) ★★★
-                    if time_key <= OCRThresholds.TIME_BUFFER_BEFORE:
-                        start_time = 0
+                for t in times[1:]:
+                    if t - seg_end <= 2.0:  # 2.0초 갭 허용
+                        seg_end = t
                     else:
-                        start_time = max(0, time_key - OCRThresholds.TIME_BUFFER_BEFORE)
-                    end_time = time_key + OCRThresholds.TIME_BUFFER_AFTER
+                        time_segments.append((seg_start, seg_end))
+                        seg_start = t
+                        seg_end = t
+                time_segments.append((seg_start, seg_end))
+
+                # ===== Phase 3: 시간 구간별 블러 영역 출력 =====
+                for seg_idx, (seg_start, seg_end) in enumerate(time_segments):
+                    # 시간 버퍼 적용
+                    buffered_start = max(0.0, seg_start - OCRThresholds.TIME_BUFFER_BEFORE)
+                    buffered_end = seg_end + OCRThresholds.TIME_BUFFER_AFTER
+
+                    # 공간 바운딩 박스에 패딩 추가
+                    x = max(0.0, bbox['x'] - 2.0)
+                    y = max(0.0, bbox['y'] - 2.0)
+                    right = min(100.0, bbox['x'] + bbox['width'] + 2.0)
+                    bottom = min(100.0, bbox['y'] + bbox['height'] + 2.0)
+
+                    sample_text = next((m.get('text', '') for m in members if m.get('text')), '')
+                    # 이 시간 구간에 속하는 멤버들의 Y 위치 수집
+                    seg_members = [m for m in members if seg_start <= m.get('time', 0) <= seg_end]
+                    y_positions = [float(m.get('y', 0)) for m in seg_members]
+                    # 출현한 시간 그룹(0.5초 단위) 수 계산
+                    time_group_count = len(set(round(m.get('time', 0) * 2) / 2 for m in seg_members))
 
                     source_name = 'opencv_ocr_gpu' if GPU_ACCEL_AVAILABLE else 'opencv_ocr_numpy'
-                    reliable_regions.append({
-                        'x': cluster_x,
-                        'y': cluster_y,
-                        'width': cluster_width,
-                        'height': cluster_height,
-                        'frequency': len(cluster),
+                    merged_regions.append({
+                        'x': x,
+                        'y': y,
+                        'width': max(1.0, right - x),
+                        'height': max(1.0, bottom - y),
+                        'frequency': len(seg_members),
                         'language': 'chinese',
                         'source': source_name,
                         'sample_text': sample_text,
-                        'start_time': start_time,
-                        'end_time': end_time,
-                        'cluster_id': f"{time_key}_{cluster_idx}",
-                        # ★ 자막 vs 상품 텍스트 구분용 메타데이터
-                        # 클러스터 평균 Y만 사용 (개별 박스 Y는 OCR 노이즈로 분산 부풀림 방지)
-                        'y_positions': [float(r.get('y', 0)) for r in cluster],
-                        'time_group_count': 1,  # 출현 시간 그룹 수 (병합 시 누적)
+                        'start_time': buffered_start,
+                        'end_time': buffered_end,
+                        'cluster_id': f"spatial_{cluster_idx}_{seg_idx}",
+                        'y_positions': y_positions,
+                        'time_group_count': time_group_count,
                     })
 
-            # ★★★ 연속된 시간대의 "동일 트랙" 영역만 병합 (IoU 기반으로 공간 유사성 확인) ★★★
             # 시간순 정렬
-            reliable_regions.sort(key=lambda r: (r['y'], r['start_time']))
+            merged_regions.sort(key=lambda r: (r['start_time'], r['y']))
 
-            merged_regions = []
-            for region in reliable_regions:
-                merged = False
-                for existing in merged_regions:
-                    # IoU 계산 (공간적 유사성)
-                    iou = self._calculate_iou(existing, region)
-
-                    # ★ 같은 트랙 조건: IoU 임계값 낮춤 (0.4 -> 0.25)
-                    # 공간적으로 분리된 자막은 IoU가 낮아 병합되지 않음
-                    existing_right = existing['x'] + existing['width']
-                    existing_bottom = existing['y'] + existing['height']
-                    region_right = region['x'] + region['width']
-                    region_bottom = region['y'] + region['height']
-                    y_center_existing = existing['y'] + (existing['height'] / 2.0)
-                    y_center_region = region['y'] + (region['height'] / 2.0)
-                    same_row = abs(y_center_existing - y_center_region) <= max(existing['height'], region['height']) * 0.8
-                    horizontal_gap = max(0.0, max(region['x'] - existing_right, existing['x'] - region_right))
-                    proximity_merge = same_row and horizontal_gap <= 6.0
-
-                    if ((iou > OCRThresholds.IOU_MERGE_THRESHOLD or proximity_merge)
-                        and existing['end_time'] >= region['start_time'] - 1.0):
-                        # 시간 범위 확장 (공간은 평균으로 갱신)
-                        total_freq = existing['frequency'] + region['frequency']
-                        merged_left = min(existing['x'], region['x'])
-                        merged_top = min(existing['y'], region['y'])
-                        merged_right = max(existing_right, region_right)
-                        merged_bottom = max(existing_bottom, region_bottom)
-                        existing['x'] = merged_left
-                        existing['y'] = merged_top
-                        existing['width'] = max(1.0, merged_right - merged_left)
-                        existing['height'] = max(1.0, merged_bottom - merged_top)
-                        existing['start_time'] = min(existing['start_time'], region['start_time'])
-                        existing['end_time'] = max(existing['end_time'], region['end_time'])
-                        existing['frequency'] = total_freq
-                        if len(str(region.get('sample_text', ''))) > len(str(existing.get('sample_text', ''))):
-                            existing['sample_text'] = region.get('sample_text', '')
-                        # ★ 자막 판별용 메타데이터 누적
-                        existing.setdefault('y_positions', []).extend(region.get('y_positions', []))
-                        existing['time_group_count'] = existing.get('time_group_count', 1) + region.get('time_group_count', 1)
-                        merged = True
-                        break
-
-                if not merged:
-                    merged_regions.append(region.copy())
-
-            logger.info(f"[Multi-subtitle merge] {len(reliable_regions)} -> {len(merged_regions)} independent subtitle regions")
+            logger.info(f"[Multi-subtitle merge] {len(all_regions)} detections -> {len(spatial_clusters)} clusters -> {len(merged_regions)} blur regions")
             for i, r in enumerate(merged_regions):
                 tg = r.get('time_group_count', 1)
                 yp = r.get('y_positions', [])
