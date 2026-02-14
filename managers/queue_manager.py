@@ -69,11 +69,18 @@ class QueueManager:
             mix_jobs.pop(key, None)
 
     def _to_display_url(self, key: str) -> str:
+        # Handle local file entries
+        if key.startswith("local://"):
+            import os
+            return f"[로컬] {os.path.basename(key[8:])}"
         if not self._is_mix_job(key):
             return self._strip_legacy_queue_prefix(key)
         mix_urls = self.get_mix_job_urls(key)
         short_id = key.rsplit("/", 1)[-1][:6]
         if mix_urls:
+            local_count = sum(1 for u in mix_urls if u.startswith("local://"))
+            if local_count == len(mix_urls):
+                return f"[로컬 믹스:{short_id}] {len(mix_urls)}개"
             return f"[믹스:{short_id}] {len(mix_urls)}개"
         return f"[믹스:{short_id}]"
 
