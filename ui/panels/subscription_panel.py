@@ -76,22 +76,7 @@ def format_price_korean(amount: int) -> str:
         return f"{amount:,}원"
 
 
-def parse_utc_datetime(value):
-    """Parse an ISO datetime to timezone-aware UTC datetime."""
-    if value is None:
-        return None
-    try:
-        if isinstance(value, str):
-            dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
-        elif isinstance(value, datetime):
-            dt = value
-        else:
-            return None
-        if dt.tzinfo is None:
-            return dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except Exception:
-        return None
+from utils.auth_helpers import parse_utc_datetime, extract_user_id as _extract_user_id_util
 
 
 PLANS = {
@@ -1588,15 +1573,8 @@ class SubscriptionPanel(QWidget):
 
     def _extract_user_id(self):
         """login_data에서 user_id를 안전하게 추출"""
-        if not self.gui or not getattr(self.gui, "login_data", None):
-            return None
-        data_part = self.gui.login_data.get("data", {})
-        if isinstance(data_part, dict):
-            inner = data_part.get("data", {})
-            user_id = inner.get("id")
-            if user_id:
-                return user_id
-        return self.gui.login_data.get("userId")
+        login_data = getattr(self.gui, "login_data", None) if self.gui else None
+        return _extract_user_id_util(login_data)
 
     def _extract_auth_token(self):
         """login_data에서 인증 토큰을 안전하게 추출"""

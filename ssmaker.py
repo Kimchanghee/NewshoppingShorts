@@ -130,7 +130,7 @@ class StartupWorker(QtCore.QThread):
             # Stage 3: Login UI assets (45-70%)
             self.status.emit("로그인 화면을 준비하고 있습니다...")
             self.progress.emit(55)
-            from ui.login_Ui import Ui_LoginWindow
+            from ui.login_ui_modern import ModernLoginUi as Ui_LoginWindow
             self.progress.emit(60)
             from ui.windows.login_window import Login
             self.progress.emit(70)

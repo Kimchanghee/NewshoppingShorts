@@ -171,20 +171,8 @@ class AppController:
     # ?? Version ??
 
     def get_current_version(self) -> str:
-        try:
-            if getattr(sys, "frozen", False):
-                base_path = sys._MEIPASS
-            else:
-                base_path = os.getcwd()
-
-            version_path = os.path.join(base_path, "version.json")
-            if os.path.exists(version_path):
-                with open(version_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    return data.get("version", "1.0.0")
-        except Exception as e:
-            logger.error(f"Failed to read version: {e}")
-        return "1.0.0"
+        from utils.auto_updater import get_current_version
+        return get_current_version()
 
     # ?? Loading & Main App ??
 

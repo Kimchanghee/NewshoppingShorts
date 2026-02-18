@@ -106,5 +106,19 @@ tmp_updater_test/
 q
 resource/bin/
 
+# Cloud SQL Proxy binary (download separately)
+cloud-sql-proxy.exe
+
+# Backend debug/test artifacts
+backend/error_msg*.txt
+backend/static/ssmaker_setup.exe
+backend/nul
+
+# Dev-only config snapshots
+config/requirements_temp.txt
+
+# Update server test artifacts
+test_update_serv/
+
 # Virtual environments
 venv*/

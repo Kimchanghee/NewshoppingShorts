@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import QMainWindow, QApplication
 from PyQt6.QtGui import QIcon
 
 from caller import rest, ui_controller
-from ui.login_Ui import Ui_LoginWindow
+from ui.login_ui_modern import ModernLoginUi as Ui_LoginWindow
 from ui.components.custom_dialog import show_info, show_warning, show_error, show_question
 from utils.logging_config import get_logger
 from startup.constants import DEFAULT_PROCESS_PORT

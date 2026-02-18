@@ -11,22 +11,10 @@ from datetime import datetime, timezone
 from PyQt6.QtCore import QTimer
 
 from caller import rest
+from utils.auth_helpers import extract_user_id
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
-
-
-def _extract_user_id_from_login_data(login_data) -> str | None:
-    """login_data에서 user_id를 안전하게 추출 (공통 유틸리티)"""
-    if not login_data or not isinstance(login_data, dict):
-        return None
-    data_part = login_data.get("data", {})
-    if isinstance(data_part, dict):
-        inner = data_part.get("data", {})
-        user_id = inner.get("id") if isinstance(inner, dict) else None
-        if user_id:
-            return user_id
-    return login_data.get("userId")
 
 
 class SubscriptionManager:
@@ -84,7 +72,7 @@ class SubscriptionManager:
             return
 
         try:
-            user_id = _extract_user_id_from_login_data(self.gui.login_data)
+            user_id = extract_user_id(self.gui.login_data)
             if not user_id:
                 return
 
@@ -149,14 +137,10 @@ class SubscriptionManager:
             return
 
         try:
-            expires_str = self._subscription_expires_at
-            if expires_str.endswith("Z"):
-                expires_str = expires_str[:-1] + "+00:00"
-
-            expires_dt = datetime.fromisoformat(expires_str)
-
-            if expires_dt.tzinfo is None:
-                expires_dt = expires_dt.replace(tzinfo=timezone.utc)
+            from utils.auth_helpers import parse_utc_datetime
+            expires_dt = parse_utc_datetime(self._subscription_expires_at)
+            if expires_dt is None:
+                return
 
             now = datetime.now(timezone.utc)
             diff = expires_dt - now

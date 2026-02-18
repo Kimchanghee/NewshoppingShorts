@@ -7,8 +7,6 @@ Contains reusable UI components.
 """
 
 from ui.components.status_bar import StatusBar
-from ui.components.loading_splash import LoadingSplash
-from ui.components.main_loading_splash import MainLoadingSplash
 from ui.components.custom_dialog import (
     show_info,
     show_warning,
@@ -25,8 +23,6 @@ from ui.components.fixed_layout import LAYOUT, FixedLayoutConfig
 
 __all__ = [
     'StatusBar',
-    'LoadingSplash',
-    'MainLoadingSplash',
     'show_info',
     'show_warning',
     'show_error',
