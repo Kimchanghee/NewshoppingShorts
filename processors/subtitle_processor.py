@@ -474,6 +474,111 @@ class SubtitleProcessor:
 
         return merged
 
+    def _normalize_polygon_points(
+        self, polygon: Any, frame_w: int, frame_h: int
+    ) -> List[List[int]]:
+        """Normalize polygon points into in-frame integer coordinates."""
+        if not isinstance(polygon, list):
+            return []
+        normalized: List[List[int]] = []
+        for point in polygon:
+            if not isinstance(point, (list, tuple)) or len(point) < 2:
+                continue
+            try:
+                px = int(round(float(point[0])))
+                py = int(round(float(point[1])))
+            except (TypeError, ValueError):
+                continue
+            px = max(0, min(frame_w - 1, px))
+            py = max(0, min(frame_h - 1, py))
+            normalized.append([px, py])
+        if len(normalized) < 3:
+            return []
+        return normalized
+
+    def _build_polygon_timeline(
+        self,
+        subtitle_positions: List[Dict[str, Any]],
+        fps: float,
+        frame_w: int,
+        frame_h: int,
+        video_duration: float,
+    ) -> Dict[int, List[List[List[int]]]]:
+        """Build frame-indexed polygon map from OCR detections."""
+        timeline: Dict[int, List[List[List[int]]]] = {}
+        if fps <= 0:
+            return timeline
+
+        max_frame = max(0, int(video_duration * fps) + 1)
+        expansion_frames = 1
+
+        for pos in subtitle_positions:
+            frame_regions = pos.get("frame_regions")
+            if isinstance(frame_regions, list) and frame_regions:
+                for fr in frame_regions:
+                    polygon = self._normalize_polygon_points(
+                        fr.get("polygon"), frame_w=frame_w, frame_h=frame_h
+                    )
+                    if not polygon:
+                        continue
+                    frame_index = fr.get("frame_index")
+                    try:
+                        frame_index = int(frame_index)
+                    except (TypeError, ValueError):
+                        frame_index = -1
+                    if frame_index < 0:
+                        try:
+                            frame_index = int(round(float(fr.get("time", 0.0)) * fps))
+                        except (TypeError, ValueError):
+                            continue
+                    for offset in range(-expansion_frames, expansion_frames + 1):
+                        idx = frame_index + offset
+                        if idx < 0 or idx > max_frame:
+                            continue
+                        timeline.setdefault(idx, []).append(polygon)
+                continue
+
+            # Fallback: rectangular mask by time range when polygon history is unavailable.
+            try:
+                x = float(pos.get("x", 0.0))
+                y = float(pos.get("y", 0.0))
+                width = float(pos.get("width", 0.0))
+                height = float(pos.get("height", 0.0))
+            except (TypeError, ValueError):
+                continue
+            x1 = max(0, min(frame_w - 1, int(round(frame_w * x / 100.0))))
+            y1 = max(0, min(frame_h - 1, int(round(frame_h * y / 100.0))))
+            x2 = max(0, min(frame_w - 1, int(round(frame_w * (x + width) / 100.0))))
+            y2 = max(0, min(frame_h - 1, int(round(frame_h * (y + height) / 100.0))))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            rect_poly = [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
+            try:
+                start_time = float(pos.get("start_time", 0.0))
+            except (TypeError, ValueError):
+                start_time = 0.0
+            try:
+                end_time = float(pos.get("end_time", video_duration))
+            except (TypeError, ValueError):
+                end_time = video_duration
+            start_idx = max(0, int(round(start_time * fps)))
+            end_idx = min(max_frame, int(round(end_time * fps)))
+            for idx in range(start_idx, end_idx + 1):
+                timeline.setdefault(idx, []).append(rect_poly)
+
+        # Deduplicate polygons per frame.
+        for idx, polygons in list(timeline.items()):
+            seen = set()
+            unique: List[List[List[int]]] = []
+            for polygon in polygons:
+                key = tuple((pt[0], pt[1]) for pt in polygon)
+                if key in seen:
+                    continue
+                seen.add(key)
+                unique.append(polygon)
+            timeline[idx] = unique
+        return timeline
+
     def _build_time_aware_blur_boxes(
         self, subtitle_positions: List[Dict[str, Any]], w: int, h: int, video_duration: float
     ) -> List[Dict[str, Any]]:
@@ -631,6 +736,24 @@ class SubtitleProcessor:
         import numpy as np
         from moviepy.editor import VideoClip
 
+        fps = float(getattr(video, "fps", 0.0) or 0.0)
+        if fps <= 0:
+            fps = 30.0
+
+        polygon_timeline: Dict[int, List[List[List[int]]]] = {}
+        if getattr(OCRThresholds, "PRECISION_POLYGON_BLUR", False):
+            polygon_timeline = self._build_polygon_timeline(
+                subtitle_positions=subtitle_positions,
+                fps=fps,
+                frame_w=w,
+                frame_h=h,
+                video_duration=float(video.duration),
+            )
+            if polygon_timeline:
+                logger.info(
+                    f"[BLUR APPLY V2] Precision polygon timeline: {len(polygon_timeline)} frame slots"
+                )
+
         boxes_with_time = self._build_time_aware_blur_boxes(
             subtitle_positions=subtitle_positions,
             w=w,
@@ -638,7 +761,7 @@ class SubtitleProcessor:
             video_duration=float(video.duration),
         )
         logger.info(f"[BLUR APPLY V2] Stabilized region count: {len(boxes_with_time)}")
-        if not boxes_with_time:
+        if not boxes_with_time and not polygon_timeline:
             return video
 
         base_height = 1080
@@ -660,6 +783,74 @@ class SubtitleProcessor:
             should_log = (int(t) % 5 == 0) and (int(t) != last_log_time[0])
             if should_log:
                 last_log_time[0] = int(t)
+
+            frame_index = int(round(t * fps))
+            frame_polygons = polygon_timeline.get(frame_index, []) if polygon_timeline else []
+            if frame_polygons:
+                min_x = w - 1
+                min_y = h - 1
+                max_x = 0
+                max_y = 0
+                valid_polygons = []
+                for polygon in frame_polygons:
+                    normalized = self._normalize_polygon_points(
+                        polygon, frame_w=w, frame_h=h
+                    )
+                    if not normalized:
+                        continue
+                    valid_polygons.append(normalized)
+                    xs = [p[0] for p in normalized]
+                    ys = [p[1] for p in normalized]
+                    min_x = min(min_x, min(xs))
+                    min_y = min(min_y, min(ys))
+                    max_x = max(max_x, max(xs))
+                    max_y = max(max_y, max(ys))
+
+                if valid_polygons and max_x > min_x and max_y > min_y:
+                    # Keep blur work limited to polygon envelope ROI.
+                    roi_x1 = max(0, min_x - 2)
+                    roi_y1 = max(0, min_y - 2)
+                    roi_x2 = min(w, max_x + 3)
+                    roi_y2 = min(h, max_y + 3)
+                    roi = frame[roi_y1:roi_y2, roi_x1:roi_x2]
+                    if roi.size > 0:
+                        roi_mask = np.zeros(
+                            (roi_y2 - roi_y1, roi_x2 - roi_x1), dtype=np.uint8
+                        )
+                        for polygon in valid_polygons:
+                            shifted = np.array(
+                                [[p[0] - roi_x1, p[1] - roi_y1] for p in polygon],
+                                dtype=np.int32,
+                            ).reshape((-1, 1, 2))
+                            cv2.fillPoly(roi_mask, [shifted], 255)
+
+                        edge_kernel = max(3, int(min(w, h) * 0.004))
+                        if edge_kernel % 2 == 0:
+                            edge_kernel += 1
+                        edge_struct = cv2.getStructuringElement(
+                            cv2.MORPH_ELLIPSE, (edge_kernel, edge_kernel)
+                        )
+                        roi_mask = cv2.dilate(roi_mask, edge_struct, iterations=1)
+
+                        blur_kernel = _auto_kernel(roi_x2 - roi_x1, roi_y2 - roi_y1)
+                        blurred_roi = cv2.GaussianBlur(roi, (blur_kernel, blur_kernel), 0)
+                        feathered = cv2.GaussianBlur(
+                            roi_mask, (feather_size, feather_size), 0
+                        )
+                        m3 = (
+                            np.dstack([feathered, feathered, feathered]).astype(np.float32)
+                            / 255.0
+                        )
+                        frame[roi_y1:roi_y2, roi_x1:roi_x2] = (
+                            blurred_roi.astype(np.float32) * m3
+                            + roi.astype(np.float32) * (1 - m3)
+                        ).astype(np.uint8)
+                        if should_log:
+                            logger.debug(
+                                f"[BLUR APPLY V2] t={t:.2f}s polygons={len(valid_polygons)} "
+                                f"roi={roi_x2 - roi_x1}x{roi_y2 - roi_y1}"
+                            )
+                        return frame
 
             active = [bt for bt in boxes_with_time if bt["start_time"] <= t <= bt["end_time"]]
             if not active:
