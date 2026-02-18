@@ -412,7 +412,7 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.3.43") or "1.3.43").strip()
+_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.0") or "1.4.0").strip()
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
     "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v"
@@ -426,12 +426,14 @@ APP_VERSION_INFO = {
     "version": _DEFAULT_APP_VERSION,
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.3.43 변경사항
-- 자막 블러 영역 정확도 개선 (union envelope + 시간 기반 안정화)
-- 음성 카드 설명 폰트 크기 개선""",
+    "release_notes": """### v1.4.0 대형 업데이트
+- 샤오홍슈(小红书) 영상 링크 다운로드 공식 지원 추가
+- 도우인/틱톡/샤오홍슈 플랫폼 자동 감지 라우터 도입
+- 다운로드 모듈 구조 정리 (platforms 분리)
+- UI 안내 문구를 도우인 + 샤오홍슈 기준으로 업데이트""",
     "is_mandatory": True,
     "update_channel": "stable",
-    "file_hash": "774d92a694ad1b41967570729b869981b2113b94d647a573adb5d0a842237e46",
+    "file_hash": "b3b1dea69ced9f2cfdab0765cfe136b830465585cc4736bbf5efc8b168a369ea",
 }
 
 

@@ -317,6 +317,17 @@ def extract_urls_from_text(text):
         for pattern in tiktok_patterns:
             matches = re.findall(pattern, text)
             urls.extend(matches)
+
+        # Xiaohongshu/XHS URL patterns
+        xhs_patterns = [
+            r'https://xhslink\.com/[A-Za-z0-9_\-]+/?',
+            r'https://www\.xiaohongshu\.com/explore/[A-Za-z0-9]+[^\s"\']*',
+            r'https://www\.xiaohongshu\.com/discovery/item/[A-Za-z0-9]+[^\s"\']*',
+        ]
+
+        for pattern in xhs_patterns:
+            matches = re.findall(pattern, text)
+            urls.extend(matches)
         
         # 중복 제거
         cleaned_urls = []

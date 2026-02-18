@@ -175,7 +175,7 @@ def _download_mix_sources(app, mix_urls: List[str]) -> List[str]:
             app.add_log(f"[Mix] Local source {idx}/{total}: {os.path.basename(local_path)}")
         else:
             app.add_log(f"[Mix] 소스 {idx}/{total} 다운로드 중...")
-            path = DouyinExtract.download_tiktok_douyin_video(source_url)
+            path = VideoDownloader.download_video(source_url)
             downloaded.append(path)
             _register_temp_download_files(app, [path])
             app.add_log(f"[Mix] 소스 {idx} 준비 완료: {os.path.basename(path)}")
@@ -323,7 +323,7 @@ from moviepy.editor import (
 
 
 from core.video import VideoTool
-from core.download import DouyinExtract
+from core.download import VideoDownloader
 from .utils import (
     _extract_product_name,
     _get_voice_display_name,
@@ -1107,7 +1107,7 @@ def _process_single_video(app, url, current_number, total_urls):
                     else:
                         raise Exception("Sourcing Manager가 초기화되지 않았습니다.")
                 else:
-                    downloaded_path = DouyinExtract.download_tiktok_douyin_video(url)
+                    downloaded_path = VideoDownloader.download_video(url)
                 app._temp_downloaded_file = downloaded_path
                 _register_temp_download_files(app, [downloaded_path])
                 app.add_log(
