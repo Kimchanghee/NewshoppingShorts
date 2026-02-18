@@ -39,7 +39,7 @@ jobs:
       run: choco install innosetup --no-progress -y
 
     - name: Install Tesseract OCR
-          run: choco install tesseract --no-progress -y
+      run: choco install tesseract --no-progress -y
 
     - name: Download Whisper models
       run: python scripts/download_whisper_models.py
