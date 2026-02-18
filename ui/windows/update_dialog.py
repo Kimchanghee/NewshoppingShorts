@@ -57,14 +57,43 @@ def _center_widget(widget):
 
 
 def _release_notes_style(colors):
-    """Shared stylesheet for release notes box."""
+    """Shared stylesheet for release notes QTextEdit."""
     return f"""
-        color: {colors['text_secondary']};
-        background-color: {colors['surface']};
-        padding: 12px 16px;
-        border-radius: 8px;
-        border: 1px solid {colors['border']};
+        QTextEdit {{
+            color: {colors['text_secondary']};
+            background-color: {colors['surface']};
+            border: 1px solid {colors['border']};
+            border-radius: 8px;
+            padding: 12px;
+        }}
+        QTextEdit:focus {{
+            border: 1px solid {colors['border']};
+            outline: none;
+        }}
+        QScrollBar:vertical {{
+            background: {colors['surface']};
+            width: 8px;
+            border-radius: 4px;
+        }}
+        QScrollBar::handle:vertical {{
+            background: {colors['border']};
+            border-radius: 4px;
+            min-height: 20px;
+        }}
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0px;
+        }}
     """
+
+
+def _setup_frameless_window(widget):
+    """Shared frameless window setup for update dialogs."""
+    widget.setWindowFlags(
+        Qt.WindowType.FramelessWindowHint |
+        Qt.WindowType.WindowStaysOnTopHint
+    )
+    widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+    widget.setFixedSize(widget.WIN_W, widget.WIN_H)
 
 
 # ─────────────────────────────────────────────
@@ -96,12 +125,7 @@ class UpdateNotesDialog(QWidget):
         _center_widget(self)
 
     def _setup_window(self):
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(self.WIN_W, self.WIN_H)
+        _setup_frameless_window(self)
 
     def _setup_ui(self):
         C = self.COLORS
@@ -258,12 +282,7 @@ class UpdateProgressDialog(QWidget):
         self.dot_timer.start(400)
 
     def _setup_window(self):
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(self.WIN_W, self.WIN_H)
+        _setup_frameless_window(self)
 
     def _setup_ui(self):
         C = self.COLORS
@@ -341,32 +360,7 @@ class UpdateProgressDialog(QWidget):
             notes.setReadOnly(True)
             notes.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             notes.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            notes.setStyleSheet(f"""
-                QTextEdit {{
-                    color: {C['text_secondary']};
-                    background-color: {C['surface']};
-                    border: 1px solid {C['border']};
-                    border-radius: 8px;
-                    padding: 12px;
-                }}
-                QTextEdit:focus {{
-                    border: 1px solid {C['border']};
-                    outline: none;
-                }}
-                QScrollBar:vertical {{
-                    background: {C['surface']};
-                    width: 8px;
-                    border-radius: 4px;
-                }}
-                QScrollBar::handle:vertical {{
-                    background: {C['border']};
-                    border-radius: 4px;
-                    min-height: 20px;
-                }}
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                    height: 0px;
-                }}
-            """)
+            notes.setStyleSheet(_release_notes_style(C))
             notes.setFixedHeight(140)
             layout.addWidget(notes)
 
@@ -451,12 +445,7 @@ class UpdateCompleteDialog(QWidget):
         self._countdown_timer.timeout.connect(self._tick)
 
     def _setup_window(self):
-        self.setWindowFlags(
-            Qt.WindowType.FramelessWindowHint |
-            Qt.WindowType.WindowStaysOnTopHint
-        )
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        self.setFixedSize(self.WIN_W, self.WIN_H)
+        _setup_frameless_window(self)
 
     def _setup_ui(self):
         C = self.COLORS
@@ -511,32 +500,7 @@ class UpdateCompleteDialog(QWidget):
             notes.setReadOnly(True)
             notes.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             notes.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-            notes.setStyleSheet(f"""
-                QTextEdit {{
-                    color: {C['text_secondary']};
-                    background-color: {C['surface']};
-                    border: 1px solid {C['border']};
-                    border-radius: 8px;
-                    padding: 12px;
-                }}
-                QTextEdit:focus {{
-                    border: 1px solid {C['border']};
-                    outline: none;
-                }}
-                QScrollBar:vertical {{
-                    background: {C['surface']};
-                    width: 8px;
-                    border-radius: 4px;
-                }}
-                QScrollBar::handle:vertical {{
-                    background: {C['border']};
-                    border-radius: 4px;
-                    min-height: 20px;
-                }}
-                QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
-                    height: 0px;
-                }}
-            """)
+            notes.setStyleSheet(_release_notes_style(C))
             notes.setFixedHeight(140)
             layout.addWidget(notes)
 

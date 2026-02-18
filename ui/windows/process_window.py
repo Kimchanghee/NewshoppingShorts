@@ -6,9 +6,9 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMainWindow
 from PyQt6.QtGui import QIcon
 
-from ui import process_ui
+from ui.process_ui_modern import ModernProcessUi
 
-class ProcessWindow(QMainWindow, process_ui.Process_Ui):
+class ProcessWindow(QMainWindow, ModernProcessUi):
     """Loading window that shows initialization progress for PyQt6."""
 
     def __init__(self) -> None:

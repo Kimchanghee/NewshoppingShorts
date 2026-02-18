@@ -549,19 +549,6 @@ class SettingsTab(QWidget, ThemedMixin):
             show_warning(self, "알림", "저장 폴더가 설정되지 않았거나 존재하지 않습니다.")
     
     @staticmethod
-    def _extract_user_id_from_login_data(login_data):
-        """Safely extract user_id from login_data payload."""
-        if not login_data or not isinstance(login_data, dict):
-            return None
-        data_part = login_data.get("data", {})
-        if isinstance(data_part, dict):
-            inner = data_part.get("data", {})
-            user_id = inner.get("id") if isinstance(inner, dict) else None
-            if user_id:
-                return user_id
-        return login_data.get("userId")
-
-    @staticmethod
     def _resolve_creator_level(used_count: int):
         """Return gamified community level and next target."""
         levels = [
@@ -612,7 +599,8 @@ class SettingsTab(QWidget, ThemedMixin):
             self._apply_work_community_ui(None, "앱 정보가 없어 작업량을 불러올 수 없습니다.")
             return
 
-        user_id = self._extract_user_id_from_login_data(getattr(self.gui, "login_data", None))
+        from utils.auth_helpers import extract_user_id
+        user_id = extract_user_id(getattr(self.gui, "login_data", None))
         if not user_id:
             self._apply_work_community_ui(None, "로그인 후 작업량을 확인할 수 있어요.")
             return
