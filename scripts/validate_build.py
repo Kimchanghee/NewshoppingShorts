@@ -36,7 +36,7 @@ def get_directory_size(path):
     try:
         for entry in os.scandir(path):
             if entry.is_file(follow_symlinks=False):
-                total += entry.stat().size
+                total += entry.stat().st_size
             elif entry.is_dir(follow_symlinks=False):
                 total += get_directory_size(entry.path)
     except Exception as e:
@@ -51,9 +51,14 @@ def validate_build():
     print("=" * 60)
     print()
 
-    # Determine build directory
-    script_dir = Path(__file__).parent
-    build_dir = script_dir / "dist" / "ssmaker"
+    # Determine build directory.
+    # Primary output is <repo>/dist/ssmaker, but keep legacy fallback.
+    script_dir = Path(__file__).resolve().parent
+    candidates = [
+        script_dir.parent / "dist" / "ssmaker",
+        script_dir / "dist" / "ssmaker",
+    ]
+    build_dir = next((p for p in candidates if p.exists()), candidates[0])
 
     print(f"Build directory: {build_dir}")
     print()
@@ -70,11 +75,19 @@ def validate_build():
         all_checks_passed = False
     print()
 
-    # Check _internal directory
+    # Check dependency root directory.
+    # Some builds use dist/ssmaker/_internal, while others use dist/ssmaker directly.
     print("[2] Dependencies Directory")
     internal_dir = build_dir / "_internal"
-    if check_directory_exists(internal_dir, "_internal folder"):
-        size_gb = get_directory_size(internal_dir)
+    if internal_dir.is_dir():
+        dep_root = internal_dir
+        dep_label = "_internal folder"
+    else:
+        dep_root = build_dir
+        dep_label = "build root folder (flat layout)"
+
+    if check_directory_exists(dep_root, dep_label):
+        size_gb = get_directory_size(dep_root)
         print(f"    Size: {size_gb:.2f} GB")
     else:
         all_checks_passed = False
@@ -85,30 +98,36 @@ def validate_build():
     # Check critical Python packages
     print("[3] Critical Python Dependencies")
     critical_packages = [
-        ("onnxruntime", "ONNX Runtime for AI model inference"),
         ("faster_whisper", "Faster-Whisper STT engine"),
         ("ctranslate2", "CTranslate2 inference engine"),
-        ("rapidocr_onnxruntime", "OCR engine"),
         ("certifi", "SSL certificates"),
     ]
 
+    optional_packages = [
+        ("onnxruntime", "ONNX Runtime for legacy OCR pipeline"),
+        ("rapidocr_onnxruntime", "RapidOCR legacy engine"),
+    ]
+
     for package, description in critical_packages:
-        package_path = internal_dir / package
+        package_path = dep_root / package
         if not check_directory_exists(package_path, f"{package} - {description}"):
             all_checks_passed = False
+    for package, description in optional_packages:
+        package_path = dep_root / package
+        check_directory_exists(package_path, f"{package} - {description} (optional)")
     print()
 
     # Check FFmpeg
     print("[4] FFmpeg (Video Processing)")
-    imageio_ffmpeg_path = internal_dir / "imageio_ffmpeg"
+    imageio_ffmpeg_path = dep_root / "imageio_ffmpeg"
     if not check_directory_exists(imageio_ffmpeg_path, "imageio_ffmpeg"):
         all_checks_passed = False
     print()
 
     # Check SSL libraries
     print("[5] SSL Libraries")
-    ssl_pyd = internal_dir / "_ssl.pyd"
-    libssl_dll = internal_dir / "libssl-3.dll"
+    ssl_pyd = dep_root / "_ssl.pyd"
+    libssl_dll = dep_root / "libssl-3.dll"
     if not check_file_exists(ssl_pyd, "_ssl.pyd"):
         all_checks_passed = False
     if not check_file_exists(libssl_dll, "libssl-3.dll"):
@@ -117,7 +136,7 @@ def validate_build():
 
     # Check Faster-Whisper models (CTranslate2 format)
     print("[6] Faster-Whisper AI Models")
-    whisper_models_dir = internal_dir / "faster_whisper_models"
+    whisper_models_dir = dep_root / "faster_whisper_models"
     if check_directory_exists(whisper_models_dir, "faster_whisper_models folder"):
         # Faster-Whisper 모델은 폴더 구조: {model_size}/model.bin
         models = ["tiny", "base", "small"]
