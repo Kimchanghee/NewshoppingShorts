@@ -1,11 +1,12 @@
 """
-Video download modules
-- DouyinExtract: 도우인(抖音) 영상 다운로드
+Video download modules.
 """
-# Note: Imports use module-level functions, not class imports
-# to avoid circular references
-from core.download import DouyinExtract
+
+from . import DouyinExtract, TicktokExtract, VideoDownloader, XiaohongshuExtract
 
 __all__ = [
-    'DouyinExtract',
+    "DouyinExtract",
+    "TicktokExtract",
+    "VideoDownloader",
+    "XiaohongshuExtract",
 ]

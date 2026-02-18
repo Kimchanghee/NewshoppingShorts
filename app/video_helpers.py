@@ -176,7 +176,15 @@ class VideoHelpers:
                 parent = os.path.dirname(path)
                 if parent:
                     parent_name = os.path.basename(parent)
-                    if parent_name.startswith(("mix_source_", "tiktok_douyin_")):
+                    if parent_name.startswith(
+                        (
+                            "mix_source_",
+                            "tiktok_douyin_",
+                            "tiktok_video_",
+                            "douyin_video_",
+                            "xiaohongshu_video_",
+                        )
+                    ):
                         try:
                             os.rmdir(parent)
                         except Exception:

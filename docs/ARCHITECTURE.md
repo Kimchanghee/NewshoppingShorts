@@ -76,12 +76,15 @@ core/
 │   └── video_validator.py
 └── download/            # 비디오 다운로더
     ├── DouyinExtract.py
-    └── TicktokExtract.py
+    ├── TicktokExtract.py
+    ├── XiaohongshuExtract.py
+    ├── VideoDownloader.py
+    └── platforms/
 ```
 
 **주요 기능**:
 - API 키 관리 (Gemini, Anthropic)
-- 비디오 다운로드 (Douyin, TikTok)
+- 비디오 다운로드 (Douyin, TikTok, Xiaohongshu)
 - 비디오 검증 및 변환
 - 배치 작업 관리
 

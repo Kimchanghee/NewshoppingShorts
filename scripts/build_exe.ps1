@@ -264,10 +264,21 @@ try {
     }
   }
 
-  # certifi CA bundle allowed; block other .pem files
+  # Allow only known CA bundles; block all other .pem files
+  $allowedPemPatterns = @(
+    "*certifi*cacert.pem*",
+    "*grpc*_cython*_credentials*roots.pem*"
+  )
   $pemFiles = $allFiles | Where-Object { $_ -like "*.pem" }
   foreach ($pem in $pemFiles) {
-    if ($pem -notlike "*certifi*cacert.pem*") {
+    $isAllowed = $false
+    foreach ($pattern in $allowedPemPatterns) {
+      if ($pem -like $pattern) {
+        $isAllowed = $true
+        break
+      }
+    }
+    if (-not $isAllowed) {
       throw "Unexpected .pem file in build output: ${pem}"
     }
   }

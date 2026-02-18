@@ -31,7 +31,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
     {
         "id": "source",
         "title": "소스 입력",
-        "description": "변환할 영상의 URL을 입력하세요.\n도우인 영상 링크를 붙여넣고\n추가 버튼을 클릭합니다.",
+        "description": "변환할 영상의 URL을 입력하세요.\n도우인/샤오홍슈 링크를 붙여넣고\n추가 버튼을 클릭합니다.",
         "target_type": "sidebar",
         "target_id": "source",
         "navigate_to": "source",
