@@ -5,13 +5,13 @@ Social Media Upload Settings Panel (PyQt6)
 Provides channel connection, per-channel upload prompts (title, description,
 hashtags), and YouTube-specific comment auto-upload settings.
 """
-from typing import Optional, Dict, TYPE_CHECKING
+from typing import Optional, Dict, Any, TYPE_CHECKING
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog,
     QStackedWidget
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system
@@ -24,6 +24,35 @@ if TYPE_CHECKING:
 
 from utils.logging_config import get_logger
 logger = get_logger(__name__)
+
+
+class _YouTubeOAuthWorker(QObject):
+    """Runs potentially slow YouTube OAuth work off the UI thread."""
+
+    finished = pyqtSignal(bool, object, str)
+
+    def __init__(self, youtube_manager: Any, source_path: str):
+        super().__init__()
+        self._youtube_manager = youtube_manager
+        self._source_path = source_path
+
+    def run(self):
+        try:
+            installed_json = self._youtube_manager.install_client_secrets(self._source_path)
+            success = self._youtube_manager.connect_channel(client_secrets_file=installed_json)
+            if not success:
+                error_message = self._youtube_manager.get_last_error() or (
+                    "선택한 JSON으로 인증에 실패했습니다.\n"
+                    "OAuth 클라이언트 타입/리디렉션 설정을 확인해주세요."
+                )
+                self.finished.emit(False, {}, error_message)
+                return
+
+            channel_info = self._youtube_manager.get_channel_info() or {}
+            self.finished.emit(True, channel_info, "")
+        except Exception as e:
+            logger.error(f"[UploadPanel] OAuth JSON 연결 워커 실패: {e}")
+            self.finished.emit(False, {}, str(e))
 
 
 class PromptInputGroup(QFrame):
@@ -1110,21 +1139,10 @@ class UploadPanel(QFrame, ThemedMixin):
 
     def _connect_youtube(self, platform_id: str):
         """Connect YouTube channel via OAuth."""
-        from ui.components.custom_dialog import show_info, show_error
+        from ui.components.custom_dialog import show_error
 
         try:
-            if self.gui and hasattr(self.gui, 'youtube_manager') and self.gui.youtube_manager:
-                yt_manager = self.gui.youtube_manager
-                success = yt_manager.connect_channel()
-                if success:
-                    channel_info = yt_manager.get_channel_info()
-                    channel_name = self._apply_youtube_connected_state(channel_info)
-                    show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
-                    return
-
-            # OAuth JSON 업로드 연결
             self._show_youtube_json_connect()
-
         except Exception as e:
             logger.error(f"[UploadPanel] YouTube 연결 실패: {e}")
             show_error(self, "연결 실패", f"유튜브 채널 연결에 실패했습니다.\n\n{e}")
@@ -1137,10 +1155,12 @@ class UploadPanel(QFrame, ThemedMixin):
         ds = self.ds
         c = ds.colors
         selected_file = {"path": ""}
+        connection_state = {"running": False, "thread": None, "worker": None}
 
         dialog = QDialog(self)
         dialog.setWindowTitle("유튜브 채널 연결")
-        dialog.setFixedSize(520, 300)
+        dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        dialog.setFixedSize(520, 330)
         dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
         layout = QVBoxLayout(dialog)
@@ -1181,6 +1201,12 @@ class UploadPanel(QFrame, ThemedMixin):
         """)
         layout.addWidget(select_btn)
 
+        status_label = QLabel("")
+        status_label.setWordWrap(True)
+        status_label.setFont(QFont(ds.typography.font_family_primary, 10))
+        status_label.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(status_label)
+
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
 
@@ -1214,9 +1240,25 @@ class UploadPanel(QFrame, ThemedMixin):
             }}
             QPushButton:hover {{ background-color: {c.surface}; }}
         """)
-        cancel_btn.clicked.connect(dialog.reject)
+        def set_connecting(running: bool, status_message: str = ""):
+            connection_state["running"] = running
+            select_btn.setEnabled(not running)
+            cancel_btn.setEnabled(not running)
+            connect_btn.setText("연결 중..." if running else "연결")
+            connect_btn.setEnabled((not running) and bool(selected_file["path"]))
+            status_label.setText(status_message if status_message else "")
+
+        def on_cancel():
+            if connection_state["running"]:
+                status_label.setText("연결 처리 중입니다. 완료 후 다시 시도해주세요.")
+                return
+            dialog.reject()
+
+        cancel_btn.clicked.connect(on_cancel)
 
         def choose_file():
+            if connection_state["running"]:
+                return
             file_path, _ = QFileDialog.getOpenFileName(
                 dialog,
                 "OAuth JSON 파일 선택",
@@ -1229,7 +1271,27 @@ class UploadPanel(QFrame, ThemedMixin):
             file_info.setText(f"선택된 파일: {file_path}")
             connect_btn.setEnabled(True)
 
+        def on_connect_finished(success: bool, channel_info_obj: object, error_message: str):
+            set_connecting(False)
+            connection_state["thread"] = None
+            connection_state["worker"] = None
+
+            if success:
+                channel_info = channel_info_obj if isinstance(channel_info_obj, dict) else {}
+                channel_name = self._apply_youtube_connected_state(channel_info)
+                dialog.accept()
+                show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
+                return
+
+            detail = error_message or (
+                "선택한 JSON으로 인증에 실패했습니다.\n"
+                "OAuth 클라이언트 타입/리디렉션 설정을 확인해주세요."
+            )
+            show_error(self, "연결 실패", detail)
+
         def do_connect():
+            if connection_state["running"]:
+                return
             if not selected_file["path"]:
                 return
 
@@ -1237,27 +1299,21 @@ class UploadPanel(QFrame, ThemedMixin):
                 show_error(self, "연결 실패", "YouTube 매니저를 초기화하지 못했습니다.")
                 return
 
-            try:
-                yt_manager = self.gui.youtube_manager
-                installed_json = yt_manager.install_client_secrets(selected_file["path"])
-                success = yt_manager.connect_channel(client_secrets_file=installed_json)
+            set_connecting(True, "OAuth 인증을 진행 중입니다. 브라우저 승인 후 잠시만 기다려주세요.")
+            yt_manager = self.gui.youtube_manager
 
-                if not success:
-                    show_error(
-                        self,
-                        "연결 실패",
-                        "선택한 JSON으로 인증에 실패했습니다.\n"
-                        "OAuth 클라이언트 타입/리디렉션 설정을 확인해주세요."
-                    )
-                    return
+            worker = _YouTubeOAuthWorker(yt_manager, selected_file["path"])
+            thread = QThread(dialog)
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.finished.connect(on_connect_finished)
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
 
-                channel_info = yt_manager.get_channel_info()
-                channel_name = self._apply_youtube_connected_state(channel_info)
-                dialog.accept()
-                show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
-            except Exception as e:
-                logger.error(f"[UploadPanel] OAuth JSON 연결 실패: {e}")
-                show_error(self, "연결 실패", f"OAuth JSON 처리 중 오류가 발생했습니다.\n\n{e}")
+            connection_state["thread"] = thread
+            connection_state["worker"] = worker
+            thread.start()
 
         select_btn.clicked.connect(choose_file)
         connect_btn.clicked.connect(do_connect)
