@@ -72,6 +72,7 @@ class YouTubeManager:
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly"
     ]
+    OAUTH_FLOW_TIMEOUT_SECONDS = 180
 
     def __init__(self, gui=None, settings_file: str = "youtube_settings.json"):
         """
@@ -88,6 +89,7 @@ class YouTubeManager:
         self._credentials: Optional[Any] = None
         self._youtube_service: Optional[Any] = None
         self._channel: Optional[YouTubeChannel] = None
+        self._last_error_message: str = ""
         self._upload_settings = AutoUploadSettings()
 
         # Auto-upload thread
@@ -222,18 +224,29 @@ class YouTubeManager:
             "connected_at": self._channel.connected_at,
         }
 
-    def connect_channel(self, client_secrets_file: str = None) -> bool:
+    def get_last_error(self) -> str:
+        """Return the latest YouTube connection error message."""
+        return self._last_error_message
+
+    def connect_channel(
+        self,
+        client_secrets_file: str = None,
+        oauth_timeout_seconds: Optional[int] = None
+    ) -> bool:
         """
         Connect to YouTube channel using OAuth 2.0.
 
         Args:
             client_secrets_file: Path to OAuth client secrets file
+            oauth_timeout_seconds: OAuth callback wait timeout in seconds
 
         Returns:
             True if connection successful
         """
+        self._last_error_message = ""
         if not YOUTUBE_API_AVAILABLE:
-            logger.warning("[YouTube] YouTube API 라이브러리가 설치되지 않았습니다.")
+            logger.warning("[YouTube] YouTube API library is not installed.")
+            self._last_error_message = "YouTube API 라이브러리가 설치되지 않았습니다."
             return False
 
         try:
@@ -261,16 +274,25 @@ class YouTubeManager:
                                 logger.debug(f"[YouTube] 레거시 OAuth 파일 마이그레이션 실패: {migrate_error}")
 
                     if not os.path.exists(client_secrets_file):
-                        logger.warning("[YouTube] OAuth 클라이언트 설정 파일이 없습니다.")
+                        logger.warning("[YouTube] OAuth client secrets file is missing.")
+                        self._last_error_message = "OAuth 클라이언트 JSON 파일을 찾을 수 없습니다."
                         return False
 
                     flow = InstalledAppFlow.from_client_secrets_file(
                         client_secrets_file, self.SCOPES
                     )
-                    creds = flow.run_local_server(port=0)
+                    timeout_seconds = (
+                        oauth_timeout_seconds
+                        if oauth_timeout_seconds is not None
+                        else self.OAUTH_FLOW_TIMEOUT_SECONDS
+                    )
+                    creds = flow.run_local_server(
+                        port=0,
+                        timeout_seconds=timeout_seconds
+                    )
 
                 # Save credentials
-                with open(token_path, 'w') as token:
+                with open(token_path, "w", encoding="utf-8") as token:
                     token.write(creds.to_json())
 
             self._credentials = creds
@@ -288,7 +310,8 @@ class YouTubeManager:
             return True
 
         except Exception as e:
-            logger.error(f"[YouTube] 연결 실패: {e}")
+            logger.error("[YouTube] Connection failed: %s", e)
+            self._last_error_message = str(e) or "YouTube 채널 연결 중 알 수 없는 오류가 발생했습니다."
             return False
 
     def disconnect_channel(self) -> None:
