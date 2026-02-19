@@ -42,10 +42,10 @@ FONT_SOURCES = [
     {
         "id": "gmarketsans",
         "name": "GmarketSansTTFBold.ttf",
-        "is_zip": True,
-        "urls": ["https://corp.gmarket.com/fonts/GmarketSansTTF.zip"],
-        "extract_files": ["GmarketSansBold.ttf"],
-        "rename": {"GmarketSansBold.ttf": "GmarketSansTTFBold.ttf"}
+        "urls": [
+            "https://github.com/webfontworld/gmarket/raw/main/GmarketSansBold.ttf",
+            "https://cdn.jsdelivr.net/gh/webfontworld/gmarket/GmarketSansBold.ttf"
+        ]
     },
     {
         "id": "ibm_plex",
