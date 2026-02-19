@@ -41,6 +41,9 @@ jobs:
     - name: Install Tesseract OCR
       run: choco install tesseract --no-progress -y
 
+    - name: Download fonts
+      run: python scripts/download_all_fonts_final.py
+
     - name: Download Whisper models
       run: python scripts/download_whisper_models.py
       continue-on-error: true
