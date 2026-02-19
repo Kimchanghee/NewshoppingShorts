@@ -43,8 +43,8 @@ FONT_SOURCES = [
         "id": "gmarketsans",
         "name": "GmarketSansTTFBold.ttf",
         "urls": [
-            "https://github.com/webfontworld/gmarket/raw/main/GmarketSansBold.ttf",
-            "https://cdn.jsdelivr.net/gh/webfontworld/gmarket/GmarketSansBold.ttf"
+            "https://raw.githubusercontent.com/fonts-archive/GmarketSans/main/GmarketSansBold.ttf",
+            "https://cdn.jsdelivr.net/gh/fonts-archive/GmarketSans/GmarketSansBold.ttf"
         ]
     },
     {
