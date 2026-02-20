@@ -56,24 +56,72 @@ class UpdateCheckWorker(QtCore.QThread):
             self.check_failed.emit(str(e))
 
     def _check_with_fallback(self, requests_module):
+        best_no_update: Optional[Dict[str, Any]] = None
+
         for base_url in self._candidate_base_urls():
             by_check = self._query_version_check(requests_module, base_url)
-            if by_check is not None:
-                return by_check
+            if by_check is None:
+                by_check = self._query_version_info(requests_module, base_url)
 
-            by_version = self._query_version_info(requests_module, base_url)
-            if by_version is not None:
-                return by_version
+            if by_check is None:
+                continue
+
+            if by_check.get("update_available"):
+                if self._has_required_update_metadata(by_check):
+                    return by_check
+                logger.warning(
+                    "Server reported update but metadata is incomplete at %s; trying fallback sources",
+                    base_url,
+                )
+            else:
+                best_no_update = self._pick_newer_result(best_no_update, by_check)
 
         by_github = self._query_github_latest_release(requests_module)
         if by_github is not None:
-            return by_github
+            if by_github.get("update_available"):
+                if self._has_required_update_metadata(by_github):
+                    return by_github
+                logger.warning("GitHub release fallback metadata is incomplete")
+            else:
+                best_no_update = self._pick_newer_result(best_no_update, by_github)
+
+        if best_no_update is not None:
+            return best_no_update
 
         return {
             "update_available": False,
             "current_version": self.current_version,
             "latest_version": self.current_version,
         }
+
+    @staticmethod
+    def _has_required_update_metadata(update_data: Dict[str, Any]) -> bool:
+        download_url = str(update_data.get("download_url", "")).strip()
+        file_hash = str(update_data.get("file_hash", "")).strip()
+        return bool(download_url and file_hash)
+
+    def _pick_newer_result(
+        self,
+        current_best: Optional[Dict[str, Any]],
+        candidate: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        if current_best is None:
+            return candidate
+
+        best_version = str(
+            current_best.get("latest_version") or current_best.get("version") or "0.0.0"
+        ).strip()
+        candidate_version = str(
+            candidate.get("latest_version") or candidate.get("version") or "0.0.0"
+        ).strip()
+
+        try:
+            if compare_versions(best_version, candidate_version) < 0:
+                return candidate
+        except Exception:
+            if best_version < candidate_version:
+                return candidate
+        return current_best
 
     @staticmethod
     def _normalize_base_url(raw: str) -> str:
