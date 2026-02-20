@@ -8,7 +8,7 @@ hashtags), and YouTube-specific comment auto-upload settings.
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog,
+    QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog, QLineEdit,
     QStackedWidget
 )
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
@@ -50,6 +50,14 @@ class _YouTubeOAuthWorker(QObject):
 
             channel_info = self._youtube_manager.get_channel_info() or {}
             self.finished.emit(True, channel_info, "")
+        except PermissionError:
+            logger.error("[UploadPanel] OAuth JSON 저장 권한 오류")
+            self.finished.emit(
+                False,
+                {},
+                "OAuth 파일 저장 권한이 없어 연결에 실패했습니다.\n"
+                "앱을 다시 실행한 뒤 다시 시도해주세요.",
+            )
         except Exception as e:
             logger.error(f"[UploadPanel] OAuth JSON 연결 워커 실패: {e}")
             self.finished.emit(False, {}, str(e))
@@ -335,6 +343,36 @@ class YouTubeCommentSection(QFrame):
         self.comment_prompt.setAcceptRichText(False)
         prompt_layout.addWidget(self.comment_prompt)
 
+        link_label = QLabel("쿠팡 원상품 링크 (선택)")
+        link_label.setFont(QFont(ds.typography.font_family_primary, 11, QFont.Weight.Medium))
+        link_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        prompt_layout.addWidget(link_label)
+
+        self.manual_product_link_input = QLineEdit()
+        self.manual_product_link_input.setPlaceholderText(
+            "비워두면 현재 작업의 쿠팡 원상품 링크를 자동으로 댓글에 넣습니다."
+        )
+        self.manual_product_link_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                padding: 8px 10px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {c.primary};
+            }}
+        """)
+        prompt_layout.addWidget(self.manual_product_link_input)
+
+        link_desc = QLabel("자동 댓글 하단에 '원상품 링크' 항목으로 자연스럽게 포함됩니다.")
+        link_desc.setWordWrap(True)
+        link_desc.setFont(QFont(ds.typography.font_family_primary, 10))
+        link_desc.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
+        prompt_layout.addWidget(link_desc)
+
         # Save button
         btn_row = QHBoxLayout()
         btn_row.addStretch()
@@ -365,6 +403,7 @@ class YouTubeCommentSection(QFrame):
         enabled = self.settings.get_youtube_comment_enabled()
         self.comment_checkbox.setChecked(enabled)
         self.comment_prompt.setPlainText(self.settings.get_youtube_comment_prompt())
+        self.manual_product_link_input.setText(self.settings.get_youtube_comment_manual_product_link())
         self.prompt_container.setVisible(enabled)
 
     def _on_checkbox_changed(self, state: int):
@@ -378,6 +417,9 @@ class YouTubeCommentSection(QFrame):
         from ui.components.custom_dialog import show_info
         self.settings.set_youtube_comment_enabled(self.comment_checkbox.isChecked())
         self.settings.set_youtube_comment_prompt(self.comment_prompt.toPlainText().strip())
+        self.settings.set_youtube_comment_manual_product_link(
+            self.manual_product_link_input.text().strip()
+        )
         show_info(self, "저장 완료", "댓글 설정이 저장되었습니다.")
 
 
@@ -1171,7 +1213,7 @@ class UploadPanel(QFrame, ThemedMixin):
             "채널명을 직접 입력할 필요 없이 OAuth JSON 파일만 업로드하면 됩니다.\n\n"
             "1. 구글 클라우드 콘솔에서 OAuth 클라이언트 ID를 생성하세요.\n"
             "2. 다운로드한 client_secrets.json 파일을 선택하세요.\n"
-            "3. 파일은 앱 설치 폴더 내부 보안 경로에 복사되어 보관됩니다."
+            "3. 파일은 사용자 프로필 보안 경로(내 계정 전용)에 복사되어 보관됩니다."
         )
         inst.setWordWrap(True)
         inst.setFont(QFont(ds.typography.font_family_primary, 11))

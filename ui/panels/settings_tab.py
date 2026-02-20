@@ -843,6 +843,25 @@ class SettingsTab(QWidget, ThemedMixin):
         """Open Kakao inquiry link."""
         QDesktopServices.openUrl(QUrl("https://open.kakao.com/o/sVkZPsfi"))
 
+    def focus_api_key_setup(self):
+        """Scroll to API key section and focus the most relevant input."""
+        try:
+            bar = self.scroll_area.verticalScrollBar()
+            target_y = max(0, self.api_section.y() - 24)
+            bar.setValue(target_y)
+        except Exception:
+            pass
+
+        if not self.api_key_inputs:
+            return
+
+        target_input = next(
+            (inp for inp in self.api_key_inputs if not inp.text().strip()),
+            self.api_key_inputs[0],
+        )
+        target_input.setFocus(Qt.FocusReason.OtherFocusReason)
+        target_input.selectAll()
+
     def showEvent(self, event):
         super().showEvent(event)
         QTimer.singleShot(0, self.refresh_work_community_stats)

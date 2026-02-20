@@ -100,6 +100,8 @@ jobs:
           ## SSMaker v${{ steps.version.outputs.VERSION }}
 
           ### 이번 업데이트 핵심
+          - API KEY 없이 작업 시작 버튼을 누르면 설정 > API 키 화면으로 즉시 안내/이동되도록 개선했습니다.
+          - YouTube 자동 댓글에 쿠팡 원상품 링크를 자연스럽게 포함할 수 있도록 설정을 추가했습니다.
           - 업데이트 설치 안정성을 개선했습니다. (기존 파일 충돌로 인한 시작 오류 예방)
           - 자동 업데이트/수동 설치 모두에서 이전 버전 잔여 파일 정리 로직을 강화했습니다.
           - 일부 PC에서 발생하던 API 키 저장 실패를 보완했습니다.
@@ -123,7 +125,7 @@ jobs:
           version = $version
           download_url = $downloadUrl
           file_hash = "${{ steps.hash.outputs.FILE_HASH }}"
-          release_notes = "업데이트 설치 안정성 개선, 시작 오류(라이브러리 충돌) 대응, API 키 저장 안정성 개선"
+          release_notes = "API KEY 미입력 시작 방지 및 설정 이동 개선, YouTube 자동 댓글 쿠팡 원상품 링크 반영, 설치/저장 안정성 개선"
           is_mandatory = $false
         } | ConvertTo-Json
 

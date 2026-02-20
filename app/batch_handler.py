@@ -20,6 +20,7 @@ from utils.logging_config import get_logger
 from caller import rest
 from ui.design_system_v2 import get_design_system, get_color
 import config
+from utils.secrets_manager import SecretsManager
 
 logger = get_logger(__name__)
 
@@ -32,6 +33,35 @@ class BatchHandler:
 
     def __init__(self, app: "VideoAnalyzerGUI"):
         self.app = app
+
+    @staticmethod
+    def _key_exists(value: str) -> bool:
+        return bool(isinstance(value, str) and value.strip())
+
+    def _has_valid_api_key(self) -> bool:
+        """Return True when at least one usable Gemini API key exists."""
+        try:
+            # 1) In-memory config keys
+            cfg = getattr(config, "GEMINI_API_KEYS", {}) or {}
+            if isinstance(cfg, dict) and any(self._key_exists(v) for v in cfg.values()):
+                return True
+
+            # 2) API key manager snapshot
+            mgr = getattr(self.app, "api_key_manager", None)
+            mgr_keys = getattr(mgr, "api_keys", None) if mgr else None
+            if isinstance(mgr_keys, dict) and any(self._key_exists(v) for v in mgr_keys.values()):
+                return True
+
+            # 3) Secure storage fallback
+            for i in range(1, 9):
+                key = SecretsManager.get_api_key(f"gemini_api_{i}")
+                if self._key_exists(key):
+                    return True
+            if self._key_exists(SecretsManager.get_api_key("gemini")):
+                return True
+        except Exception as e:
+            logger.debug("[BatchHandler] API 키 확인 중 예외: %s", e)
+        return False
 
     def start_batch_processing(self):
         """배치 처리 시작 - 동적 URL 처리 지원 (중복 실행 방지)"""
@@ -87,23 +117,18 @@ class BatchHandler:
         )
 
         # API 키 검증 - 먼저 체크 (빈 dict, None, 또는 모든 값이 빈 문자열인 경우 체크)
-        has_valid_api_key = (
-            config.GEMINI_API_KEYS
-            and isinstance(config.GEMINI_API_KEYS, dict)
-            and any(v and v.strip() for v in config.GEMINI_API_KEYS.values())
-        )
-
-        if not has_valid_api_key:
+        if not self._has_valid_api_key():
             self.app.add_log("[API] API 키가 설정되지 않았습니다.")
             show_warning(
                 self.app,
                 "API KEY 필요",
                 "API KEY를 먼저 저장해주세요.\n\n"
                 "작업을 시작하려면 최소 1개 이상의 API 키가 필요합니다.\n"
-                "확인을 누르면 설정 페이지로 이동합니다.",
+                "확인을 누르면 설정 > API 키 화면으로 이동합니다.",
             )
-            # 설정 페이지로 이동
-            if hasattr(self.app, '_on_step_selected'):
+            if hasattr(self.app, "open_api_key_settings"):
+                self.app.open_api_key_settings()
+            elif hasattr(self.app, "_on_step_selected"):
                 self.app._on_step_selected("settings")
             return
 

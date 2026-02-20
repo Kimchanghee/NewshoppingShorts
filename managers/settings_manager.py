@@ -139,6 +139,7 @@ class SettingsManager:
         "youtube_hashtag_prompt": "",
         "youtube_comment_enabled": False,
         "youtube_comment_prompt": DEFAULT_YOUTUBE_COMMENT_PROMPT,
+        "youtube_comment_manual_product_link": "",
         # COMING SOON 플랫폼
         "tiktok_connected": False,
         "tiktok_title_prompt": "",
@@ -681,6 +682,16 @@ class SettingsManager:
         """Save YouTube auto-comment prompt"""
         with self._lock:
             self._settings["youtube_comment_prompt"] = prompt
+        return self._save_settings()
+
+    def get_youtube_comment_manual_product_link(self) -> str:
+        """Get optional manual Coupang original product link for auto-comments."""
+        return str(self._settings.get("youtube_comment_manual_product_link", "") or "").strip()
+
+    def set_youtube_comment_manual_product_link(self, url: str) -> bool:
+        """Save optional manual Coupang original product link for auto-comments."""
+        with self._lock:
+            self._settings["youtube_comment_manual_product_link"] = str(url or "").strip()
         return self._save_settings()
 
     # ============ Automation Settings ============
