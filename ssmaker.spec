@@ -169,6 +169,13 @@ for src_path in set(_jaraco_lorem_sources):
     append_data_unique(datas, src_path, os.path.join("setuptools", "_vendor", "jaraco", "text"))
 if _jaraco_lorem_sources:
     print("[spec] Ensured jaraco Lorem resource under both jaraco/text and setuptools/_vendor/jaraco/text")
+else:
+    # CI fallback: some setuptools builds do not ship jaraco's sample data.
+    _fallback_lorem = os.path.join(project_root, "resource", "jaraco_lorem.txt")
+    if os.path.exists(_fallback_lorem):
+        append_data_unique(datas, _fallback_lorem, os.path.join("jaraco", "text"))
+        append_data_unique(datas, _fallback_lorem, os.path.join("setuptools", "_vendor", "jaraco", "text"))
+        print("[spec] Added fallback jaraco Lorem resource from resource/jaraco_lorem.txt")
 
 # Some packages are imported dynamically at runtime (lazy imports) and might be missed by Analysis.
 # Force-include their submodules so end-users do not see ModuleNotFoundError.
