@@ -26,17 +26,11 @@ def _get_trusted_proxies() -> List[str]:
     if env_proxies:
         return [p.strip() for p in env_proxies.split(",") if p.strip()]
 
-    # Default trusted ranges:
-    # - 127.0.0.1, ::1: Localhost
-    # - 10.0.0.0/8: Private network (Cloud Run internal)
-    # - 172.16.0.0/12: Private network (Docker, Kubernetes)
-    # - 192.168.0.0/16: Private network (local development)
+    # Secure default: trust only loopback addresses.
+    # If behind a reverse proxy/load balancer, set TRUSTED_PROXIES explicitly.
     return [
         "127.0.0.1",
         "::1",
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
     ]
 
 

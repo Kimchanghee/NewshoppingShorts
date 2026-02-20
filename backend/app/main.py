@@ -32,15 +32,18 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-# Disable docs in production
-docs_url = "/docs" if settings.ENVIRONMENT != "production" else None
-redoc_url = "/redoc" if settings.ENVIRONMENT != "production" else None
+# Disable docs and OpenAPI schema in production
+_is_prod = settings.ENVIRONMENT == "production"
+docs_url = "/docs" if not _is_prod else None
+redoc_url = "/redoc" if not _is_prod else None
+openapi_url = "/openapi.json" if not _is_prod else None
 
 app = FastAPI(
     title="SSMaker Auth API",
     version="2.0.0",
     docs_url=docs_url,
     redoc_url=redoc_url,
+    openapi_url=openapi_url,
 )
 
 
@@ -214,7 +217,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
                         for ck, cv in v.items()
                     } if isinstance(v, dict) else str(v)
                 except Exception:
-                    pass  # skip unserializable ctx entirely
+                    sanitized[k] = {"sanitized": True}
                 continue
             sanitized[k] = v
 
@@ -262,14 +265,13 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
         f"error={type(exc).__name__}: {exc}",
         exc_info=True,
     )
-    is_production = settings.ENVIRONMENT == "production"
     return JSONResponse(
         status_code=500,
         content={
             "success": False,
             "error": {
                 "code": "INTERNAL_ERROR",
-                "message": "서버 오류가 발생했습니다." if is_production else str(exc),
+                "message": "서버 오류가 발생했습니다.",
                 "requestId": request_id,
             },
         },
@@ -365,15 +367,20 @@ app.add_middleware(AuditLoggingMiddleware)
 # Request logging middleware
 app.add_middleware(RequestLoggingMiddleware)
 
-# CORS middleware - validate credentials with origins
-allow_credentials = "*" not in settings.ALLOWED_ORIGINS
-if "*" in settings.ALLOWED_ORIGINS and settings.ENVIRONMENT == "production":
-    logger.error("CRITICAL: CORS wildcard with credentials is insecure!")
-    allow_credentials = False
+# CORS middleware - desktop app uses requests library (not browser),
+# so CORS is only relevant if a web admin panel is added later.
+# In production, deny all cross-origin browser requests.
+if settings.ENVIRONMENT == "production" and "*" in settings.ALLOWED_ORIGINS:
+    logger.warning("CORS: Production wildcard overridden to empty (desktop app does not need CORS)")
+    _cors_origins: list = []
+else:
+    _cors_origins = settings.ALLOWED_ORIGINS
+
+allow_credentials = "*" not in _cors_origins and len(_cors_origins) > 0
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.ALLOWED_ORIGINS,
+    allow_origins=_cors_origins,
     allow_credentials=allow_credentials,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=[

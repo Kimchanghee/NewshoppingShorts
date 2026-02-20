@@ -1,9 +1,11 @@
 import bcrypt
+from app.configuration import get_settings
 
 
 def hash_password(password: str) -> str:
-    """Hash password using bcrypt"""
-    salt = bcrypt.gensalt(rounds=12)
+    """Hash password using bcrypt with configured rounds"""
+    _settings = get_settings()
+    salt = bcrypt.gensalt(rounds=_settings.BCRYPT_ROUNDS)
     return bcrypt.hashpw(password.encode("utf-8"), salt).decode("utf-8")
 
 

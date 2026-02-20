@@ -120,5 +120,11 @@ config/requirements_temp.txt
 # Update server test artifacts
 test_update_serv/
 
+# YouTube OAuth credentials (보안: 절대 커밋 금지)
+youtube_token.json
+youtube_settings.json
+.ssmaker_credentials/
+tiktok_settings.json
+
 # Virtual environments
 venv*/

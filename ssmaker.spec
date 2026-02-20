@@ -6,6 +6,19 @@ from PyInstaller.utils.hooks import collect_all, copy_metadata, collect_submodul
 block_cipher = None
 project_root = os.path.abspath('.')
 
+# Guardrail: shipping builds are validated only on Python 3.11.
+# Prevent accidental releases from unsupported interpreters (e.g. 3.14),
+# which can produce ABI-mismatched binary wheels in the final installer.
+_supported_build_python = (3, 11)
+_allow_unsupported = os.getenv("SSMAKER_ALLOW_UNSUPPORTED_PYTHON", "0").strip() == "1"
+if sys.version_info[:2] != _supported_build_python and not _allow_unsupported:
+    raise SystemExit(
+        "[spec] ERROR: Unsupported build interpreter "
+        f"{sys.version_info[0]}.{sys.version_info[1]}. "
+        "Use Python 3.11 for release builds, or set "
+        "SSMAKER_ALLOW_UNSUPPORTED_PYTHON=1 for local experiments."
+    )
+
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. Dependency Collection
 # ─────────────────────────────────────────────────────────────────────────────
@@ -121,9 +134,11 @@ for package in packages_to_collect:
     try:
         tmp_ret = collect_all(package)
     except Exception as e:
-        # Keep CI/builds resilient when optional packages are not installed.
-        print(f"[spec] WARNING: collect_all('{package}') failed: {e!r}")
-        continue
+        raise SystemExit(
+            f"[spec] ERROR: collect_all('{package}') failed. "
+            "Failing build to avoid shipping an incomplete runtime. "
+            f"Details: {e!r}"
+        )
     datas += tmp_ret[0]
     binaries += tmp_ret[1]
     hidden_imports += tmp_ret[2]
@@ -252,7 +267,7 @@ exe = EXE(
     upx=False,
     upx_exclude=[],
     console=False,
-    disable_windowed_traceback=False,
+    disable_windowed_traceback=True,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,

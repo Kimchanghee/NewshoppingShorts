@@ -27,7 +27,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # ?꾩옱 ??踰꾩쟾 (鍮뚮뱶 ????媛믪쓣 ?낅뜲?댄듃)
-CURRENT_VERSION = "1.3.43"
+CURRENT_VERSION = "1.4.10"
 
 # 踰꾩쟾 ?뺤씤 API ?붾뱶?ъ씤??
 UPDATE_CHECK_URL = os.getenv(
@@ -282,18 +282,18 @@ class UpdateChecker:
         try:
             logger.info(f"Downloading update from: {download_url}")
             
-            # ?꾩떆 ?붾젆?좊━???ㅼ슫濡쒕뱶
+            # Download to a temporary directory.
             temp_dir = Path(tempfile.gettempdir()) / "ssmaker_update"
             temp_dir.mkdir(parents=True, exist_ok=True)
             
-            # ?뚯씪紐?異붿텧
+            # Determine target filename.
             filename = download_url.split("/")[-1].split("?")[0]
             if not filename.endswith((".exe", ".zip", ".msi")):
                 filename = "ssmaker_update.exe"
             
             download_path = temp_dir / filename
             
-            # ?ㅽ듃由щ컢 ?ㅼ슫濡쒕뱶
+            # Stream download for stable memory usage.
             response = requests.get(
                 download_url,
                 stream=True,

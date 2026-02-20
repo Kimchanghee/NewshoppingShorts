@@ -16,7 +16,7 @@ MAX_IP_ATTEMPTS = 10  # IP별 최대 로그인 시도 횟수
 
 # Password Policy
 MIN_PASSWORD_LENGTH = 8
-BCRYPT_ROUNDS = 14  # bcrypt 해싱 rounds (2^14 iterations)
+BCRYPT_ROUNDS = 12  # bcrypt 해싱 rounds (Settings.BCRYPT_ROUNDS와 동기화)
 
 # Session Settings
 SESSION_EXPIRY_DAYS = 30  # 세션 만료 기간 (일)

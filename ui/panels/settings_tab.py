@@ -631,12 +631,21 @@ class SettingsTab(QWidget, ThemedMixin):
     def _load_saved_api_keys(self):
         """저장된 API 키들을 로드하여 입력 필드에 표시"""
         try:
-            loaded_count = 0
+            for key_input in self.api_key_inputs:
+                key_input.clear()
             for i in range(1, 9):
                 key_value = SecretsManager.get_api_key(f"gemini_api_{i}")
+                if i == 1 and not key_value:
+                    # 하위 호환: 과거 단일 키 저장 포맷
+                    legacy_value = SecretsManager.get_api_key("gemini")
+                    if legacy_value and legacy_value.strip():
+                        key_value = legacy_value.strip()
+                        try:
+                            SecretsManager.store_api_key("gemini_api_1", key_value)
+                        except Exception:
+                            pass
                 if key_value and i <= len(self.api_key_inputs):
-                    self.api_key_inputs[i - 1].setText(key_value)
-                    loaded_count += 1
+                    self.api_key_inputs[i - 1].setText(key_value.strip())
             self._update_key_count()
         except Exception as e:
             from utils.logging_config import get_logger
@@ -651,6 +660,10 @@ class SettingsTab(QWidget, ThemedMixin):
                 key_value = SecretsManager.get_api_key(f"gemini_api_{i}")
                 if key_value and str(key_value).strip():
                     count += 1
+            if count == 0:
+                legacy_value = SecretsManager.get_api_key("gemini")
+                if legacy_value and str(legacy_value).strip():
+                    count = 1
             self.api_count_label.setText(f"저장된 키: {count}개")
         except Exception:
             # Fallback: UI 입력값 기준 (예외 상황에서만)
@@ -690,29 +703,46 @@ class SettingsTab(QWidget, ThemedMixin):
             )
             return
 
-        # 2. UI 업데이트 (앞으로 당기기)
-        # 모든 입력창 초기화
-        for key_input in self.api_key_inputs:
-            key_input.clear()
-            
-        # 유효한 키 순서대로 채우기
-        for i, key_value in enumerate(valid_keys):
-            if i < len(self.api_key_inputs):
-                self.api_key_inputs[i].setText(key_value)
-
-        # 3. 저장 및 미사용 슬롯 삭제
+        # 2. 저장 및 미사용 슬롯 삭제
         saved_count = 0
+        failed_save = []
+        failed_verify = []
         new_keys_dict = {}
         
         try:
-            # 3-1. 유효한 키 순서대로 저장
+            # 2-1. 유효한 키 순서대로 저장
             for i, key_value in enumerate(valid_keys):
                 idx = i + 1  # 1-based index
-                SecretsManager.store_api_key(f"gemini_api_{idx}", key_value)
+
+                if not SecretsManager.store_api_key(f"gemini_api_{idx}", key_value):
+                    failed_save.append(idx)
+                    continue
+
+                # 저장 직후 읽기 검증으로 환경별 저장 실패를 조기에 감지
+                loaded_value = SecretsManager.get_api_key(f"gemini_api_{idx}")
+                if (loaded_value or "").strip() != key_value:
+                    failed_verify.append(idx)
+                    continue
+
                 new_keys_dict[f"api_{idx}"] = key_value
                 saved_count += 1
+
+            if failed_save or failed_verify:
+                detail_lines = []
+                if failed_save:
+                    detail_lines.append(f"- 저장 실패 위치: {failed_save}")
+                if failed_verify:
+                    detail_lines.append(f"- 저장 검증 실패 위치: {failed_verify}")
+                show_error(
+                    self,
+                    "저장 오류",
+                    "일부 API 키를 저장하지 못했습니다.\n"
+                    + "\n".join(detail_lines)
+                    + "\n\n보안 프로그램/권한 정책으로 사용자 저장소 쓰기가 막힌 환경인지 확인해주세요."
+                )
+                return
             
-            # 3-2. 나머지 슬롯(기존에 있었을 수 있는 키) 삭제
+            # 2-2. 나머지 슬롯(기존에 있었을 수 있는 키) 삭제
             # valid_keys 개수 다음부터 MAX_API_KEYS(20)까지 삭제
             MAX_API_KEYS = len(self.api_key_inputs)
             for i in range(len(valid_keys) + 1, MAX_API_KEYS + 1):
@@ -724,6 +754,13 @@ class SettingsTab(QWidget, ThemedMixin):
             logger.error(f"[Settings] API 키 저장 중 오류 발생: {e}")
             show_error(self, "저장 오류", f"API 키 저장 중 오류가 발생했습니다:\n{e}")
             return
+
+        # 3. UI 업데이트 (앞으로 당기기)
+        for key_input in self.api_key_inputs:
+            key_input.clear()
+        for i, key_value in enumerate(valid_keys):
+            if i < len(self.api_key_inputs):
+                self.api_key_inputs[i].setText(key_value)
 
         # 4. config 업데이트 및 매니저 재초기화
         config.GEMINI_API_KEYS = new_keys_dict
