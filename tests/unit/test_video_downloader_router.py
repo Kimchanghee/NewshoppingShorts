@@ -7,6 +7,8 @@ def test_detect_platform_for_supported_hosts():
     assert VideoDownloader.detect_platform("https://v.douyin.com/abc123/") == "douyin"
     assert VideoDownloader.detect_platform("https://www.tiktok.com/@user/video/123") == "tiktok"
     assert VideoDownloader.detect_platform("https://xhslink.com/AbCdEf") == "xiaohongshu"
+    assert VideoDownloader.detect_platform("https://www.kuaishou.com/short-video/3x5zabc") == "kuaishou"
+    assert VideoDownloader.detect_platform("https://v.kwai.com/AbCdEf") == "kuaishou"
     assert (
         VideoDownloader.detect_platform("https://www.xiaohongshu.com/explore/123abc")
         == "xiaohongshu"
@@ -36,3 +38,13 @@ def test_download_video_routes_douyin_tiktok(monkeypatch):
     )
     out = VideoDownloader.download_video("https://v.douyin.com/abc123/")
     assert out == "dy:https://v.douyin.com/abc123/:3"
+
+
+def test_download_video_routes_kuaishou(monkeypatch):
+    monkeypatch.setattr(
+        VideoDownloader.kuaishou,
+        "download",
+        lambda url, max_retries=3: f"ks:{url}:{max_retries}",
+    )
+    out = VideoDownloader.download_video("https://www.kuaishou.com/short-video/xyz123", max_retries=4)
+    assert out == "ks:https://www.kuaishou.com/short-video/xyz123:4"
