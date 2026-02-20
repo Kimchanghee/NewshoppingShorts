@@ -1488,7 +1488,9 @@ def _process_single_video(app, url, current_number, total_urls):
                                     title=video_title,
                                     description=video_desc,
                                     tags=video_tags,
-                                    source_url=url
+                                    product_info=product_info,
+                                    source_url=url,
+                                    coupang_deep_link=coupang_link,
                                 )
                                 logger.info("[Automation] Added to YouTube upload queue")
                                 try:

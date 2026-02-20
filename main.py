@@ -277,6 +277,13 @@ class VideoAnalyzerGUI(
         except Exception:
             pass
 
+    def open_api_key_settings(self) -> None:
+        """Move to Settings tab and focus API key input area."""
+        self._on_step_selected("settings")
+        settings_tab = getattr(self, "settings_tab", None)
+        if settings_tab and hasattr(settings_tab, "focus_api_key_setup"):
+            QTimer.singleShot(0, settings_tab.focus_api_key_setup)
+
 
 def main():
     sys.excepthook = global_exception_handler

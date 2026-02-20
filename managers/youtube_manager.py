@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass
 
 from utils.logging_config import get_logger
+from managers.settings_manager import get_settings_manager
 
 logger = get_logger(__name__)
 
@@ -70,7 +71,8 @@ class YouTubeManager:
     # OAuth 2.0 scopes
     SCOPES = [
         "https://www.googleapis.com/auth/youtube.upload",
-        "https://www.googleapis.com/auth/youtube.readonly"
+        "https://www.googleapis.com/auth/youtube.readonly",
+        "https://www.googleapis.com/auth/youtube.force-ssl",
     ]
     OAUTH_FLOW_TIMEOUT_SECONDS = 180
 
@@ -119,20 +121,55 @@ class YouTubeManager:
             logger.debug(f"[YouTube] 앱 기본 경로 감지 실패, cwd 사용: {e}")
             return os.getcwd()
 
+    def _get_user_data_dir(self) -> str:
+        """Get per-user writable directory for persisted app data."""
+        return os.path.join(os.path.expanduser("~"), ".ssmaker")
+
+    def _ensure_writable_dir(self, directory: str) -> None:
+        """Ensure directory exists and is writable for current user."""
+        if not directory:
+            raise ValueError("directory path is empty")
+        os.makedirs(directory, exist_ok=True)
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["attrib", "-R", "-H", directory],
+                    check=False,
+                    capture_output=True,
+                    text=True
+                )
+            except Exception:
+                pass
+
     def _get_credentials_dir(self) -> str:
-        """Get protected credentials directory under app base folder."""
-        return os.path.join(self._get_app_base_dir(), ".ssmaker_credentials", "youtube")
+        """Get protected credentials directory under user data folder."""
+        return os.path.join(self._get_user_data_dir(), ".ssmaker_credentials", "youtube")
 
     def _get_settings_path(self) -> str:
         """Get full path to settings file"""
-        base_dir = self._get_app_base_dir()
-        return os.path.join(base_dir, self.settings_file)
+        return os.path.join(self._get_user_data_dir(), self.settings_file)
+
+    def _get_legacy_settings_path(self) -> str:
+        """Legacy settings location near app executable/project root."""
+        return os.path.join(self._get_app_base_dir(), self.settings_file)
 
     def _load_settings(self) -> None:
         """Load settings from file"""
         settings_path = self._get_settings_path()
+        legacy_settings_path = self._get_legacy_settings_path()
 
         try:
+            if (not os.path.exists(settings_path)) and os.path.exists(legacy_settings_path):
+                try:
+                    self._ensure_writable_dir(os.path.dirname(settings_path))
+                    shutil.copy2(legacy_settings_path, settings_path)
+                    logger.info("[YouTube] 설정 파일을 사용자 경로로 마이그레이션했습니다.")
+                except Exception as migrate_error:
+                    logger.warning(
+                        "[YouTube] 설정 마이그레이션 실패: %s",
+                        migrate_error,
+                    )
+
             if os.path.exists(settings_path):
                 with open(settings_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
@@ -173,6 +210,7 @@ class YouTubeManager:
         settings_path = self._get_settings_path()
 
         try:
+            self._ensure_writable_dir(os.path.dirname(settings_path))
             data = {
                 "channel": {
                     "channel_id": self._channel.channel_id if self._channel else "",
@@ -250,12 +288,22 @@ class YouTubeManager:
             return False
 
         try:
+            self._migrate_legacy_oauth_files()
+
             # Check for existing credentials
             token_path = self._get_token_path()
             creds = None
 
             if os.path.exists(token_path):
                 creds = Credentials.from_authorized_user_file(token_path, self.SCOPES)
+                try:
+                    has_scopes = bool(getattr(creds, "has_scopes", None))
+                    if has_scopes and not creds.has_scopes(self.SCOPES):
+                        logger.info("[YouTube] OAuth 권한(scope) 업데이트로 재인증이 필요합니다.")
+                        creds = None
+                except Exception:
+                    # If scope introspection fails, proceed with normal refresh/login flow.
+                    pass
 
             # Refresh or get new credentials
             if not creds or not creds.valid:
@@ -292,6 +340,7 @@ class YouTubeManager:
                     )
 
                 # Save credentials
+                self._ensure_writable_dir(os.path.dirname(token_path))
                 with open(token_path, "w", encoding="utf-8") as token:
                     token.write(creds.to_json())
 
@@ -309,6 +358,13 @@ class YouTubeManager:
 
             return True
 
+        except PermissionError as e:
+            logger.error("[YouTube] Connection permission error: %s", e)
+            self._last_error_message = (
+                "OAuth 파일 저장 권한이 없어 연결에 실패했습니다.\n"
+                "앱을 다시 실행한 뒤 다시 시도해주세요."
+            )
+            return False
         except Exception as e:
             logger.error("[YouTube] Connection failed: %s", e)
             self._last_error_message = str(e) or "YouTube 채널 연결 중 알 수 없는 오류가 발생했습니다."
@@ -339,16 +395,89 @@ class YouTubeManager:
 
     def _get_token_path(self) -> str:
         """Get OAuth token file path"""
-        base_dir = self._get_app_base_dir()
-        return os.path.join(base_dir, "youtube_token.json")
+        return os.path.join(self._get_user_data_dir(), "youtube_token.json")
+
+    def _get_legacy_token_path(self) -> str:
+        """Legacy OAuth token path stored next to executable/project root."""
+        return os.path.join(self._get_app_base_dir(), "youtube_token.json")
 
     def _get_client_secrets_path(self) -> str:
         """Get OAuth client secrets file path"""
         return os.path.join(self._get_credentials_dir(), "client_secrets.json")
 
+    def _get_legacy_managed_client_secrets_path(self) -> str:
+        """Legacy managed OAuth file path under app base directory."""
+        return os.path.join(self._get_app_base_dir(), ".ssmaker_credentials", "youtube", "client_secrets.json")
+
     def _get_legacy_client_secrets_path(self) -> str:
         """Get old client_secrets.json location in app root."""
         return os.path.join(self._get_app_base_dir(), "client_secrets.json")
+
+    def _make_path_writable(self, path: str) -> None:
+        """Best-effort clear read-only attributes so updates can replace file."""
+        if not path or not os.path.exists(path):
+            return
+
+        try:
+            mode = stat.S_IREAD | stat.S_IWRITE
+            if os.path.isdir(path):
+                mode |= stat.S_IEXEC
+            os.chmod(path, mode)
+        except Exception:
+            pass
+
+        if os.name == "nt":
+            try:
+                subprocess.run(
+                    ["attrib", "-R", "-H", path],
+                    check=False,
+                    capture_output=True,
+                    text=True
+                )
+            except Exception:
+                pass
+
+    def _copy_file_best_effort(self, source_path: str, destination_path: str, label: str) -> bool:
+        """Copy file with best-effort writable handling for legacy migration."""
+        if not source_path or not destination_path:
+            return False
+        if not os.path.isfile(source_path):
+            return False
+
+        try:
+            self._ensure_writable_dir(os.path.dirname(destination_path))
+            self._make_path_writable(destination_path)
+            shutil.copy2(source_path, destination_path)
+            logger.info("[YouTube] %s 마이그레이션 완료: %s", label, destination_path)
+            return True
+        except Exception as e:
+            logger.debug("[YouTube] %s 마이그레이션 실패: %s", label, e)
+            return False
+
+    def _migrate_legacy_oauth_files(self) -> None:
+        """Migrate OAuth artifacts from legacy app-root paths to user profile path."""
+        token_path = self._get_token_path()
+        if not os.path.exists(token_path):
+            self._copy_file_best_effort(
+                self._get_legacy_token_path(),
+                token_path,
+                "OAuth 토큰",
+            )
+
+        client_secrets_path = self._get_client_secrets_path()
+        if os.path.exists(client_secrets_path):
+            return
+
+        for legacy_path in (
+            self._get_legacy_managed_client_secrets_path(),
+            self._get_legacy_client_secrets_path(),
+        ):
+            if self._copy_file_best_effort(
+                legacy_path,
+                client_secrets_path,
+                "OAuth client_secrets",
+            ):
+                break
 
     def _protect_credentials_file(self, path: str) -> None:
         """Apply basic protection flags to credentials file."""
@@ -391,19 +520,47 @@ class YouTubeManager:
         if not source_path or not os.path.exists(source_path):
             raise FileNotFoundError("OAuth JSON 파일을 찾을 수 없습니다.")
 
+        if os.path.isdir(source_path):
+            inferred = os.path.join(source_path, "client_secrets.json")
+            if os.path.isfile(inferred):
+                source_path = inferred
+            else:
+                raise FileNotFoundError("선택한 경로에 client_secrets.json 파일이 없습니다.")
+
+        if not os.path.isfile(source_path):
+            raise FileNotFoundError("OAuth JSON 파일 경로가 올바르지 않습니다.")
+
         destination = self._get_client_secrets_path()
-        os.makedirs(os.path.dirname(destination), exist_ok=True)
+        self._ensure_writable_dir(os.path.dirname(destination))
 
         source_abs = os.path.abspath(source_path)
         destination_abs = os.path.abspath(destination)
 
         if source_abs != destination_abs:
-            if os.path.exists(destination_abs):
+            temp_destination = destination_abs + ".tmp"
+            self._make_path_writable(destination_abs)
+            self._make_path_writable(temp_destination)
+            if os.path.exists(temp_destination):
+                os.remove(temp_destination)
+
+            try:
+                shutil.copy2(source_abs, temp_destination)
+                os.replace(temp_destination, destination_abs)
+            except PermissionError:
+                # Fallback: use timestamped file if default target is locked by another process.
+                fallback_destination = os.path.join(
+                    os.path.dirname(destination_abs),
+                    f"client_secrets_{int(time.time())}.json",
+                )
+                shutil.copy2(source_abs, fallback_destination)
+                destination_abs = fallback_destination
+                logger.warning("[YouTube] 기본 OAuth 경로 잠금으로 fallback 경로를 사용합니다: %s", destination_abs)
+            finally:
                 try:
-                    os.chmod(destination_abs, stat.S_IREAD | stat.S_IWRITE)
+                    if os.path.exists(temp_destination):
+                        os.remove(temp_destination)
                 except Exception:
                     pass
-            shutil.copy2(source_abs, destination_abs)
 
         self._protect_credentials_file(destination_abs)
         logger.info(f"[YouTube] OAuth JSON 설치 완료: {destination_abs}")
@@ -605,7 +762,8 @@ class YouTubeManager:
         description: str = "",
         tags: List[str] = None,
         product_info: str = "",
-        source_url: str = ""
+        source_url: str = "",
+        coupang_deep_link: str = "",
     ) -> None:
         """
         Add video to upload queue.
@@ -633,6 +791,9 @@ class YouTubeManager:
             "title": title or "쇼핑 추천 영상",
             "description": description or "",
             "tags": tags or [],
+            "product_info": product_info or "",
+            "source_url": source_url or "",
+            "coupang_deep_link": coupang_deep_link or "",
             "added_at": datetime.now().isoformat()
         })
 
@@ -749,11 +910,134 @@ class YouTubeManager:
 
             video_id = response.get("id", "")
             logger.info(f"[YouTube] 업로드 완료: https://youtu.be/{video_id}")
+
+            if video_id:
+                self._try_post_auto_comment(video_id, item)
             return True
 
         except Exception as e:
             logger.error(f"[YouTube] 업로드 실패: {e}")
             return False
+
+    @staticmethod
+    def _is_coupang_url(url: str) -> bool:
+        return "coupang.com" in str(url or "").lower()
+
+    @staticmethod
+    def _trim_comment_text(text: str, limit: int = 10000) -> str:
+        cleaned = str(text or "").strip()
+        if len(cleaned) <= limit:
+            return cleaned
+        return cleaned[: limit - 3].rstrip() + "..."
+
+    def _render_comment_template(
+        self,
+        template: str,
+        purchase_link: str,
+        original_link: str,
+    ) -> str:
+        replacements = {
+            "{구매링크}": purchase_link,
+            "{쿠팡링크}": purchase_link,
+            "{딥링크}": purchase_link,
+            "{purchase_link}": purchase_link,
+            "{원상품링크}": original_link,
+            "{쿠팡원상품링크}": original_link,
+            "{original_link}": original_link,
+        }
+
+        rendered = str(template or "")
+        for token, value in replacements.items():
+            rendered = rendered.replace(token, value or "")
+        return rendered.strip()
+
+    def _resolve_comment_original_link(self, item: Dict[str, Any]) -> str:
+        settings = get_settings_manager()
+        manual_link = settings.get_youtube_comment_manual_product_link()
+        if manual_link:
+            return manual_link
+
+        source_url = str(item.get("source_url", "")).strip()
+        if self._is_coupang_url(source_url):
+            return source_url
+        return ""
+
+    def _build_auto_comment_text(self, item: Dict[str, Any]) -> str:
+        settings = get_settings_manager()
+        if not settings.get_youtube_comment_enabled():
+            return ""
+
+        raw_prompt = settings.get_youtube_comment_prompt().strip()
+        purchase_link = str(item.get("coupang_deep_link", "")).strip()
+        original_link = self._resolve_comment_original_link(item)
+
+        prompt_with_tokens = self._render_comment_template(
+            raw_prompt,
+            purchase_link=purchase_link or original_link,
+            original_link=original_link,
+        )
+
+        has_placeholder = any(
+            token in raw_prompt
+            for token in (
+                "{구매링크}",
+                "{쿠팡링크}",
+                "{딥링크}",
+                "{purchase_link}",
+                "{원상품링크}",
+                "{쿠팡원상품링크}",
+                "{original_link}",
+            )
+        )
+
+        if not prompt_with_tokens:
+            prompt_with_tokens = "영상에서 소개한 상품 정보를 공유드립니다."
+
+        extra_lines = []
+        if not has_placeholder:
+            if purchase_link:
+                extra_lines.append(f"구매 링크: {purchase_link}")
+            if original_link and original_link != purchase_link:
+                extra_lines.append(f"원상품 링크: {original_link}")
+
+        if extra_lines:
+            text = f"{prompt_with_tokens}\n\n" + "\n".join(extra_lines)
+        else:
+            text = prompt_with_tokens
+
+        return self._trim_comment_text(text)
+
+    def _post_top_level_comment(self, video_id: str, text: str) -> bool:
+        if not self._youtube_service or not video_id or not text:
+            return False
+
+        try:
+            request = self._youtube_service.commentThreads().insert(
+                part="snippet",
+                body={
+                    "snippet": {
+                        "videoId": video_id,
+                        "topLevelComment": {
+                            "snippet": {
+                                "textOriginal": text,
+                            }
+                        },
+                    }
+                },
+            )
+            request.execute()
+            return True
+        except Exception as e:
+            logger.warning(f"[YouTube] 자동 댓글 등록 실패: {e}")
+            return False
+
+    def _try_post_auto_comment(self, video_id: str, item: Dict[str, Any]) -> None:
+        comment_text = self._build_auto_comment_text(item)
+        if not comment_text:
+            return
+
+        if self._post_top_level_comment(video_id, comment_text):
+            logger.info("[YouTube] 자동 댓글 등록 완료: %s", video_id)
 
     # ============ Callbacks ============
 
