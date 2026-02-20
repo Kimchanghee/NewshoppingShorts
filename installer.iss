@@ -14,7 +14,7 @@
 ;     uses the previously registered path.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.3.43"
+  #define MyAppVersion "1.4.10"
 #endif
 
 #define MyAppName "SSMaker"
@@ -86,17 +86,271 @@ Source: "dist\ssmaker\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs 
 [Icons]
 ; Start Menu
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
-Name: "{group}\{#MyAppName} 제거"; Filename: "{uninstallexe}"
+Name: "{group}\{#MyAppName} Uninstall"; Filename: "{uninstallexe}"
 ; Desktop (if user selected the task)
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
 ; Interactive install: user chooses whether to launch via checkbox
-Filename: "{app}\{#MyAppExeName}"; Description: "SSMaker 실행"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch SSMaker"; Flags: nowait postinstall skipifsilent
 ; Silent install (auto-update): always restart the app after files are replaced
 Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent
+
+[InstallDelete]
+; Remove stale binary-extension residues before copying new files.
+; This prevents ABI mismatch crashes after in-place updates (e.g., numpy cp311/cp313 leftovers).
+Type: files; Name: "{app}\*.pyd"
+Type: files; Name: "{app}\python3*.dll"
+Type: filesandordirs; Name: "{app}\numpy"
+Type: filesandordirs; Name: "{app}\numpy.libs"
+Type: filesandordirs; Name: "{app}\numpy-*.dist-info"
+Type: filesandordirs; Name: "{app}\scipy"
+Type: filesandordirs; Name: "{app}\scipy.libs"
+Type: filesandordirs; Name: "{app}\scipy-*.dist-info"
+Type: filesandordirs; Name: "{app}\cv2"
+Type: filesandordirs; Name: "{app}\opencv_python-*.dist-info"
+Type: filesandordirs; Name: "{app}\av"
+Type: filesandordirs; Name: "{app}\av.libs"
+Type: filesandordirs; Name: "{app}\av-*.dist-info"
+Type: filesandordirs; Name: "{app}\tokenizers"
+Type: filesandordirs; Name: "{app}\tokenizers-*.dist-info"
 
 [UninstallDelete]
 ; Clean up runtime-generated files on uninstall
 Type: filesandordirs; Name: "{app}\logs"
 Type: filesandordirs; Name: "{app}\__pycache__"
+; Remove possible stale Python binary/runtime residues too.
+Type: files; Name: "{app}\*.pyd"
+Type: files; Name: "{app}\python3*.dll"
+Type: filesandordirs; Name: "{app}\numpy"
+Type: filesandordirs; Name: "{app}\numpy.libs"
+Type: filesandordirs; Name: "{app}\numpy-*.dist-info"
+Type: filesandordirs; Name: "{app}\scipy"
+Type: filesandordirs; Name: "{app}\scipy.libs"
+Type: filesandordirs; Name: "{app}\scipy-*.dist-info"
+Type: filesandordirs; Name: "{app}\cv2"
+Type: filesandordirs; Name: "{app}\opencv_python-*.dist-info"
+Type: filesandordirs; Name: "{app}\av"
+Type: filesandordirs; Name: "{app}\av.libs"
+Type: filesandordirs; Name: "{app}\av-*.dist-info"
+Type: filesandordirs; Name: "{app}\tokenizers"
+Type: filesandordirs; Name: "{app}\tokenizers-*.dist-info"
+
+[Code]
+const
+  AppUninstallRegKey = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{B8F2A7C1-3D4E-5F60-A1B2-C3D4E5F6A7B8}_is1';
+
+var
+  ExistingInstallDetected: Boolean;
+  ExistingInstallDir: string;
+  ExistingUninstallCmd: string;
+  ExistingQuietUninstallCmd: string;
+  InstallModePage: TInputOptionWizardPage;
+
+function ReadUninstallRegValue(const ValueName: string; var Value: string): Boolean;
+begin
+  Result :=
+    RegQueryStringValue(HKCU, AppUninstallRegKey, ValueName, Value) or
+    RegQueryStringValue(HKLM, AppUninstallRegKey, ValueName, Value);
+end;
+
+function DetectExistingInstall(): Boolean;
+begin
+  ExistingInstallDir := '';
+  ExistingUninstallCmd := '';
+  ExistingQuietUninstallCmd := '';
+
+  ReadUninstallRegValue('InstallLocation', ExistingInstallDir);
+  ReadUninstallRegValue('UninstallString', ExistingUninstallCmd);
+  ReadUninstallRegValue('QuietUninstallString', ExistingQuietUninstallCmd);
+
+  ExistingInstallDir := Trim(ExistingInstallDir);
+  ExistingUninstallCmd := Trim(ExistingUninstallCmd);
+  ExistingQuietUninstallCmd := Trim(ExistingQuietUninstallCmd);
+
+  Result := (ExistingInstallDir <> '') or
+            (ExistingUninstallCmd <> '') or
+            (ExistingQuietUninstallCmd <> '');
+end;
+
+function SplitCommandLine(const CommandLine: string; var ExeFile, Params: string): Boolean;
+var
+  S: string;
+  I: Integer;
+begin
+  S := Trim(CommandLine);
+  ExeFile := '';
+  Params := '';
+
+  if S = '' then
+  begin
+    Result := False;
+    exit;
+  end;
+
+  if S[1] = '"' then
+  begin
+    Delete(S, 1, 1);
+    I := Pos('"', S);
+    if I <= 0 then
+    begin
+      Result := False;
+      exit;
+    end;
+
+    ExeFile := Copy(S, 1, I - 1);
+    Params := Trim(Copy(S, I + 1, MaxInt));
+  end
+  else
+  begin
+    I := Pos(' ', S);
+    if I <= 0 then
+      ExeFile := S
+    else
+    begin
+      ExeFile := Copy(S, 1, I - 1);
+      Params := Trim(Copy(S, I + 1, MaxInt));
+    end;
+  end;
+
+  Result := Trim(ExeFile) <> '';
+end;
+
+function IsReinstallSelected(): Boolean;
+begin
+  Result :=
+    ExistingInstallDetected and
+    Assigned(InstallModePage) and
+    InstallModePage.Values[1];
+end;
+
+function BuildUninstallParams(const BaseParams: string): string;
+var
+  U: string;
+begin
+  U := Uppercase(BaseParams);
+  Result := Trim(BaseParams);
+
+  if (Pos('/SILENT', U) = 0) and (Pos('/VERYSILENT', U) = 0) then
+    Result := Trim(Result + ' /VERYSILENT');
+  if Pos('/SUPPRESSMSGBOXES', U) = 0 then
+    Result := Trim(Result + ' /SUPPRESSMSGBOXES');
+  if Pos('/NORESTART', U) = 0 then
+    Result := Trim(Result + ' /NORESTART');
+end;
+
+function RunExistingUninstaller(var ExitCode: Integer): Boolean;
+var
+  CommandLine: string;
+  ExeFile: string;
+  Params: string;
+begin
+  Result := False;
+  ExitCode := 0;
+
+  if ExistingQuietUninstallCmd <> '' then
+    CommandLine := ExistingQuietUninstallCmd
+  else
+    CommandLine := ExistingUninstallCmd;
+
+  if not SplitCommandLine(CommandLine, ExeFile, Params) then
+  begin
+    Log('Reinstall requested but uninstall command could not be parsed.');
+    exit;
+  end;
+
+  Params := BuildUninstallParams(Params);
+  Log(Format('Running previous uninstaller: %s %s', [ExeFile, Params]));
+
+  Result := Exec(ExeFile, Params, '', SW_HIDE, ewWaitUntilTerminated, ExitCode);
+end;
+
+procedure InitializeWizard();
+begin
+  ExistingInstallDetected := DetectExistingInstall();
+
+  if not ExistingInstallDetected then
+    exit;
+
+  InstallModePage := CreateInputOptionPage(
+    wpSelectDir,
+    'Existing installation detected',
+    'Choose install mode',
+    'SSMaker appears to already be installed on this PC.'#13#10 +
+    'Choose one mode below:'#13#10 +
+    '- Update (recommended): overwrite app files in place.'#13#10 +
+    '- Reinstall: remove previous version first, then install fresh.',
+    True,
+    False
+  );
+  InstallModePage.Add('Update in place (recommended)');
+  InstallModePage.Add('Reinstall (remove previous version, then install)');
+  InstallModePage.Values[0] := True;
+
+  if ExistingInstallDir <> '' then
+  begin
+    WizardForm.DirEdit.Text := ExistingInstallDir;
+    Log('Existing install directory detected: ' + ExistingInstallDir);
+  end;
+end;
+
+function NextButtonClick(CurPageID: Integer): Boolean;
+begin
+  Result := True;
+
+  if Assigned(InstallModePage) and (CurPageID = InstallModePage.ID) and IsReinstallSelected() then
+  begin
+    Result :=
+      MsgBox(
+        'Reinstall will uninstall the existing SSMaker first.'#13#10 +
+        'User data outside the install directory is preserved.'#13#10#13#10 +
+        'Continue?',
+        mbConfirmation,
+        MB_YESNO
+      ) = IDYES;
+  end;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): string;
+var
+  ExitCode: Integer;
+  Ok: Boolean;
+begin
+  Result := '';
+
+  if not ExistingInstallDetected then
+    exit;
+
+  if (not IsReinstallSelected()) and (not WizardSilent) then
+    exit;
+
+  if WizardSilent and (not IsReinstallSelected()) then
+    Log('Silent update detected: forcing clean reinstall via previous uninstaller.');
+
+  Ok := RunExistingUninstaller(ExitCode);
+  if not Ok then
+  begin
+    if WizardSilent then
+    begin
+      Log('Silent reinstall fallback: previous uninstaller launch failed, continuing with in-place update.');
+      exit;
+    end;
+    Result :=
+      'Failed to launch the previous uninstaller. ' +
+      'Please uninstall SSMaker manually and run setup again.';
+    exit;
+  end;
+
+  if ExitCode <> 0 then
+  begin
+    if WizardSilent then
+    begin
+      Log('Silent reinstall fallback: previous uninstaller failed, continuing with in-place update.');
+      exit;
+    end;
+    Result :=
+      'Previous uninstall failed with exit code ' + IntToStr(ExitCode) + '. ' +
+      'Please uninstall SSMaker manually and run setup again.';
+    exit;
+  end;
+end;

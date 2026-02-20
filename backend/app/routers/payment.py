@@ -34,7 +34,10 @@ from app.utils.billing_crypto import (
     has_encryption_key,
     is_encrypted,
 )
+from app.configuration import get_settings
 from app.dependencies import verify_admin_api_key
+
+settings = get_settings()
 from app.models.payment_session import PaymentSession, PaymentStatus, PaymentStatusHistory
 from app.models.session import SessionModel
 from app.models.user import User, UserType
@@ -497,7 +500,10 @@ async def mock_complete_payment(
     Mock: Complete payment for testing (Admin only)
 
     Requires X-Admin-API-Key header for security.
+    Disabled in production environment.
     """
+    if settings.ENVIRONMENT == "production":
+        raise HTTPException(status_code=404, detail="Not found")
     logger.info(f"[Payment] Mock complete (admin): {payment_id}")
 
     session = (
@@ -541,7 +547,10 @@ async def mock_cancel_payment(
     Mock: Cancel payment for testing (Admin only)
 
     Requires X-Admin-API-Key header for security.
+    Disabled in production environment.
     """
+    if settings.ENVIRONMENT == "production":
+        raise HTTPException(status_code=404, detail="Not found")
     logger.info(f"[Payment] Mock cancel (admin): {payment_id}")
 
     session = (

@@ -47,6 +47,13 @@ if (-not (Test-Path $Python)) {
   $Python = "python"
 }
 
+# Release guardrail: enforce Python 3.11 to prevent ABI-mismatched wheels.
+$pyVersionRaw = (& $Python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}')").Trim()
+$pyVersionMM = ($pyVersionRaw -split '\.')[0..1] -join '.'
+if (($env:SSMAKER_ALLOW_NON311 -ne "1") -and ($pyVersionMM -ne "3.11")) {
+  throw "Unsupported build interpreter: Python $pyVersionRaw. Use Python 3.11 for release builds (override only for local experiments with SSMAKER_ALLOW_NON311=1)."
+}
+
 # Read version from version.json for Inno Setup
 $versionJson = Join-Path $Root "version.json"
 $AppVersion = "0.0.0"
@@ -216,6 +223,40 @@ try {
     if (-not $found) {
       throw "Missing required item in dist\ssmaker\: ${item}"
     }
+  }
+
+  # ABI consistency check: all CPython-tagged binaries must match the build interpreter.
+  $pyParts = $pyVersionMM -split '\.'
+  $expectedAbiTag = "cp$($pyParts[0])$($pyParts[1])"
+  $abiTaggedBinaries = Get-ChildItem -Path $distDir -Recurse -File |
+    Where-Object { $_.Name -match '\.cp\d{2,3}-(win_amd64|win32)\.(pyd|dll|lib)$' }
+  $mismatchedAbi = @()
+  foreach ($bin in $abiTaggedBinaries) {
+    if ($bin.Name -match '\.cp(\d{2,3})-') {
+      $tag = "cp$($matches[1])"
+      if ($tag -ne $expectedAbiTag) {
+        $mismatchedAbi += $bin.FullName.Substring($distDir.Length + 1)
+      }
+    }
+  }
+  if ($mismatchedAbi.Count -gt 0) {
+    $preview = ($mismatchedAbi | Select-Object -First 10) -join ", "
+    throw "ABI mismatch detected in build output. Expected $expectedAbiTag but found other tags. Examples: $preview"
+  }
+
+  # NumPy core sanity check (common startup crash point if stale files remain).
+  $numpyCore = Join-Path $distDir "numpy\_core"
+  $umathFiles = @()
+  if (Test-Path $numpyCore) {
+    $umathFiles = @(Get-ChildItem -Path $numpyCore -File -Filter "_multiarray_umath*.pyd")
+  }
+  if ($umathFiles.Count -eq 0) {
+    throw "NumPy core binary missing: numpy\\_core\\_multiarray_umath*.pyd"
+  }
+  $badUmath = $umathFiles | Where-Object { $_.Name -notmatch "\.$expectedAbiTag-(win_amd64|win32)\.pyd$" }
+  if ($badUmath) {
+    $badNames = ($badUmath | Select-Object -ExpandProperty Name) -join ", "
+    throw "NumPy ABI mismatch: expected $expectedAbiTag but found $badNames"
   }
 
   # pkg_resources runtime hook may need jaraco.text's sample resource file.

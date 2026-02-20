@@ -20,6 +20,7 @@ Usage:
 import os
 import re
 import sys
+import shutil
 import base64
 import hashlib
 import threading
@@ -83,11 +84,96 @@ class SecretsManager:
         Returns:
             Path to .secrets file in user's home directory
         """
-        if cls._fallback_file is None:
-            home = Path.home()
-            cls._fallback_file = home / ".newshopping" / ".secrets"
-            cls._fallback_file.parent.mkdir(parents=True, exist_ok=True)
+        if cls._fallback_file is not None:
+            return cls._fallback_file
+
+        candidates = cls._candidate_secret_files()
+
+        # Prefer the primary app data path (~/.ssmaker) when writable.
+        if candidates:
+            preferred = candidates[0]
+            if cls._ensure_dir(preferred.parent):
+                if not preferred.exists():
+                    # Best-effort migration from existing legacy file.
+                    for legacy in candidates[1:]:
+                        if legacy.exists():
+                            try:
+                                shutil.copy2(legacy, preferred)
+                            except Exception:
+                                pass
+                            break
+                cls._fallback_file = preferred
+                return cls._fallback_file
+
+        for candidate in candidates:
+            if candidate.exists():
+                cls._fallback_file = candidate
+                return cls._fallback_file
+
+        for candidate in candidates:
+            if cls._ensure_dir(candidate.parent):
+                cls._fallback_file = candidate
+                return cls._fallback_file
+
+        # Last-resort fallback (best effort)
+        home = Path.home()
+        cls._fallback_file = home / ".ssmaker" / ".secrets"
+        cls._ensure_dir(cls._fallback_file.parent)
         return cls._fallback_file
+
+    @classmethod
+    def _candidate_base_dirs(cls) -> list[Path]:
+        """
+        Return preferred storage base directories in priority order.
+        """
+        candidates: list[Path] = []
+        home = Path.home()
+
+        # Primary location aligned with app-wide user data dir.
+        candidates.append(home / ".ssmaker")
+
+        if sys.platform == "win32":
+            appdata = os.getenv("APPDATA", "").strip()
+            localappdata = os.getenv("LOCALAPPDATA", "").strip()
+            if appdata:
+                candidates.append(Path(appdata) / "SSMaker")
+            if localappdata:
+                candidates.append(Path(localappdata) / "SSMaker")
+
+        # Legacy path for backward compatibility.
+        candidates.append(home / ".newshopping")
+
+        unique: list[Path] = []
+        seen = set()
+        for p in candidates:
+            key = str(p).lower()
+            if key not in seen:
+                seen.add(key)
+                unique.append(p)
+        return unique
+
+    @classmethod
+    def _candidate_secret_files(cls) -> list[Path]:
+        return [base / ".secrets" for base in cls._candidate_base_dirs()]
+
+    @classmethod
+    def _candidate_key_files(cls) -> list[Path]:
+        return [base / ".encryption_key" for base in cls._candidate_base_dirs()]
+
+    @classmethod
+    def _ensure_dir(cls, path: Path) -> bool:
+        """
+        Ensure directory exists and is writable.
+        """
+        try:
+            path.mkdir(parents=True, exist_ok=True)
+            probe = path / ".perm_test"
+            with open(probe, "w", encoding="utf-8") as f:
+                f.write("ok")
+            probe.unlink(missing_ok=True)
+            return True
+        except Exception:
+            return False
 
     @classmethod
     def _validate_key_name(cls, key_name: str) -> bool:
@@ -140,7 +226,12 @@ class SecretsManager:
                 try:
                     import keyring
                     keyring.set_password(cls.SERVICE_NAME, key_name, key_value)
-                    return True
+                    # Some environments report success but fail to persist.
+                    verify_value = keyring.get_password(cls.SERVICE_NAME, key_name)
+                    if verify_value == key_value:
+                        return True
+                    logger.warning("Keyring write verification failed; falling back to file storage")
+                    cls._use_keyring = False
                 except Exception as e:
                     logger.debug("Keyring storage failed: %s", type(e).__name__)
                     cls._use_keyring = False
@@ -201,19 +292,19 @@ class SecretsManager:
             True if deleted successfully, False otherwise
         """
         success = False
+        with cls._lock:
+            # Try keyring
+            if cls._use_keyring and cls._init_keyring():
+                try:
+                    import keyring
+                    keyring.delete_password(cls.SERVICE_NAME, key_name)
+                    success = True
+                except Exception:
+                    pass
 
-        # Try keyring
-        if cls._use_keyring and cls._init_keyring():
-            try:
-                import keyring
-                keyring.delete_password(cls.SERVICE_NAME, key_name)
+            # Also remove from file-based storage
+            if cls._delete_from_file(key_name):
                 success = True
-            except Exception:
-                pass
-
-        # Also remove from file-based storage
-        if cls._delete_from_file(key_name):
-            success = True
 
         return success
 
@@ -225,18 +316,11 @@ class SecretsManager:
         Returns:
             List of key names
         """
-        keys = []
-
-        # Read from fallback file (ensure file path is initialized)
-        secrets_file = cls._get_fallback_file()
-        if secrets_file.exists():
-            try:
-                data = cls._read_secrets_file()
-                keys.extend(data.keys())
-            except Exception:
-                pass
-
-        return list(set(keys))
+        try:
+            data = cls._read_secrets_file()
+            return list(sorted(set(data.keys())))
+        except Exception:
+            return []
 
     @classmethod
     def _set_file_permissions(cls, file_path: Path) -> bool:
@@ -280,6 +364,7 @@ class SecretsManager:
     def _store_to_file(cls, key_name: str, key_value: str) -> bool:
         """Store key to encrypted file (fallback method)."""
         import logging
+        import json
         logger = logging.getLogger(__name__)
 
         try:
@@ -290,10 +375,11 @@ class SecretsManager:
             encrypted = cls._simple_encrypt(key_value)
             data[key_name] = encrypted
 
-            # Write to file
-            with open(secrets_file, 'w', encoding='utf-8') as f:
-                import json
+            # Atomic write to reduce corruption risk on abrupt shutdown.
+            tmp_file = secrets_file.with_suffix(secrets_file.suffix + ".tmp")
+            with open(tmp_file, 'w', encoding='utf-8') as f:
                 json.dump(data, f)
+            os.replace(tmp_file, secrets_file)
 
             # Set restrictive permissions (owner only) - works on both Windows and Unix
             cls._set_file_permissions(secrets_file)
@@ -322,36 +408,54 @@ class SecretsManager:
     @classmethod
     def _delete_from_file(cls, key_name: str) -> bool:
         """Delete key from file (fallback method)."""
+        import json
+        deleted = False
         try:
-            secrets_file = cls._get_fallback_file()
-            if not secrets_file.exists():
-                return False
+            # Delete from all known fallback files (current + legacy).
+            for secrets_file in cls._candidate_secret_files():
+                if not secrets_file.exists():
+                    continue
 
-            data = cls._read_secrets_file()
-            if key_name in data:
+                data = {}
+                try:
+                    with open(secrets_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+
+                if key_name not in data:
+                    continue
+
                 del data[key_name]
-
-                with open(secrets_file, 'w', encoding='utf-8') as f:
-                    import json
+                tmp_file = secrets_file.with_suffix(secrets_file.suffix + ".tmp")
+                with open(tmp_file, "w", encoding="utf-8") as f:
                     json.dump(data, f)
-                return True
+                os.replace(tmp_file, secrets_file)
+                deleted = True
         except Exception:
             pass
-        return False
+        return deleted
 
     @classmethod
     def _read_secrets_file(cls) -> Dict:
         """Read secrets file, return empty dict if not exists."""
-        secrets_file = cls._get_fallback_file()
-        if not secrets_file.exists():
-            return {}
+        import json
 
-        try:
-            with open(secrets_file, 'r', encoding='utf-8') as f:
-                import json
-                return json.load(f)
-        except Exception:
-            return {}
+        merged: Dict[str, str] = {}
+        for secrets_file in cls._candidate_secret_files():
+            if not secrets_file.exists():
+                continue
+            try:
+                with open(secrets_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    # Keep first occurrence by priority order.
+                    for k, v in data.items():
+                        if k not in merged:
+                            merged[k] = v
+            except Exception:
+                continue
+        return merged
 
     # Cache for machine-specific key to ensure consistency
     _cached_machine_key: Optional[bytes] = None
@@ -367,10 +471,20 @@ class SecretsManager:
         Returns:
             Path to .encryption_key file in user's home directory
         """
-        home = Path.home()
-        key_dir = home / ".newshopping"
-        key_dir.mkdir(parents=True, exist_ok=True)
-        return key_dir / ".encryption_key"
+        # Reuse existing key file first for compatibility.
+        for candidate in cls._candidate_key_files():
+            if candidate.exists():
+                return candidate
+
+        # Otherwise pick the first writable directory.
+        for candidate in cls._candidate_key_files():
+            if cls._ensure_dir(candidate.parent):
+                return candidate
+
+        # Last-resort fallback.
+        fallback = Path.home() / ".ssmaker" / ".encryption_key"
+        cls._ensure_dir(fallback.parent)
+        return fallback
 
     @classmethod
     def _is_production(cls) -> bool:
@@ -380,6 +494,14 @@ class SecretsManager:
         Returns:
             True if production, False otherwise
         """
+        # Explicit override for strict environments.
+        if os.getenv("SECRETS_REQUIRE_ENV_KEY", "").strip() == "1":
+            return True
+
+        # Desktop packaged app should not fail key save due inherited APP_ENV.
+        if getattr(sys, "frozen", False):
+            return False
+
         env = os.getenv('APP_ENV', '').lower()
         return env in ('production', 'prod')
 

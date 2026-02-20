@@ -134,9 +134,36 @@ class TikTokManager:
             base_dir = os.getcwd()
         return os.path.join(base_dir, self.settings_file)
 
+    @staticmethod
+    def _encrypt_secret(value: str) -> str:
+        """Encrypt sensitive token value for local persistence."""
+        if not value:
+            return value
+        try:
+            from utils.secrets_manager import SecretsManager
+            return SecretsManager._simple_encrypt(value)
+        except Exception as e:
+            logger.warning(f"[TikTok] Token encryption failed, storing plaintext: {e}")
+            return value
+
+    @staticmethod
+    def _decrypt_secret(value: str) -> str:
+        """Decrypt persisted token value. Returns plaintext for legacy values."""
+        if not value:
+            return value
+        if value.startswith("fernet:"):
+            try:
+                from utils.secrets_manager import SecretsManager
+                return SecretsManager._simple_decrypt(value)
+            except Exception as e:
+                logger.warning(f"[TikTok] Token decryption failed: {e}")
+                return ""
+        return value
+
     def _load_settings(self) -> None:
         """Load settings from file"""
         settings_path = self._get_settings_path()
+        migrated_plaintext = False
 
         try:
             if os.path.exists(settings_path):
@@ -159,9 +186,19 @@ class TikTokManager:
                 # Load credentials
                 if "credentials" in data:
                     cred = data["credentials"]
+                    raw_access_token = str(cred.get("access_token", "") or "")
+                    raw_refresh_token = str(cred.get("refresh_token", "") or "")
+                    access_token = self._decrypt_secret(raw_access_token)
+                    refresh_token = self._decrypt_secret(raw_refresh_token)
+
+                    if raw_access_token and not raw_access_token.startswith("fernet:"):
+                        migrated_plaintext = True
+                    if raw_refresh_token and not raw_refresh_token.startswith("fernet:"):
+                        migrated_plaintext = True
+
                     self._credentials = TikTokCredentials(
-                        access_token=cred.get("access_token", ""),
-                        refresh_token=cred.get("refresh_token", ""),
+                        access_token=access_token,
+                        refresh_token=refresh_token,
                         open_id=cred.get("open_id", ""),
                         expires_at=cred.get("expires_at", 0.0),
                         scope=cred.get("scope", "")
@@ -180,6 +217,10 @@ class TikTokManager:
                         auto_caption=us.get("auto_caption", False),
                         max_video_length=us.get("max_video_length", 180)
                     )
+
+                if migrated_plaintext and self._credentials:
+                    logger.info("[TikTok] Migrating plaintext OAuth tokens to encrypted storage")
+                    self._save_settings()
 
                 logger.debug("[TikTok] 설정 로드 완료")
         except Exception as e:
@@ -201,8 +242,14 @@ class TikTokManager:
                     "connected_at": self._channel.connected_at if self._channel else ""
                 },
                 "credentials": {
-                    "access_token": self._credentials.access_token if self._credentials else "",
-                    "refresh_token": self._credentials.refresh_token if self._credentials else "",
+                    "access_token": (
+                        self._encrypt_secret(self._credentials.access_token)
+                        if self._credentials else ""
+                    ),
+                    "refresh_token": (
+                        self._encrypt_secret(self._credentials.refresh_token)
+                        if self._credentials else ""
+                    ),
                     "open_id": self._credentials.open_id if self._credentials else "",
                     "expires_at": self._credentials.expires_at if self._credentials else 0.0,
                     "scope": self._credentials.scope if self._credentials else ""

@@ -685,38 +685,101 @@ class SettingsManager:
 
     # ============ Automation Settings ============
 
+    @staticmethod
+    def _encrypt_value(value: str) -> str:
+        """Encrypt a sensitive string using SecretsManager's Fernet encryption."""
+        if not value:
+            return value
+        try:
+            from utils.secrets_manager import SecretsManager
+            return SecretsManager._simple_encrypt(value)
+        except Exception as e:
+            logger.warning(f"[SettingsManager] Encryption failed, storing as-is: {e}")
+            return value
+
+    @staticmethod
+    def _decrypt_value(value: str) -> str:
+        """Decrypt a value. If it's plaintext (legacy), return as-is and flag for migration."""
+        if not value:
+            return value
+        # Encrypted values start with 'fernet:' prefix
+        if value.startswith("fernet:"):
+            try:
+                from utils.secrets_manager import SecretsManager
+                return SecretsManager._simple_decrypt(value)
+            except Exception as e:
+                logger.warning(f"[SettingsManager] Decryption failed: {e}")
+                return ""
+        # Legacy plaintext value -- return as-is (will be re-encrypted on next save)
+        return value
+
     def get_coupang_keys(self) -> Dict[str, str]:
-        """Get Coupang Partners API keys"""
+        """Get Coupang Partners API keys (auto-decrypts, migrates plaintext on read)"""
+        raw_access = self._settings.get("coupang_access_key", "")
+        raw_secret = self._settings.get("coupang_secret_key", "")
+        access_key = self._decrypt_value(raw_access)
+        secret_key = self._decrypt_value(raw_secret)
+        # Auto-migrate: if stored as plaintext, re-encrypt and save
+        if raw_access and not raw_access.startswith("fernet:") and access_key:
+            self.set_coupang_keys(access_key, secret_key)
         return {
-            "access_key": self._settings.get("coupang_access_key", ""),
-            "secret_key": self._settings.get("coupang_secret_key", ""),
+            "access_key": access_key,
+            "secret_key": secret_key,
         }
 
     def set_coupang_keys(self, access_key: str, secret_key: str) -> bool:
-        """Save Coupang Partners API keys"""
+        """Save Coupang Partners API keys (encrypted)"""
         with self._lock:
-            self._settings["coupang_access_key"] = access_key
-            self._settings["coupang_secret_key"] = secret_key
+            self._settings["coupang_access_key"] = self._encrypt_value(access_key)
+            self._settings["coupang_secret_key"] = self._encrypt_value(secret_key)
         return self._save_settings()
 
     def get_inpock_cookies(self) -> Dict[str, str]:
-        """Get Inpock Link cookies"""
-        return self._settings.get("cookies_inpock", {})
+        """Get Inpock Link cookies (auto-decrypts)"""
+        raw = self._settings.get("cookies_inpock", {})
+        if isinstance(raw, str):
+            decrypted = self._decrypt_value(raw)
+            if decrypted:
+                try:
+                    import json as _json
+                    return _json.loads(decrypted)
+                except Exception:
+                    return {}
+            return {}
+        # Legacy plaintext dict -- migrate on next save
+        if raw and isinstance(raw, dict):
+            self.set_inpock_cookies(raw)
+        return raw if isinstance(raw, dict) else {}
 
     def set_inpock_cookies(self, cookies: Dict[str, str]) -> bool:
-        """Save Inpock Link cookies"""
+        """Save Inpock Link cookies (encrypted as JSON string)"""
+        import json as _json
         with self._lock:
-            self._settings["cookies_inpock"] = cookies
+            self._settings["cookies_inpock"] = self._encrypt_value(_json.dumps(cookies, ensure_ascii=False))
         return self._save_settings()
 
     def get_1688_cookies(self) -> Dict[str, str]:
-        """Get 1688 cookies"""
-        return self._settings.get("cookies_1688", {})
+        """Get 1688 cookies (auto-decrypts)"""
+        raw = self._settings.get("cookies_1688", {})
+        if isinstance(raw, str):
+            decrypted = self._decrypt_value(raw)
+            if decrypted:
+                try:
+                    import json as _json
+                    return _json.loads(decrypted)
+                except Exception:
+                    return {}
+            return {}
+        # Legacy plaintext dict -- migrate on next save
+        if raw and isinstance(raw, dict):
+            self.set_1688_cookies(raw)
+        return raw if isinstance(raw, dict) else {}
 
     def set_1688_cookies(self, cookies: Dict[str, str]) -> bool:
-        """Save 1688 cookies for selenium"""
+        """Save 1688 cookies (encrypted as JSON string)"""
+        import json as _json
         with self._lock:
-            self._settings["cookies_1688"] = cookies
+            self._settings["cookies_1688"] = self._encrypt_value(_json.dumps(cookies, ensure_ascii=False))
         return self._save_settings()
 
     # ============ Bulk Operations ============

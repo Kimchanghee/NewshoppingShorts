@@ -41,15 +41,10 @@ def _get_trusted_proxies() -> List[str]:
     env_proxies = os.environ.get("TRUSTED_PROXIES", "")
     if env_proxies:
         return [p.strip() for p in env_proxies.split(",") if p.strip()]
-    
-    # Cloud Run / GCP Load Balancer often use these ranges
-    # 사설 IP 대역을 기본적으로 신뢰하여 X-Forwarded-For 사용 가능하게 함
-    return _DEFAULT_TRUSTED_PROXIES + [
-        "10.0.0.0/8",
-        "172.16.0.0/12",
-        "192.168.0.0/16",
-        "169.254.0.0/16",
-    ]
+
+    # Secure default: trust only loopback addresses.
+    # For reverse proxies/load balancers, configure TRUSTED_PROXIES explicitly.
+    return _DEFAULT_TRUSTED_PROXIES
 
 
 def _is_trusted_proxy(ip: str) -> bool:

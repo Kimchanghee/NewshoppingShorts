@@ -30,7 +30,7 @@ def decode_access_token(token: str) -> dict:
     """Decode and validate JWT token"""
     try:
         payload = jwt.decode(
-            token, settings.JWT_SECRET_KEY, algorithms=[settings.JWT_ALGORITHM]
+            token, settings.JWT_SECRET_KEY, algorithms=["HS256"]
         )
         return payload
     except jwt.ExpiredSignatureError:

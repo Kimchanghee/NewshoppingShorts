@@ -8,15 +8,32 @@ def _load_api_keys() -> Dict[str, str]:
     keys: Dict[str, str] = {}
     try:
         from utils.secrets_manager import SecretsManager
-        secure_key = SecretsManager.get_api_key("gemini")
-        if secure_key:
-            keys["gemini"] = secure_key
+
+        # Primary format: gemini_api_1..N -> api_1..N
+        for i in range(1, 9):
+            secure_key = SecretsManager.get_api_key(f"gemini_api_{i}")
+            if secure_key and secure_key.strip():
+                keys[f"api_{i}"] = secure_key.strip()
+
+        # Legacy single-key format.
+        if not keys:
+            legacy_key = SecretsManager.get_api_key("gemini")
+            if legacy_key and legacy_key.strip():
+                keys["api_1"] = legacy_key.strip()
+                # One-time compatibility migration.
+                try:
+                    SecretsManager.store_api_key("gemini_api_1", legacy_key.strip())
+                except Exception:
+                    pass
     except Exception:
         pass
-    if "gemini" not in keys and (gemini_key := os.getenv("GEMINI_API_KEY")):
-        keys["gemini"] = gemini_key
+
+    if not keys and (gemini_key := os.getenv("GEMINI_API_KEY")):
+        keys["api_1"] = gemini_key
         try:
             from utils.secrets_manager import SecretsManager
+            SecretsManager.store_api_key("gemini_api_1", gemini_key)
+            # Keep legacy alias for older code paths.
             SecretsManager.store_api_key("gemini", gemini_key)
         except Exception:
             pass

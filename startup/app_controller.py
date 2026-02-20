@@ -8,9 +8,11 @@ from typing import Optional, List, Tuple, Any, Dict
 import sys
 import os
 import json
+import re
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QMessageBox
 from utils.logging_config import get_logger
+from utils.auto_updater import compare_versions
 from .initializer import Initializer
 
 logger = get_logger(__name__)
@@ -25,6 +27,11 @@ API_SERVER_URL = os.getenv(
     "API_SERVER_URL",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
 ).rstrip("/")
+PAYMENT_API_BASE_URL = os.getenv("PAYMENT_API_BASE_URL", "").strip().rstrip("/")
+GITHUB_RELEASE_API_URL = os.getenv(
+    "GITHUB_RELEASE_API_URL",
+    "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases/latest",
+).strip()
 
 
 class UpdateCheckWorker(QtCore.QThread):
@@ -35,30 +42,214 @@ class UpdateCheckWorker(QtCore.QThread):
 
     def __init__(self, current_version: str):
         super().__init__()
-        self.current_version = current_version
+        self.current_version = (current_version or "").strip() or "0.0.0"
 
     def run(self):
         import requests
         try:
-            response = requests.get(
-                f"{API_SERVER_URL}/app/version/check",
+            result = self._check_with_fallback(requests)
+            if result.get("update_available"):
+                self.update_available.emit(result)
+                return
+            self.no_update.emit()
+        except Exception as e:
+            self.check_failed.emit(str(e))
+
+    def _check_with_fallback(self, requests_module):
+        for base_url in self._candidate_base_urls():
+            by_check = self._query_version_check(requests_module, base_url)
+            if by_check is not None:
+                return by_check
+
+            by_version = self._query_version_info(requests_module, base_url)
+            if by_version is not None:
+                return by_version
+
+        by_github = self._query_github_latest_release(requests_module)
+        if by_github is not None:
+            return by_github
+
+        return {
+            "update_available": False,
+            "current_version": self.current_version,
+            "latest_version": self.current_version,
+        }
+
+    @staticmethod
+    def _normalize_base_url(raw: str) -> str:
+        return (raw or "").strip().rstrip("/")
+
+    def _candidate_base_urls(self) -> List[str]:
+        candidates: List[str] = []
+        for raw in (PAYMENT_API_BASE_URL, API_SERVER_URL):
+            base = self._normalize_base_url(raw)
+            if base and base not in candidates:
+                candidates.append(base)
+        return candidates
+
+    def _query_version_check(self, requests_module, base_url: str) -> Optional[Dict[str, Any]]:
+        try:
+            response = requests_module.get(
+                f"{base_url}/app/version/check",
                 params={"current_version": self.current_version},
                 timeout=5,
             )
             if response.status_code == 200:
                 data = response.json()
-                if data.get("update_available"):
-                    self.update_available.emit(data)
-                    return
-                self.no_update.emit()
-            elif response.status_code == 404:
-                # Backend deployment may not expose update endpoints.
-                # Treat as "no update" instead of a hard failure.
-                self.no_update.emit()
-            else:
-                self.check_failed.emit(f"Server returned {response.status_code}")
+                latest_version = str(
+                    data.get("latest_version")
+                    or data.get("version")
+                    or self.current_version
+                ).strip()
+                is_mandatory = bool(data.get("is_mandatory", False))
+                return {
+                    "update_available": bool(data.get("update_available")),
+                    "current_version": self.current_version,
+                    "latest_version": latest_version,
+                    "download_url": data.get("download_url"),
+                    "release_notes": data.get("release_notes", ""),
+                    "is_mandatory": is_mandatory,
+                    "file_hash": data.get("file_hash", ""),
+                }
+            if response.status_code in (404, 405, 422):
+                return None
+            logger.warning(
+                "Version check endpoint returned %s at %s",
+                response.status_code,
+                base_url,
+            )
+            return None
         except Exception as e:
-            self.check_failed.emit(str(e))
+            logger.debug("Version check endpoint failed at %s: %s", base_url, e)
+            return None
+
+    def _query_version_info(self, requests_module, base_url: str) -> Optional[Dict[str, Any]]:
+        try:
+            response = requests_module.get(f"{base_url}/app/version", timeout=5)
+            if response.status_code != 200:
+                if response.status_code not in (404, 405):
+                    logger.warning(
+                        "Version metadata endpoint returned %s at %s",
+                        response.status_code,
+                        base_url,
+                    )
+                return None
+
+            data = response.json()
+            latest_version = str(data.get("version", "")).strip()
+            if not latest_version:
+                logger.warning("Version metadata missing version at %s", base_url)
+                return None
+
+            update_available = compare_versions(self.current_version, latest_version) < 0
+            min_required = str(data.get("min_required_version", "")).strip()
+            is_mandatory = bool(data.get("is_mandatory", False))
+            if min_required:
+                is_mandatory = is_mandatory or (
+                    compare_versions(self.current_version, min_required) < 0
+                )
+
+            return {
+                "update_available": update_available,
+                "current_version": self.current_version,
+                "latest_version": latest_version,
+                "download_url": data.get("download_url"),
+                "release_notes": data.get("release_notes", ""),
+                "is_mandatory": is_mandatory,
+                "file_hash": data.get("file_hash", ""),
+            }
+        except Exception as e:
+            logger.debug("Version metadata endpoint failed at %s: %s", base_url, e)
+            return None
+
+    def _query_github_latest_release(self, requests_module) -> Optional[Dict[str, Any]]:
+        if not GITHUB_RELEASE_API_URL:
+            return None
+
+        try:
+            response = requests_module.get(
+                GITHUB_RELEASE_API_URL,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": f"SSMaker/{self.current_version}",
+                },
+                timeout=6,
+            )
+            if response.status_code != 200:
+                logger.warning(
+                    "GitHub release fallback returned %s",
+                    response.status_code,
+                )
+                return None
+
+            data = response.json()
+            latest_version = str(data.get("tag_name", "")).strip().lstrip("vV")
+            if not latest_version:
+                logger.warning("GitHub release fallback missing tag_name")
+                return None
+
+            update_available = compare_versions(self.current_version, latest_version) < 0
+            if not update_available:
+                return {
+                    "update_available": False,
+                    "current_version": self.current_version,
+                    "latest_version": latest_version,
+                }
+
+            assets = data.get("assets", []) or []
+            preferred_pattern = re.compile(
+                rf"^SSMaker_Setup_v{re.escape(latest_version)}\.exe$",
+                re.IGNORECASE,
+            )
+            installer_asset = next(
+                (
+                    asset
+                    for asset in assets
+                    if preferred_pattern.match(str(asset.get("name", "")))
+                ),
+                None,
+            )
+            if installer_asset is None:
+                installer_asset = next(
+                    (
+                        asset
+                        for asset in assets
+                        if str(asset.get("name", "")).lower().endswith(".exe")
+                    ),
+                    None,
+                )
+            if installer_asset is None:
+                logger.warning("GitHub release fallback found no installer asset")
+                return {
+                    "update_available": False,
+                    "current_version": self.current_version,
+                    "latest_version": latest_version,
+                }
+
+            digest = str(installer_asset.get("digest", "")).strip()
+            file_hash = ""
+            if digest.lower().startswith("sha256:"):
+                file_hash = digest.split(":", 1)[1].strip()
+            if not file_hash:
+                file_hash = self._extract_sha256(data.get("body", ""))
+
+            return {
+                "update_available": True,
+                "current_version": self.current_version,
+                "latest_version": latest_version,
+                "download_url": installer_asset.get("browser_download_url"),
+                "release_notes": data.get("body", ""),
+                "is_mandatory": False,
+                "file_hash": file_hash,
+            }
+        except Exception as e:
+            logger.debug("GitHub release fallback failed: %s", e)
+            return None
+
+    @staticmethod
+    def _extract_sha256(text: str) -> str:
+        match = re.search(r"\b([a-fA-F0-9]{64})\b", str(text or ""))
+        return match.group(1).lower() if match else ""
 
 
 class AppController:
@@ -272,8 +463,35 @@ class AppController:
             QMessageBox.critical(
                 None,
                 "시작 오류",
-                f"메인 앱을 시작할 수 없습니다:\n{type(e).__name__}: {e}",
+                self._build_launch_error_message(e),
             )
+
+    @staticmethod
+    def _build_launch_error_message(exc: Exception) -> str:
+        """Return a user-friendly launch error message for known runtime issues."""
+        detail = f"{type(exc).__name__}: {exc}"
+        lowered = detail.lower()
+        numpy_signature = (
+            "numpy" in lowered
+            and (
+                "_multiarray_umath" in lowered
+                or "importing the numpy c-extensions failed" in lowered
+                or "numpy c-extensions failed" in lowered
+            )
+        )
+
+        if numpy_signature:
+            return (
+                "메인 앱을 시작할 수 없습니다.\n\n"
+                "원인: 업데이트 중 이전 버전 파일이 남아 라이브러리 충돌이 발생했습니다.\n\n"
+                "해결 방법\n"
+                "1) 최신 설치 파일을 다시 실행하세요.\n"
+                "2) 설치 모드에서 '재설치(Reinstall)'를 선택하세요.\n"
+                "3) 설치 완료 후 앱을 다시 실행하세요.\n\n"
+                f"기술 정보: {detail}"
+            )
+
+        return f"메인 앱을 시작할 수 없습니다:\n{detail}"
 
     def _show_update_notes_if_needed(self) -> None:
         """업데이트 내역 팝업 표시 (새 버전이고 릴리즈노트가 있을 때)."""
@@ -540,4 +758,3 @@ class DownloadWorker(QtCore.QThread):
             self.finished.emit(True, self.dest_path)
         except Exception as e:
             self.finished.emit(False, str(e))
-
