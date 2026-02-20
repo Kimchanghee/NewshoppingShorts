@@ -183,6 +183,7 @@ class VideoHelpers:
                             "tiktok_video_",
                             "douyin_video_",
                             "xiaohongshu_video_",
+                            "kuaishou_video_",
                         )
                     ):
                         try:
