@@ -20,16 +20,21 @@ class SettingsManager:
     DEFAULT_PLATFORM_PROMPTS = {
         "youtube": {
             "title_prompt": (
-                "상품명, 핵심 기능, 타깃 고객을 반영해 유튜브 쇼츠 제목 1개를 작성하세요. "
-                "30자 내외로 짧고 클릭을 유도하되 허위·과장은 금지합니다."
+                "유튜브 쇼핑 쇼츠 제목 1개를 작성해주세요. "
+                "핵심 키워드 1~2개를 자연스럽게 포함하고, 제품의 핵심 효익/차별점이 3초 안에 이해되도록 짧고 명확하게 써주세요. "
+                "과장/오해 유도/낚시성 표현은 금지하고, 실제 영상 내용과 정확히 일치하게 작성해주세요."
             ),
             "description_prompt": (
-                "아래 상품 정보를 바탕으로 유튜브 게시글을 작성하세요. "
-                "1) 한 줄 요약 2) 핵심 장점 2개 3) 구매 유도 CTA 1개 순서로 3~4문장 구성."
+                "유튜브 쇼츠 설명을 작성해주세요. "
+                "첫 1~2문장에 영상 핵심 요약과 구매/탐색 CTA를 배치하고, 뒤에는 제품 특징/사용 상황/추천 포인트를 짧게 정리해주세요. "
+                "각 영상마다 중복 없는 고유 문구로 작성하고, 제목과 설명의 핵심 키워드를 일관되게 맞춰 검색 노출을 높여주세요. "
+                "설명은 사람이 읽기 쉽게 줄바꿈/불릿을 활용해주세요."
             ),
             "hashtag_prompt": (
-                "상품 카테고리, 사용 상황, 타깃 키워드를 반영한 해시태그를 8~10개 작성하세요. "
-                "#을 포함하고 중복 없이 작성합니다."
+                "유튜브 쇼츠용 해시태그를 3~5개 작성해주세요. "
+                "구성은 1) 넓은 카테고리 1개 2) 니치 키워드 1~2개 3) 구매 의도 키워드 1~2개로 해주세요. "
+                "#shorts 포함 여부를 콘텐츠 맥락에 맞게 판단하고, 영상과 직접 관련된 태그만 사용해주세요. "
+                "해시태그 남발/중복/무관 태그는 제외해주세요."
             ),
         },
         "tiktok": {
@@ -90,6 +95,22 @@ class SettingsManager:
         },
     }
 
+
+    DEFAULT_YOUTUBE_COMMENT_PROMPT = (
+        "유튜브 고정 댓글용 상품 안내문 1개를 작성해주세요.\n"
+        "[형식]\n"
+        "1) 한 줄 요약: 이 영상에서 소개한 핵심 포인트\n"
+        "2) 상품 정보: 상품명/모델명, 주요 옵션(색상·사이즈), 추천 대상\n"
+        "3) 구매 정보: 구매 링크, 가격 변동 가능 안내, 쿠폰/할인 유무(확인 필요 시 '수시 변동')\n"
+        "4) 신뢰 문구: 직접 확인한 사실만 안내하고 과장 표현 금지\n"
+        "5) 참여 유도: 궁금한 점 댓글 요청 + 재고/가격 업데이트 시 고정댓글 수정 안내\n\n"
+        "[작성 원칙]\n"
+        "- 5~8줄, 짧고 가독성 높게\n"
+        "- 이모지는 0~2개만 사용\n"
+        "- 스팸처럼 보이는 반복 문구 금지\n"
+        "- 제휴 링크일 경우 '제휴 수수료를 받을 수 있음' 문구를 자연스럽게 포함"
+    )
+
     DEFAULT_SETTINGS = {
         "cta_id": "default",
         "font_id": "seoul_hangang",
@@ -117,7 +138,7 @@ class SettingsManager:
         "youtube_description_prompt": "",
         "youtube_hashtag_prompt": "",
         "youtube_comment_enabled": False,
-        "youtube_comment_prompt": "",
+        "youtube_comment_prompt": DEFAULT_YOUTUBE_COMMENT_PROMPT,
         # COMING SOON 플랫폼
         "tiktok_connected": False,
         "tiktok_title_prompt": "",
@@ -653,7 +674,8 @@ class SettingsManager:
 
     def get_youtube_comment_prompt(self) -> str:
         """Get YouTube auto-comment prompt"""
-        return self._settings.get("youtube_comment_prompt", "")
+        prompt = str(self._settings.get("youtube_comment_prompt", "") or "").strip()
+        return prompt or self.DEFAULT_YOUTUBE_COMMENT_PROMPT
 
     def set_youtube_comment_prompt(self, prompt: str) -> bool:
         """Save YouTube auto-comment prompt"""
