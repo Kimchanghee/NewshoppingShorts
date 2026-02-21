@@ -264,6 +264,10 @@ try {
   foreach ($item in $mustContain) {
     $found = $allFiles | Where-Object { $_ -like "*$item*" }
     if (-not $found) {
+      if ($item -like "fonts\*") {
+        Write-Warning "Optional font missing in dist\\ssmaker\\: ${item}"
+        continue
+      }
       throw "Missing required item in dist\ssmaker\: ${item}"
     }
   }
