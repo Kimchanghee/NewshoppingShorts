@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import get_db
-from app.dependencies import verify_admin_api_key
+from app.dependencies import verify_admin_api_key, get_current_user_id
 from app.models.subscription_request import SubscriptionRequest, SubscriptionRequestStatus
 from app.models.user import User, UserType
 from app.utils.subscription_utils import is_subscription_active, calculate_subscription_expiry
@@ -54,34 +54,21 @@ router = APIRouter(prefix="/user/subscription", tags=["subscription"])
 async def submit_subscription_request(
     request: Request,
     data: SubscriptionRequestCreate,
-    user_id: int = Header(..., alias="X-User-ID", description="User ID"),
-    token: str = Header(..., alias="Authorization", description="Bearer token"),
+    current_user_id: int = Depends(get_current_user_id),
+    x_user_id: Optional[int] = Header(None, alias="X-User-ID", description="User ID"),
     db: Session = Depends(get_db)
 ):
-    """
-    구독 신청 제출 (체험판 사용자용)
-    Submit subscription request (for trial users)
-
-    Requires valid JWT token via Authorization header.
-    """
-    # Remove "Bearer " prefix if present
-    if token.startswith("Bearer "):
-        token = token[7:]
+    """Submit subscription request for authenticated user."""
+    user_id = int(current_user_id)
+    if x_user_id is not None and int(x_user_id) != user_id:
+        return SubscriptionResponse(
+            success=False,
+            message="User mismatch"
+        )
 
     logger.info(f"Subscription request received: user_id={user_id}")
 
     try:
-        # Verify user and token
-        service = AuthService(db)
-        session_result = await service.check_session(
-            user_id=str(user_id), token=token, ip_address=get_client_ip(request)
-        )
-        if not session_result.get("status"):
-            return SubscriptionResponse(
-                success=False,
-                message="유효하지 않은 세션입니다. 다시 로그인해 주세요."
-            )
-
         # Check if user exists
         user = db.query(User).filter(User.id == user_id).first()
         if not user:
@@ -151,33 +138,27 @@ async def submit_subscription_request(
 @limiter.limit("60/minute")
 async def get_my_subscription_status(
     request: Request,
-    user_id: int = Header(..., alias="X-User-ID", description="User ID"),
-    token: str = Header(..., alias="Authorization", description="Bearer token"),
+    current_user_id: int = Depends(get_current_user_id),
+    x_user_id: Optional[int] = Header(None, alias="X-User-ID", description="User ID"),
     db: Session = Depends(get_db)
 ):
     """
     내 구독 상태 조회
     Get my subscription status
     """
-    # Remove "Bearer " prefix if present
-    if token.startswith("Bearer "):
-        token = token[7:]
+    user_id = int(current_user_id)
+    if x_user_id is not None and int(x_user_id) != user_id:
+        return SubscriptionStatusResponse(
+            success=False,
+            is_trial=True,
+            work_count=0,
+            work_used=0,
+            remaining=0,
+            can_work=False
+        )
 
     try:
-        # Verify user and token
         service = AuthService(db)
-        session_result = await service.check_session(
-            user_id=str(user_id), token=token, ip_address=get_client_ip(request)
-        )
-        if not session_result.get("status"):
-            return SubscriptionStatusResponse(
-                success=False,
-                is_trial=True,
-                work_count=0,
-                work_used=0,
-                remaining=0,
-                can_work=False
-            )
 
         # Get user
         user = db.query(User).filter(User.id == user_id).first()

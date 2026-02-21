@@ -10,9 +10,13 @@ import subprocess
 import warnings
 import shutil
 import logging
+import hashlib
 from typing import List, Tuple
 
 logger = logging.getLogger(__name__)
+
+_CHI_SIM_SHA256 = "fc05d89ab31d8b4e226910f16a8bcbf78e43bae3e2580bb5feefd052efdab363"
+
 
 
 def _configure_stdio_utf8() -> None:
@@ -128,7 +132,7 @@ def install_tesseract_windows() -> bool:
         return False
 
     if find_tesseract_cmd():
-        logger.info("[Tesseract] 이미 설치됨")
+        logger.info("[Tesseract] Tesseract already installed")
         return True
 
     ok, _ = run_command(["winget", "--version"])
@@ -152,7 +156,7 @@ def install_tesseract_windows() -> bool:
         return False
 
     if find_tesseract_cmd():
-        logger.info("[Tesseract] 설치 완료")
+        logger.info("[Tesseract] Tesseract already installed")
         return True
 
     logger.warning("[Tesseract] 설치 확인 실패 - 수동 설치 필요")
@@ -191,6 +195,19 @@ def _download_file_safe(url: str, dest_path: str) -> Tuple[bool, str]:
         return False, f"다운로드 오류: {str(e)}"
 
 
+
+def _verify_sha256(file_path: str, expected_sha256: str) -> bool:
+    """Verify SHA256 hash for downloaded artifact."""
+    try:
+        sha256 = hashlib.sha256()
+        with open(file_path, "rb") as f:
+            for chunk in iter(lambda: f.read(8192), b""):
+                sha256.update(chunk)
+        actual = sha256.hexdigest().lower()
+        return actual == expected_sha256.lower()
+    except Exception:
+        return False
+
 def ensure_tesseract_lang_data() -> None:
     """
     Ensure Tesseract language data is installed.
@@ -204,9 +221,14 @@ def ensure_tesseract_lang_data() -> None:
     os.makedirs(tessdata_dir, exist_ok=True)
 
     lang_file = os.path.join(tessdata_dir, "chi_sim.traineddata")
-    if os.path.exists(lang_file):
-        logger.info("[Tesseract] chi_sim 언어팩 이미 설치됨")
+    if os.path.exists(lang_file) and _verify_sha256(lang_file, _CHI_SIM_SHA256):
+        logger.info("[Tesseract] chi_sim language data already installed")
         return
+    if os.path.exists(lang_file):
+        try:
+            os.remove(lang_file)
+        except Exception:
+            pass
 
     # Hardcoded URL for security - do not accept user input
     # 보안을 위해 하드코딩된 URL - 사용자 입력을 받지 않음
@@ -217,9 +239,15 @@ def ensure_tesseract_lang_data() -> None:
     # subprocess 대신 직접 Python 다운로드 사용 (명령 주입 방지)
     ok, out = _download_file_safe(url, lang_file)
 
-    if os.path.exists(lang_file):
-        logger.info("[Tesseract] chi_sim 언어팩 설치 완료")
+    if os.path.exists(lang_file) and _verify_sha256(lang_file, _CHI_SIM_SHA256):
+        logger.info("[Tesseract] chi_sim language data installed (sha256 verified)")
         return
+    if os.path.exists(lang_file):
+        logger.error("[Tesseract] chi_sim SHA256 mismatch. Removing unsafe file.")
+        try:
+            os.remove(lang_file)
+        except Exception:
+            pass
 
     if not ok:
         logger.error("[Tesseract] 언어팩 다운로드 실패: %s", out[:200])
@@ -231,13 +259,21 @@ def ensure_tesseract_lang_data() -> None:
 
     ok, out = _download_file_safe(url, user_lang_file)
 
-    if os.path.exists(user_lang_file):
+    if os.path.exists(user_lang_file) and _verify_sha256(user_lang_file, _CHI_SIM_SHA256):
         # Set environment variable for current process only (security best practice)
         # 현재 프로세스에만 환경 변수 설정 (보안 모범 사례)
         os.environ["TESSDATA_PREFIX"] = user_tessdata
         logger.info("[Tesseract] chi_sim 언어팩 설치 완료 (사용자 경로: %s)", user_tessdata)
         logger.info("[안내] TESSDATA_PREFIX를 영구적으로 설정하려면 환경 변수를 수동으로 설정하세요.")
         return
+
+
+    if os.path.exists(user_lang_file):
+        logger.error("[Tesseract] chi_sim SHA256 mismatch in user path. Removing unsafe file.")
+        try:
+            os.remove(user_lang_file)
+        except Exception:
+            pass
 
     if not ok:
         logger.error("[Tesseract] 사용자 경로 언어팩 다운로드 실패: %s", out[:200])

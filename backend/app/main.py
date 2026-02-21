@@ -1,6 +1,10 @@
 import logging
 import sys
 import os
+import re
+import hashlib
+import hmac
+import json
 from uuid import uuid4
 from fastapi import FastAPI, Request, Header, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
@@ -31,6 +35,7 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 # Disable docs and OpenAPI schema in production
 _is_prod = settings.ENVIRONMENT == "production"
@@ -95,6 +100,9 @@ def run_auto_migration():
             for table, columns in migrations.items():
                 for col, type_def in columns:
                     try:
+                        # Defensive guard: only allow safe SQL identifiers.
+                        if not _SQL_IDENTIFIER_RE.fullmatch(table) or not _SQL_IDENTIFIER_RE.fullmatch(col):
+                            raise ValueError(f"Unsafe identifier detected: {table}.{col}")
                         # Direct ALTER TABLE attempt
                         conn.execute(text(f"ALTER TABLE `{table}` ADD COLUMN `{col}` {type_def}"))
                         logger.info(f"Successfully added column {table}.{col}")
@@ -123,6 +131,8 @@ async def startup_event():
         
         # 2. Then ensure columns exist (migrations)
         run_auto_migration()
+        # 3. Ensure settings table for persistent app metadata.
+        _ensure_system_settings_table()
     except Exception as e:
         logger.error(f"Startup error during DB init/migration: {e}", exc_info=True)
 
@@ -443,6 +453,100 @@ APP_VERSION_INFO = {
     "file_hash": "b3b1dea69ced9f2cfdab0765cfe136b830465585cc4736bbf5efc8b168a369ea",
 }
 
+_APP_VERSION_INFO_SETTING_KEY = "app_version_info_v1"
+
+
+def _ensure_system_settings_table() -> None:
+    """Ensure key-value settings table exists for small persistent config."""
+    try:
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(
+                text(
+                    """
+                    CREATE TABLE IF NOT EXISTS `system_settings` (
+                        `setting_key` VARCHAR(128) NOT NULL,
+                        `setting_value` TEXT NOT NULL,
+                        `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                        PRIMARY KEY (`setting_key`)
+                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
+                    """
+                )
+            )
+    except Exception as e:
+        logger.warning("system_settings ensure warning: %s", e)
+
+
+def _load_app_version_info_from_db(default_info: dict) -> dict:
+    """Load persisted app version info from DB, fallback to defaults."""
+    try:
+        _ensure_system_settings_table()
+        with engine.connect() as conn:
+            row = conn.execute(
+                text(
+                    """
+                    SELECT setting_value
+                    FROM system_settings
+                    WHERE setting_key = :setting_key
+                    LIMIT 1
+                    """
+                ),
+                {"setting_key": _APP_VERSION_INFO_SETTING_KEY},
+            ).fetchone()
+
+        if not row:
+            return default_info
+
+        raw_value = row[0]
+        if not raw_value:
+            return default_info
+
+        loaded = json.loads(raw_value)
+        if not isinstance(loaded, dict):
+            return default_info
+
+        merged = dict(default_info)
+        for key in (
+            "version",
+            "min_required_version",
+            "download_url",
+            "release_notes",
+            "is_mandatory",
+            "update_channel",
+            "file_hash",
+        ):
+            if key in loaded:
+                merged[key] = loaded[key]
+        return merged
+    except Exception as e:
+        logger.warning("Failed loading APP_VERSION_INFO from DB: %s", e)
+        return default_info
+
+
+def _persist_app_version_info_to_db(version_info: dict) -> None:
+    """Persist app version info so restarts do not lose update metadata."""
+    try:
+        _ensure_system_settings_table()
+        payload = json.dumps(version_info, ensure_ascii=False)
+        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
+            conn.execute(
+                text(
+                    """
+                    INSERT INTO system_settings (setting_key, setting_value)
+                    VALUES (:setting_key, :setting_value)
+                    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
+                    """
+                ),
+                {
+                    "setting_key": _APP_VERSION_INFO_SETTING_KEY,
+                    "setting_value": payload,
+                },
+            )
+    except Exception as e:
+        logger.warning("Failed persisting APP_VERSION_INFO to DB: %s", e)
+
+
+APP_VERSION_INFO = _load_app_version_info_from_db(APP_VERSION_INFO)
+
 
 class VersionUpdateRequest(BaseModel):
     """Request model for version update"""
@@ -475,7 +579,8 @@ async def get_app_version():
 @app.post("/app/version/update")
 async def update_app_version(
     request: VersionUpdateRequest,
-    authorization: str = Header(None)
+    authorization: str = Header(None),
+    x_update_signature: str = Header(None, alias="X-Update-Signature"),
 ):
     """
     Update app version info (CI/CD endpoint).
@@ -494,12 +599,38 @@ async def update_app_version(
 
     token = authorization[7:]  # Remove "Bearer " prefix
 
-    # Check against ADMIN_API_KEY from settings (constant-time comparison)
+    # Check against dedicated update API key first.
+    # Fallback to ADMIN_API_KEY only in non-production for compatibility.
     import secrets as _secrets
-    expected_key = settings.ADMIN_API_KEY
+    expected_key = (settings.APP_VERSION_UPDATE_API_KEY or "").strip()
+    if settings.ENVIRONMENT == "production" and not expected_key:
+        logger.error("APP_VERSION_UPDATE_API_KEY is not configured in production")
+        raise HTTPException(status_code=500, detail="Update API key not configured")
+    if not expected_key:
+        expected_key = settings.ADMIN_API_KEY
+        logger.warning("Using ADMIN_API_KEY fallback for /app/version/update (set APP_VERSION_UPDATE_API_KEY)")
+
     if not expected_key or not _secrets.compare_digest(token, expected_key):
         logger.warning("Invalid API key attempt for version update")
         raise HTTPException(status_code=403, detail="Invalid API key")
+
+    # Optional payload HMAC verification for stronger CI/CD integrity.
+    signing_key = (settings.APP_VERSION_UPDATE_HMAC_KEY or "").strip()
+    if signing_key:
+        if not x_update_signature:
+            raise HTTPException(status_code=401, detail="Missing X-Update-Signature")
+        provided_sig = str(x_update_signature).strip()
+        if provided_sig.lower().startswith("sha256="):
+            provided_sig = provided_sig.split("=", 1)[1].strip()
+        payload_json = request.model_dump_json(exclude_none=True)
+        expected_sig = hmac.new(
+            signing_key.encode("utf-8"),
+            payload_json.encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
+        if not _secrets.compare_digest(provided_sig.lower(), expected_sig.lower()):
+            logger.warning("Invalid update payload signature")
+            raise HTTPException(status_code=403, detail="Invalid update signature")
 
     # Atomic replacement - build new dict then assign
     new_info = {**APP_VERSION_INFO}
@@ -513,6 +644,7 @@ async def update_app_version(
     if request.file_hash:
         new_info["file_hash"] = request.file_hash
     APP_VERSION_INFO = new_info
+    _persist_app_version_info_to_db(APP_VERSION_INFO)
 
     logger.info(f"App version updated to {request.version} by CI/CD")
 

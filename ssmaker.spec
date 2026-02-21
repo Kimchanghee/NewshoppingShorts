@@ -277,8 +277,8 @@ exe = EXE(
     disable_windowed_traceback=True,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    # Windows release signing is enforced in scripts/build_exe.ps1 via signtool.
+    # (codesign_identity is macOS-only and intentionally omitted.)
     icon='resource/app_icon.ico' if os.path.exists('resource/app_icon.ico') else None,
     uac_admin=False,
     contents_directory='.',   # 모든 파일을 EXE와 같은 디렉토리에 배치 (flat 구조)
@@ -301,7 +301,7 @@ coll = COLLECT(
 # After building, sign the EXE to prevent SmartScreen warnings and ensure integrity.
 # Run this after PyInstaller build completes:
 #
-#   signtool sign /fd sha256 /tr http://timestamp.digicert.com /td sha256 ^
+#   signtool sign /fd sha256 /tr https://timestamp.digicert.com /td sha256 ^
 #       /sha1 <CERT_THUMBPRINT> dist\ssmaker\ssmaker.exe
 #
 # Then build the installer:

@@ -5,6 +5,7 @@ import sys
 import logging
 import requests
 import zipfile
+from urllib.parse import urlparse
 from io import BytesIO
 
 logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
@@ -28,7 +29,6 @@ FONT_SOURCES = [
         "id": "seoul_hangang",
         "name": "SeoulHangangB.ttf",
         "urls": [
-            "http://www.seoul.go.kr/v2012/seoul/symbol/file/SeoulHangangB.ttf",
             "https://cdn.jsdelivr.net/gh/webfontworld/seoul/SeoulHangangB.ttf"
         ]
     },
@@ -92,6 +92,35 @@ FONT_SOURCES = [
     }
 ]
 
+_ALLOWED_FONT_HOSTS = {
+    "cdn.jsdelivr.net",
+    "github.com",
+    "raw.githubusercontent.com",
+    "fonts.cafe24.com",
+    "www.seoul.go.kr",
+}
+
+
+def _is_trusted_font_url(url: str) -> bool:
+    parsed = urlparse(url)
+    return parsed.scheme == "https" and bool(parsed.hostname) and parsed.hostname in _ALLOWED_FONT_HOSTS
+
+
+def _safe_extract_member(zf: zipfile.ZipFile, member_name: str, output_path: str) -> bool:
+    """Extract one file from zip with traversal guard."""
+    for zip_info in zf.infolist():
+        if not zip_info.filename.endswith(member_name):
+            continue
+        candidate = os.path.abspath(os.path.join(FONTS_DIR, output_path))
+        if not candidate.startswith(os.path.abspath(FONTS_DIR) + os.sep):
+            logger.warning("    [BLOCKED] Unsafe zip extraction path: %s", output_path)
+            return False
+        with zf.open(zip_info.filename) as src, open(candidate, "wb") as dst:
+            dst.write(src.read())
+        logger.info(f"    - Extracted {output_path}")
+        return True
+    return False
+
 def download_font(source):
     target_name = source["name"]
     target_path = os.path.join(FONTS_DIR, target_name)
@@ -101,6 +130,9 @@ def download_font(source):
         return True
 
     for url in source["urls"]:
+        if not _is_trusted_font_url(url):
+            logger.warning(f"    [BLOCKED] Untrusted font source: {url}")
+            continue
         try:
             logger.info(f"  [TRYING] {target_name} from {url}")
             resp = requests.get(url, timeout=30, headers=HEADERS)
@@ -109,14 +141,9 @@ def download_font(source):
                     with zipfile.ZipFile(BytesIO(resp.content)) as zf:
                         extracted = False
                         for file_to_extract in source["extract_files"]:
-                            for zip_info in zf.infolist():
-                                if zip_info.filename.endswith(file_to_extract):
-                                    final_name = source.get("rename", {}).get(file_to_extract, file_to_extract)
-                                    with zf.open(zip_info.filename) as src, open(os.path.join(FONTS_DIR, final_name), 'wb') as dst:
-                                        dst.write(src.read())
-                                    logger.info(f"    - Extracted {final_name}")
-                                    extracted = True
-                                    break
+                            final_name = source.get("rename", {}).get(file_to_extract, file_to_extract)
+                            if _safe_extract_member(zf, file_to_extract, final_name):
+                                extracted = True
                         if extracted: return True
                 else:
                     with open(target_path, 'wb') as f:

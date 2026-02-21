@@ -27,7 +27,19 @@ def test_install_client_secrets_replaces_readonly_destination(tmp_path):
     manager = _TestYouTubeManager(user_dir=user_dir, app_dir=app_dir)
 
     source = tmp_path / "client_secrets_source.json"
-    source.write_text('{"installed": {"client_id": "new"}}', encoding="utf-8")
+    source.write_text('{"installed": {"client_id": "new", "client_secret": "abc"}}', encoding="utf-8")
+
+    secure_store = {}
+
+    def _set_credential(key, value):
+        secure_store[key] = value
+        return True
+
+    def _get_credential(key):
+        return secure_store.get(key)
+
+    manager._secrets_manager.set_credential = _set_credential
+    manager._secrets_manager.get_credential = _get_credential
 
     destination = Path(manager._get_client_secrets_path())
     destination.parent.mkdir(parents=True, exist_ok=True)
@@ -37,8 +49,8 @@ def test_install_client_secrets_replaces_readonly_destination(tmp_path):
     installed_path = manager.install_client_secrets(str(source))
 
     assert Path(installed_path) == destination
-    installed_content = Path(installed_path).read_text(encoding="utf-8")
-    assert '"client_id": "new"' in installed_content
+    assert '"client_id": "new"' in secure_store[manager.CLIENT_SECRETS_KEY]
+    assert not Path(installed_path).exists()
 
 
 def test_migrate_legacy_oauth_files_to_user_profile(tmp_path):
@@ -55,7 +67,22 @@ def test_migrate_legacy_oauth_files_to_user_profile(tmp_path):
     legacy_secret_dir = app_dir / ".ssmaker_credentials" / "youtube"
     legacy_secret_dir.mkdir(parents=True, exist_ok=True)
     legacy_secret = legacy_secret_dir / "client_secrets.json"
-    legacy_secret.write_text('{"installed": {"client_id": "legacy"}}', encoding="utf-8")
+    legacy_secret.write_text(
+        '{"installed": {"client_id": "legacy", "client_secret": "secret"}}',
+        encoding="utf-8",
+    )
+
+    secure_store = {}
+
+    def _set_credential(key, value):
+        secure_store[key] = value
+        return True
+
+    def _get_credential(key):
+        return secure_store.get(key)
+
+    manager._secrets_manager.set_credential = _set_credential
+    manager._secrets_manager.get_credential = _get_credential
 
     token_path = Path(manager._get_token_path())
     secret_path = Path(manager._get_client_secrets_path())
@@ -67,6 +94,6 @@ def test_migrate_legacy_oauth_files_to_user_profile(tmp_path):
     manager._migrate_legacy_oauth_files()
 
     assert token_path.exists()
-    assert secret_path.exists()
     assert '"token": "legacy"' in token_path.read_text(encoding="utf-8")
-    assert '"client_id": "legacy"' in secret_path.read_text(encoding="utf-8")
+    assert '"client_id": "legacy"' in secure_store[manager.CLIENT_SECRETS_KEY]
+    assert not secret_path.exists()

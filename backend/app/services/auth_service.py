@@ -313,7 +313,6 @@ class AuthService:
                     if user.last_login_at
                     else None,
                 },
-                "ip": ip_address,
                 "token": token,
             },
         }

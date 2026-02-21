@@ -9,6 +9,7 @@ import sys
 import os
 import json
 import re
+import subprocess
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QMessageBox
 from utils.logging_config import get_logger
@@ -32,6 +33,61 @@ GITHUB_RELEASE_API_URL = os.getenv(
     "GITHUB_RELEASE_API_URL",
     "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases/latest",
 ).strip()
+
+
+def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tuple[bool, str]:
+    """
+    Verify Windows Authenticode signature for a file.
+
+    - Requires signature Status == Valid
+    - If `<thumbprints_env>` is configured, signer thumbprint must match allowlist.
+    """
+    if not file_path or not os.path.exists(file_path):
+        return False, "File not found"
+    if sys.platform != "win32":
+        return True, "Signature check skipped (non-Windows)"
+
+    escaped_path = file_path.replace("'", "''")
+    ps_script = (
+        f"$sig = Get-AuthenticodeSignature -FilePath '{escaped_path}'; "
+        "if ($null -eq $sig) { Write-Output 'unknown|'; exit 0 }; "
+        "$thumb=''; if ($sig.SignerCertificate) { $thumb=$sig.SignerCertificate.Thumbprint }; "
+        "Write-Output (($sig.Status.ToString().ToLower()) + '|' + $thumb)"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+    except Exception as e:
+        return False, f"Signature check invocation failed: {e}"
+
+    output = (result.stdout or "").strip().splitlines()
+    last_line = output[-1].strip() if output else ""
+    status, thumb = (last_line.split("|", 1) + [""])[:2] if "|" in last_line else (last_line, "")
+    status = (status or "").strip().lower()
+    thumb = (thumb or "").replace(" ", "").strip().lower()
+
+    if status != "valid":
+        stderr = (result.stderr or "").strip()
+        return False, f"Invalid signature status: {status or 'unknown'} {stderr}".strip()
+
+    allow_raw = (os.getenv(thumbprints_env, "") or "").strip()
+    if allow_raw:
+        allowed = {
+            item.replace(" ", "").strip().lower()
+            for item in allow_raw.split(",")
+            if item.strip()
+        }
+        if not thumb:
+            return False, "Missing signer thumbprint"
+        if thumb not in allowed:
+            return False, "Signer thumbprint not allowed"
+
+    return True, "Signature verified"
 
 
 class UpdateCheckWorker(QtCore.QThread):
@@ -324,6 +380,19 @@ class AppController:
 
     def start(self) -> None:
         """Start the app ??show login first."""
+        if getattr(sys, "frozen", False) and sys.platform == "win32":
+            ok, reason = _verify_authenticode_signature(
+                sys.executable,
+                "APP_SIGNER_THUMBPRINTS",
+            )
+            if not ok:
+                logger.error("Executable signature verification failed: %s", reason)
+                QMessageBox.critical(
+                    None,
+                    "보안 오류",
+                    "앱 서명 검증에 실패했습니다. 실행을 중단합니다.",
+                )
+                sys.exit(1)
         self._show_login()
 
     # ?? Splash management ??
@@ -802,6 +871,15 @@ class DownloadWorker(QtCore.QThread):
             file_hash = sha256.hexdigest().lower()
             if file_hash != self.expected_hash.lower():
                 raise ValueError(f"Hash mismatch! Expected {self.expected_hash}, got {file_hash}")
+
+            # Verify installer code signature before execution.
+            # If UPDATE_SIGNER_THUMBPRINTS is set, signer must match allowlist.
+            ok, reason = _verify_authenticode_signature(
+                self.dest_path,
+                "UPDATE_SIGNER_THUMBPRINTS",
+            )
+            if not ok:
+                raise ValueError(f"Installer signature verification failed: {reason}")
                 
             self.finished.emit(True, self.dest_path)
         except Exception as e:

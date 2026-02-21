@@ -71,6 +71,27 @@ class Settings(BaseSettings):
             )
         return v
 
+    # Dedicated key for CI/CD app-version metadata updates.
+    # Keep separate from ADMIN_API_KEY to reduce blast radius if leaked.
+    APP_VERSION_UPDATE_API_KEY: str = ""
+
+    @field_validator("APP_VERSION_UPDATE_API_KEY")
+    @classmethod
+    def validate_update_api_key(cls, v, info):
+        env = (
+            (info.data.get("ENVIRONMENT") if info.data else None)
+            or os.getenv("ENVIRONMENT", "development")
+        )
+        if env == "production" and (not v or len(v) < 32):
+            raise ValueError(
+                "APP_VERSION_UPDATE_API_KEY must be at least 32 characters in production"
+            )
+        return v
+
+    # Optional HMAC key for update metadata payload signing.
+    # If set, /app/version/update requires a matching X-Update-Signature header.
+    APP_VERSION_UPDATE_HMAC_KEY: str = ""
+
     # Billing key encryption (Fernet key)
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     BILLING_KEY_ENCRYPTION_KEY: str = ""

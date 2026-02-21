@@ -125,11 +125,22 @@ try {
   }
 
   $tessdataFastBase = "https://github.com/tesseract-ocr/tessdata_fast/raw/main"
+  $expectedTessFastHashes = @{
+    "eng" = "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
+    "kor" = "6b85e11d9bbf07863b97b3523b1b112844c43e713df8b66418a081fd1060b3b2"
+    "chi_sim" = "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+  }
   foreach ($lang in @("eng", "kor", "chi_sim")) {
     $dst = Join-Path $stageTessdata ("$lang.traineddata")
     if (-not (Test-Path $dst)) {
       Write-Host "Downloading tessdata_fast: $lang.traineddata"
       Invoke-WebRequest -Uri ("$tessdataFastBase/$lang.traineddata") -OutFile $dst -UseBasicParsing
+      $actualHash = (Get-FileHash -Path $dst -Algorithm SHA256).Hash.ToLower()
+      $expectedHash = $expectedTessFastHashes[$lang]
+      if ($actualHash -ne $expectedHash) {
+        Remove-Item -Path $dst -Force -ErrorAction SilentlyContinue
+        throw "tessdata_fast hash mismatch for $lang.traineddata (expected $expectedHash, got $actualHash)"
+      }
     }
   }
 
@@ -155,6 +166,25 @@ try {
   if (-not (Test-Path $ssmakerExe)) {
     throw "Build output missing: ${ssmakerExe}"
   }
+
+  # Enforce code-signing prerequisites for release artifacts.
+  $signThumb = ($env:SIGN_CERT_THUMBPRINT ?? "").Trim()
+  if ([string]::IsNullOrWhiteSpace($signThumb)) {
+    throw "SIGN_CERT_THUMBPRINT is required for release builds."
+  }
+  $signtool = (Get-Command signtool -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue)
+  if (-not $signtool) {
+    throw "signtool.exe not found in PATH. Install Windows SDK Signing Tools."
+  }
+
+  Invoke-Native "[2.5/5] Code signing ssmaker.exe..." $signtool @(
+    "sign",
+    "/fd", "sha256",
+    "/tr", "https://timestamp.digicert.com",
+    "/td", "sha256",
+    "/sha1", $signThumb,
+    $ssmakerExe
+  )
 
   # ── Verify output directory contents ───────────────────────────────────────
   Write-Host "`n[3/5] Verifying build output in dist\ssmaker\..."
@@ -348,12 +378,18 @@ try {
   $issFile = Join-Path $Root "installer.iss"
   Invoke-Native "[4/5] Compiling installer..." $iscc @(
     "/DMyAppVersion=$AppVersion",
+    "/DSignToolAvailable",
     $issFile
   )
 
   $installerExe = Join-Path $Root "dist\SSMaker_Setup_v${AppVersion}.exe"
   if (-not (Test-Path $installerExe)) {
     throw "Installer output missing: ${installerExe}"
+  }
+
+  $installerSig = Get-AuthenticodeSignature -FilePath $installerExe
+  if ($installerSig.Status -ne "Valid") {
+    throw "Installer signature invalid: $($installerSig.Status)"
   }
 
   # ── Done ───────────────────────────────────────────────────────────────────

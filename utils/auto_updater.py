@@ -1,10 +1,9 @@
-# -*- coding: utf-8 -*-
+﻿# -*- coding: utf-8 -*-
 """
 Auto Updater Module
-?먮룞 ?낅뜲?댄듃 紐⑤뱢
-
-?ъ슜?먭? ?꾨줈洹몃옩 ?ㅽ뻾 ???쒕쾭?먯꽌 理쒖떊 踰꾩쟾???뺤씤?섍퀬,
-?낅뜲?댄듃媛 ?덉쑝硫??뚮┝ ???ㅼ슫濡쒕뱶?⑸땲??
+?癒?짗 ??낅쑓??꾨뱜 筌뤴뫀諭?
+????癒? ?袁⑥쨮域밸챶????쎈뻬 ????뺤쒔?癒?퐣 筌ㅼ뮇??甕곌쑴????類ㅼ뵥??랁?
+??낅쑓??꾨뱜揶쎛 ??됱몵筌????뵝 ????쇱뒲嚥≪뮆諭??몃빍??
 """
 
 import os
@@ -26,10 +25,10 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-# ?꾩옱 ??踰꾩쟾 (鍮뚮뱶 ????媛믪쓣 ?낅뜲?댄듃)
-CURRENT_VERSION = "1.4.14"
+# ?袁⑹삺 ??甕곌쑴??(??슢諭?????揶쏅?????낅쑓??꾨뱜)
+CURRENT_VERSION = "1.4.15"
 
-# 踰꾩쟾 ?뺤씤 API ?붾뱶?ъ씤??
+# 甕곌쑴???類ㅼ뵥 API ?遺얜굡?????
 UPDATE_CHECK_URL = os.getenv(
     "UPDATE_CHECK_URL",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app/app/version"
@@ -44,13 +43,57 @@ _ALLOWED_DOWNLOAD_DOMAINS: frozenset[str] = frozenset({
 })
 
 
+def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tuple[bool, str]:
+    """Verify Windows Authenticode signature status and optional thumbprint allowlist."""
+    if sys.platform != "win32":
+        return True, "signature check skipped on non-windows"
+    if not file_path or not os.path.exists(file_path):
+        return False, "file not found"
+
+    allowlist = {
+        t.strip().upper().replace(" ", "")
+        for t in str(thumbprints_env or "").split(",")
+        if t.strip()
+    }
+
+    ps_script = (
+        "$ErrorActionPreference='Stop'; "
+        f"$sig=Get-AuthenticodeSignature -FilePath '{file_path}'; "
+        "$thumb=''; if ($sig.SignerCertificate) { $thumb=$sig.SignerCertificate.Thumbprint }; "
+        "[PSCustomObject]@{Status=[string]$sig.Status; Thumbprint=[string]$thumb} | ConvertTo-Json -Compress"
+    )
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-Command", ps_script],
+        capture_output=True,
+        text=True,
+        timeout=20,
+        check=False,
+    )
+    if proc.returncode != 0:
+        err = (proc.stderr or proc.stdout or "").strip()
+        return False, f"signature check failed: {err[:180]}"
+
+    try:
+        info = json.loads(proc.stdout.strip() or "{}")
+    except Exception:
+        return False, "invalid signature verification output"
+
+    status = str(info.get("Status") or "").strip()
+    thumbprint = str(info.get("Thumbprint") or "").strip().upper().replace(" ", "")
+    if status != "Valid":
+        return False, f"invalid signature status: {status or 'unknown'}"
+    if allowlist and thumbprint not in allowlist:
+        return False, "signer certificate is not allowlisted"
+    return True, "ok"
+
+
 def get_current_version() -> str:
     """
-    ?꾩옱 ??踰꾩쟾 諛섑솚.
+    ?袁⑹삺 ??甕곌쑴??獄쏆꼹??
     
     Returns:
-        ?꾩옱 踰꾩쟾 臾몄옄??    """
-    # 踰꾩쟾 ?뚯씪???덉쑝硫??쎌쓬
+        ?袁⑹삺 甕곌쑴???얜챷???    """
+    # 甕곌쑴?????뵬????됱몵筌???뚯벉
     version_file = get_version_file_path()
     if version_file and version_file.exists():
         try:
@@ -65,45 +108,45 @@ def get_current_version() -> str:
 
 def get_version_file_path() -> Optional[Path]:
     """
-    踰꾩쟾 ?뚯씪 寃쎈줈 諛섑솚.
+    甕곌쑴?????뵬 野껋럥以?獄쏆꼹??
 
-    PyInstaller --onefile 紐⑤뱶?먯꽌??
-    1. EXE ??version.json ?곗꽑 (?낅뜲?댄듃 ??援먯껜 媛??
-    2. _MEIPASS 踰덈뱾 ??version.json ?대갚 (珥덇린 ?ㅼ튂 ??
+    PyInstaller --onefile 筌뤴뫀諭?癒?퐣??
+    1. EXE ??version.json ?怨쀪퐨 (??낅쑓??꾨뱜 ???대Ŋ猿?揶쎛??
+    2. _MEIPASS 甕곕뜄諭???version.json ??媛?(?λ뜃由???쇳뒄 ??
 
     Returns:
-        踰꾩쟾 ?뚯씪 寃쎈줈 ?먮뒗 None
+        甕곌쑴?????뵬 野껋럥以??癒?뮉 None
     """
     if getattr(sys, 'frozen', False):
-        # 1?쒖쐞: EXE ??(?낅뜲?댄듃 ????踰꾩쟾 ?뚯씪???ш린???볦엫)
+        # 1??뽰맄: EXE ??(??낅쑓??꾨뱜 ????甕곌쑴?????뵬????由???蹂?뿫)
         exe_dir = Path(sys.executable).parent
         exe_version = exe_dir / "version.json"
         if exe_version.exists():
             return exe_version
 
-        # 2?쒖쐞: _MEIPASS 踰덈뱾 ??(--onefile 珥덇린 ?ㅽ뻾 ??
+        # 2??뽰맄: _MEIPASS 甕곕뜄諭???(--onefile ?λ뜃由???쎈뻬 ??
         meipass = getattr(sys, '_MEIPASS', None)
         if meipass:
             bundled_version = Path(meipass) / "version.json"
             if bundled_version.exists():
                 return bundled_version
 
-        return exe_version  # ?놁뼱??寃쎈줈??諛섑솚 (get_current_version?먯꽌 fallback)
+        return exe_version  # ??곷선??野껋럥以??獄쏆꼹??(get_current_version?癒?퐣 fallback)
     else:
-        # 媛쒕컻 ?섍꼍
+        # 揶쏆뮆而???띻펾
         base_path = Path(__file__).parent.parent
         return base_path / "version.json"
 
 
 def parse_version(version_str: str) -> Tuple[int, int, int]:
     """
-    踰꾩쟾 臾몄옄?댁쓣 ?쒗뵆濡??뚯떛.
+    甕곌쑴???얜챷???곸뱽 ??쀫탣嚥????뼓.
     
     Args:
-        version_str: 踰꾩쟾 臾몄옄??(?? "1.0.0")
+        version_str: 甕곌쑴???얜챷???(?? "1.0.0")
     
     Returns:
-        (major, minor, patch) ?쒗뵆
+        (major, minor, patch) ??쀫탣
     """
     try:
         parts = version_str.strip().split('.')
@@ -118,16 +161,14 @@ def parse_version(version_str: str) -> Tuple[int, int, int]:
 
 def compare_versions(current: str, latest: str) -> int:
     """
-    ??踰꾩쟾??鍮꾧탳.
+    ??甕곌쑴?????쑨??
     
     Args:
-        current: ?꾩옱 踰꾩쟾
-        latest: 理쒖떊 踰꾩쟾
-    
+        current: ?袁⑹삺 甕곌쑴??        latest: 筌ㅼ뮇??甕곌쑴??    
     Returns:
-        -1: current < latest (?낅뜲?댄듃 ?꾩슂)
-         0: current == latest (?숈씪)
-         1: current > latest (?꾩옱媛 ??理쒖떊)
+        -1: current < latest (??낅쑓??꾨뱜 ?袁⑹뒄)
+         0: current == latest (??덉뵬)
+         1: current > latest (?袁⑹삺揶쎛 ??筌ㅼ뮇??
     """
     current_tuple = parse_version(current)
     latest_tuple = parse_version(latest)
@@ -142,7 +183,7 @@ def compare_versions(current: str, latest: str) -> int:
 
 class UpdateChecker:
     """
-    ?먮룞 ?낅뜲?댄듃 ?뺤씤 諛??ㅼ슫濡쒕뱶 ?대옒??
+    ?癒?짗 ??낅쑓??꾨뱜 ?類ㅼ뵥 獄???쇱뒲嚥≪뮆諭??????
     """
     
     def __init__(
@@ -151,11 +192,11 @@ class UpdateChecker:
         timeout: int = 10
     ):
         """
-        珥덇린??
+        ?λ뜃由??
         
         Args:
-            check_url: 踰꾩쟾 ?뺤씤 API URL
-            timeout: ?붿껌 ??꾩븘??(珥?
+            check_url: 甕곌쑴???類ㅼ뵥 API URL
+            timeout: ?遺욧퍕 ???袁⑸툡??(??
         """
         self.check_url = check_url
         self.timeout = timeout
@@ -164,10 +205,10 @@ class UpdateChecker:
         
     def check_for_updates(self) -> Dict[str, Any]:
         """
-        ?쒕쾭?먯꽌 ?낅뜲?댄듃 ?뺤씤.
+        ??뺤쒔?癒?퐣 ??낅쑓??꾨뱜 ?類ㅼ뵥.
         
         Returns:
-            ?낅뜲?댄듃 ?뺣낫 ?뺤뀛?덈━:
+            ??낅쑓??꾨뱜 ?類ｋ궖 ?類ㅻ??댿봺:
             {
                 "update_available": bool,
                 "current_version": str,
@@ -207,8 +248,7 @@ class UpdateChecker:
                 result["is_mandatory"] = data.get("is_mandatory", False)
                 result["file_hash"] = data.get("file_hash")  # SHA256 hash for integrity verification
                 
-                # 踰꾩쟾 鍮꾧탳
-                comparison = compare_versions(self.current_version, latest_version)
+                # 甕곌쑴????쑨??                comparison = compare_versions(self.current_version, latest_version)
                 if comparison < 0:
                     if not result["download_url"]:
                         result["error"] = "Missing download_url in update metadata"
@@ -236,16 +276,16 @@ class UpdateChecker:
                 logger.warning(f"Update check failed: HTTP {response.status_code}")
                 
         except requests.exceptions.Timeout:
-            result["error"] = "요청 시간이 초과되었습니다."
+            result["error"] = "?붿껌 ?쒓컙??珥덇낵?섏뿀?듬땲??"
             logger.warning("Update check timeout")
         except requests.exceptions.ConnectionError:
-            result["error"] = "서버에 연결할 수 없습니다."
+            result["error"] = "?쒕쾭???곌껐?????놁뒿?덈떎."
             logger.warning("Update check connection error")
         except json.JSONDecodeError:
-            result["error"] = "서버 응답을 해석할 수 없습니다."
+            result["error"] = "?쒕쾭 ?묐떟???댁꽍?????놁뒿?덈떎."
             logger.warning("Update check JSON parse error")
         except Exception as e:
-            result["error"] = f"알 수 없는 오류: {str(e)[:50]}"
+            result["error"] = f"?????녿뒗 ?ㅻ쪟: {str(e)[:50]}"
             logger.exception(f"Update check error: {e}")
         
         self._update_info = result
@@ -257,14 +297,14 @@ class UpdateChecker:
         progress_callback: Optional[Callable[[int, int], None]] = None
     ) -> Optional[Path]:
         """
-        ?낅뜲?댄듃 ?뚯씪 ?ㅼ슫濡쒕뱶.
+        ??낅쑓??꾨뱜 ???뵬 ??쇱뒲嚥≪뮆諭?
         
         Args:
-            download_url: ?ㅼ슫濡쒕뱶 URL
-            progress_callback: 吏꾪뻾瑜?肄쒕갚 (downloaded_bytes, total_bytes)
+            download_url: ??쇱뒲嚥≪뮆諭?URL
+            progress_callback: 筌욊쑵六양몴??꾩뮆媛?(downloaded_bytes, total_bytes)
         
         Returns:
-            ?ㅼ슫濡쒕뱶???뚯씪 寃쎈줈 ?먮뒗 None
+            ??쇱뒲嚥≪뮆諭?????뵬 野껋럥以??癒?뮉 None
         """
         if not download_url:
             logger.error("Download URL is empty")
@@ -333,6 +373,17 @@ class UpdateChecker:
                 download_path.unlink(missing_ok=True)
                 return None
 
+            if sys.platform == "win32":
+                ok, reason = _verify_authenticode_signature(
+                    str(download_path),
+                    os.getenv("UPDATE_SIGNER_THUMBPRINTS", ""),
+                )
+                if not ok:
+                    logger.error("Installer signature verification failed: %s", reason)
+                    download_path.unlink(missing_ok=True)
+                    return None
+                logger.info("Installer Authenticode signature verified")
+
             return download_path
             
         except Exception as e:
@@ -341,16 +392,16 @@ class UpdateChecker:
     
     def install_update(self, installer_path: Path) -> bool:
         """
-        다운로드된 Inno Setup 인스톨러를 사일런트 모드로 실행하여 업데이트 설치.
+        ?ㅼ슫濡쒕뱶??Inno Setup ?몄뒪?⑤윭瑜??ъ씪?고듃 紐⑤뱶濡??ㅽ뻾?섏뿬 ?낅뜲?댄듃 ?ㅼ튂.
 
-        이 메서드가 True를 반환하면, 호출자는 반드시 앱을 종료해야 합니다.
-        인스톨러가 파일 교체 후 앱을 자동으로 재시작합니다.
+        ??硫붿꽌?쒓? True瑜?諛섑솚?섎㈃, ?몄텧?먮뒗 諛섎뱶???깆쓣 醫낅즺?댁빞 ?⑸땲??
+        ?몄뒪?⑤윭媛 ?뚯씪 援먯껜 ???깆쓣 ?먮룞?쇰줈 ?ъ떆?묓빀?덈떎.
 
         Args:
-            installer_path: 인스톨러 파일 경로
+            installer_path: ?몄뒪?⑤윭 ?뚯씪 寃쎈줈
 
         Returns:
-            성공 여부
+            ?깃났 ?щ?
         """
         if not installer_path or not installer_path.exists():
             logger.error("Installer file not found")
@@ -360,11 +411,11 @@ class UpdateChecker:
             logger.info(f"Installing update (silent): {installer_path}")
 
             if sys.platform == "win32":
-                # Inno Setup 사일런트 설치:
-                # /VERYSILENT  - UI 없이 설치
-                # /SUPPRESSMSGBOXES - 메시지 박스 숨김
-                # /CLOSEAPPLICATIONS - 실행 중인 앱 자동 종료
-                # /SP- - 설치 확인 프롬프트 건너뛰기
+                # Inno Setup ?ъ씪?고듃 ?ㅼ튂:
+                # /VERYSILENT  - UI ?놁씠 ?ㅼ튂
+                # /SUPPRESSMSGBOXES - 硫붿떆吏 諛뺤뒪 ?④?
+                # /CLOSEAPPLICATIONS - ?ㅽ뻾 以묒씤 ???먮룞 醫낅즺
+                # /SP- - ?ㅼ튂 ?뺤씤 ?꾨＼?꾪듃 嫄대꼫?곌린
                 subprocess.Popen(
                     [
                         str(installer_path),
@@ -388,8 +439,8 @@ class UpdateChecker:
 
 class UpdateCheckerAsync:
     """
-    鍮꾨룞湲??낅뜲?댄듃 ?뺤씤 ?대옒??
-    諛깃렇?쇱슫?쒖뿉???낅뜲?댄듃瑜??뺤씤?⑸땲??
+    ??쑬猷욄묾???낅쑓??꾨뱜 ?類ㅼ뵥 ?????
+    獄쏄퉫???깆뒲??뽯퓠????낅쑓??꾨뱜???類ㅼ뵥??몃빍??
     """
     
     def __init__(self):
@@ -403,40 +454,40 @@ class UpdateCheckerAsync:
         callback: Optional[Callable[[Dict[str, Any]], None]] = None
     ) -> None:
         """
-        鍮꾨룞湲곕줈 ?낅뜲?댄듃 ?뺤씤.
+        ??쑬猷욄묾怨뺤쨮 ??낅쑓??꾨뱜 ?類ㅼ뵥.
         
         Args:
-            callback: ?꾨즺 ???몄텧??肄쒕갚 ?⑥닔
+            callback: ?袁⑥┷ ???紐꾪뀱???꾩뮆媛???λ땾
         """
         self._callback = callback
         self._thread = threading.Thread(target=self._check_worker, daemon=True)
         self._thread.start()
     
     def _check_worker(self):
-        """諛깃렇?쇱슫???뚯빱."""
+        """獄쏄퉫???깆뒲?????묽."""
         self._result = self._checker.check_for_updates()
         if self._callback:
             self._callback(self._result)
     
     def get_result(self) -> Optional[Dict[str, Any]]:
-        """寃곌낵 諛섑솚."""
+        """野껉퀗??獄쏆꼹??"""
         return self._result
     
     def is_checking(self) -> bool:
-        """?뺤씤 以??щ?."""
+        """?類ㅼ뵥 餓????."""
         return self._thread is not None and self._thread.is_alive()
 
 
-# ?깃????몄뒪?댁뒪
+# ?源????紐꾨뮞??곷뮞
 _update_checker: Optional[UpdateCheckerAsync] = None
 
 
 def get_update_checker() -> UpdateCheckerAsync:
     """
-    ?꾩뿭 ?낅뜲?댄듃 泥댁빱 ?몄뒪?댁뒪 諛섑솚.
+    ?袁⑸열 ??낅쑓??꾨뱜 筌ｋ똻鍮??紐꾨뮞??곷뮞 獄쏆꼹??
     
     Returns:
-        UpdateCheckerAsync ?몄뒪?댁뒪
+        UpdateCheckerAsync ?紐꾨뮞??곷뮞
     """
     global _update_checker
     if _update_checker is None:
@@ -448,10 +499,10 @@ def check_for_updates_on_startup(
     callback: Optional[Callable[[Dict[str, Any]], None]] = None
 ) -> None:
     """
-    ?쒖옉 ???낅뜲?댄듃 ?뺤씤 (鍮꾨룞湲?.
+    ??뽰삂 ????낅쑓??꾨뱜 ?類ㅼ뵥 (??쑬猷욄묾?.
     
     Args:
-        callback: ?낅뜲?댄듃 ?뺤씤 ?꾨즺 ??肄쒕갚
-    """
+        callback: ??낅쑓??꾨뱜 ?類ㅼ뵥 ?袁⑥┷ ???꾩뮆媛?    """
     checker = get_update_checker()
     checker.check_async(callback)
+

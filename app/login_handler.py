@@ -6,6 +6,7 @@ This module handles login status monitoring thread logic, extracted from main.py
 
 import json
 import os
+import socket
 import sys
 import threading
 import time
@@ -105,7 +106,18 @@ class LoginHandler:
         """5초마다 로그인 상태 확인"""
         try:
             userId = self.app.login_data["data"]["data"]["id"]
-            userIp = self.app.login_data["data"]["ip"]
+            userIp = (
+                self.app.login_data.get("data", {}).get("ip")
+                if isinstance(self.app.login_data, dict)
+                else None
+            )
+            if not userIp:
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                        s.connect(("8.8.8.8", 80))
+                        userIp = s.getsockname()[0]
+                except Exception:
+                    userIp = "127.0.0.1"
             logger.info(f"[watch_loop] Loop started for user: {userId} at IP: {userIp}")
         except Exception as e:
             logger.warning("[watch_loop] Failed to extract login data: %s", e)
@@ -305,4 +317,3 @@ class LoginHandler:
         except Exception as e:
             logger.warning(f"[LoginHandler] Failed to get app version: {e}")
             return "unknown"
-

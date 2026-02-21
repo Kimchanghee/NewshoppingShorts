@@ -9,6 +9,7 @@ Security:
 - Rate limiting on all endpoints
 """
 import logging
+import ipaddress
 from typing import Optional, List
 from datetime import datetime, timezone
 
@@ -120,6 +121,32 @@ class LoginHistoryResponse(BaseModel):
     history: List[LoginHistoryItem]
 
 
+
+def _mask_ip(ip_value: Optional[str]) -> Optional[str]:
+    """Mask IP before returning admin API responses."""
+    if not ip_value:
+        return None
+    ip_text = str(ip_value).strip()
+    if not ip_text:
+        return None
+    try:
+        parsed = ipaddress.ip_address(ip_text)
+        if parsed.version == 4:
+            octets = ip_text.split(".")
+            if len(octets) == 4:
+                return f"{octets[0]}.{octets[1]}.{octets[2]}.xxx"
+            return "xxx.xxx.xxx.xxx"
+        hextets = parsed.exploded.split(":")
+        return ":".join(hextets[:4] + ["xxxx", "xxxx", "xxxx", "xxxx"])
+    except ValueError:
+        return "masked"
+
+
+def _to_user_response(user: User) -> UserResponse:
+    payload = UserResponse.model_validate(user).model_dump()
+    payload["last_login_ip"] = _mask_ip(payload.get("last_login_ip"))
+    return UserResponse(**payload)
+
 # ===== Endpoints =====
 
 @router.get("/users", response_model=UserListResponse)
@@ -180,7 +207,7 @@ async def list_users(
     users = query.order_by(User.created_at.desc()).offset(offset).limit(page_size).all()
 
     return UserListResponse(
-        users=[UserResponse.model_validate(u) for u in users],
+        users=[_to_user_response(u) for u in users],
         total=total
     )
 
@@ -204,7 +231,7 @@ async def get_user(
     if not user:
         raise HTTPException(status_code=404, detail="사용자를 찾을 수 없습니다.")
 
-    return UserResponse.model_validate(user)
+    return _to_user_response(user)
 
 
 @router.get("/users/{user_id}/history", response_model=LoginHistoryResponse)
@@ -228,7 +255,16 @@ async def get_user_login_history(
     ).order_by(LoginAttempt.attempted_at.desc()).limit(100).all()
 
     return LoginHistoryResponse(
-        history=[LoginHistoryItem.model_validate(h) for h in history]
+        history=[
+            LoginHistoryItem(
+                id=h.id,
+                username=h.username,
+                ip_address=_mask_ip(h.ip_address) or "masked",
+                attempted_at=h.attempted_at,
+                success=h.success,
+            )
+            for h in history
+        ]
     )
 
 

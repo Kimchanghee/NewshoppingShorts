@@ -54,6 +54,34 @@ jobs:
       shell: bash
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+    - name: Import Code Signing Certificate
+      shell: pwsh
+      run: |
+        $thumb = "${{ secrets.SIGN_CERT_THUMBPRINT }}".Trim().ToUpper()
+        if ([string]::IsNullOrWhiteSpace($thumb)) {
+          throw "SIGN_CERT_THUMBPRINT secret is required for release signing."
+        }
+
+        $pfxBase64 = "${{ secrets.SIGN_CERT_PFX_BASE64 }}"
+        $pfxPassword = "${{ secrets.SIGN_CERT_PASSWORD }}"
+        if (-not [string]::IsNullOrWhiteSpace($pfxBase64)) {
+          if ([string]::IsNullOrWhiteSpace($pfxPassword)) {
+            throw "SIGN_CERT_PASSWORD secret is required when SIGN_CERT_PFX_BASE64 is provided."
+          }
+          $pfxPath = Join-Path $env:RUNNER_TEMP "codesign.pfx"
+          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($pfxBase64))
+          $securePwd = ConvertTo-SecureString $pfxPassword -AsPlainText -Force
+          Import-PfxCertificate -FilePath $pfxPath -Password $securePwd -CertStoreLocation Cert:\\CurrentUser\\My | Out-Null
+          Remove-Item -Path $pfxPath -Force -ErrorAction SilentlyContinue
+        }
+
+        $installed = Get-ChildItem Cert:\\CurrentUser\\My | Where-Object { $_.Thumbprint -eq $thumb } | Select-Object -First 1
+        if (-not $installed) {
+          throw "Code signing cert with thumbprint $thumb not found in Cert:\\CurrentUser\\My"
+        }
+
+        "SIGN_CERT_THUMBPRINT=$thumb" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
     - name: Update version.json
       shell: python
       run: |
@@ -130,12 +158,21 @@ jobs:
         } | ConvertTo-Json
 
         try {
+          $headers = @{
+            "Content-Type" = "application/json"
+            "Authorization" = "Bearer ${{ secrets.APP_VERSION_UPDATE_API_KEY }}"
+          }
+          $hmacKey = "${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}"
+          if (-not [string]::IsNullOrWhiteSpace($hmacKey)) {
+            $hmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($hmacKey))
+            $sigBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))
+            $signature = -join ($sigBytes | ForEach-Object { $_.ToString("x2") })
+            $headers["X-Update-Signature"] = $signature
+          }
+
           Invoke-RestMethod -Uri "https://ssmaker-auth-api-1049571775048.us-central1.run.app/app/version/update" `
             -Method POST `
-            -Headers @{
-              "Content-Type" = "application/json"
-              "Authorization" = "Bearer ${{ secrets.ADMIN_API_KEY }}"
-            } `
+            -Headers $headers `
             -Body $body
           Write-Host "Server version updated successfully"
         } catch {

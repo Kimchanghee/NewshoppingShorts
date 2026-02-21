@@ -5,6 +5,8 @@ import requests
 import json
 import os
 import sys
+import ssl
+import socket
 import configparser
 import traceback
 import jwt
@@ -56,9 +58,13 @@ _DNS_BACKOFF_MAX_SECONDS = max(
     _DNS_BACKOFF_BASE_SECONDS,
     int(os.getenv("API_DNS_BACKOFF_MAX_SECONDS", "60")),
 )
+_CERT_PIN_CACHE_SECONDS = max(60, int(os.getenv("API_CERT_PIN_CACHE_SECONDS", "600")))
+_CERT_PINNING_ENABLED = os.getenv("API_CERT_PINNING", "1").strip().lower() not in {"0", "false", "off", "no"}
 _dns_failure_count = 0
 _dns_backoff_until = 0.0
 _dns_state_lock = threading.RLock()
+_pinning_checked_until = 0.0
+_pinning_last_result = True
 
 
 def _is_dns_resolution_error(exc: Exception) -> bool:
@@ -136,6 +142,102 @@ def _sanitize_user_id_for_logging(user_id: str) -> str:
     return f"{user_id[:2]}{'*' * (len(user_id) - 4)}{user_id[-2:]}"
 
 
+def _normalize_cert_pin(value: str) -> str:
+    """Normalize SHA256 certificate fingerprint string."""
+    text = (value or "").strip().lower().replace(":", "")
+    if text.startswith("sha256="):
+        text = text[7:]
+    if re.fullmatch(r"[a-f0-9]{64}", text):
+        return text
+    return ""
+
+
+def _server_cert_sha256(host: str, port: int, timeout: int = 5) -> str:
+    """Fetch leaf certificate and return SHA256 fingerprint."""
+    context = ssl.create_default_context()
+    with socket.create_connection((host, port), timeout=timeout) as sock:
+        with context.wrap_socket(sock, server_hostname=host) as tls_sock:
+            cert_der = tls_sock.getpeercert(binary_form=True)
+    return hashlib.sha256(cert_der).hexdigest().lower()
+
+
+def _load_pinned_cert_hashes() -> list[str]:
+    """
+    Load configured certificate fingerprints.
+    Priority:
+    1) API_CERT_SHA256 env (comma-separated)
+    2) local secure storage (TOFU pin)
+    """
+    env_val = os.getenv("API_CERT_SHA256", "")
+    pins: list[str] = []
+    if env_val.strip():
+        for raw in env_val.split(","):
+            normalized = _normalize_cert_pin(raw)
+            if normalized:
+                pins.append(normalized)
+        return pins
+
+    try:
+        stored = secrets_manager.get_credential("api_cert_sha256_pin") or ""
+        normalized = _normalize_cert_pin(stored)
+        if normalized:
+            pins.append(normalized)
+    except Exception:
+        pass
+    return pins
+
+
+def _store_tofu_pin(pin: str) -> None:
+    """Persist TOFU certificate pin for next runs."""
+    try:
+        secrets_manager.set_credential("api_cert_sha256_pin", pin)
+    except Exception:
+        pass
+
+
+def _check_certificate_pinning() -> bool:
+    """Validate server certificate against configured/stored pin."""
+    global _pinning_checked_until, _pinning_last_result
+
+    now = time.time()
+    if now < _pinning_checked_until:
+        return _pinning_last_result
+
+    parsed = urlparse(main_server)
+    host = parsed.hostname or ""
+    if not host or host in {"localhost", "127.0.0.1"}:
+        _pinning_last_result = True
+        _pinning_checked_until = now + _CERT_PIN_CACHE_SECONDS
+        return True
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        observed_pin = _server_cert_sha256(host, port)
+        configured_pins = _load_pinned_cert_hashes()
+
+        if configured_pins:
+            matched = observed_pin in configured_pins
+            if not matched:
+                logger.critical(
+                    "TLS pin mismatch for %s. observed=%s expected=%s",
+                    host,
+                    observed_pin[:16] + "...",
+                    ",".join(p[:16] + "..." for p in configured_pins),
+                )
+            _pinning_last_result = matched
+        else:
+            # Trust-on-first-use fallback: persist current cert fingerprint.
+            _store_tofu_pin(observed_pin)
+            logger.info("TLS pin initialized for %s (TOFU).", host)
+            _pinning_last_result = True
+    except Exception as e:
+        logger.error("TLS pinning check failed for %s: %s", host, str(e)[:160])
+        _pinning_last_result = False
+
+    _pinning_checked_until = now + _CERT_PIN_CACHE_SECONDS
+    return _pinning_last_result
+
+
 def _check_https_security() -> bool:
     """
     Check if HTTPS is enforced in production environment.
@@ -159,6 +261,17 @@ def _check_https_security() -> bool:
             "SECURITY WARNING: Using HTTP for non-localhost server. "
             "Consider using HTTPS for secure communication."
         )
+
+    if (
+        _CERT_PINNING_ENABLED
+        and main_server.startswith("https://")
+        and "localhost" not in main_server
+        and "127.0.0.1" not in main_server
+    ):
+        if not _check_certificate_pinning():
+            logger.critical("SECURITY WARNING: TLS certificate pinning verification failed.")
+            return False
+
     return True
 
 

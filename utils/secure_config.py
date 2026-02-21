@@ -10,11 +10,14 @@ import hashlib
 import json
 import os
 import sys
+from pathlib import Path
 from typing import Optional
 
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+_SECURE_CONFIG_SEED_KEY = "secure_config_seed_v1"
 
 try:
     from cryptography.fernet import Fernet, InvalidToken
@@ -41,25 +44,89 @@ def _get_windows_machine_guid() -> str:
     return ""
 
 
+def _get_seed_file_path() -> Path:
+    """Return fallback path for secure-config local seed."""
+    base = Path.home() / ".ssmaker"
+    try:
+        base.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    return base / ".secure_config.seed"
+
+
+def _decode_seed(seed_text: str) -> Optional[bytes]:
+    """Decode base64 seed text to raw bytes."""
+    if not seed_text:
+        return None
+    try:
+        raw = base64.urlsafe_b64decode(seed_text.encode("ascii"))
+        if len(raw) >= 16:
+            return raw
+    except Exception:
+        pass
+    return None
+
+
+def _load_or_create_installation_seed() -> bytes:
+    """Load persistent random seed from keyring/file, creating one if needed."""
+    # 1) Preferred: keyring-backed secret storage.
+    try:
+        from utils.secrets_manager import get_secrets_manager
+
+        manager = get_secrets_manager()
+        existing = _decode_seed((manager.get_credential(_SECURE_CONFIG_SEED_KEY) or "").strip())
+        if existing:
+            return existing
+
+        new_seed = os.urandom(32)
+        encoded = base64.urlsafe_b64encode(new_seed).decode("ascii")
+        if manager.set_credential(_SECURE_CONFIG_SEED_KEY, encoded):
+            return new_seed
+    except Exception as e:
+        logger.debug("[SecureConfig] Keyring seed unavailable: %s", e)
+
+    # 2) Fallback: local user file.
+    seed_file = _get_seed_file_path()
+    try:
+        if seed_file.exists():
+            existing = _decode_seed(seed_file.read_text(encoding="ascii").strip())
+            if existing:
+                return existing
+    except Exception as e:
+        logger.debug("[SecureConfig] Failed reading seed file: %s", e)
+
+    new_seed = os.urandom(32)
+    try:
+        encoded = base64.urlsafe_b64encode(new_seed).decode("ascii")
+        seed_file.write_text(encoded, encoding="ascii")
+    except Exception as e:
+        logger.debug("[SecureConfig] Failed writing seed file: %s", e)
+    return new_seed
+
+
 def _get_machine_key() -> bytes:
     """Generate a stable machine-bound key seed.
 
-    Uses Windows MachineGuid (unique per OS install, not user-guessable)
-    combined with COMPUTERNAME for additional entropy.
-    Falls back to legacy inputs when MachineGuid is unavailable.
+    Uses machine identifiers + installation-local random seed.
+    This prevents deriving encryption keys from predictable host metadata alone.
     """
     machine_guid = _get_windows_machine_guid()
+    installation_seed = _load_or_create_installation_seed()
 
-    machine_id_parts = [
+    machine_parts = [
         os.name,
         sys.platform,
         os.getenv("COMPUTERNAME", "default"),
     ]
     if machine_guid:
-        machine_id_parts.append(machine_guid)
+        machine_parts.append(machine_guid)
 
-    machine_string = "-".join(machine_id_parts)
-    return hashlib.sha256(machine_string.encode("utf-8")).digest()
+    digest = hashlib.sha256()
+    for part in machine_parts:
+        digest.update(str(part).encode("utf-8"))
+        digest.update(b"\x00")
+    digest.update(installation_seed)
+    return digest.digest()
 
 
 def _get_machine_key_legacy() -> bytes:

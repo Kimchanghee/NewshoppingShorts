@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass
 
 from utils.logging_config import get_logger
+from utils.secrets_manager import get_secrets_manager
 from managers.settings_manager import get_settings_manager
 
 logger = get_logger(__name__)
@@ -75,6 +76,7 @@ class YouTubeManager:
         "https://www.googleapis.com/auth/youtube.force-ssl",
     ]
     OAUTH_FLOW_TIMEOUT_SECONDS = 180
+    CLIENT_SECRETS_KEY = "youtube_client_secrets_json_v1"
 
     def __init__(self, gui=None, settings_file: str = "youtube_settings.json"):
         """
@@ -93,6 +95,7 @@ class YouTubeManager:
         self._channel: Optional[YouTubeChannel] = None
         self._last_error_message: str = ""
         self._upload_settings = AutoUploadSettings()
+        self._secrets_manager = get_secrets_manager()
 
         # Auto-upload thread
         self._upload_thread: Optional[threading.Thread] = None
@@ -310,24 +313,32 @@ class YouTubeManager:
                 if creds and creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                 else:
-                    if not client_secrets_file:
-                        client_secrets_file = self._get_client_secrets_path()
+                    oauth_config = self._load_client_secret_config_securely()
+                    if oauth_config is None:
+                        if not client_secrets_file:
+                            client_secrets_file = self._get_client_secrets_path()
 
-                    if not os.path.exists(client_secrets_file):
-                        legacy_secrets_path = self._get_legacy_client_secrets_path()
-                        if os.path.exists(legacy_secrets_path):
-                            try:
-                                client_secrets_file = self.install_client_secrets(legacy_secrets_path)
-                            except Exception as migrate_error:
-                                logger.debug(f"[YouTube] 레거시 OAuth 파일 마이그레이션 실패: {migrate_error}")
+                        if not os.path.exists(client_secrets_file):
+                            legacy_secrets_path = self._get_legacy_client_secrets_path()
+                            if os.path.exists(legacy_secrets_path):
+                                try:
+                                    client_secrets_file = self.install_client_secrets(legacy_secrets_path)
+                                except Exception as migrate_error:
+                                    logger.debug(f"[YouTube] 레거시 OAuth 파일 마이그레이션 실패: {migrate_error}")
 
-                    if not os.path.exists(client_secrets_file):
-                        logger.warning("[YouTube] OAuth client secrets file is missing.")
-                        self._last_error_message = "OAuth 클라이언트 JSON 파일을 찾을 수 없습니다."
-                        return False
+                        if not os.path.exists(client_secrets_file):
+                            logger.warning("[YouTube] OAuth client secrets file is missing.")
+                            self._last_error_message = "OAuth 클라이언트 JSON 파일을 찾을 수 없습니다."
+                            return False
 
-                    flow = InstalledAppFlow.from_client_secrets_file(
-                        client_secrets_file, self.SCOPES
+                        oauth_config = self._load_client_secret_config_from_file(client_secrets_file)
+                        if not oauth_config:
+                            self._last_error_message = "OAuth JSON 형식이 올바르지 않습니다."
+                            return False
+                        self._store_client_secret_config_securely(oauth_config)
+
+                    flow = InstalledAppFlow.from_client_config(
+                        oauth_config, self.SCOPES
                     )
                     timeout_seconds = (
                         oauth_timeout_seconds
@@ -413,6 +424,54 @@ class YouTubeManager:
         """Get old client_secrets.json location in app root."""
         return os.path.join(self._get_app_base_dir(), "client_secrets.json")
 
+    @staticmethod
+    def _is_valid_client_secret_config(config: Dict[str, Any]) -> bool:
+        """Validate minimal OAuth client JSON schema."""
+        if not isinstance(config, dict):
+            return False
+        installed = config.get("installed") or config.get("web")
+        if not isinstance(installed, dict):
+            return False
+        return bool(installed.get("client_id")) and bool(installed.get("client_secret"))
+
+    def _load_client_secret_config_from_file(self, source_path: str) -> Optional[Dict[str, Any]]:
+        """Load OAuth client config from JSON file."""
+        try:
+            with open(source_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+        except Exception as e:
+            logger.debug("[YouTube] Failed to load OAuth JSON %s: %s", source_path, e)
+            return None
+        if not self._is_valid_client_secret_config(data):
+            logger.warning("[YouTube] Invalid OAuth JSON format: %s", source_path)
+            return None
+        return data
+
+    def _store_client_secret_config_securely(self, config: Dict[str, Any]) -> bool:
+        """Store OAuth client config in secure storage."""
+        if not self._is_valid_client_secret_config(config):
+            return False
+        try:
+            payload = json.dumps(config, ensure_ascii=False)
+            return bool(self._secrets_manager.set_credential(self.CLIENT_SECRETS_KEY, payload))
+        except Exception as e:
+            logger.debug("[YouTube] Failed to store OAuth config securely: %s", e)
+            return False
+
+    def _load_client_secret_config_securely(self) -> Optional[Dict[str, Any]]:
+        """Load OAuth client config from secure storage."""
+        try:
+            payload = self._secrets_manager.get_credential(self.CLIENT_SECRETS_KEY)
+            if not payload:
+                return None
+            data = json.loads(payload)
+        except Exception as e:
+            logger.debug("[YouTube] Failed to read secure OAuth config: %s", e)
+            return None
+        if not self._is_valid_client_secret_config(data):
+            return None
+        return data
+
     def _make_path_writable(self, path: str) -> None:
         """Best-effort clear read-only attributes so updates can replace file."""
         if not path or not os.path.exists(path):
@@ -464,19 +523,25 @@ class YouTubeManager:
                 "OAuth 토큰",
             )
 
-        client_secrets_path = self._get_client_secrets_path()
-        if os.path.exists(client_secrets_path):
+        if self._load_client_secret_config_securely():
             return
 
         for legacy_path in (
+            self._get_client_secrets_path(),
             self._get_legacy_managed_client_secrets_path(),
             self._get_legacy_client_secrets_path(),
         ):
-            if self._copy_file_best_effort(
-                legacy_path,
-                client_secrets_path,
-                "OAuth client_secrets",
-            ):
+            if not os.path.exists(legacy_path):
+                continue
+            config = self._load_client_secret_config_from_file(legacy_path)
+            if not config:
+                continue
+            if self._store_client_secret_config_securely(config):
+                try:
+                    self._make_path_writable(legacy_path)
+                    os.remove(legacy_path)
+                except Exception:
+                    pass
                 break
 
     def _protect_credentials_file(self, path: str) -> None:
@@ -505,17 +570,17 @@ class YouTubeManager:
 
     def install_client_secrets(self, source_path: str) -> str:
         """
-        Copy OAuth client secrets file into protected app credentials directory.
+        Validate and store OAuth client secrets in secure storage.
 
         Args:
             source_path: User-selected source json file path.
 
         Returns:
-            Destination path used by YouTube OAuth flow.
+            Logical managed path used for compatibility.
 
         Raises:
             FileNotFoundError: source file missing.
-            OSError: copy/protection failed.
+            OSError: secure store operation failed.
         """
         if not source_path or not os.path.exists(source_path):
             raise FileNotFoundError("OAuth JSON 파일을 찾을 수 없습니다.")
@@ -530,40 +595,24 @@ class YouTubeManager:
         if not os.path.isfile(source_path):
             raise FileNotFoundError("OAuth JSON 파일 경로가 올바르지 않습니다.")
 
-        destination = self._get_client_secrets_path()
-        self._ensure_writable_dir(os.path.dirname(destination))
-
         source_abs = os.path.abspath(source_path)
-        destination_abs = os.path.abspath(destination)
+        config = self._load_client_secret_config_from_file(source_abs)
+        if not config:
+            raise OSError("OAuth JSON 형식이 올바르지 않습니다.")
 
-        if source_abs != destination_abs:
-            temp_destination = destination_abs + ".tmp"
-            self._make_path_writable(destination_abs)
-            self._make_path_writable(temp_destination)
-            if os.path.exists(temp_destination):
-                os.remove(temp_destination)
+        if not self._store_client_secret_config_securely(config):
+            raise OSError("OAuth JSON을 안전 저장소에 저장하지 못했습니다.")
 
-            try:
-                shutil.copy2(source_abs, temp_destination)
-                os.replace(temp_destination, destination_abs)
-            except PermissionError:
-                # Fallback: use timestamped file if default target is locked by another process.
-                fallback_destination = os.path.join(
-                    os.path.dirname(destination_abs),
-                    f"client_secrets_{int(time.time())}.json",
-                )
-                shutil.copy2(source_abs, fallback_destination)
-                destination_abs = fallback_destination
-                logger.warning("[YouTube] 기본 OAuth 경로 잠금으로 fallback 경로를 사용합니다: %s", destination_abs)
-            finally:
-                try:
-                    if os.path.exists(temp_destination):
-                        os.remove(temp_destination)
-                except Exception:
-                    pass
+        # Remove plaintext managed file if it exists.
+        destination_abs = os.path.abspath(self._get_client_secrets_path())
+        try:
+            if os.path.exists(destination_abs):
+                self._make_path_writable(destination_abs)
+                os.remove(destination_abs)
+        except Exception:
+            pass
 
-        self._protect_credentials_file(destination_abs)
-        logger.info(f"[YouTube] OAuth JSON 설치 완료: {destination_abs}")
+        logger.info("[YouTube] OAuth JSON securely stored (keyring/encrypted storage)")
         return destination_abs
 
     def _fetch_channel_info(self) -> None:

@@ -40,8 +40,7 @@ exe = EXE(
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
-    codesign_identity=None,
-    entitlements_file=None,
+    # Windows signing is handled by external signtool in release pipeline.
     icon="resource/app_icon.ico" if os.path.exists("resource/app_icon.ico") else None,
 )
 
