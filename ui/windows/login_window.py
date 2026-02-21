@@ -52,8 +52,7 @@ class Login(QMainWindow, Ui_LoginWindow):
             self._preload_ip()
             self._warmup_server()
         else:
-            self.showCustomMessageBox("오류", "이미 실행 중입니다.")
-            sys.exit()
+            raise RuntimeError("이미 실행 중이거나 단일 실행 포트를 사용할 수 없습니다.")
 
     def _read_app_version(self) -> str:
         """

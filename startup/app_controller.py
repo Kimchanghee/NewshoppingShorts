@@ -34,6 +34,12 @@ GITHUB_RELEASE_API_URL = os.getenv(
     "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases/latest",
 ).strip()
 
+def _env_truthy(name: str, default: bool = False) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in {"1", "true", "yes", "on"}
+
 
 def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tuple[bool, str]:
     """
@@ -386,13 +392,19 @@ class AppController:
                 "APP_SIGNER_THUMBPRINTS",
             )
             if not ok:
-                logger.error("Executable signature verification failed: %s", reason)
-                QMessageBox.critical(
-                    None,
-                    "보안 오류",
-                    "앱 서명 검증에 실패했습니다. 실행을 중단합니다.",
+                self._close_splash()
+                if _env_truthy("APP_SIGNATURE_REQUIRED", default=False):
+                    logger.error("Executable signature verification failed: %s", reason)
+                    QMessageBox.critical(
+                        None,
+                        "보안 오류",
+                        "앱 서명 검증에 실패했습니다. 실행을 중단합니다.",
+                    )
+                    sys.exit(1)
+                logger.warning(
+                    "Executable signature verification failed but APP_SIGNATURE_REQUIRED is disabled: %s",
+                    reason,
                 )
-                sys.exit(1)
         self._show_login()
 
     # ?? Splash management ??
@@ -406,11 +418,23 @@ class AppController:
 
     def _show_login(self) -> None:
         from ui.windows.login_window import Login
-        self.login_window = Login()
+        try:
+            self.login_window = Login()
+        except Exception as e:
+            self._close_splash()
+            logger.error("Failed to create login window: %s", e, exc_info=True)
+            QMessageBox.critical(
+                None,
+                "시작 오류",
+                f"로그인 화면을 열 수 없습니다:\n{e}",
+            )
+            sys.exit(1)
         self.login_window.controller = self
 
         if self.splash:
             self.login_window.window_ready.connect(self._close_splash)
+            # Fallback to avoid splash staying on top forever if ready signal is missed.
+            QtCore.QTimer.singleShot(3000, self._close_splash)
 
         self.login_window.show()
 
@@ -790,6 +814,13 @@ class AppController:
 
             if getattr(sys, "frozen", False):
                 creation_flags = self._windows_creation_flags()
+                installer_log_path = os.path.join(
+                    os.path.expanduser("~"),
+                    ".ssmaker",
+                    "logs",
+                    "installer_update.log",
+                )
+                os.makedirs(os.path.dirname(installer_log_path), exist_ok=True)
 
                 logger.info(f"Launching Inno Setup installer (silent): {installer_path}")
                 subprocess.Popen(
@@ -799,6 +830,7 @@ class AppController:
                         "/SUPPRESSMSGBOXES",
                         "/CLOSEAPPLICATIONS",
                         "/SP-",
+                        f"/LOG={installer_log_path}",
                     ],
                     creationflags=creation_flags,
                     shell=False,

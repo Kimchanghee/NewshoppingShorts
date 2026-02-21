@@ -3,6 +3,7 @@
 ;
 ; Usage:
 ;   iscc /DMyAppVersion=1.3.31 installer.iss
+;   iscc /DMyAppVersion=1.3.31 /DForceSilentReinstall=1 installer.iss
 ;
 ; Update behavior:
 ;   - AppId is a FIXED GUID shared across all versions.
@@ -12,9 +13,15 @@
 ;     to find the EXISTING install directory and overwrites files in place.
 ;   - Silent install (/VERYSILENT) never prompts for a directory; it always
 ;     uses the previously registered path.
+;   - Silent updates default to in-place overwrite (no uninstall).
+;     Set ForceSilentReinstall=1 at build time to force old-version uninstall.
 
 #ifndef MyAppVersion
-  #define MyAppVersion "1.4.14"
+  #define MyAppVersion "1.4.18"
+#endif
+
+#ifndef ForceSilentReinstall
+  #define ForceSilentReinstall 0
 #endif
 
 #define MyAppName "SSMaker"
@@ -321,11 +328,20 @@ begin
   if not ExistingInstallDetected then
     exit;
 
-  if (not IsReinstallSelected()) and (not WizardSilent) then
-    exit;
-
-  if WizardSilent and (not IsReinstallSelected()) then
-    Log('Silent update detected: forcing clean reinstall via previous uninstaller.');
+  if not IsReinstallSelected() then
+  begin
+    if WizardSilent then
+    begin
+      #if ForceSilentReinstall
+      Log('Silent update detected: forcing clean reinstall via previous uninstaller.');
+      #else
+      Log('Silent update detected: using in-place update mode (no uninstall).');
+      exit;
+      #endif
+    end
+    else
+      exit;
+  end;
 
   Ok := RunExistingUninstaller(ExitCode);
   if not Ok then
