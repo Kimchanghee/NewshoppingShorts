@@ -168,7 +168,10 @@ try {
   }
 
   # Enforce code-signing prerequisites for release artifacts.
-  $signThumb = ($env:SIGN_CERT_THUMBPRINT ?? "").Trim()
+  $signThumb = ""
+  if ($null -ne $env:SIGN_CERT_THUMBPRINT) {
+    $signThumb = $env:SIGN_CERT_THUMBPRINT.Trim()
+  }
   if ([string]::IsNullOrWhiteSpace($signThumb)) {
     throw "SIGN_CERT_THUMBPRINT is required for release builds."
   }
