@@ -395,7 +395,6 @@ try {
   $issFile = Join-Path $Root "installer.iss"
   Invoke-Native "[4/5] Compiling installer..." $iscc @(
     "/DMyAppVersion=$AppVersion",
-    "/DSignToolAvailable",
     $issFile
   )
 
@@ -403,6 +402,14 @@ try {
   if (-not (Test-Path $installerExe)) {
     throw "Installer output missing: ${installerExe}"
   }
+
+  Invoke-Native "[4.5/5] Code signing installer..." $signtool @(
+    "sign",
+    "/fd", "sha256",
+    "/t", "http://timestamp.digicert.com",
+    "/sha1", $signThumb,
+    $installerExe
+  )
 
   $installerSig = Get-AuthenticodeSignature -FilePath $installerExe
   if ($installerSig.Status -ne "Valid") {
