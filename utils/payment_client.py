@@ -6,6 +6,7 @@ Server endpoints expected:
   GET  /payments/status?payment_id=... -> {status, ...}
   POST /payments/payapp/card/register -> {success, card_id, ...}
   POST /payments/payapp/card/pay -> {success, payment_id, mul_no}
+  POST /payments/payapp/refund -> {success, message}
   POST /payments/payapp/card/delete -> {success, message}
   GET  /payments/payapp/card/list -> {success, cards: [...]}
   POST /payments/payapp/subscribe -> {success, rebill_no, payurl}
@@ -367,6 +368,33 @@ class PaymentClient:
         except requests.exceptions.RequestException as e:
             logger.error("[PaymentClient] 서버 오류: %s", e)
             raise RuntimeError("결제 서버 오류가 발생했습니다. 다시 시도해주세요.")
+
+    def refund_payment(self, user_id: str, payment_id: str, reason: str, token: str) -> dict:
+        """완료된 결제 환불 요청."""
+        payload = {
+            "user_id": user_id,
+            "payment_id": payment_id,
+            "reason": reason or "Customer requested refund",
+        }
+        try:
+            resp = requests.post(
+                f"{self.base_url}/payments/payapp/refund",
+                json=payload,
+                headers=self._auth_headers(user_id, token),
+                timeout=30,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            if not data.get("success"):
+                self._raise_business_error(data.get("message", ""), "환불 처리 실패")
+            return data
+        except requests.exceptions.HTTPError as e:
+            self._raise_http_error(e, "환불 처리 실패")
+        except requests.exceptions.Timeout:
+            raise RuntimeError("결제 서버 연결 시간 초과")
+        except requests.exceptions.RequestException as e:
+            logger.error("[PaymentClient] 서버 오류: %s", e)
+            raise RuntimeError("환불 처리 중 네트워크 오류가 발생했습니다.")
 
     def list_cards(self, user_id: str, token: str) -> dict:
         """등록된 카드 목록 조회.

@@ -12,6 +12,8 @@ Security:
 import logging
 import os
 import secrets
+import ipaddress
+import hashlib
 from typing import Optional
 from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qs
@@ -103,6 +105,10 @@ PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
 PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
 PAYAPP_SHOPNAME = os.getenv("PAYAPP_SHOPNAME", "NewshoppingShorts")
 _PAYAPP_API_URL_RAW = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
+_PAYAPP_WEBHOOK_ALLOWED_IPS_RAW = os.getenv("PAYAPP_WEBHOOK_ALLOWED_IPS", "")
+PAYAPP_WEBHOOK_ALLOWED_IPS = tuple(
+    item.strip() for item in _PAYAPP_WEBHOOK_ALLOWED_IPS_RAW.split(",") if item.strip()
+)
 # SSRF prevention: only allow known PayApp domain
 from urllib.parse import urlparse as _urlparse
 _parsed = _urlparse(_PAYAPP_API_URL_RAW)
@@ -162,6 +168,67 @@ def _parse_int_value(value: str | None) -> Optional[int]:
     if not value.isdigit():
         return None
     return int(value)
+
+
+def _is_ip_in_allowlist(ip: str, allowlist: tuple[str, ...]) -> bool:
+    """Return True when ip matches a configured IP/CIDR allowlist."""
+    if not allowlist:
+        return True
+    try:
+        client_ip = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    for entry in allowlist:
+        try:
+            if "/" in entry:
+                if client_ip in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif client_ip == ipaddress.ip_address(entry):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _assert_payapp_webhook_source(request: Request) -> None:
+    """Validate webhook source IP when allowlist is configured."""
+    if settings.ENVIRONMENT == "production" and not PAYAPP_WEBHOOK_ALLOWED_IPS:
+        logger.error("[PayApp Webhook] PAYAPP_WEBHOOK_ALLOWED_IPS is not configured in production")
+        raise HTTPException(status_code=500, detail="Webhook IP allowlist is not configured")
+    if not PAYAPP_WEBHOOK_ALLOWED_IPS:
+        return
+    client_ip = get_client_ip(request)
+    if not _is_ip_in_allowlist(client_ip, PAYAPP_WEBHOOK_ALLOWED_IPS):
+        logger.warning("[PayApp Webhook] Rejected source IP: %s", client_ip)
+        raise HTTPException(status_code=403, detail="Webhook source IP is not allowed")
+
+
+def _find_existing_pending_payment(
+    db: Session,
+    user_id: str,
+    plan_id: str,
+) -> Optional[PaymentSession]:
+    """Find an unexpired pending payment for same user+plan to prevent duplicates."""
+    now = datetime.now(timezone.utc)
+    return (
+        db.query(PaymentSession)
+        .filter(
+            PaymentSession.user_id == str(user_id),
+            PaymentSession.plan_id == plan_id,
+            PaymentSession.status == PaymentStatus.PENDING,
+            PaymentSession.expires_at.isnot(None),
+            PaymentSession.expires_at > now,
+        )
+        .order_by(PaymentSession.created_at.desc())
+        .first()
+    )
+
+
+def _build_recurring_event_key(rebill_no: str, mul_no: str) -> str:
+    if not mul_no:
+        return ""
+    digest = hashlib.sha256(f"{rebill_no}:{mul_no}".encode("utf-8")).hexdigest()[:24]
+    return f"recurring:{digest}"
 
 
 def _force_masked_card_number(value: str | None, fallback_mask: str) -> str:
@@ -306,6 +373,9 @@ async def create_payment(
     - Requires Authorization + X-User-ID headers
     - Header user must match optional body user_id
     """
+    if settings.ENVIRONMENT == "production":
+        raise HTTPException(status_code=404, detail="Not found")
+
     _validate_authenticated_user(db, str(x_user_id), authorization)
     if data.user_id is not None and str(data.user_id) != str(x_user_id):
         raise HTTPException(status_code=403, detail="User mismatch")
@@ -324,6 +394,13 @@ async def create_payment(
     if amount is None:
         raise HTTPException(status_code=400, detail=f"Invalid plan_id: {data.plan_id}")
 
+    existing_pending = _find_existing_pending_payment(db, user_id, data.plan_id)
+    if existing_pending:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Pending payment already exists: {existing_pending.payment_id}",
+        )
+
     # Create payment session in database
     session = PaymentSession(
         payment_id=payment_id,
@@ -339,7 +416,8 @@ async def create_payment(
 
     # Generate checkout URL (mock - should be real payment gateway URL)
     # ?ㅼ젣 寃곗젣 寃뚯씠?몄썾??URL濡?援먯껜 ?꾩슂 (?? ?좎뒪?섏씠癒쇱툩, 移댁뭅?ㅽ럹????
-    checkout_url = f"http://localhost:8000/static/mock_payment.html?payment_id={payment_id}&plan={data.plan_id}"
+    base_url = str(request.base_url).rstrip("/")
+    checkout_url = f"{base_url}/static/mock_payment.html?payment_id={payment_id}&plan={data.plan_id}"
 
     logger.info(f"[Payment] Session created: {payment_id}")
 
@@ -791,6 +869,14 @@ async def create_payapp_payment(
     if plan_price is None or plan_price <= 0:
         return PayAppCreateResponse(success=False, message=f"Invalid plan_id: {data.plan_id}")
 
+    existing_pending = _find_existing_pending_payment(db, user_id, data.plan_id)
+    if existing_pending:
+        return PayAppCreateResponse(
+            success=False,
+            payment_id=existing_pending.payment_id,
+            message="Pending payment already exists. Complete or cancel it before creating a new one.",
+        )
+
     good_name = PLAN_NAMES.get(data.plan_id, "Pro subscription")
     local_payment_id = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
@@ -884,12 +970,103 @@ async def create_payapp_payment(
         return PayAppCreateResponse(success=False, message="Error occurred while processing payment request.")
 
 
+@router.post("/payapp/refund")
+@limiter.limit("10/minute")
+async def refund_payapp_payment(
+    request: Request,
+    data: "RefundRequest",
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    authorization: str = Header(..., alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """Refund a completed PayApp payment owned by the authenticated user."""
+    _validate_authenticated_user(db, str(x_user_id), authorization)
+    if str(data.user_id) != str(x_user_id):
+        raise HTTPException(status_code=403, detail="User mismatch")
+
+    user_id = str(x_user_id)
+    session = (
+        db.query(PaymentSession)
+        .filter(
+            PaymentSession.payment_id == data.payment_id,
+            PaymentSession.user_id == user_id,
+        )
+        .with_for_update()
+        .first()
+    )
+    if not session:
+        raise HTTPException(status_code=404, detail="Payment not found")
+
+    if session.status == PaymentStatus.CANCELLED:
+        return {"success": True, "message": "Payment already refunded"}
+
+    if session.status != PaymentStatus.SUCCEEDED:
+        raise HTTPException(status_code=409, detail="Only succeeded payments can be refunded")
+
+    if not session.gateway_reference:
+        raise HTTPException(status_code=409, detail="Gateway reference missing for refund")
+
+    params = {
+        "cmd": "paycancel",
+        "userid": PAYAPP_USERID,
+        "linkkey": PAYAPP_LINKKEY,
+        "mul_no": session.gateway_reference,
+        "cancelmemo": (data.reason or "Customer requested refund")[:100],
+        "partcancel": "0",
+    }
+
+    try:
+        result = _call_payapp_api(params)
+        if result.get("state") != "1":
+            error_msg = result.get("errorMessage", "Refund failed")
+            error_code = result.get("errorCode", "")
+            record_payment_error(
+                db=db,
+                error_type=ErrorType.GATEWAY_ERROR,
+                error_code=error_code,
+                error_message=error_msg,
+                user_id=user_id,
+                payment_id=data.payment_id,
+                plan_id=session.plan_id,
+                endpoint="payapp_refund",
+            )
+            return {"success": False, "message": error_msg}
+
+        if _can_transition_payment_status(session.status, PaymentStatus.CANCELLED):
+            prev = session.status.value if session.status else None
+            session.status = PaymentStatus.CANCELLED
+            _record_status_change(
+                db,
+                session.payment_id,
+                prev,
+                PaymentStatus.CANCELLED.value,
+                "payapp_refund",
+            )
+            db.commit()
+
+        return {"success": True, "message": "Refund completed"}
+    except Exception as e:
+        db.rollback()
+        logger.error("[PayApp Refund] Failed: %s", e, exc_info=True)
+        record_payment_error(
+            db=db,
+            error_type=ErrorType.SYSTEM_ERROR,
+            error_message=str(e)[:200],
+            user_id=user_id,
+            payment_id=data.payment_id,
+            plan_id=session.plan_id,
+            endpoint="payapp_refund",
+        )
+        return {"success": False, "message": "Refund processing failed"}
+
+
 def _handle_recurring_webhook(
     db: Session,
     rebill_no: str,
     pay_state: str,
     price: object,
     user_id: str,
+    mul_no: str = "",
 ) -> PlainTextResponse:
     """
     Handle PayApp recurring webhook events that do not include var1/local payment id.
@@ -931,9 +1108,35 @@ def _handle_recurring_webhook(
         return PlainTextResponse("SUCCESS")
 
     if pay_state == _PAYAPP_SUCCESS_STATE:
+        event_key = _build_recurring_event_key(rebill_no, mul_no)
+        if event_key:
+            existing = (
+                db.query(PaymentStatusHistory)
+                .filter(
+                    PaymentStatusHistory.payment_id == event_key,
+                    PaymentStatusHistory.source == "payapp_recurring_webhook",
+                )
+                .first()
+            )
+            if existing:
+                logger.info(
+                    "[PayApp Webhook] duplicate recurring event ignored: rebill_no=%s mul_no=%s",
+                    rebill_no,
+                    mul_no,
+                )
+                return PlainTextResponse("SUCCESS")
+
         if subscription.status != SubscriptionStatus.ACTIVE:
             subscription.status = SubscriptionStatus.ACTIVE
-            db.commit()
+        if event_key:
+            _record_status_change(
+                db,
+                event_key,
+                None,
+                PaymentStatus.SUCCEEDED.value,
+                "payapp_recurring_webhook",
+            )
+        db.commit()
         _activate_subscription(db, str(subscription.user_id), str(subscription.plan_id))
         logger.info(
             "[PayApp Webhook] recurring payment succeeded: rebill_no=%s user=%s plan=%s",
@@ -946,7 +1149,16 @@ def _handle_recurring_webhook(
     if pay_state in _PAYAPP_CANCEL_STATES:
         if subscription.status != SubscriptionStatus.CANCELLED:
             subscription.status = SubscriptionStatus.CANCELLED
-            db.commit()
+        if mul_no:
+            cancel_event_key = _build_recurring_event_key(rebill_no, mul_no)
+            _record_status_change(
+                db,
+                cancel_event_key,
+                None,
+                PaymentStatus.CANCELLED.value,
+                "payapp_recurring_webhook",
+            )
+        db.commit()
         # Record cancellation for statistics
         if subscription.user_id:
             update_user_payment_stats(db, str(subscription.user_id), success=False)
@@ -974,6 +1186,7 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
     Response: "SUCCESS" (plain text) per PayApp requirement.
     """
     try:
+        _assert_payapp_webhook_source(request)
         form_data = await request.form()
         pay_state = str(form_data.get("pay_state", "")).strip()
         mul_no = str(form_data.get("mul_no", "")).strip()
@@ -1009,6 +1222,7 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
                     pay_state=pay_state,
                     price=price,
                     user_id=user_id,
+                    mul_no=mul_no,
                 )
             logger.warning("[PayApp Webhook] Missing var1(local payment id)")
             return PlainTextResponse("FAIL")
@@ -1108,6 +1322,9 @@ async def payapp_webhook(request: Request, db: Session = Depends(get_db)):
 
         return PlainTextResponse("SUCCESS")
 
+    except HTTPException as e:
+        logger.warning("[PayApp Webhook] Rejected: %s", e.detail)
+        return PlainTextResponse("FAIL")
     except Exception as e:
         logger.error(f"[PayApp Webhook] Error: {e}", exc_info=True)
         return PlainTextResponse("FAIL")
@@ -1245,6 +1462,13 @@ class SubscribeManageRequest(BaseModel):
     """Recurring subscription management request (cancel/stop/start)."""
     user_id: str
     rebill_no: str  # PayApp recurring subscription id
+
+
+class RefundRequest(BaseModel):
+    """Refund request for an authenticated user's payment."""
+    user_id: str
+    payment_id: str
+    reason: str = Field(default="Customer requested refund", max_length=200)
 
 
 # --- Helper: feedbackurl ?앹꽦 ---
@@ -1450,6 +1674,14 @@ async def pay_with_card(
     plan_price = PLAN_PRICES.get(data.plan_id)
     if plan_price is None or plan_price <= 0:
         return {"success": False, "message": f"?좏슚?섏? ?딆? ?뚮옖?낅땲?? {data.plan_id}"}
+
+    existing_pending = _find_existing_pending_payment(db, user_id, data.plan_id)
+    if existing_pending:
+        return {
+            "success": False,
+            "payment_id": existing_pending.payment_id,
+            "message": "Pending payment already exists. Complete or cancel it before retrying.",
+        }
 
     good_name = f"?쇳븨?륂뤌硫붿씠而?{PLAN_NAMES.get(data.plan_id, '?꾨줈 援щ룆')}"
 

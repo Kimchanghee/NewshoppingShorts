@@ -48,6 +48,17 @@ def has_encryption_key() -> bool:
     return _get_fernet() is not None
 
 
+def validate_billing_crypto_startup(require_key: bool = False) -> None:
+    """
+    Validate billing crypto configuration during server startup.
+
+    Raises RuntimeError when Fernet key format is invalid or missing while required.
+    """
+    fernet = _get_fernet()
+    if require_key and fernet is None:
+        raise RuntimeError("BILLING_KEY_ENCRYPTION_KEY is required")
+
+
 def encrypt_billing_key(value: str) -> str:
     """
     Encrypt billing key for DB storage.

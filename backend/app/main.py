@@ -5,6 +5,7 @@ import re
 import hashlib
 import hmac
 import json
+import asyncio
 from uuid import uuid4
 from fastapi import FastAPI, Request, Header, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
@@ -21,6 +22,8 @@ from app.routers import auth, registration, admin, subscription, payment, logs
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
 from app.database import init_db
+from app.utils.billing_crypto import validate_billing_crypto_startup
+from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
 
 # 로깅 설정 - 모든 로그를 터미널에 출력
 logging.basicConfig(
@@ -36,6 +39,8 @@ logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 settings = get_settings()
 _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+_auth_cleanup_stop_event: Optional[asyncio.Event] = None
+_auth_cleanup_task: Optional[asyncio.Task] = None
 
 # Disable docs and OpenAPI schema in production
 _is_prod = settings.ENVIRONMENT == "production"
@@ -133,8 +138,35 @@ async def startup_event():
         run_auto_migration()
         # 3. Ensure settings table for persistent app metadata.
         _ensure_system_settings_table()
+        # 4. Validate billing key crypto at startup (fail fast on bad Fernet key).
+        validate_billing_crypto_startup(
+            require_key=(settings.ENVIRONMENT == "production")
+        )
+        # 5. Run one cleanup at startup + periodic cleanup loop.
+        cleanup_auth_records_once()
+        global _auth_cleanup_task
+        global _auth_cleanup_stop_event
+        if _auth_cleanup_stop_event is None:
+            _auth_cleanup_stop_event = asyncio.Event()
+        if _auth_cleanup_task is None or _auth_cleanup_task.done():
+            _auth_cleanup_stop_event.clear()
+            _auth_cleanup_task = asyncio.create_task(run_auth_cleanup_loop(_auth_cleanup_stop_event))
     except Exception as e:
         logger.error(f"Startup error during DB init/migration: {e}", exc_info=True)
+        raise
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Gracefully stop background maintenance tasks."""
+    global _auth_cleanup_task
+    if _auth_cleanup_stop_event is not None:
+        _auth_cleanup_stop_event.set()
+    if _auth_cleanup_task and not _auth_cleanup_task.done():
+        try:
+            await asyncio.wait_for(_auth_cleanup_task, timeout=5)
+        except Exception:
+            _auth_cleanup_task.cancel()
 
 
 # Register rate limiter with app state
@@ -429,7 +461,7 @@ async def health():
 
 # ===== Auto Update API =====
 # 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.0") or "1.4.0").strip()
+_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.16") or "1.4.16").strip()
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
     "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v"
@@ -443,7 +475,7 @@ APP_VERSION_INFO = {
     "version": _DEFAULT_APP_VERSION,
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.4.0 대형 업데이트
+    "release_notes": """### v1.4.16 대형 업데이트
 - 샤오홍슈(小红书) 영상 링크 다운로드 공식 지원 추가
 - 도우인/틱톡/샤오홍슈 플랫폼 자동 감지 라우터 도입
 - 다운로드 모듈 구조 정리 (platforms 분리)

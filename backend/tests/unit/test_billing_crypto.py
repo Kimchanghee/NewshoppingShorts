@@ -54,3 +54,13 @@ def test_encrypt_requires_key(monkeypatch):
 
     with pytest.raises(RuntimeError):
         billing_crypto.encrypt_billing_key("encBill_token_123")
+
+
+def test_validate_startup_requires_key(monkeypatch):
+    _set_required_env(monkeypatch)
+    monkeypatch.delenv("BILLING_KEY_ENCRYPTION_KEY", raising=False)
+    get_settings.cache_clear()
+    billing_crypto = _reload_crypto_module()
+
+    with pytest.raises(RuntimeError):
+        billing_crypto.validate_billing_crypto_startup(require_key=True)

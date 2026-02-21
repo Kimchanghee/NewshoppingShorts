@@ -15,12 +15,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.models.user import User, UserType
 from app.models.billing import RecurringSubscription, SubscriptionStatus
 from app.utils.subscription_utils import _utcnow, _ensure_aware
+from app.config.constants import FREE_TRIAL_WORK_COUNT
 
 logger = logging.getLogger(__name__)
 
 
 # 무료 사용자 기본 작업 한도
-FREE_USER_WORK_LIMIT = 5
+FREE_USER_WORK_LIMIT = FREE_TRIAL_WORK_COUNT
 
 
 def check_subscription_expiry(user: User) -> tuple[bool, int]:

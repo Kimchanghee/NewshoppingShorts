@@ -28,6 +28,11 @@ from app.models.user import User, UserType, ProgramType
 from app.models.session import SessionModel
 from app.utils.jwt_handler import create_access_token
 from app.utils.subscription_utils import get_trial_cycle_start
+from app.config.constants import (
+    EARLY_BIRD_WORK_COUNT,
+    FREE_TRIAL_WORK_COUNT as BASE_FREE_TRIAL_WORK_COUNT,
+    DEFAULT_TRIAL_DAYS,
+)
 from app.schemas.registration import (
     RegistrationRequestCreate,
     RegistrationRequestResponse,
@@ -42,9 +47,7 @@ from app.schemas.registration import (
 # Users registered on/before 2026-02-08 23:59:59 KST get 5 free uses.
 # Users registered after that get 2 free uses.
 EARLY_BIRD_CUTOFF_KST = datetime(2026, 2, 8, 23, 59, 59)
-EARLY_BIRD_WORK_COUNT = 5
-DEFAULT_TRIAL_WORK_COUNT = 5
-DEFAULT_TRIAL_DAYS = 365
+DEFAULT_TRIAL_WORK_COUNT = BASE_FREE_TRIAL_WORK_COUNT
 
 
 def get_free_trial_work_count() -> int:
@@ -536,4 +539,3 @@ async def check_registration_status(
             else None,
         },
     )
-

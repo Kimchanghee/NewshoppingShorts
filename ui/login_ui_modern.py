@@ -278,7 +278,7 @@ class ModernLoginUi:
         self.rememberCheckbox = QCheckBox(self.rightFrame)
         self.rememberCheckbox.setGeometry(QtCore.QRect(50, 335, 200, 25))
         self.rememberCheckbox.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.rememberCheckbox.setText("아이디/비밀번호 저장")
+        self.rememberCheckbox.setText("아이디 저장")
         self.rememberCheckbox.setStyleSheet(f"""
             QCheckBox {{
                 color: {login_color('text_secondary')};

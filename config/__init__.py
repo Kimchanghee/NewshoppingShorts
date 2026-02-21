@@ -1,8 +1,26 @@
-﻿import os
+﻿import json
+import os
 from pathlib import Path
 from typing import Dict
 
 # API keys
+
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_VERSION_FILE = _PROJECT_ROOT / "version.json"
+
+
+def _read_app_version(default: str = "0.0.0") -> str:
+    try:
+        with _VERSION_FILE.open("r", encoding="utf-8") as f:
+            payload = json.load(f)
+        version = str(payload.get("version", "")).strip()
+        return version or default
+    except Exception:
+        return default
+
+
+APP_VERSION = _read_app_version("0.0.0")
+
 
 def _load_api_keys() -> Dict[str, str]:
     keys: Dict[str, str] = {}
@@ -32,12 +50,14 @@ def _load_api_keys() -> Dict[str, str]:
         keys["api_1"] = gemini_key
         try:
             from utils.secrets_manager import SecretsManager
+
             SecretsManager.store_api_key("gemini_api_1", gemini_key)
             # Keep legacy alias for older code paths.
             SecretsManager.store_api_key("gemini", gemini_key)
         except Exception:
             pass
     return keys
+
 
 GEMINI_API_KEYS = _load_api_keys()
 
@@ -46,7 +66,7 @@ GEMINI_API_KEYS = _load_api_keys()
 # gemini-2.5-flash-preview-tts: Low-latency TTS
 # gemini-2.5-pro-preview-tts: High-quality TTS
 GEMINI_VIDEO_MODEL = "gemini-2.0-flash"  # Fast multimodal for video analysis
-GEMINI_TEXT_MODEL = "gemini-2.0-flash"   # Fast text generation
+GEMINI_TEXT_MODEL = "gemini-2.0-flash"  # Fast text generation
 GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"  # TTS with 30 HD voices
 GEMINI_THINKING_LEVEL = "low"
 GEMINI_MEDIA_RESOLUTION = "media_resolution_low"
@@ -79,6 +99,7 @@ CHECKOUT_POLL_MAX_TRIES = int(os.getenv("CHECKOUT_POLL_MAX_TRIES", "20"))
 from config.voice_profiles import VOICE_PROFILES, DEFAULT_MULTI_VOICE_PRESETS
 
 __all__ = [
+    "APP_VERSION",
     "GEMINI_API_KEYS",
     "GEMINI_VIDEO_MODEL",
     "GEMINI_TEXT_MODEL",

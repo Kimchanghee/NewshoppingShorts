@@ -38,13 +38,13 @@ class LoginResponse(BaseModel):
 class LogoutRequest(BaseModel):
     """Logout request with validated inputs"""
     id: str = Field(..., min_length=1, max_length=50, description="User ID")
-    key: str = Field(..., min_length=10, max_length=1024, description="JWT token")
+    key: str = Field("", max_length=1024, description="JWT token (legacy body field)")
 
 
 class CheckRequest(BaseModel):
     """Session check request with validated inputs"""
     id: str = Field(..., min_length=1, max_length=50, description="User ID")
-    key: str = Field(..., min_length=10, max_length=1024, description="JWT token")
+    key: str = Field("", max_length=1024, description="JWT token (legacy body field)")
     ip: str = Field(..., max_length=45, description="Client IP (legacy)")
     current_task: Optional[str] = Field(None, max_length=200, description="Current task status")
     app_version: Optional[str] = Field(None, max_length=20, description="Client app version")
@@ -53,7 +53,7 @@ class CheckRequest(BaseModel):
 class UseWorkRequest(BaseModel):
     """Work usage request."""
     user_id: str = Field(..., min_length=1, max_length=50, description="User ID")
-    token: str = Field(..., min_length=10, max_length=1024, description="JWT token")
+    token: str = Field("", max_length=1024, description="JWT token (legacy body field)")
 
 
 class UseWorkResponse(BaseModel):
@@ -71,3 +71,19 @@ class CheckWorkResponse(BaseModel):
     work_count: int  # -1 = unlimited
     work_used: int
     remaining: int  # -1 = unlimited
+
+
+class ChangePasswordRequest(BaseModel):
+    """Password change request for authenticated users."""
+    user_id: str = Field(..., min_length=1, max_length=50, description="User ID")
+    current_password: str = Field(..., min_length=8, max_length=128)
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, v: str) -> str:
+        if not re.search(r"[a-zA-Z]", v):
+            raise ValueError("New password must include at least one letter")
+        if not re.search(r"[0-9]", v):
+            raise ValueError("New password must include at least one digit")
+        return v

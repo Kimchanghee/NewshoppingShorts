@@ -5,7 +5,7 @@ import re
 import logging
 from typing import Optional, List
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Request, Header, HTTPException
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
@@ -20,6 +20,7 @@ from app.schemas.auth import (
     UseWorkRequest,
     UseWorkResponse,
     CheckWorkResponse,
+    ChangePasswordRequest,
 )
 from app.services.auth_service import AuthService
 from app.models.user import User
@@ -128,6 +129,16 @@ limiter = Limiter(key_func=get_client_ip)
 router = APIRouter(prefix="/user", tags=["auth"])
 
 
+def _resolve_token(
+    authorization: Optional[str],
+    body_token: str,
+) -> str:
+    """Prefer Bearer token from header, fallback to legacy body token."""
+    if authorization and authorization.startswith("Bearer "):
+        return authorization[7:].strip()
+    return (body_token or "").strip()
+
+
 # Rate limit exceeded exception handler
 async def rate_limit_exceeded_handler(
     request: Request, exc: RateLimitExceeded
@@ -168,25 +179,72 @@ async def login(request: Request, data: LoginRequest, db: Session = Depends(get_
 
 @router.post("/logout/god")
 @limiter.limit("30/minute")
-async def logout(request: Request, data: LogoutRequest, db: Session = Depends(get_db)):
+async def logout(
+    request: Request,
+    data: LogoutRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
     """Logout endpoint with rate limiting"""
+    token = _resolve_token(authorization, data.key)
     service = AuthService(db)
-    result = await service.logout(user_id=data.id, token=data.key)
+    result = await service.logout(user_id=data.id, token=token)
     return {"status": result}
 
 
 @router.post("/login/god/check")
 @limiter.limit("120/minute")
 async def check_session(
-    request: Request, data: CheckRequest, db: Session = Depends(get_db)
+    request: Request,
+    data: CheckRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
 ):
     """Session check endpoint with rate limiting - called every 5 seconds"""
     client_ip = get_client_ip(request)
+    token = _resolve_token(authorization, data.key)
     service = AuthService(db)
     return await service.check_session(
-        user_id=data.id, token=data.key, ip_address=client_ip,
+        user_id=data.id, token=token, ip_address=client_ip,
         current_task=data.current_task, app_version=data.app_version
     )
+
+
+@router.post("/change-password")
+@limiter.limit("10/hour")
+async def change_password(
+    request: Request,
+    data: ChangePasswordRequest,
+    x_user_id: str = Header(..., alias="X-User-ID"),
+    authorization: str = Header(..., alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """Change password for authenticated user."""
+    if str(data.user_id) != str(x_user_id):
+        raise HTTPException(status_code=403, detail="User mismatch")
+
+    token = _resolve_token(authorization, "")
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing token")
+
+    service = AuthService(db)
+    session_check = await service.check_session(
+        user_id=str(x_user_id),
+        token=token,
+        ip_address=get_client_ip(request),
+    )
+    if session_check.get("status") is not True:
+        raise HTTPException(status_code=401, detail="Session expired or invalid")
+
+    result = await service.change_password(
+        user_id=str(x_user_id),
+        current_password=data.current_password,
+        new_password=data.new_password,
+    )
+    if not result.get("success"):
+        raise HTTPException(status_code=400, detail=result.get("message", "Password change failed"))
+
+    return {"success": True}
 
 
 @router.get("/check-username/{username}")
@@ -254,24 +312,32 @@ async def check_username(
 @router.post("/work/check", response_model=CheckWorkResponse)
 @limiter.limit("60/minute")
 async def check_work(
-    request: Request, data: UseWorkRequest, db: Session = Depends(get_db)
+    request: Request,
+    data: UseWorkRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
 ):
     """
     Check if user can perform work (has remaining work count).
     작업 가능 여부 확인 (잔여 작업 횟수 확인)
     """
+    token = _resolve_token(authorization, data.token)
     service = AuthService(db)
-    return await service.check_work_available(user_id=data.user_id, token=data.token)
+    return await service.check_work_available(user_id=data.user_id, token=token)
 
 
 @router.post("/work/use", response_model=UseWorkResponse)
 @limiter.limit("60/minute")
 async def use_work(
-    request: Request, data: UseWorkRequest, db: Session = Depends(get_db)
+    request: Request,
+    data: UseWorkRequest,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
 ):
     """
     Increment work_used after successful work completion.
     작업 완료 후 사용 횟수 증가
     """
+    token = _resolve_token(authorization, data.token)
     service = AuthService(db)
-    return await service.use_work(user_id=data.user_id, token=data.token)
+    return await service.use_work(user_id=data.user_id, token=token)

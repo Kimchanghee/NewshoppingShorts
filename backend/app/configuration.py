@@ -1,9 +1,9 @@
-import os
 import logging
 from pydantic_settings import BaseSettings
-from pydantic import field_validator
+from pydantic import field_validator, model_validator
 from functools import lru_cache
 from typing import Union
+from cryptography.fernet import Fernet
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +49,10 @@ class Settings(BaseSettings):
     # backward compatibility with older deployments.
     SESSION_STALE_SECONDS: int = 30
     SESSION_STALE_MINUTES: int = 2
+    ENFORCE_SESSION_IP_BINDING: bool = False
+    SESSION_RETENTION_DAYS: int = 7
+    LOGIN_ATTEMPT_RETENTION_DAYS: int = 30
+    MAINTENANCE_TASK_INTERVAL_MINUTES: int = 60
 
     # API Key for client authentication
     SSMAKER_API_KEY: str = ""
@@ -59,16 +63,8 @@ class Settings(BaseSettings):
 
     @field_validator("ADMIN_API_KEY")
     @classmethod
-    def validate_admin_api_key(cls, v, info):
-        """Admin API key validation - required in production"""
-        env = (
-            (info.data.get("ENVIRONMENT") if info.data else None)
-            or os.getenv("ENVIRONMENT", "development")
-        )
-        if env == "production" and (not v or len(v) < 32):
-            raise ValueError(
-                "ADMIN_API_KEY must be at least 32 characters in production"
-            )
+    def validate_admin_api_key(cls, v):
+        """Normalize API key value."""
         return v
 
     # Dedicated key for CI/CD app-version metadata updates.
@@ -77,15 +73,8 @@ class Settings(BaseSettings):
 
     @field_validator("APP_VERSION_UPDATE_API_KEY")
     @classmethod
-    def validate_update_api_key(cls, v, info):
-        env = (
-            (info.data.get("ENVIRONMENT") if info.data else None)
-            or os.getenv("ENVIRONMENT", "development")
-        )
-        if env == "production" and (not v or len(v) < 32):
-            raise ValueError(
-                "APP_VERSION_UPDATE_API_KEY must be at least 32 characters in production"
-            )
+    def validate_update_api_key(cls, v):
+        """Normalize update API key value."""
         return v
 
     # Optional HMAC key for update metadata payload signing.
@@ -98,17 +87,16 @@ class Settings(BaseSettings):
 
     @field_validator("BILLING_KEY_ENCRYPTION_KEY")
     @classmethod
-    def validate_billing_key_encryption_key(cls, v, info):
-        """Billing key encryption key is mandatory in production."""
-        env = (
-            (info.data.get("ENVIRONMENT") if info.data else None)
-            or os.getenv("ENVIRONMENT", "development")
-        )
-        if env == "production" and not v:
-            raise ValueError(
-                "BILLING_KEY_ENCRYPTION_KEY is required in production"
-            )
-        return v
+    def validate_billing_key_encryption_key(cls, v):
+        """Validate Fernet key format when provided."""
+        key = (v or "").strip()
+        if not key:
+            return ""
+        try:
+            Fernet(key.encode("utf-8"))
+        except Exception as exc:
+            raise ValueError("BILLING_KEY_ENCRYPTION_KEY must be a valid Fernet key") from exc
+        return key
 
     # Environment
     ENVIRONMENT: str = "development"
@@ -134,6 +122,27 @@ class Settings(BaseSettings):
             # Comma-separated list
             return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
+
+    @model_validator(mode="after")
+    def validate_production_requirements(self):
+        env = (self.ENVIRONMENT or "development").lower().strip()
+        if env != "production":
+            return self
+
+        admin_key = (self.ADMIN_API_KEY or "").strip()
+        if len(admin_key) < 32:
+            raise ValueError("ADMIN_API_KEY must be at least 32 characters in production")
+
+        update_key = (self.APP_VERSION_UPDATE_API_KEY or "").strip()
+        if len(update_key) < 32:
+            raise ValueError(
+                "APP_VERSION_UPDATE_API_KEY must be at least 32 characters in production"
+            )
+
+        if not (self.BILLING_KEY_ENCRYPTION_KEY or "").strip():
+            raise ValueError("BILLING_KEY_ENCRYPTION_KEY is required in production")
+
+        return self
 
     class Config:
         env_file = ".env"

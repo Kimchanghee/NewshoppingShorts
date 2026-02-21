@@ -7,12 +7,13 @@ from sqlalchemy import func, update
 from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
-from app.utils.password import verify_password, get_dummy_hash
+from app.utils.password import verify_password, get_dummy_hash, hash_password
 from app.utils.subscription_utils import (
     is_subscription_active,
     get_trial_cycle_start,
     is_new_trial_cycle,
 )
+from app.config.constants import FREE_TRIAL_WORK_COUNT
 from app.utils.jwt_handler import create_access_token, decode_access_token
 from app.configuration import get_settings
 
@@ -350,6 +351,43 @@ class AuthService:
             logger.exception(f"Logout failed - unexpected error")
             return "error"
 
+    async def change_password(
+        self,
+        user_id: str,
+        current_password: str,
+        new_password: str,
+    ) -> Dict[str, Any]:
+        """Change password for authenticated user and revoke active sessions."""
+        try:
+            user = self.db.query(User).filter(User.id == int(user_id)).first()
+            if not user or not user.is_active:
+                return {"success": False, "message": "Invalid user"}
+
+            if not verify_password(current_password, user.password_hash):
+                return {"success": False, "message": "Current password is incorrect"}
+
+            if current_password == new_password:
+                return {"success": False, "message": "New password must be different"}
+
+            user.password_hash = hash_password(new_password)
+
+            (
+                self.db.query(SessionModel)
+                .filter(
+                    SessionModel.user_id == user.id,
+                    SessionModel.is_active == True,
+                )
+                .update({"is_active": False}, synchronize_session=False)
+            )
+
+            self.db.commit()
+            logger.info("Password changed: user_id=%s", user.id)
+            return {"success": True}
+        except Exception:
+            self.db.rollback()
+            logger.exception("Password change failed")
+            return {"success": False, "message": "Password change failed"}
+
     async def check_session(
         self, user_id: str, token: str, ip_address: str,
         current_task: Optional[str] = None, app_version: Optional[str] = None
@@ -369,8 +407,7 @@ class AuthService:
                 return {"status": "EU003"}
 
             # IP mismatch check
-            if token_ip != ip_address:
-                # Security: Hash IPs in logs for privacy
+            if settings.ENFORCE_SESSION_IP_BINDING and token_ip != ip_address:
                 logger.warning(
                     f"Session IP mismatch: token_ip_hash={_hash_ip(token_ip)}, request_ip_hash={_hash_ip(ip_address)}"
                 )
@@ -509,8 +546,8 @@ class AuthService:
             user.work_used = 0
             # Reset monthly quota to 5 (as per policy update)
             # 정책 업데이트: 매달 5회 제공
-            if user.work_count < 5:
-                user.work_count = 5
+            if user.work_count < FREE_TRIAL_WORK_COUNT:
+                user.work_count = FREE_TRIAL_WORK_COUNT
             user.trial_cycle_started_at = current_cycle_start
             changed = True
             logger.info(f"Trial monthly quota reset applied: user_id={user.id}")

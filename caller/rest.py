@@ -630,10 +630,14 @@ def logOut(**data) -> str:
         pass
 
     body = {"id": user_id, "key": logout_token}
+    headers = {"Authorization": f"Bearer {logout_token}"}
 
     try:
         response = _secure_session.post(
-            f"{main_server}/user/logout/god", json=body, timeout=60
+            f"{main_server}/user/logout/god",
+            json=body,
+            headers=headers,
+            timeout=60,
         )
         response.raise_for_status()
         loginObject = json.loads(response.text)
@@ -689,11 +693,13 @@ def cleanup_local_session() -> bool:
             return False
 
         body = {"id": token_user_id, "key": stored_token}
+        headers = {"Authorization": f"Bearer {stored_token}"}
         status_text = "error"
         try:
             response = _secure_session.post(
                 f"{main_server}/user/logout/god",
                 json=body,
+                headers=headers,
                 timeout=(3, 10),
             )
             response.raise_for_status()
@@ -755,6 +761,7 @@ def loginCheck(**data) -> Dict[str, Any]:
         "current_task": data.get("current_task"),
         "app_version": data.get("app_version")
     }
+    headers = {"Authorization": f"Bearer {stored_token}"}
 
     if _is_dns_backoff_active():
         return {
@@ -766,7 +773,10 @@ def loginCheck(**data) -> Dict[str, Any]:
 
     try:
         response = _secure_session.post(
-            f"{main_server}/user/login/god/check", json=body, timeout=60
+            f"{main_server}/user/login/god/check",
+            json=body,
+            headers=headers,
+            timeout=60,
         )
         _reset_dns_failure_state()
         response.raise_for_status()
@@ -1035,6 +1045,7 @@ def checkWorkAvailable(user_id: str) -> Dict[str, Any]:
         }
 
     body = {"user_id": str(user_id), "token": stored_token}
+    headers = {"Authorization": f"Bearer {stored_token}"}
 
     if _is_dns_backoff_active():
         return {
@@ -1047,7 +1058,10 @@ def checkWorkAvailable(user_id: str) -> Dict[str, Any]:
 
     try:
         response = _secure_session.post(
-            f"{main_server}/user/work/check", json=body, timeout=10
+            f"{main_server}/user/work/check",
+            json=body,
+            headers=headers,
+            timeout=10,
         )
         _reset_dns_failure_state()
         response.raise_for_status()
@@ -1159,10 +1173,14 @@ def useWork(user_id: str) -> Dict[str, Any]:
         }
 
     body = {"user_id": str(user_id), "token": stored_token}
+    headers = {"Authorization": f"Bearer {stored_token}"}
 
     try:
         response = _secure_session.post(
-            f"{main_server}/user/work/use", json=body, timeout=10
+            f"{main_server}/user/work/use",
+            json=body,
+            headers=headers,
+            timeout=10,
         )
         response.raise_for_status()
         result = response.json()

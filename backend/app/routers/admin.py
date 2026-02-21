@@ -26,6 +26,7 @@ from app.models.user import User, UserType, ProgramType
 from app.models.login_attempt import LoginAttempt
 from app.utils.subscription_utils import calculate_subscription_expiry
 from app.services.auth_service import AuthService
+from app.config.constants import FREE_TRIAL_WORK_COUNT
 
 
 logger = logging.getLogger(__name__)
@@ -407,7 +408,7 @@ async def revoke_subscription(
 
         user.user_type = UserType.TRIAL
         user.subscription_expires_at = None
-        user.work_count = 5  # 기본 무료 작업 횟수
+        user.work_count = FREE_TRIAL_WORK_COUNT
         user.work_used = 0
         db.commit()
 
@@ -487,7 +488,7 @@ async def reduce_subscription(
             # Reduction makes subscription expired → revoke to trial
             user.user_type = UserType.TRIAL
             user.subscription_expires_at = None
-            user.work_count = 5
+            user.work_count = FREE_TRIAL_WORK_COUNT
             user.work_used = 0
             db.commit()
 
