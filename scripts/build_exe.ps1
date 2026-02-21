@@ -412,8 +412,16 @@ try {
   )
 
   $installerSig = Get-AuthenticodeSignature -FilePath $installerExe
+  $signedThumb = ""
+  if ($installerSig.SignerCertificate -and $installerSig.SignerCertificate.Thumbprint) {
+    $signedThumb = $installerSig.SignerCertificate.Thumbprint.ToUpper()
+  }
   if ($installerSig.Status -ne "Valid") {
-    throw "Installer signature invalid: $($installerSig.Status)"
+    if (($installerSig.Status -eq "UnknownError") -and ($signedThumb -eq $signThumb.ToUpper())) {
+      Write-Warning "Installer signature chain not trusted on this runner, but signer thumbprint matches expected cert."
+    } else {
+      throw "Installer signature invalid: $($installerSig.Status)"
+    }
   }
 
   # ── Done ───────────────────────────────────────────────────────────────────
