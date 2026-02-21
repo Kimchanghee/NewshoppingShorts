@@ -1,4 +1,4 @@
-import logging
+﻿import logging
 import sys
 import os
 import re
@@ -25,7 +25,7 @@ from app.database import init_db
 from app.utils.billing_crypto import validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
 
-# 로깅 설정 - 모든 로그를 터미널에 출력
+# 濡쒓퉭 ?ㅼ젙 - 紐⑤뱺 濡쒓렇瑜??곕??먯뿉 異쒕젰
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -33,7 +33,7 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
-# SQLAlchemy 로그 레벨 조정 (너무 많은 로그 방지)
+# SQLAlchemy 濡쒓렇 ?덈꺼 議곗젙 (?덈Т 留롮? 濡쒓렇 諛⑹?)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
@@ -290,7 +290,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
             "success": False,
             "error": {
                 "code": "VALIDATION_ERROR",
-                "message": "입력값이 올바르지 않습니다.",
+                "message": "?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.",
                 "requestId": request_id,
                 "details": safe_details,
             },
@@ -313,7 +313,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             "success": False,
             "error": {
                 "code": "INTERNAL_ERROR",
-                "message": "서버 오류가 발생했습니다.",
+                "message": "?쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.",
                 "requestId": request_id,
             },
         },
@@ -324,13 +324,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log all API requests and responses"""
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # 요청 로깅
+        # ?붿껌 濡쒓퉭
         client_ip = request.client.host if request.client else "unknown"
         logger.info(f">>> {request.method} {request.url.path} | IP: {client_ip}")
 
         try:
             response = await call_next(request)
-            # 응답 로깅
+            # ?묐떟 濡쒓퉭
             logger.info(
                 f"<<< {request.method} {request.url.path} | Status: {response.status_code}"
             )
@@ -460,8 +460,8 @@ async def health():
     return {"status": "healthy"}
 
 # ===== Auto Update API =====
-# 최신 버전 정보 (배포 시 이 값을 업데이트)
-_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.16") or "1.4.16").strip()
+# 理쒖떊 踰꾩쟾 ?뺣낫 (諛고룷 ????媛믪쓣 ?낅뜲?댄듃)
+_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.17") or "1.4.17").strip()
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
     "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v"
@@ -475,11 +475,11 @@ APP_VERSION_INFO = {
     "version": _DEFAULT_APP_VERSION,
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.4.16 대형 업데이트
-- 샤오홍슈(小红书) 영상 링크 다운로드 공식 지원 추가
-- 도우인/틱톡/샤오홍슈 플랫폼 자동 감지 라우터 도입
-- 다운로드 모듈 구조 정리 (platforms 분리)
-- UI 안내 문구를 도우인 + 샤오홍슈 기준으로 업데이트""",
+    "release_notes": """### v1.4.17 ????낅뜲?댄듃
+- ?ㅼ삤?띿뒋(弱뤹벚阿? ?곸긽 留곹겕 ?ㅼ슫濡쒕뱶 怨듭떇 吏??異붽?
+- ?꾩슦???깊넚/?ㅼ삤?띿뒋 ?뚮옯???먮룞 媛먯? ?쇱슦???꾩엯
+- ?ㅼ슫濡쒕뱶 紐⑤뱢 援ъ“ ?뺣━ (platforms 遺꾨━)
+- UI ?덈궡 臾멸뎄瑜??꾩슦??+ ?ㅼ삤?띿뒋 湲곗??쇰줈 ?낅뜲?댄듃""",
     "is_mandatory": True,
     "update_channel": "stable",
     "file_hash": "b3b1dea69ced9f2cfdab0765cfe136b830465585cc4736bbf5efc8b168a369ea",
@@ -594,7 +594,7 @@ class VersionUpdateRequest(BaseModel):
 async def get_app_version():
     """
     Get latest app version info for auto-update.
-    자동 업데이트를 위한 최신 앱 버전 정보 반환.
+    ?먮룞 ?낅뜲?댄듃瑜??꾪븳 理쒖떊 ??踰꾩쟾 ?뺣낫 諛섑솚.
 
     Returns:
         {
@@ -616,7 +616,7 @@ async def update_app_version(
 ):
     """
     Update app version info (CI/CD endpoint).
-    GitHub Actions에서 빌드 후 버전 정보를 업데이트하는 엔드포인트.
+    GitHub Actions?먯꽌 鍮뚮뱶 ??踰꾩쟾 ?뺣낫瑜??낅뜲?댄듃?섎뒗 ?붾뱶?ъ씤??
 
     Requires Bearer token authentication.
     """
@@ -691,7 +691,7 @@ async def update_app_version(
 async def check_app_version(current_version: str = Query(..., max_length=20)):
     """
     Check if update is available.
-    업데이트 가능 여부 확인.
+    ?낅뜲?댄듃 媛???щ? ?뺤씤.
     
     Args:
         current_version: Current client version (e.g., "1.0.0")
@@ -732,3 +732,4 @@ async def check_app_version(current_version: str = Query(..., max_length=20)):
         "is_mandatory": is_mandatory,
         "file_hash": APP_VERSION_INFO.get("file_hash", ""),
     }
+
