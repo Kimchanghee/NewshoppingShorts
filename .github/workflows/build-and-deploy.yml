@@ -149,13 +149,15 @@ jobs:
         $version = "${{ steps.version.outputs.VERSION }}"
         $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/v${version}/SSMaker_Setup_v${version}.exe"
 
-        $body = @{
+        # Canonicalize JSON so HMAC signature matches backend verification.
+        $payload = [ordered]@{
           version = $version
           download_url = $downloadUrl
-          file_hash = "${{ steps.hash.outputs.FILE_HASH }}"
           release_notes = "API KEY 미입력 시작 방지 및 설정 이동 개선, YouTube 자동 댓글 쿠팡 원상품 링크 반영, 설치/저장 안정성 개선"
           is_mandatory = $false
-        } | ConvertTo-Json
+          file_hash = "${{ steps.hash.outputs.FILE_HASH }}"
+        }
+        $body = $payload | ConvertTo-Json -Compress
 
         try {
           $headers = @{
