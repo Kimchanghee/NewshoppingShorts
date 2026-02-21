@@ -177,6 +177,17 @@ try {
   }
   $signtool = (Get-Command signtool -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue)
   if (-not $signtool) {
+    $sdkBins = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Directory -ErrorAction SilentlyContinue |
+      Sort-Object -Property Name -Descending
+    foreach ($sdkBin in $sdkBins) {
+      $candidate = Join-Path $sdkBin.FullName "x64\signtool.exe"
+      if (Test-Path $candidate) {
+        $signtool = $candidate
+        break
+      }
+    }
+  }
+  if (-not $signtool) {
     throw "signtool.exe not found in PATH. Install Windows SDK Signing Tools."
   }
 
