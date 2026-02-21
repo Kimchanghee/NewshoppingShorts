@@ -194,8 +194,7 @@ try {
   Invoke-Native "[2.5/5] Code signing ssmaker.exe..." $signtool @(
     "sign",
     "/fd", "sha256",
-    "/tr", "https://timestamp.digicert.com",
-    "/td", "sha256",
+    "/t", "http://timestamp.digicert.com",
     "/sha1", $signThumb,
     $ssmakerExe
   )

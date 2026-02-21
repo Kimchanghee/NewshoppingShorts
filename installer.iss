@@ -65,7 +65,7 @@ UninstallDisplayName={#MyAppName}
 ; SignTool expects signtool.exe in PATH (Windows SDK) or set SIGNTOOL_PATH env var.
 ; Certificate can be specified via SIGN_CERT_THUMBPRINT env var.
 #ifdef SignToolAvailable
-SignTool=signtool sign /fd sha256 /tr https://timestamp.digicert.com /td sha256 /sha1 {#GetEnv("SIGN_CERT_THUMBPRINT")} $f
+SignTool=signtool sign /fd sha256 /t http://timestamp.digicert.com /sha1 {#GetEnv("SIGN_CERT_THUMBPRINT")} $f
 SignedUninstaller=yes
 #endif
 
