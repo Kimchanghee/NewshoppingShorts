@@ -385,7 +385,7 @@ class AppController:
     # ?? Entry point ??
 
     def start(self) -> None:
-        """Start the app ??show login first."""
+        """Start the app ??show login first, but check updates before login."""
         if getattr(sys, "frozen", False) and sys.platform == "win32":
             ok, reason = _verify_authenticode_signature(
                 sys.executable,
@@ -405,6 +405,50 @@ class AppController:
                     "Executable signature verification failed but APP_SIGNATURE_REQUIRED is disabled: %s",
                     reason,
                 )
+
+        # Pre-login update check: ensures users on broken versions can still
+        # receive updates even when the login flow itself is broken.
+        if getattr(sys, "frozen", False):
+            self._check_update_before_login()
+        else:
+            self._show_login()
+
+    # ?? Pre-login update check ??
+
+    def _check_update_before_login(self) -> None:
+        """Check for updates before showing login screen.
+
+        This runs the same UpdateCheckWorker used post-login but wired to
+        pre-login signals so that critical/mandatory updates are applied
+        even when login itself is blocked by a client-side bug.
+        """
+        current_version = self.get_current_version()
+        logger.info("Pre-login update check. Current version: %s", current_version)
+        self._pre_login_worker = UpdateCheckWorker(current_version)
+        self._pre_login_worker.update_available.connect(self._on_pre_login_update)
+        self._pre_login_worker.no_update.connect(self._show_login)
+        self._pre_login_worker.check_failed.connect(self._on_pre_login_check_failed)
+        self._pre_login_worker.start()
+
+    def _on_pre_login_update(self, update_data: dict) -> None:
+        """Handle update found before login."""
+        download_url = update_data.get("download_url")
+        file_hash = update_data.get("file_hash", "")
+        self._update_is_mandatory = update_data.get("is_mandatory", False)
+        self._latest_version = update_data.get("latest_version", "")
+        self._release_notes = update_data.get("release_notes", "")
+
+        if not download_url or not file_hash:
+            logger.warning("Pre-login update available but metadata incomplete, proceeding to login")
+            self._show_login()
+            return
+
+        logger.info("Pre-login auto-updating to version %s", self._latest_version)
+        self.perform_update(download_url, file_hash)
+
+    def _on_pre_login_check_failed(self, error: str) -> None:
+        """If pre-login check fails, just show login normally."""
+        logger.warning("Pre-login update check failed: %s", error)
         self._show_login()
 
     # ?? Splash management ??
@@ -741,6 +785,17 @@ class AppController:
         flags |= int(getattr(subprocess, "DETACHED_PROCESS", 0))
         return flags
 
+    def _fallback_after_update_failure(self) -> None:
+        """Route to the correct screen after a non-mandatory update failure.
+
+        If login hasn't happened yet, show login screen.
+        If login already succeeded, proceed to loading/main app.
+        """
+        if self.login_data is not None:
+            self._proceed_to_loading()
+        else:
+            self._show_login()
+
     def perform_update(self, download_url: str, file_hash: str) -> None:
         """Auto-download and install update (game-like, no confirmation).
 
@@ -759,7 +814,7 @@ class AppController:
                     "업데이트 파일 경로가 올바르지 않습니다.\n프로그램을 종료합니다.",
                 )
                 sys.exit(1)
-            self._proceed_to_loading()
+            self._fallback_after_update_failure()
             return
 
         import tempfile
@@ -790,7 +845,7 @@ class AppController:
                         f"업데이트 검증 실패:\n{result}\n\n프로그램을 종료합니다.",
                     )
                     sys.exit(1)
-                self._proceed_to_loading()
+                self._fallback_after_update_failure()
 
         self.download_worker.finished.connect(on_download_finished)
         self.download_worker.start()

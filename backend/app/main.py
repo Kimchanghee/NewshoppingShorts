@@ -461,7 +461,7 @@ async def health():
 
 # ===== Auto Update API =====
 # 理쒖떊 踰꾩쟾 ?뺣낫 (諛고룷 ????媛믪쓣 ?낅뜲?댄듃)
-_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.19") or "1.4.19").strip()
+_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.20") or "1.4.20").strip()
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
     "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v"
@@ -475,10 +475,10 @@ APP_VERSION_INFO = {
     "version": _DEFAULT_APP_VERSION,
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.4.19 업데이트
+    "release_notes": """### v1.4.20 업데이트
 - TLS 인증서 피닝 실패 시 로그인 차단 문제 수정
-- 네트워크 일시 오류로 인한 Secure connection required 에러 해결
-- 인증서 피닝 검증을 경고 로깅으로 변경""",
+- 로그인 전 업데이트 체크 추가 (기존 사용자 자동 업데이트 보장)
+- 네트워크 일시 오류로 인한 Secure connection required 에러 해결""",
     "is_mandatory": True,
     "update_channel": "stable",
     "file_hash": "b3b1dea69ced9f2cfdab0765cfe136b830465585cc4736bbf5efc8b168a369ea",
