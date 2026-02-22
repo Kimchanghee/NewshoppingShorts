@@ -231,8 +231,9 @@ def _check_certificate_pinning() -> bool:
             logger.info("TLS pin initialized for %s (TOFU).", host)
             _pinning_last_result = True
     except Exception as e:
-        logger.error("TLS pinning check failed for %s: %s", host, str(e)[:160])
-        _pinning_last_result = False
+        logger.warning("TLS pinning check failed for %s: %s", host, str(e)[:160])
+        # Keep previous cached result on transient errors (network timeout, etc.)
+        # so a temporary failure does not lock out the user.
 
     _pinning_checked_until = now + _CERT_PIN_CACHE_SECONDS
     return _pinning_last_result
@@ -269,8 +270,10 @@ def _check_https_security() -> bool:
         and "127.0.0.1" not in main_server
     ):
         if not _check_certificate_pinning():
-            logger.critical("SECURITY WARNING: TLS certificate pinning verification failed.")
-            return False
+            logger.warning(
+                "TLS certificate pinning verification failed. "
+                "Allowing connection but logging for investigation."
+            )
 
     return True
 
