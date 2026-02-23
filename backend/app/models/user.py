@@ -23,6 +23,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     username = Column(String(50), unique=True, nullable=False, index=True)
     email = Column(String(255), nullable=True)
+    ym_news_opt_in = Column(Boolean, default=False, nullable=False)
     phone = Column(String(50), nullable=True)
     name = Column(String(100), nullable=True)
     password_hash = Column(String(255), nullable=False)

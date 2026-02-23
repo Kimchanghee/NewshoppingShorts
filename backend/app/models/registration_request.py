@@ -4,7 +4,7 @@ Registration Request Model
 
 사용자의 회원가입 요청을 저장하고 관리자 승인 대기 상태를 추적합니다.
 """
-from sqlalchemy import Column, Integer, String, Enum, TIMESTAMP, Text
+from sqlalchemy import Column, Integer, String, Enum, TIMESTAMP, Text, Boolean
 from sqlalchemy.sql import func
 from app.database import Base
 import enum
@@ -25,6 +25,7 @@ class RegistrationRequest(Base):
     name = Column(String(100), nullable=False)  # 가입자 명
     username = Column(String(50), unique=True, nullable=False, index=True)  # 요청 아이디
     email = Column(String(255), nullable=True)  # 이메일
+    ym_news_opt_in = Column(Boolean, default=False, nullable=False)
     password_hash = Column(String(255), nullable=False)  # 해시된 비밀번호
     contact = Column(String(50), nullable=False)  # 연락처
     status = Column(
@@ -42,4 +43,3 @@ class RegistrationRequest(Base):
     reviewed_at = Column(TIMESTAMP, nullable=True)  # 검토 일시
     reviewed_by = Column(Integer, nullable=True)  # 검토한 관리자 ID
     rejection_reason = Column(Text, nullable=True)  # 거부 사유
-

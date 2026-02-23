@@ -1,34 +1,77 @@
 """
-User Log Router
-사용자 로그 API 라우터 (활동 기록 및 조회)
+User activity log router.
 
 Security:
-- POST /logs: Authenticated users only
-- GET /admin/logs/{user_id}: Admin only
+- POST /user/logs: authenticated users only
+- GET /user/admin/users/{user_id}/logs: admin only
 """
-import logging
-from typing import List, Optional
-from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.orm import Session
+import os
+import logging
+from datetime import datetime, timedelta, timezone
+from threading import Lock
+from typing import List, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import get_current_user_id, verify_admin_api_key
-from app.models.user_log import UserLog
 from app.models.user import User
+from app.models.user_log import UserLog
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["logs"])
 
-# --- Schemas ---
+
+def _read_int_env(name: str, default: int, minimum: int) -> int:
+    try:
+        value = int(os.getenv(name, str(default)) or str(default))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, value)
+
+
+_LOG_CLEANUP_INTERVAL_SECONDS = _read_int_env(
+    "USER_LOG_CLEANUP_INTERVAL_SECONDS",
+    default=300,
+    minimum=30,
+)
+_LOG_RETENTION_DAYS = _read_int_env(
+    "USER_LOG_RETENTION_DAYS",
+    default=7,
+    minimum=1,
+)
+_LOG_RETENTION_WINDOW = timedelta(days=_LOG_RETENTION_DAYS)
+_log_cleanup_lock = Lock()
+_last_log_cleanup_at: Optional[datetime] = None
+
+
+def _cleanup_old_logs_if_needed(db: Session) -> None:
+    """Run old-log cleanup periodically instead of on every insert."""
+    global _last_log_cleanup_at
+    now = datetime.now(timezone.utc)
+
+    with _log_cleanup_lock:
+        if _last_log_cleanup_at is not None:
+            elapsed_seconds = (now - _last_log_cleanup_at).total_seconds()
+            if elapsed_seconds < _LOG_CLEANUP_INTERVAL_SECONDS:
+                return
+        _last_log_cleanup_at = now
+
+    cleanup_threshold = now - _LOG_RETENTION_WINDOW
+    db.query(UserLog).filter(UserLog.created_at < cleanup_threshold).delete(
+        synchronize_session=False
+    )
+
 
 class LogCreate(BaseModel):
     level: str = "INFO"
     action: str
     content: Optional[str] = None
+
 
 class LogResponse(BaseModel):
     id: int
@@ -41,27 +84,21 @@ class LogResponse(BaseModel):
     class Config:
         from_attributes = True
 
+
 class LogListResponse(BaseModel):
     logs: List[LogResponse]
     total: int
 
-# --- Endpoints ---
 
 @router.post("/user/logs", response_model=LogResponse)
 async def create_log(
     log_data: LogCreate,
     user_id: int = Depends(get_current_user_id),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
 ):
-    """
-    사용자 활동 로그 기록
-    Log user activity
-    """
-    # 24시간 지난 로그 삭제 (간단한 정리 로직)
-    # 실제 프로덕션에서는 별도 백그라운드 작업으로 분리하는 것이 좋음
+    """Log user activity."""
     try:
-        cleanup_threshold = datetime.now(timezone.utc) - timedelta(hours=24)
-        db.query(UserLog).filter(UserLog.created_at < cleanup_threshold).delete()
+        _cleanup_old_logs_if_needed(db)
     except Exception as e:
         logger.warning(f"Failed to cleanup old logs: {e}")
 
@@ -69,39 +106,36 @@ async def create_log(
         user_id=user_id,
         level=log_data.level,
         action=log_data.action,
-        content=log_data.content
+        content=log_data.content,
     )
     db.add(new_log)
     db.commit()
     db.refresh(new_log)
     return new_log
 
+
 @router.get("/user/admin/users/{user_id}/logs", response_model=LogListResponse)
 async def get_user_logs(
     user_id: int,
     limit: int = Query(100, ge=1, le=500),
     db: Session = Depends(get_db),
-    _admin: bool = Depends(verify_admin_api_key)
+    _admin: bool = Depends(verify_admin_api_key),
 ):
-    """
-    사용자 로그 조회 (관리자용, 최근 24시간)
-    Get user logs (admin only, last 24h)
-    """
+    """Get user logs (admin only, recent retention window)."""
     user = db.query(User).filter(User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
 
-    # 최근 24시간 로그만 조회
-    since = datetime.now(timezone.utc) - timedelta(hours=24)
+    since = datetime.now(timezone.utc) - _LOG_RETENTION_WINDOW
     query = db.query(UserLog).filter(
         UserLog.user_id == user_id,
-        UserLog.created_at >= since
+        UserLog.created_at >= since,
     )
-    
+
     total = query.count()
     logs = query.order_by(UserLog.created_at.desc()).limit(limit).all()
 
     return LogListResponse(
-        logs=[LogResponse.model_validate(l) for l in logs],
-        total=total
+        logs=[LogResponse.model_validate(item) for item in logs],
+        total=total,
     )

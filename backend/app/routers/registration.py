@@ -181,6 +181,7 @@ async def submit_registration_request(
             trial_cycle_started_at=get_trial_cycle_start(),
             user_type=UserType.TRIAL,
             email=data.email,
+            ym_news_opt_in=bool(data.ym_news_opt_in),
             phone=data.contact,
             name=data.name,
             registration_ip=client_ip,  # 가입 IP 저장 (중복 가입 감지용)
@@ -209,6 +210,7 @@ async def submit_registration_request(
             password_hash=password_hash,
             contact=data.contact,
             email=data.email,
+            ym_news_opt_in=bool(data.ym_news_opt_in),
             status=RequestStatus.APPROVED,
             reviewed_at=datetime.now(timezone.utc),
         )
@@ -359,6 +361,7 @@ async def approve_registration(
             trial_cycle_started_at=get_trial_cycle_start(),
             user_type=UserType.SUBSCRIBER if data.work_count == -1 else UserType.TRIAL,
             email=reg_request.email,
+            ym_news_opt_in=bool(getattr(reg_request, "ym_news_opt_in", False)),
             phone=reg_request.contact,
             name=reg_request.name,
         )

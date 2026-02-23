@@ -49,6 +49,7 @@ def update_schema():
         # 1. Update users table
         columns = [
             ("email", "VARCHAR(255) NULL"),
+            ("ym_news_opt_in", "BOOLEAN DEFAULT FALSE"),
             ("phone", "VARCHAR(50) NULL"),
             ("name", "VARCHAR(100) NULL"),
             ("current_task", "VARCHAR(255) NULL")
@@ -77,6 +78,15 @@ def update_schema():
                 logger.info("email column already exists in registration_requests")
             else:
                 logger.warning(f"Error adding email to registration_requests: {e}")
+
+        try:
+            conn.execute(text("ALTER TABLE registration_requests ADD COLUMN ym_news_opt_in BOOLEAN DEFAULT FALSE"))
+            logger.info("Added ym_news_opt_in column to registration_requests")
+        except Exception as e:
+            if "1060" in str(e) or "Duplicate column" in str(e):
+                logger.info("ym_news_opt_in column already exists in registration_requests")
+            else:
+                logger.warning(f"Error adding ym_news_opt_in to registration_requests: {e}")
         
         conn.commit()
         logger.info("Schema update completed.")

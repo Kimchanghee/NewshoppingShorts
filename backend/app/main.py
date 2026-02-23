@@ -77,9 +77,11 @@ def run_auto_migration():
                     ("app_version", "VARCHAR(20) NULL"),
                     ("trial_cycle_started_at", "TIMESTAMP NULL"),
                     ("program_type", "ENUM('ssmaker', 'stmaker') DEFAULT 'ssmaker' NOT NULL"),
+                    ("ym_news_opt_in", "BOOLEAN DEFAULT FALSE"),
                 ],
                 "registration_requests": [
-                    ("email", "VARCHAR(255) NULL")
+                    ("email", "VARCHAR(255) NULL"),
+                    ("ym_news_opt_in", "BOOLEAN DEFAULT FALSE"),
                 ]
             }
             
@@ -461,7 +463,7 @@ async def health():
 
 # ===== Auto Update API =====
 # 理쒖떊 踰꾩쟾 ?뺣낫 (諛고룷 ????媛믪쓣 ?낅뜲?댄듃)
-_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.20") or "1.4.20").strip()
+_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.21") or "1.4.21").strip()
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
     "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v"
@@ -475,10 +477,10 @@ APP_VERSION_INFO = {
     "version": _DEFAULT_APP_VERSION,
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.4.20 업데이트
-- TLS 인증서 피닝 실패 시 로그인 차단 문제 수정
-- 로그인 전 업데이트 체크 추가 (기존 사용자 자동 업데이트 보장)
-- 네트워크 일시 오류로 인한 Secure connection required 에러 해결""",
+    "release_notes": """### v1.4.21 업데이트
+- 회원 DB에 YM 소식/정보 수신 동의(ym_news_opt_in) 항목 추가
+- 회원가입/관리자 조회 API에 수신 동의 필드 반영
+- 사용자 활동 로그 보관 정책을 환경변수 기반(기본 7일)으로 개선""",
     "is_mandatory": True,
     "update_channel": "stable",
     "file_hash": "b3b1dea69ced9f2cfdab0765cfe136b830465585cc4736bbf5efc8b168a369ea",
@@ -731,4 +733,3 @@ async def check_app_version(current_version: str = Query(..., max_length=20)):
         "is_mandatory": is_mandatory,
         "file_hash": APP_VERSION_INFO.get("file_hash", ""),
     }
-

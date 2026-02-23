@@ -25,6 +25,15 @@ def update_schema():
                 logger.error(f"Error adding email to users: {e}")
 
         try:
+            conn.execute(text("ALTER TABLE users ADD COLUMN ym_news_opt_in BOOLEAN DEFAULT FALSE"))
+            logger.info("Added ym_news_opt_in column to users")
+        except Exception as e:
+            if "Duplicate column" in str(e) or "1060" in str(e):
+                logger.info("ym_news_opt_in column already exists in users")
+            else:
+                logger.error(f"Error adding ym_news_opt_in to users: {e}")
+
+        try:
             conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(50) NULL"))
             logger.info("Added phone column to users")
         except Exception as e:
@@ -62,6 +71,15 @@ def update_schema():
                 logger.info("email column already exists in registration_requests")
             else:
                 logger.error(f"Error adding email to registration_requests: {e}")
+
+        try:
+            conn.execute(text("ALTER TABLE registration_requests ADD COLUMN ym_news_opt_in BOOLEAN DEFAULT FALSE"))
+            logger.info("Added ym_news_opt_in column to registration_requests")
+        except Exception as e:
+            if "Duplicate column" in str(e) or "1060" in str(e):
+                logger.info("ym_news_opt_in column already exists in registration_requests")
+            else:
+                logger.error(f"Error adding ym_news_opt_in to registration_requests: {e}")
         
         conn.commit()
         logger.info("Schema update completed.")

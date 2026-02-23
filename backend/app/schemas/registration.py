@@ -25,6 +25,10 @@ class RegistrationRequestCreate(BaseModel):
     password: str = Field(..., min_length=8, max_length=128)
     contact: str = Field(..., min_length=1, max_length=50)
     email: Optional[str] = Field(None, max_length=255)
+    ym_news_opt_in: bool = Field(
+        False,
+        description="Consent to receive YM program news/info emails.",
+    )
     program_type: Optional[str] = Field("ssmaker", description="프로그램 유형 (ssmaker/stmaker)")
 
     @field_validator('password')
@@ -83,6 +87,7 @@ class RegistrationRequestResponse(BaseModel):
     name: str
     username: str
     email: Optional[str] = None
+    ym_news_opt_in: bool = False
     contact: str
     status: RequestStatusEnum
     created_at: datetime

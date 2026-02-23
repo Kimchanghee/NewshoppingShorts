@@ -46,6 +46,7 @@ class UserResponse(BaseModel):
     id: int
     username: str
     email: Optional[str] = None
+    ym_news_opt_in: bool = False
     phone: Optional[str] = None
     name: Optional[str] = None
     # Security: hashed_password removed from API response to prevent exposure
