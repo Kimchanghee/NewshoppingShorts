@@ -7,6 +7,7 @@ import os
 import sys
 import ssl
 import socket
+import hashlib
 import configparser
 import traceback
 import jwt

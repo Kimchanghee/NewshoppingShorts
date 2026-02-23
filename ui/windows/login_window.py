@@ -27,6 +27,11 @@ logger = get_logger(__name__)
 class Login(QMainWindow, Ui_LoginWindow):
     """Login window with authentication functionality for PyQt6"""
 
+    WINDOW_WIDTH = 720
+    WINDOW_HEIGHT = 760
+    LEFT_PANEL_WIDTH = 300
+    RIGHT_PANEL_WIDTH = 420
+
     # Signal emitted when window is fully displayed
     window_ready = pyqtSignal()
 
@@ -39,6 +44,7 @@ class Login(QMainWindow, Ui_LoginWindow):
         
         if self.setPort():
             self.setupUi(self)
+            self.setFixedSize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
             self._apply_version_label()
             ui_controller.userLoadInfo(self)
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
@@ -72,7 +78,7 @@ class Login(QMainWindow, Ui_LoginWindow):
         for path in candidates:
             try:
                 if path.exists():
-                    with open(path, "r", encoding="utf-8") as f:
+                    with open(path, "r", encoding="utf-8-sig") as f:
                         data = json.load(f)
                     version = str(data.get("version", "")).strip()
                     if version:
@@ -189,12 +195,11 @@ class Login(QMainWindow, Ui_LoginWindow):
             if res.get("status") is True:
                 self._handle_login_success(res)
             elif res.get("status") == "EU003":
-                # 중복 로그인 감지 - 사용자 확인 후 강제 로그인
-                logger.info("Duplicate login detected (EU003).")
+                logger.info("Duplicate login detected (EU003)")
                 reply = show_question(
                     self,
                     "중복 로그인",
-                    "다른 곳에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 여기서 로그인하시겠습니까?"
+                    "다른 기기에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 이 기기에서 계속할까요?",
                 )
                 if reply and not force:
                     self._loginCheck(force=True)

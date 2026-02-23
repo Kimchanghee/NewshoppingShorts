@@ -302,7 +302,7 @@ class LoginHandler:
 
             version_file = os.path.join(base_path, "version.json")
             if os.path.exists(version_file):
-                with open(version_file, "r", encoding="utf-8") as f:
+                with open(version_file, "r", encoding="utf-8-sig") as f:
                     data = json.load(f)
                     return data.get("version", "unknown")
 

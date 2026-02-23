@@ -155,6 +155,12 @@ class Initializer(QtCore.QObject):
             "is_new_version": False,
         }
 
+        # Source-run/dev mode does not need release-note polling and often
+        # points to auth-only backends without /app/version routes.
+        if not getattr(sys, "frozen", False):
+            self.checkItemChanged.emit("update_check", "success", "개발 모드")
+            return update_info
+
         base_url = (PAYMENT_API_BASE_URL or "").strip().rstrip("/")
         if not base_url:
             logger.info("Update check skipped: PAYMENT_API_BASE_URL is empty")
@@ -190,7 +196,9 @@ class Initializer(QtCore.QObject):
                 self.updateInfoReady.emit(update_info)
             elif response.status_code == 404:
                 # Backend can run without update routes.
-                logger.info("Update endpoint not available (404). Skipping update check.")
+                logger.info(
+                    "Update endpoint not available (404) on this server; skipping update check by design."
+                )
                 self.checkItemChanged.emit("update_check", "success", "건너뜀")
             else:
                 logger.warning(f"Update check returned status {response.status_code}")

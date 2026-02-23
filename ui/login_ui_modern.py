@@ -21,8 +21,10 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QCheckBox,
     QDialog,
+    QHBoxLayout,
     QVBoxLayout,
     QFormLayout,
+    QScrollArea,
 )
 from PyQt6.QtGui import QFont, QIcon, QPixmap
 
@@ -63,7 +65,7 @@ def _read_app_version() -> str:
     for path in candidates:
         try:
             if path.exists():
-                with open(path, "r", encoding="utf-8") as f:
+                with open(path, "r", encoding="utf-8-sig") as f:
                     data = json.load(f)
                 version = str(data.get("version", "")).strip()
                 if version:
@@ -126,16 +128,20 @@ class ModernLoginUi:
 
     def setupUi(self, LoginWindow: QMainWindow):
         LoginWindow.setObjectName("LoginWindow")
-        LoginWindow.resize(700, 500)
-        LoginWindow.setMinimumSize(QtCore.QSize(700, 500))
-        LoginWindow.setMaximumSize(QtCore.QSize(700, 500))
+        LoginWindow.resize(720, 760)
+        LoginWindow.setMinimumSize(QtCore.QSize(720, 760))
+        LoginWindow.setMaximumSize(QtCore.QSize(720, 760))
 
         self.centralwidget = QWidget(LoginWindow)
         self.centralwidget.setObjectName("centralwidget")
 
-        # 왼쪽 패널
+        root_layout = QHBoxLayout(self.centralwidget)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+
         self.leftFrame = QFrame(self.centralwidget)
-        self.leftFrame.setGeometry(QtCore.QRect(0, 0, 300, 500))
+        self.leftFrame.setMinimumWidth(300)
+        self.leftFrame.setMaximumWidth(300)
         self.leftFrame.setStyleSheet(f"""
             QFrame {{
                 background: qlineargradient(
@@ -146,9 +152,15 @@ class ModernLoginUi:
             }}
         """)
         self.leftFrame.setFrameShape(QFrame.Shape.StyledPanel)
+        root_layout.addWidget(self.leftFrame)
+
+        left_layout = QVBoxLayout(self.leftFrame)
+        left_layout.setContentsMargins(26, 28, 26, 24)
+        left_layout.setSpacing(10)
+        left_layout.addStretch(1)
 
         self.logoIcon = QLabel(self.leftFrame)
-        self.logoIcon.setGeometry(QtCore.QRect(75, 100, 150, 100))
+        self.logoIcon.setFixedSize(116, 116)
         self.logoIcon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.logoIcon.setFont(QFont(FONT_FAMILY, ds.typography.size_3xl, QFont.Weight.Bold))
         self.logoIcon.setStyleSheet(f"""
@@ -157,9 +169,11 @@ class ModernLoginUi:
             border-radius: {ds.radius.xl}px;
         """)
         self.logoIcon.setText("SS")
+        left_layout.addWidget(self.logoIcon, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self.logoBadge = QLabel(self.leftFrame)
-        self.logoBadge.setGeometry(QtCore.QRect(95, 190, 110, 28))
+        self.logoBadge.setFixedHeight(28)
+        self.logoBadge.setMinimumWidth(120)
         self.logoBadge.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.logoBadge.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs, QFont.Weight.Bold))
         self.logoBadge.setStyleSheet(f"""
@@ -168,44 +182,57 @@ class ModernLoginUi:
             border-radius: {ds.radius.full}px;
             padding: {ds.spacing.space_1}px;
         """)
-        self.logoBadge.setText("숏폼 메이커")
+        self.logoBadge.setText("쇼츠 메이커")
+        left_layout.addWidget(self.logoBadge, alignment=Qt.AlignmentFlag.AlignHCenter)
 
         self.titleLabel = QLabel(self.leftFrame)
-        self.titleLabel.setGeometry(QtCore.QRect(0, 240, 300, 60))
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.titleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_lg, QFont.Weight.Bold))
         self.titleLabel.setStyleSheet("color: white; background: transparent;")
+        self.titleLabel.setWordWrap(True)
         self.titleLabel.setText("쇼핑 숏폼 메이커")
+        left_layout.addWidget(self.titleLabel)
 
         self.subtitleLabel = QLabel(self.leftFrame)
-        self.subtitleLabel.setGeometry(QtCore.QRect(0, 305, 300, 50))
         self.subtitleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.subtitleLabel.setStyleSheet("color: rgba(255,255,255,0.85); background: transparent;")
-        self.subtitleLabel.setText("중국 쇼핑 영상을\n한국어 숏폼으로 자동 변환")
+        self.subtitleLabel.setWordWrap(True)
+        self.subtitleLabel.setText("쇼핑 영상을 숏폼 콘텐츠로 자동 변환합니다")
+        left_layout.addWidget(self.subtitleLabel)
 
         self.featureIcons = QLabel(self.leftFrame)
-        self.featureIcons.setGeometry(QtCore.QRect(0, 380, 300, 30))
         self.featureIcons.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.featureIcons.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.featureIcons.setStyleSheet("color: rgba(255,255,255,0.7); background: transparent;")
         self.featureIcons.setText("AI 번역  |  자동 편집  |  숏폼 제작")
+        left_layout.addWidget(self.featureIcons)
+
+        left_layout.addStretch(1)
 
         self.versionLabel = QLabel(self.leftFrame)
-        self.versionLabel.setGeometry(QtCore.QRect(0, 460, 300, 30))
         self.versionLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.versionLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.versionLabel.setStyleSheet("color: rgba(255,255,255,0.5); background: transparent;")
         self.versionLabel.setText(f"v{_read_app_version()}")
+        left_layout.addWidget(self.versionLabel)
 
-        # 오른쪽 패널
         self.rightFrame = QFrame(self.centralwidget)
-        self.rightFrame.setGeometry(QtCore.QRect(300, 0, 400, 500))
+        self.rightFrame.setMinimumWidth(420)
+        self.rightFrame.setMaximumWidth(420)
         self.rightFrame.setStyleSheet(f"background-color: {login_color('surface')};")
         self.rightFrame.setFrameShape(QFrame.Shape.StyledPanel)
+        root_layout.addWidget(self.rightFrame, 1)
+
+        right_layout = QVBoxLayout(self.rightFrame)
+        right_layout.setContentsMargins(40, 18, 40, 24)
+        right_layout.setSpacing(10)
+
+        titlebar_layout = QHBoxLayout()
+        titlebar_layout.addStretch(1)
 
         self.minimumButton = QPushButton(self.rightFrame)
-        self.minimumButton.setGeometry(QtCore.QRect(330, 10, 25, 25))
+        self.minimumButton.setFixedSize(28, 28)
         self.minimumButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.minimumButton.setStyleSheet(f"""
             QPushButton {{
@@ -218,9 +245,10 @@ class ModernLoginUi:
         icon_min = QIcon()
         icon_min.addPixmap(QPixmap("resource/Minimize_icon.png"), QIcon.Mode.Normal, QIcon.State.On)
         self.minimumButton.setIcon(icon_min)
+        titlebar_layout.addWidget(self.minimumButton)
 
         self.exitButton = QPushButton(self.rightFrame)
-        self.exitButton.setGeometry(QtCore.QRect(360, 10, 25, 25))
+        self.exitButton.setFixedSize(28, 28)
         self.exitButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.exitButton.setStyleSheet(f"""
             QPushButton {{
@@ -233,19 +261,25 @@ class ModernLoginUi:
         icon_close = QIcon()
         icon_close.addPixmap(QPixmap("resource/Close_icon.png"), QIcon.Mode.Normal, QIcon.State.On)
         self.exitButton.setIcon(icon_close)
+        titlebar_layout.addWidget(self.exitButton)
+        right_layout.addLayout(titlebar_layout)
 
         self.loginTitleLabel = QLabel(self.rightFrame)
-        self.loginTitleLabel.setGeometry(QtCore.QRect(50, 70, 300, 40))
         self.loginTitleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_xl, QFont.Weight.Bold))
+        self.loginTitleLabel.setStyleSheet(f"color: {login_color('text_primary')}; background: transparent;")
         self.loginTitleLabel.setText("로그인")
+        right_layout.addWidget(self.loginTitleLabel)
+        right_layout.addSpacing(6)
 
         self.label_id = QLabel(self.rightFrame)
-        self.label_id.setGeometry(QtCore.QRect(50, 160, 100, 25))
         self.label_id.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
+        self.label_id.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.label_id.setText("아이디")
+        right_layout.addWidget(self.label_id)
 
         self.idEdit = QLineEdit(self.rightFrame)
-        self.idEdit.setGeometry(QtCore.QRect(50, 190, 300, ds.button_sizes['md'].height))
+        self.idEdit.setMinimumHeight(ds.button_sizes["md"].height)
+        self.idEdit.setPlaceholderText("아이디를 입력하세요")
         self.idEdit.setStyleSheet(f"""
             QLineEdit {{
                 background-color: {login_color('background')};
@@ -255,14 +289,18 @@ class ModernLoginUi:
             }}
             QLineEdit:focus {{ border: 2px solid {login_color('primary')}; background-color: {login_color('surface')}; }}
         """)
+        right_layout.addWidget(self.idEdit)
+        right_layout.addSpacing(4)
 
         self.label_pw = QLabel(self.rightFrame)
-        self.label_pw.setGeometry(QtCore.QRect(50, 250, 100, 25))
         self.label_pw.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
+        self.label_pw.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
         self.label_pw.setText("비밀번호")
+        right_layout.addWidget(self.label_pw)
 
         self.pwEdit = QLineEdit(self.rightFrame)
-        self.pwEdit.setGeometry(QtCore.QRect(50, 280, 300, ds.button_sizes['md'].height))
+        self.pwEdit.setMinimumHeight(ds.button_sizes["md"].height)
+        self.pwEdit.setPlaceholderText("비밀번호를 입력하세요")
         self.pwEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self.pwEdit.setStyleSheet(f"""
             QLineEdit {{
@@ -273,12 +311,12 @@ class ModernLoginUi:
             }}
             QLineEdit:focus {{ border: 2px solid {login_color('primary')}; background-color: {login_color('surface')}; }}
         """)
+        right_layout.addWidget(self.pwEdit)
+        right_layout.addSpacing(4)
 
-        # 로그인 정보 저장 체크박스
         self.rememberCheckbox = QCheckBox(self.rightFrame)
-        self.rememberCheckbox.setGeometry(QtCore.QRect(50, 335, 200, 25))
         self.rememberCheckbox.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.rememberCheckbox.setText("아이디 저장")
+        self.rememberCheckbox.setText("아이디 / 비밀번호 저장")
         self.rememberCheckbox.setStyleSheet(f"""
             QCheckBox {{
                 color: {login_color('text_secondary')};
@@ -300,10 +338,13 @@ class ModernLoginUi:
             }}
         """)
         self.rememberCheckbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        right_layout.addWidget(self.rememberCheckbox)
+
+        right_layout.addStretch(1)
 
         self.loginButton = QPushButton(self.rightFrame)
-        self.loginButton.setGeometry(QtCore.QRect(50, 375, 300, ds.button_sizes['lg'].height))
-        self.loginButton.setFont(QFont(FONT_FAMILY, ds.button_sizes['lg'].font_size, QFont.Weight.Bold))
+        self.loginButton.setMinimumHeight(ds.button_sizes["lg"].height)
+        self.loginButton.setFont(QFont(FONT_FAMILY, ds.button_sizes["lg"].font_size, QFont.Weight.Bold))
         self.loginButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.loginButton.setStyleSheet(f"""
             QPushButton {{
@@ -315,9 +356,11 @@ class ModernLoginUi:
             QPushButton:hover {{ background-color: {login_color('secondary')}; }}
         """)
         self.loginButton.setText("로그인")
+        right_layout.addWidget(self.loginButton)
+        right_layout.addSpacing(8)
 
         self.registerRequestButton = QPushButton(self.rightFrame)
-        self.registerRequestButton.setGeometry(QtCore.QRect(50, 430, 300, ds.button_sizes['lg'].height))
+        self.registerRequestButton.setMinimumHeight(ds.button_sizes["lg"].height)
         self.registerRequestButton.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
         self.registerRequestButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.registerRequestButton.setStyleSheet(f"""
@@ -328,7 +371,8 @@ class ModernLoginUi:
             }}
             QPushButton:hover {{ background-color: rgba(227, 22, 57, 0.05); }}
         """)
-        self.registerRequestButton.setText("회원가입")
+        self.registerRequestButton.setText("회원가입 요청")
+        right_layout.addWidget(self.registerRequestButton)
 
         LoginWindow.setCentralWidget(self.centralwidget)
 
@@ -349,14 +393,22 @@ class RegistrationRequestDialog(QWidget):
         self._connect_validation_signals()
 
     def _setup_ui(self):
-        self.setFixedSize(400, 720)  # Height increased for Email field
+        self.resize(420, 760)
+        self.setMinimumSize(420, 760)
         self.setStyleSheet(f"background-color: {login_color('surface')};")
 
-        # 뒤로가기 버튼
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(18, 18, 18, 18)
+        root_layout.setSpacing(10)
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(10)
+
         self.backButton = QPushButton(self)
-        self.backButton.setGeometry(QtCore.QRect(15, 15, 35, 35))
+        self.backButton.setFixedSize(36, 36)
         self.backButton.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
-        self.backButton.setText("←")
+        self.backButton.setText("<")
         self.backButton.setStyleSheet(f"""
             QPushButton {{
                 background-color: {login_color('surface_variant')};
@@ -368,63 +420,86 @@ class RegistrationRequestDialog(QWidget):
         """)
         self.backButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.backButton.clicked.connect(self._on_back)
+        header_layout.addWidget(self.backButton, alignment=Qt.AlignmentFlag.AlignTop)
 
-        # 타이틀
+        title_layout = QVBoxLayout()
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(4)
+
         self.titleLabel = QLabel(self)
-        self.titleLabel.setGeometry(QtCore.QRect(30, 65, 340, 35))
         self.titleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_lg, QFont.Weight.Bold))
         self.titleLabel.setStyleSheet(f"color: {login_color('text_primary')}; background: transparent;")
-        self.titleLabel.setText("회원가입")
+        self.titleLabel.setText("회원가입 요청")
+        title_layout.addWidget(self.titleLabel)
 
-        # 서브타이틀
         self.subtitleLabel = QLabel(self)
-        self.subtitleLabel.setGeometry(QtCore.QRect(30, 100, 340, 40))
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.subtitleLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
-        self.subtitleLabel.setText("가입 정보를 입력해주세요.\n가입 후 바로 로그인 가능합니다. (체험판 제공)")
+        self.subtitleLabel.setWordWrap(True)
+        self.subtitleLabel.setText("정보를 입력한 뒤 회원가입 요청을 제출하세요.")
+        title_layout.addWidget(self.subtitleLabel)
 
-        # 가입자 명
-        self.nameLabel = QLabel(self)
-        self.nameLabel.setGeometry(QtCore.QRect(30, 150, 100, 25))
-        self.nameLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.nameLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
-        self.nameLabel.setText("가입자 명")
+        header_layout.addLayout(title_layout, 1)
+        root_layout.addLayout(header_layout)
 
-        self.nameEdit = QLineEdit(self)
-        self.nameEdit.setGeometry(QtCore.QRect(30, 175, 340, ds.button_sizes['md'].height))
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        root_layout.addWidget(scroll, 1)
+
+        form_container = QWidget()
+        scroll.setWidget(form_container)
+
+        form_layout = QVBoxLayout(form_container)
+        form_layout.setContentsMargins(2, 2, 2, 2)
+        form_layout.setSpacing(8)
+        input_height = ds.button_sizes["md"].height
+
+        def _field_label(text: str) -> QLabel:
+            label = QLabel(form_container)
+            label.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
+            label.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
+            label.setText(text)
+            return label
+
+        self.nameLabel = _field_label("이름")
+        form_layout.addWidget(self.nameLabel)
+
+        self.nameEdit = QLineEdit(form_container)
+        self.nameEdit.setMinimumHeight(input_height)
         self.nameEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
         self.nameEdit.setPlaceholderText("이름을 입력하세요")
         self._apply_input_style(self.nameEdit)
+        form_layout.addWidget(self.nameEdit)
 
-        # 이메일
-        self.emailLabel = QLabel(self)
-        self.emailLabel.setGeometry(QtCore.QRect(30, 225, 100, 25))
-        self.emailLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.emailLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
-        self.emailLabel.setText("이메일")
+        self.emailLabel = _field_label("이메일")
+        form_layout.addWidget(self.emailLabel)
 
-        self.emailEdit = QLineEdit(self)
-        self.emailEdit.setGeometry(QtCore.QRect(30, 250, 340, ds.button_sizes['md'].height))
+        self.emailEdit = QLineEdit(form_container)
+        self.emailEdit.setMinimumHeight(input_height)
         self.emailEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
         self.emailEdit.setPlaceholderText("example@email.com")
         self._apply_input_style(self.emailEdit)
+        form_layout.addWidget(self.emailEdit)
 
-        # 아이디 + 중복확인 (Shifted down +75)
-        self.usernameLabel = QLabel(self)
-        self.usernameLabel.setGeometry(QtCore.QRect(30, 300, 100, 25))
-        self.usernameLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.usernameLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
-        self.usernameLabel.setText("아이디")
+        self.usernameLabel = _field_label("아이디")
+        form_layout.addWidget(self.usernameLabel)
 
-        self.usernameEdit = QLineEdit(self)
-        self.usernameEdit.setGeometry(QtCore.QRect(30, 325, 240, ds.button_sizes['md'].height))
+        username_row = QHBoxLayout()
+        username_row.setSpacing(8)
+
+        self.usernameEdit = QLineEdit(form_container)
+        self.usernameEdit.setMinimumHeight(input_height)
         self.usernameEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
-        self.usernameEdit.setPlaceholderText("영문, 숫자, 밑줄(_)만 사용")
+        self.usernameEdit.setPlaceholderText("영문 소문자, 숫자, 밑줄(_) 사용")
         self._apply_input_style(self.usernameEdit)
         self.usernameEdit.textChanged.connect(self._on_username_changed)
+        username_row.addWidget(self.usernameEdit, 1)
 
-        self.checkUsernameBtn = QPushButton(self)
-        self.checkUsernameBtn.setGeometry(QtCore.QRect(280, 325, 90, ds.button_sizes['md'].height))
+        self.checkUsernameBtn = QPushButton(form_container)
+        self.checkUsernameBtn.setFixedHeight(input_height)
+        self.checkUsernameBtn.setMinimumWidth(100)
         self.checkUsernameBtn.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.checkUsernameBtn.setText("중복확인")
         self.checkUsernameBtn.setStyleSheet(f"""
@@ -442,72 +517,68 @@ class RegistrationRequestDialog(QWidget):
         """)
         self.checkUsernameBtn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.checkUsernameBtn.clicked.connect(self._check_username)
+        username_row.addWidget(self.checkUsernameBtn)
+        form_layout.addLayout(username_row)
 
-        self.usernameStatusLabel = QLabel(self)
-        self.usernameStatusLabel.setGeometry(QtCore.QRect(30, 369, 340, 18))
+        self.usernameStatusLabel = QLabel(form_container)
         self.usernameStatusLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.usernameStatusLabel.setWordWrap(True)
         self.usernameStatusLabel.setText("")
+        form_layout.addWidget(self.usernameStatusLabel)
 
-        # 비밀번호 (Shifted down +75)
-        self.passwordLabel = QLabel(self)
-        self.passwordLabel.setGeometry(QtCore.QRect(30, 395, 100, 25))
-        self.passwordLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.passwordLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
-        self.passwordLabel.setText("비밀번호")
+        self.passwordLabel = _field_label("비밀번호")
+        form_layout.addWidget(self.passwordLabel)
 
-        self.passwordEdit = QLineEdit(self)
-        self.passwordEdit.setGeometry(QtCore.QRect(30, 420, 340, ds.button_sizes['md'].height))
+        self.passwordEdit = QLineEdit(form_container)
+        self.passwordEdit.setMinimumHeight(input_height)
         self.passwordEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
-        self.passwordEdit.setPlaceholderText("8자 이상, 영문+숫자 포함")
+        self.passwordEdit.setPlaceholderText("영문+숫자 포함 8자 이상")
         self.passwordEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.passwordEdit)
+        form_layout.addWidget(self.passwordEdit)
 
-        self.passwordHintLabel = QLabel(self)
-        self.passwordHintLabel.setGeometry(QtCore.QRect(30, 464, 340, 18))
+        self.passwordHintLabel = QLabel(form_container)
         self.passwordHintLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.passwordHintLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
-        self.passwordHintLabel.setText("※ 영문+숫자 포함 8자 이상 필수")
+        self.passwordHintLabel.setWordWrap(True)
+        self.passwordHintLabel.setText("영문+숫자 포함 8자 이상")
+        form_layout.addWidget(self.passwordHintLabel)
 
-        # 비밀번호 확인 (Shifted down +75)
-        self.passwordConfirmLabel = QLabel(self)
-        self.passwordConfirmLabel.setGeometry(QtCore.QRect(30, 485, 120, 25))
-        self.passwordConfirmLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.passwordConfirmLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
-        self.passwordConfirmLabel.setText("비밀번호 확인")
+        self.passwordConfirmLabel = _field_label("비밀번호 확인")
+        form_layout.addWidget(self.passwordConfirmLabel)
 
-        self.passwordConfirmEdit = QLineEdit(self)
-        self.passwordConfirmEdit.setGeometry(QtCore.QRect(30, 510, 340, ds.button_sizes['md'].height))
+        self.passwordConfirmEdit = QLineEdit(form_container)
+        self.passwordConfirmEdit.setMinimumHeight(input_height)
         self.passwordConfirmEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
-        self.passwordConfirmEdit.setPlaceholderText("비밀번호를 다시 입력")
+        self.passwordConfirmEdit.setPlaceholderText("비밀번호를 다시 입력하세요")
         self.passwordConfirmEdit.setEchoMode(QLineEdit.EchoMode.Password)
         self._apply_input_style(self.passwordConfirmEdit)
+        form_layout.addWidget(self.passwordConfirmEdit)
 
-        # 비밀번호 확인 상태 라벨 (passwordConfirmEdit 바로 아래)
-        self.passwordMatchLabel = QLabel(self)
-        self.passwordMatchLabel.setGeometry(QtCore.QRect(30, 556, 340, 18))
+        self.passwordMatchLabel = QLabel(form_container)
         self.passwordMatchLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.passwordMatchLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.passwordMatchLabel.setWordWrap(True)
         self.passwordMatchLabel.setText("")
+        form_layout.addWidget(self.passwordMatchLabel)
 
-        # 연락처 (Shifted down for passwordMatchLabel)
-        self.contactLabel = QLabel(self)
-        self.contactLabel.setGeometry(QtCore.QRect(30, 578, 100, 25))
-        self.contactLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_sm, QFont.Weight.Bold))
-        self.contactLabel.setStyleSheet(f"color: {login_color('text_secondary')}; background: transparent;")
-        self.contactLabel.setText("연락처")
+        self.contactLabel = _field_label("연락처")
+        form_layout.addWidget(self.contactLabel)
 
-        self.contactEdit = QLineEdit(self)
-        self.contactEdit.setGeometry(QtCore.QRect(30, 603, 340, ds.button_sizes['md'].height))
+        self.contactEdit = QLineEdit(form_container)
+        self.contactEdit.setMinimumHeight(input_height)
         self.contactEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
         self.contactEdit.setPlaceholderText("010-1234-5678")
         self._apply_input_style(self.contactEdit)
+        form_layout.addWidget(self.contactEdit)
 
-        # 제출 버튼 (Shifted down)
-        self.submitButton = QPushButton(self)
-        self.submitButton.setGeometry(QtCore.QRect(30, 660, 340, ds.button_sizes['lg'].height))
+        form_layout.addSpacing(8)
+
+        self.submitButton = QPushButton(form_container)
+        self.submitButton.setMinimumHeight(ds.button_sizes["lg"].height)
         self.submitButton.setFont(QFont(FONT_FAMILY, ds.button_sizes['lg'].font_size, QFont.Weight.Bold))
-        self.submitButton.setText("회원가입")
+        self.submitButton.setText("회원가입 요청 제출")
         self.submitButton.setStyleSheet(f"""
             QPushButton {{
                 color: {login_color('surface')};
@@ -525,6 +596,8 @@ class RegistrationRequestDialog(QWidget):
         self.submitButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.submitButton.clicked.connect(self._on_submit)
         self.submitButton.setEnabled(True)
+        form_layout.addWidget(self.submitButton)
+        form_layout.addStretch(1)
 
     def _apply_input_style(self, widget):
         widget.setStyleSheet(f"""

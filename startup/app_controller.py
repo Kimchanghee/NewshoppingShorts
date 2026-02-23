@@ -41,6 +41,18 @@ def _env_truthy(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _is_unreliable_signature_failure(reason: str) -> bool:
+    """True when signature check failed due to tooling/environment issues."""
+    lowered = str(reason or "").lower()
+    unreliable_tokens = (
+        "unknownerror",
+        "invocation failed",
+        "timed out",
+        "powershell",
+    )
+    return any(token in lowered for token in unreliable_tokens)
+
+
 def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tuple[bool, str]:
     """
     Verify Windows Authenticode signature for a file.
@@ -380,31 +392,80 @@ class AppController:
         self._latest_version: str = ""
         self._release_notes: str = ""
         self._main_launched: bool = False
-        self._pending_update_info: Optional[Dict[str, Any]] = None  # ?낅뜲?댄듃 ?댁뿭 ??μ슜
+        self._quit_policy_overridden: bool = False
+        self._quit_policy_original: bool = True
+        if hasattr(self.app, "quitOnLastWindowClosed"):
+            try:
+                self._quit_policy_original = bool(self.app.quitOnLastWindowClosed())
+            except Exception:
+                self._quit_policy_original = True
+        self._pending_update_info: Optional[Dict[str, Any]] = None  # ??낅쑓??꾨뱜 ??곷열 ???關??
 
-    # ?? Entry point ??
+    # ???? Entry point ????
+
+    def _suspend_auto_quit(self) -> None:
+        """Prevent accidental shutdown while switching transient windows."""
+        if self._quit_policy_overridden:
+            return
+        if not hasattr(self.app, "setQuitOnLastWindowClosed"):
+            return
+        try:
+            if hasattr(self.app, "quitOnLastWindowClosed"):
+                self._quit_policy_original = bool(self.app.quitOnLastWindowClosed())
+            self.app.setQuitOnLastWindowClosed(False)
+            self._quit_policy_overridden = True
+            logger.debug("Temporarily disabled quitOnLastWindowClosed")
+        except Exception:
+            pass
+
+    def _restore_auto_quit(self) -> None:
+        """Restore quit-on-last-window policy after transition completes."""
+        if not self._quit_policy_overridden:
+            return
+        if not hasattr(self.app, "setQuitOnLastWindowClosed"):
+            self._quit_policy_overridden = False
+            return
+        try:
+            self.app.setQuitOnLastWindowClosed(self._quit_policy_original)
+        except Exception:
+            pass
+        self._quit_policy_overridden = False
 
     def start(self) -> None:
         """Start the app ??show login first, but check updates before login."""
         if getattr(sys, "frozen", False) and sys.platform == "win32":
-            ok, reason = _verify_authenticode_signature(
-                sys.executable,
-                "APP_SIGNER_THUMBPRINTS",
-            )
-            if not ok:
-                self._close_splash()
-                if _env_truthy("APP_SIGNATURE_REQUIRED", default=False):
-                    logger.error("Executable signature verification failed: %s", reason)
-                    QMessageBox.critical(
-                        None,
-                        "보안 오류",
-                        "앱 서명 검증에 실패했습니다. 실행을 중단합니다.",
-                    )
-                    sys.exit(1)
-                logger.warning(
-                    "Executable signature verification failed but APP_SIGNATURE_REQUIRED is disabled: %s",
-                    reason,
+            signature_required = _env_truthy("APP_SIGNATURE_REQUIRED", default=False)
+            signature_strict = _env_truthy("APP_SIGNATURE_STRICT", default=False)
+            signer_thumbprints = (os.getenv("APP_SIGNER_THUMBPRINTS", "") or "").strip()
+            should_verify_signature = signature_required or bool(signer_thumbprints)
+
+            if should_verify_signature:
+                ok, reason = _verify_authenticode_signature(
+                    sys.executable,
+                    "APP_SIGNER_THUMBPRINTS",
                 )
+                if not ok:
+                    self._close_splash()
+                    unreliable_failure = _is_unreliable_signature_failure(reason)
+                    must_block = signature_required and (signature_strict or not unreliable_failure)
+
+                    if must_block:
+                        logger.error("Executable signature verification failed: %s", reason)
+                        QMessageBox.critical(
+                            None,
+                            "Security Error",
+                            "App signature verification failed. Startup has been blocked.",
+                        )
+                        sys.exit(1)
+
+                    logger.warning(
+                        "Executable signature verification failed but startup will continue "
+                        "(required=%s strict=%s unreliable=%s): %s",
+                        signature_required,
+                        signature_strict,
+                        unreliable_failure,
+                        reason,
+                    )
 
         # Pre-login update check: ensures users on broken versions can still
         # receive updates even when the login flow itself is broken.
@@ -451,14 +512,14 @@ class AppController:
         logger.warning("Pre-login update check failed: %s", error)
         self._show_login()
 
-    # ?? Splash management ??
+    # ???? Splash management ????
 
     def _close_splash(self) -> None:
         if self.splash:
             self.splash.close()
             self.splash = None
 
-    # ?? Login ??
+    # ???? Login ????
 
     def _show_login(self) -> None:
         from ui.windows.login_window import Login
@@ -469,8 +530,8 @@ class AppController:
             logger.error("Failed to create login window: %s", e, exc_info=True)
             QMessageBox.critical(
                 None,
-                "시작 오류",
-                f"로그인 화면을 열 수 없습니다:\n{e}",
+                "?쒖옉 ?ㅻ쪟",
+                f"濡쒓렇???붾㈃???????놁뒿?덈떎:\n{e}",
             )
             sys.exit(1)
         self.login_window.controller = self
@@ -492,7 +553,7 @@ class AppController:
             logger.info("Development mode: Skipping update check")
             self._proceed_to_loading()
 
-    # ?? Post-login update check (game-like auto-update) ??
+    # ???? Post-login update check (game-like auto-update) ????
 
     def _check_update_after_login(self) -> None:
         current_version = self.get_current_version()
@@ -516,8 +577,8 @@ class AppController:
             if self._update_is_mandatory:
                 QMessageBox.critical(
                     None,
-                    "업데이트 오류",
-                    "필수 업데이트를 다운로드할 수 없습니다.\n프로그램을 종료합니다.",
+                    "?낅뜲?댄듃 ?ㅻ쪟",
+                    "?꾩닔 ?낅뜲?댄듃瑜??ㅼ슫濡쒕뱶?????놁뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
@@ -528,8 +589,8 @@ class AppController:
             if self._update_is_mandatory:
                 QMessageBox.critical(
                     None,
-                    "업데이트 오류",
-                    "필수 업데이트 검증 정보(file_hash)가 없습니다.\n프로그램을 종료합니다.",
+                    "?낅뜲?댄듃 ?ㅻ쪟",
+                    "?꾩닔 ?낅뜲?댄듃 寃利??뺣낫(file_hash)媛 ?놁뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
@@ -544,13 +605,13 @@ class AppController:
         logger.warning(f"Update check failed: {error}")
         self._proceed_to_loading()
 
-    # ?? Version ??
+    # ???? Version ????
 
     def get_current_version(self) -> str:
         from utils.auto_updater import get_current_version
         return get_current_version()
 
-    # ?? Loading & Main App ??
+    # ???? Loading & Main App ????
 
     def _proceed_to_loading(self) -> None:
         """Continue to ProcessWindow and main app (no update needed)."""
@@ -594,21 +655,34 @@ class AppController:
             # Check for pending update notification (saved before restart)
             pending = self._consume_pending_update()
             if pending:
+                if not getattr(sys, "frozen", False):
+                    # Source-run can inherit stale pending-update metadata
+                    # from an older installer flow. Skip dialog in dev mode.
+                    logger.info(
+                        "Ignoring pending update info in development run: v%s",
+                        pending.get("version", ""),
+                    )
+                    self.launch_main_app()
+                    return
                 # Show dialog BEFORE closing loading window to prevent
                 # quitOnLastWindowClosed from terminating the app.
+                self._suspend_auto_quit()
                 self._show_update_complete(pending)
                 if self.loading_window:
-                    self.loading_window.close()
+                    # Keep it alive during dialog handoff; it will be closed
+                    # after main window is shown.
+                    self.loading_window.hide()
             else:
                 self.launch_main_app()
         except Exception as e:
             logger.error(f"Loading finished handler failed: {e}", exc_info=True)
+            self._restore_auto_quit()
             if self.loading_window:
                 self.loading_window.close()
             QMessageBox.critical(
                 None,
-                "시작 오류",
-                f"초기화 중 오류가 발생했습니다:\n{e}",
+                "?쒖옉 ?ㅻ쪟",
+                f"珥덇린??以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎:\n{e}",
             )
 
     def launch_main_app(self) -> None:
@@ -630,24 +704,26 @@ class AppController:
             # Close loading window AFTER main window is shown
             if self.loading_window:
                 self.loading_window.close()
+            self._restore_auto_quit()
 
             # Log application start
             try:
                 from caller.rest import log_user_action
-                log_user_action("앱 실행", "애플리케이션이 성공적으로 실행되었습니다.")
+                log_user_action("???ㅽ뻾", "?좏뵆由ъ??댁뀡???깃났?곸쑝濡??ㅽ뻾?섏뿀?듬땲??")
             except Exception:
                 pass
 
-            # 업데이트 내역 팝업 표시 (새 버전일 때만)
+            # ?낅뜲?댄듃 ?댁뿭 ?앹뾽 ?쒖떆 (??踰꾩쟾???뚮쭔)
             self._show_update_notes_if_needed()
 
         except Exception as e:
             logger.error(f"Failed to launch main app: {e}", exc_info=True)
+            self._restore_auto_quit()
             if self.loading_window:
                 self.loading_window.close()
             QMessageBox.critical(
                 None,
-                "시작 오류",
+                "?쒖옉 ?ㅻ쪟",
                 self._build_launch_error_message(e),
             )
 
@@ -667,19 +743,19 @@ class AppController:
 
         if numpy_signature:
             return (
-                "메인 앱을 시작할 수 없습니다.\n\n"
-                "원인: 업데이트 중 이전 버전 파일이 남아 라이브러리 충돌이 발생했습니다.\n\n"
-                "해결 방법\n"
-                "1) 최신 설치 파일을 다시 실행하세요.\n"
-                "2) 설치 모드에서 '재설치(Reinstall)'를 선택하세요.\n"
-                "3) 설치 완료 후 앱을 다시 실행하세요.\n\n"
-                f"기술 정보: {detail}"
+                "硫붿씤 ?깆쓣 ?쒖옉?????놁뒿?덈떎.\n\n"
+                "?먯씤: ?낅뜲?댄듃 以??댁쟾 踰꾩쟾 ?뚯씪???⑥븘 ?쇱씠釉뚮윭由?異⑸룎??諛쒖깮?덉뒿?덈떎.\n\n"
+                "?닿껐 諛⑸쾿\n"
+                "1) 理쒖떊 ?ㅼ튂 ?뚯씪???ㅼ떆 ?ㅽ뻾?섏꽭??\n"
+                "2) ?ㅼ튂 紐⑤뱶?먯꽌 '?ъ꽕移?Reinstall)'瑜??좏깮?섏꽭??\n"
+                "3) ?ㅼ튂 ?꾨즺 ???깆쓣 ?ㅼ떆 ?ㅽ뻾?섏꽭??\n\n"
+                f"湲곗닠 ?뺣낫: {detail}"
             )
 
-        return f"메인 앱을 시작할 수 없습니다:\n{detail}"
+        return f"硫붿씤 ?깆쓣 ?쒖옉?????놁뒿?덈떎:\n{detail}"
 
     def _show_update_notes_if_needed(self) -> None:
-        """업데이트 내역 팝업 표시 (새 버전이고 릴리즈노트가 있을 때)."""
+        """?낅뜲?댄듃 ?댁뿭 ?앹뾽 ?쒖떆 (??踰꾩쟾?닿퀬 由대━利덈끂?멸? ?덉쓣 ??."""
         if not self._pending_update_info:
             return
 
@@ -688,7 +764,7 @@ class AppController:
         version = self._pending_update_info.get("version", "")
         release_notes = self._pending_update_info.get("release_notes", "")
 
-        # 새 버전이고 릴리즈노트가 있을 때만 팝업 표시
+        # ??踰꾩쟾?닿퀬 由대━利덈끂?멸? ?덉쓣 ?뚮쭔 ?앹뾽 ?쒖떆
         if is_new_version and has_notes and release_notes:
             try:
                 from ui.windows.update_dialog import UpdateNotesDialog
@@ -702,7 +778,7 @@ class AppController:
             except Exception as e:
                 logger.warning(f"Failed to show update notes dialog: {e}")
 
-    # ?? Pending update persistence ??
+    # ???? Pending update persistence ????
 
     @staticmethod
     def _save_pending_update(version: str, release_notes: str) -> None:
@@ -737,7 +813,7 @@ class AppController:
                 pass
         return None
 
-    # ?? Update-complete dialog ??
+    # ???? Update-complete dialog ????
 
     def _show_update_complete(self, pending: Dict[str, str]) -> None:
         """Show update-complete dialog with 5s countdown, then launch main app."""
@@ -752,9 +828,12 @@ class AppController:
         self.update_complete_dialog.confirmed.connect(self._transition_to_main)
         self.update_complete_dialog.show()
 
-        # Pre-import heavy main module while dialog countdown is visible.
-        # This caches ~20+ module imports so launch_main_app is near-instant.
-        QtCore.QTimer.singleShot(500, self._preload_main_module)
+        # Failsafe: force transition even if dialog timer/signal is missed.
+        QtCore.QTimer.singleShot(15000, self._transition_to_main_if_needed)
+
+        # Optional optimization: only enabled explicitly to avoid UI stalls.
+        if _env_truthy("APP_UPDATE_PRELOAD_MAIN", default=False):
+            QtCore.QTimer.singleShot(500, self._preload_main_module)
 
     def _preload_main_module(self) -> None:
         """Pre-import main module during update dialog to reduce transition lag."""
@@ -773,7 +852,15 @@ class AppController:
 
         self.launch_main_app()
 
-    # ?? Update download & install ??
+    # ???? Update download & install ????
+
+
+    def _transition_to_main_if_needed(self) -> None:
+        """Force transition when update-complete dialog did not progress."""
+        if self._main_launched:
+            return
+        logger.warning("Update-complete transition timed out; forcing main launch")
+        self._transition_to_main()
 
     @staticmethod
     def _windows_creation_flags() -> int:
@@ -810,8 +897,8 @@ class AppController:
             if self._update_is_mandatory:
                 QMessageBox.critical(
                     None,
-                    "오류",
-                    "업데이트 파일 경로가 올바르지 않습니다.\n프로그램을 종료합니다.",
+                    "?ㅻ쪟",
+                    "?낅뜲?댄듃 ?뚯씪 寃쎈줈媛 ?щ컮瑜댁? ?딆뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
                 )
                 sys.exit(1)
             self._fallback_after_update_failure()
@@ -832,7 +919,7 @@ class AppController:
 
         def on_download_finished(success: bool, result: str):
             if success:
-                self.update_progress_dialog.set_status("설치 준비 중...")
+                self.update_progress_dialog.set_status("?ㅼ튂 以鍮?以?..")
                 self.update_progress_dialog.set_progress(100)
                 QtCore.QTimer.singleShot(500, lambda: self._run_installer(result))
             else:
@@ -841,8 +928,8 @@ class AppController:
                 if self._update_is_mandatory:
                     QMessageBox.critical(
                         None,
-                        "업데이트 실패",
-                        f"업데이트 검증 실패:\n{result}\n\n프로그램을 종료합니다.",
+                        "?낅뜲?댄듃 ?ㅽ뙣",
+                        f"?낅뜲?댄듃 寃利??ㅽ뙣:\n{result}\n\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
                     )
                     sys.exit(1)
                 self._fallback_after_update_failure()
@@ -861,7 +948,7 @@ class AppController:
         import subprocess
 
         if hasattr(self, "update_progress_dialog") and self.update_progress_dialog:
-            self.update_progress_dialog.set_status("설치 프로그램 실행 중...")
+            self.update_progress_dialog.set_status("?ㅼ튂 ?꾨줈洹몃옩 ?ㅽ뻾 以?..")
 
         try:
             # Save update info BEFORE restarting so post-restart can show complete dialog
@@ -914,8 +1001,8 @@ class AppController:
                 self.update_progress_dialog.close()
             QMessageBox.critical(
                 None,
-                "업데이트 실행 오류",
-                f"업데이트 실행 중 오류가 발생했습니다:\n{e}",
+                "?낅뜲?댄듃 ?ㅽ뻾 ?ㅻ쪟",
+                f"?낅뜲?댄듃 ?ㅽ뻾 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎:\n{e}",
             )
             if self._update_is_mandatory:
                 sys.exit(1)
