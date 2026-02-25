@@ -329,6 +329,7 @@ from .utils import (
     _get_voice_display_name,
     _translate_error_message,
     _get_short_error_message,
+    _step_name_kr,
 )
 from .encoder import (
     _check_gpu_encoder_available,
@@ -695,6 +696,7 @@ def dynamic_batch_processing_thread(app):
                     ui_controller.write_error_log(e)
                     error_msg = str(e)
                     error_lower = error_msg.lower()
+                    error_step = getattr(e, "_batch_step", "")
 
                     # ★ 503 서버 과부하 → 5분 대기 후 재시도 (API 키 교체 없음, 무한 재시도)
                     if (
@@ -763,7 +765,9 @@ def dynamic_batch_processing_thread(app):
 
                             app.add_log("작업 중지됨 (API 키 소진)")
                             _safe_set_url_status(app, url, "failed")
-                            app.url_status_message[url] = _get_short_error_message(e)
+                            app.url_status_message[url] = _get_short_error_message(
+                                e, step=error_step
+                            )
                             failed_count += 1
                             try:
                                 app._auto_save_session()
@@ -788,7 +792,9 @@ def dynamic_batch_processing_thread(app):
                         else:
                             app.add_log(f"❌ {max_retries}번 재시도 실패")
                             _safe_set_url_status(app, url, "failed")
-                            app.url_status_message[url] = _get_short_error_message(e)
+                            app.url_status_message[url] = _get_short_error_message(
+                                e, step=error_step
+                            )
                             failed_count += 1
 
                             try:
@@ -831,9 +837,13 @@ def dynamic_batch_processing_thread(app):
 
                         # 복구 불가 에러: 팝업 띄우고 배치 중지
                         _safe_set_url_status(app, url, "failed")
-                        app.url_status_message[url] = _get_short_error_message(e)
+                        app.url_status_message[url] = _get_short_error_message(
+                            e, step=error_step
+                        )
                         failed_count += 1
-                        translated_error_msg = _translate_error_message(error_msg)
+                        translated_error_msg = getattr(
+                            e, "_batch_translated_error", ""
+                        ) or _translate_error_message(error_msg, step=error_step)
                         app.add_log(f"실패: {translated_error_msg[:100]}")
 
                         # 배치 작업 중지
@@ -841,12 +851,31 @@ def dynamic_batch_processing_thread(app):
 
                         # 에러 팝업 표시
                         popup_msg = translated_error_msg
+                        step_label = _step_name_kr(error_step) if error_step else ""
+                        raw_error = str(
+                            getattr(e, "_batch_original_error", error_msg)
+                        ).strip()
+                        raw_error = re.sub(r"\s+", " ", raw_error)
+                        if len(raw_error) > 180:
+                            raw_error = raw_error[:177] + "..."
+                        detail_lines = []
+                        if step_label:
+                            detail_lines.append(f"단계: {step_label}")
+                        if raw_error and raw_error not in translated_error_msg:
+                            detail_lines.append(f"원인: {raw_error}")
+                        detail_block = (
+                            ("\n".join(detail_lines) + "\n\n")
+                            if detail_lines
+                            else ""
+                        )
+
                         def show_error_popup():
                             try:
                                 show_error(
                                     app,
                                     "영상 처리 오류",
                                     f"{popup_msg}\n\n"
+                                    f"{detail_block}"
                                     f"작업이 중지되었습니다.\n"
                                     f"설정을 확인한 후 다시 시도해주세요.",
                                 )
@@ -922,7 +951,9 @@ def dynamic_batch_processing_thread(app):
             pass
 
     except Exception as e:
-        translated_error = _translate_error_message(str(e))
+        translated_error = _translate_error_message(
+            str(e), step=getattr(e, "_batch_step", "")
+        )
         app.add_log(f"[오류] {translated_error}")
         ui_controller.write_error_log(e)
         # traceback 출력 제거 - 한글 메시지만 표시
@@ -1551,6 +1582,12 @@ def _process_single_video(app, url, current_number, total_urls):
         error_msg = _translate_error_message(str(exc), step=current_step)
         error_lower = str(exc).lower()
         logger.error("[처리 오류] 단계=%s, 메시지=%s", current_step, error_msg)
+        try:
+            exc._batch_step = current_step
+            exc._batch_original_error = str(exc)
+            exc._batch_translated_error = error_msg
+        except Exception:
+            pass
         try:
             rest.log_user_action("작업 오류", f"[{current_number}/{total_urls}] 단계: {current_step}, 오류: {error_msg[:100]}", "ERROR")
         except Exception:

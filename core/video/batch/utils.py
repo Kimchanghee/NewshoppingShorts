@@ -239,7 +239,15 @@ def _translate_error_message(error_text: str, step: str = "") -> str:
     if "404" in error_text or "Not found" in error_text:
         if step == "download":
             return "영상을 찾을 수 없음 - 삭제되었거나 링크가 잘못됨"
-        return "리소스를 찾을 수 없음"
+        if step == "analysis":
+            return "영상 분석 리소스를 찾을 수 없음 - 원본 영상/메타데이터 확인 필요"
+        if step == "translation":
+            return "번역 리소스를 찾을 수 없음 - API 응답 형식 확인 필요"
+        if step == "tts":
+            return "TTS 리소스를 찾을 수 없음 - 음성 생성 결과 확인 필요"
+        if step == "video":
+            return "영상 렌더링 리소스를 찾을 수 없음 - 임시 파일/경로 확인 필요"
+        return "리소스를 찾을 수 없음 (404) - 원본 링크/설정 확인 필요"
 
     # 타임아웃
     if "timeout" in error_text.lower() or "timed out" in error_text.lower():
@@ -442,7 +450,17 @@ def _get_short_error_message(error: Exception, step: str = "") -> str:
             return '네트워크오류'
     elif '연결' in error_str:
         return '연결오류'
-    elif 'not found' in error_lower:
+    elif 'not found' in error_lower or '찾을 수 없' in error_str:
+        if step == "download":
+            return '영상없음'
+        if step == "analysis":
+            return '분석대상없음'
+        if step == "translation":
+            return '번역대상없음'
+        if step == "tts":
+            return 'TTS대상없음'
+        if step == "video":
+            return '렌더링파일없음'
         return '리소스없음'
     elif 'validation' in error_lower:
         return '입력값오류'
