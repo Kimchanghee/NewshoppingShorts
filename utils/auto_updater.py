@@ -26,7 +26,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # ?袁⑹삺 ??甕곌쑴??(??슢諭?????揶쏅?????낅쑓??꾨뱜)
-CURRENT_VERSION = "1.4.20"
+CURRENT_VERSION = "1.4.24"
 
 # 甕곌쑴???類ㅼ뵥 API ?遺얜굡?????
 UPDATE_CHECK_URL = os.getenv(
@@ -505,5 +505,4 @@ def check_for_updates_on_startup(
         callback: ??낅쑓??꾨뱜 ?類ㅼ뵥 ?袁⑥┷ ???꾩뮆媛?    """
     checker = get_update_checker()
     checker.check_async(callback)
-
 

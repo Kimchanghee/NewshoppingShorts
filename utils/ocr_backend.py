@@ -151,9 +151,17 @@ class OCRBackend:
             if "glmocrofflineerror" in msg_lower or "api not available" in msg_lower:
                 return False
 
-        # Non-retryable: RapidOCR package missing
+        # Non-retryable: RapidOCR package missing or native DLL load failure.
         if engine_name == "rapidocr":
-            if "import" in msg_lower and ("no module named" in msg_lower or "실패" in msg):
+            non_retry_markers = [
+                "no module named",
+                "dll load failed",
+                "loadlibrary",
+                "winerror 126",
+                "winerror 1114",
+                "onnxruntime_pybind11_state",
+            ]
+            if any(marker in msg_lower for marker in non_retry_markers):
                 return False
 
         # Non-retryable: Tesseract executable or package missing
