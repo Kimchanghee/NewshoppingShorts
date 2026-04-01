@@ -160,6 +160,10 @@ class SettingsManager:
         # Automation Settings
         "coupang_access_key": "",
         "coupang_secret_key": "",
+        "linktree_webhook_url": "",
+        "linktree_api_key": "",
+        "linktree_profile_url": "",
+        "linktree_auto_publish": False,
         "cookies_inpock": {},  # Dict to store Inpock Link cookies
         "cookies_1688": {},  # Dict to store 1688 cookies
     }
@@ -636,6 +640,7 @@ class SettingsManager:
             "threads_connected": self._settings.get("threads_connected", False),
             "x_connected": self._settings.get("x_connected", False),
             "coupang_connected": bool(self._settings.get("coupang_access_key") and self._settings.get("coupang_secret_key")),
+            "linktree_connected": bool(self._settings.get("linktree_webhook_url")),
             "inpock_connected": bool(self._settings.get("cookies_inpock")),
         }
 
@@ -743,6 +748,63 @@ class SettingsManager:
         with self._lock:
             self._settings["coupang_access_key"] = self._encrypt_value(access_key)
             self._settings["coupang_secret_key"] = self._encrypt_value(secret_key)
+        return self._save_settings()
+
+    def get_linktree_settings(self) -> Dict[str, Any]:
+        """Get Linktree webhook integration settings."""
+        raw_webhook = self._settings.get("linktree_webhook_url", "")
+        raw_api_key = self._settings.get("linktree_api_key", "")
+        profile_url = str(self._settings.get("linktree_profile_url", "") or "").strip()
+        auto_publish = bool(self._settings.get("linktree_auto_publish", False))
+
+        webhook_url = self._decrypt_value(raw_webhook).strip()
+        api_key = self._decrypt_value(raw_api_key).strip()
+
+        migrated = False
+        if raw_webhook and not str(raw_webhook).startswith("fernet:") and webhook_url:
+            migrated = True
+        if raw_api_key and not str(raw_api_key).startswith("fernet:") and api_key:
+            migrated = True
+
+        if migrated:
+            self.set_linktree_settings(
+                webhook_url=webhook_url,
+                api_key=api_key,
+                profile_url=profile_url,
+                auto_publish=auto_publish,
+            )
+
+        return {
+            "webhook_url": webhook_url,
+            "api_key": api_key,
+            "profile_url": profile_url,
+            "auto_publish": auto_publish,
+        }
+
+    def set_linktree_settings(
+        self,
+        webhook_url: str,
+        api_key: str,
+        profile_url: str = "",
+        auto_publish: Optional[bool] = None,
+    ) -> bool:
+        """Save Linktree webhook integration settings."""
+        with self._lock:
+            self._settings["linktree_webhook_url"] = self._encrypt_value(str(webhook_url or "").strip())
+            self._settings["linktree_api_key"] = self._encrypt_value(str(api_key or "").strip())
+            self._settings["linktree_profile_url"] = str(profile_url or "").strip()
+            if auto_publish is not None:
+                self._settings["linktree_auto_publish"] = bool(auto_publish)
+        return self._save_settings()
+
+    def get_linktree_auto_publish(self) -> bool:
+        """Get Linktree auto-publish flag."""
+        return bool(self._settings.get("linktree_auto_publish", False))
+
+    def set_linktree_auto_publish(self, enabled: bool) -> bool:
+        """Save Linktree auto-publish flag."""
+        with self._lock:
+            self._settings["linktree_auto_publish"] = bool(enabled)
         return self._save_settings()
 
     def get_inpock_cookies(self) -> Dict[str, str]:

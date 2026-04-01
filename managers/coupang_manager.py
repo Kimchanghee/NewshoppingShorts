@@ -119,6 +119,11 @@ class CoupangManager:
         link = self.generate_deep_link(test_url)
         return link is not None
 
+    def is_connected(self) -> bool:
+        """Return whether Coupang credentials are configured."""
+        keys = self.settings.get_coupang_keys()
+        return bool(keys["access_key"] and keys["secret_key"])
+
 # Global instance
 _coupang_manager: Optional[CoupangManager] = None
 

@@ -14,6 +14,7 @@ from managers.subscription_manager import SubscriptionManager
 from managers.settings_manager import SettingsManager, get_settings_manager
 from managers.youtube_manager import YouTubeManager, get_youtube_manager
 from managers.tiktok_manager import TikTokManager, get_tiktok_manager
+from managers.linktree_manager import LinktreeManager, get_linktree_manager
 from managers.processing_queue import (
     ProcessingQueue,
     UrlStatus,
@@ -33,6 +34,8 @@ __all__ = [
     'get_youtube_manager',
     'TikTokManager',
     'get_tiktok_manager',
+    'LinktreeManager',
+    'get_linktree_manager',
     # URL 처리 큐 관련
     'ProcessingQueue',
     'UrlStatus',

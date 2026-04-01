@@ -103,6 +103,25 @@ def setup_logging():
     )
     return log_file
 
+
+def install_keyboardinterrupt_hook():
+    """Suppress noisy traceback on Ctrl+C from Qt callback contexts."""
+    original_hook = sys.excepthook
+
+    def _hook(exc_type, exc_value, exc_traceback):
+        if issubclass(exc_type, KeyboardInterrupt):
+            logging.info("KeyboardInterrupt received. Requesting Qt shutdown.")
+            try:
+                app_instance = QApplication.instance()
+                if app_instance is not None:
+                    app_instance.quit()
+            except Exception:
+                pass
+            return
+        original_hook(exc_type, exc_value, exc_traceback)
+
+    sys.excepthook = _hook
+
 class StartupWorker(QtCore.QThread):
     progress = QtCore.pyqtSignal(int)
     status = QtCore.pyqtSignal(str)
@@ -158,6 +177,7 @@ class StartupWorker(QtCore.QThread):
 if __name__ == "__main__":
     # Setup logging first
     log_file = setup_logging()
+    install_keyboardinterrupt_hook()
     logging.info("Application starting...")
 
     app = QApplication(sys.argv)
@@ -202,8 +222,10 @@ if __name__ == "__main__":
     def on_finished():
         global controller
         try:
-            worker.quit()
-            worker.wait()
+            if worker.isRunning():
+                worker.quit()
+                if not worker.wait(3000):
+                    logging.warning("Startup worker did not stop within timeout")
 
             from startup.app_controller import AppController
             controller = AppController(app)
@@ -226,4 +248,21 @@ if __name__ == "__main__":
     
     worker.start()
 
-    sys.exit(app.exec())
+    exit_code = 0
+    try:
+        exit_code = app.exec()
+    except KeyboardInterrupt:
+        logging.info("KeyboardInterrupt received. Shutting down gracefully.")
+        try:
+            if worker.isRunning():
+                worker.quit()
+                worker.wait(2000)
+        except Exception:
+            pass
+        try:
+            splash.close()
+        except Exception:
+            pass
+        exit_code = 130
+
+    sys.exit(exit_code)

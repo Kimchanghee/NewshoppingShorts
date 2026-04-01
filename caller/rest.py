@@ -40,11 +40,40 @@ _ERROR_MESSAGES = {
 }
 
 # Server URL from environment variable (secure configuration)
-# ? ???? URL ??( ? )
-# Production: Cloud Run, Development: localhost
-main_server = os.getenv(
-    "API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
+# Priority:
+# 1) API_SERVER_URL (legacy/current client variable)
+# 2) USER_DASHBOARD_API_URL (shared backend repo variable)
+# 3) built-in fallback URL
+_DEFAULT_API_SERVER_URL = "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
+_ALT_API_SERVER_URL = "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app"
+main_server = (
+    os.getenv("API_SERVER_URL", "").strip()
+    or os.getenv("USER_DASHBOARD_API_URL", "").strip()
+    or _DEFAULT_API_SERVER_URL
 ).rstrip("/")
+
+
+def _normalize_server_url(raw: str) -> str:
+    return (raw or "").strip().rstrip("/")
+
+
+def _candidate_login_servers() -> list[str]:
+    """
+    Return login endpoint candidates in priority order.
+    Used to recover from endpoint-specific 5xx without user action.
+    """
+    candidates: list[str] = []
+    for raw in (
+        main_server,
+        os.getenv("USER_DASHBOARD_API_URL", ""),
+        os.getenv("API_SERVER_URL_FALLBACK", ""),
+        _DEFAULT_API_SERVER_URL,
+        _ALT_API_SERVER_URL,
+    ):
+        normalized = _normalize_server_url(raw)
+        if normalized and normalized not in candidates:
+            candidates.append(normalized)
+    return candidates
 
 # Production environment detection
 # ? ? ?
@@ -61,6 +90,7 @@ _DNS_BACKOFF_MAX_SECONDS = max(
 )
 _CERT_PIN_CACHE_SECONDS = max(60, int(os.getenv("API_CERT_PIN_CACHE_SECONDS", "600")))
 _CERT_PINNING_ENABLED = os.getenv("API_CERT_PINNING", "1").strip().lower() not in {"0", "false", "off", "no"}
+_CERT_PIN_AUTO_ROTATE = os.getenv("API_CERT_PIN_AUTO_ROTATE", "1").strip().lower() not in {"0", "false", "off", "no"}
 _dns_failure_count = 0
 _dns_backoff_until = 0.0
 _dns_state_lock = threading.RLock()
@@ -219,12 +249,25 @@ def _check_certificate_pinning() -> bool:
         if configured_pins:
             matched = observed_pin in configured_pins
             if not matched:
-                logger.critical(
-                    "TLS pin mismatch for %s. observed=%s expected=%s",
-                    host,
-                    observed_pin[:16] + "...",
-                    ",".join(p[:16] + "..." for p in configured_pins),
-                )
+                env_pins_raw = os.getenv("API_CERT_SHA256", "").strip()
+                can_auto_rotate = not env_pins_raw and _CERT_PIN_AUTO_ROTATE
+                if can_auto_rotate:
+                    previous_preview = ",".join(p[:16] + "..." for p in configured_pins)
+                    _store_tofu_pin(observed_pin)
+                    logger.warning(
+                        "TLS pin changed for %s. Auto-rotated stored TOFU pin (%s -> %s).",
+                        host,
+                        previous_preview or "none",
+                        observed_pin[:16] + "...",
+                    )
+                    matched = True
+                else:
+                    logger.critical(
+                        "TLS pin mismatch for %s. observed=%s expected=%s",
+                        host,
+                        observed_pin[:16] + "...",
+                        ",".join(p[:16] + "..." for p in configured_pins),
+                    )
             _pinning_last_result = matched
         else:
             # Trust-on-first-use fallback: persist current cert fingerprint.
@@ -360,34 +403,87 @@ def _create_secure_session() -> requests.Session:
 _secure_session = _create_secure_session()
 
 
+def _append_request_id(message: str, request_id: Optional[str]) -> str:
+    """Attach backend request ID for support/debugging when available."""
+    msg = (message or "").strip()
+    rid = (request_id or "").strip()
+    if not rid:
+        return msg
+    return f"{msg}\n요청 ID: {rid}"
+
+
+def _extract_error_fields(login_object: Dict[str, Any]) -> tuple[str, str, str]:
+    """
+    Extract backend error fields from either:
+    - {"error": {"code", "message", "requestId"}}
+    - legacy top-level {"code", "message", "requestId"}
+    """
+    code = ""
+    message = ""
+    request_id = ""
+
+    error_obj = login_object.get("error")
+    if isinstance(error_obj, dict):
+        code = str(error_obj.get("code") or "").strip()
+        message = str(error_obj.get("message") or "").strip()
+        request_id = str(
+            error_obj.get("requestId") or error_obj.get("request_id") or ""
+        ).strip()
+
+    if not code:
+        code = str(login_object.get("code") or "").strip()
+    if not message:
+        message = str(login_object.get("message") or "").strip()
+    if not request_id:
+        request_id = str(
+            login_object.get("requestId") or login_object.get("request_id") or ""
+        ).strip()
+
+    return code, message, request_id
+
+
 def _friendly_login_message(login_object: Dict[str, Any]) -> str:
     """
-    Convert server/login status codes into user-friendly Korean messages.
+    Convert server/login payload into a user-friendly Korean message.
     """
     status = login_object.get("status")
-    # Clean up the message, removing status codes if they are prepended
     raw_message = str(login_object.get("message") or "").strip()
-    
-    # If the server returned a clear Korean message (not just an error code), use it.
-    if raw_message and raw_message not in ["EU001", "EU002", "EU003", "EU004", "EU005"] and len(raw_message) > 10:
-         return raw_message
+    error_code, error_message, request_id = _extract_error_fields(login_object)
 
-    # Map known status codes from the backend
+    backend_error_map = {
+        "VALIDATION_ERROR": "입력값이 올바르지 않습니다.",
+        "AUTH_ERROR": "인증에 실패했습니다. 다시 로그인해주세요.",
+        "FORBIDDEN_ERROR": "접근 권한이 없습니다.",
+        "NOT_FOUND_ERROR": "요청한 정보를 찾을 수 없습니다.",
+        "CONFLICT_ERROR": "요청이 현재 상태와 충돌합니다.",
+        "RATE_LIMIT_ERROR": "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
+        "INTERNAL_ERROR": "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+    }
+    if error_code in backend_error_map:
+        return _append_request_id(backend_error_map[error_code], request_id)
+
+    legacy_login_codes = {"EU001", "EU002", "EU003", "EU004", "EU005", "EU429"}
+    if error_message and error_message not in legacy_login_codes:
+        return _append_request_id(error_message, request_id)
+
+    # If server returned a readable message (not just a short code), use it.
+    if raw_message and raw_message not in ["EU001", "EU002", "EU003", "EU004", "EU005"]:
+        return _append_request_id(raw_message, request_id)
+
+    # Legacy status mapping
     if status in ("EU001", "EU004", "INVALID_CREDENTIALS", "AUTH_FAIL", False):
-        # Security: Unified error for user not found and invalid password
-        return "아이디 또는 비밀번호가 틀렸습니다."
+        return _append_request_id("아이디 또는 비밀번호가 틀렸습니다.", request_id)
     if status == "EU002":
-        return "구독 또는 체험판 사용 기간이 만료되었습니다."
+        return _append_request_id("구독 또는 체험판 사용 기간이 만료되었습니다.", request_id)
     if status == "EU003":
-        return "이미 다른 기기(또는 브라우저)에서 로그인 중입니다."
+        return _append_request_id("이미 다른 기기(또는 브라우저)에서 로그인 중입니다.", request_id)
     if status == "EU005":
-        return "너무 많은 로그인 시도가 있었습니다. 잠시 후 다시 시도해주세요."
-    
+        return _append_request_id("너무 많은 로그인 시도가 있었습니다. 잠시 후 다시 시도해주세요.", request_id)
     if status in ("EU429", 429):
-        return "로그인 요청이 일시적으로 제한되었습니다. 잠시 후 시도해주세요."
+        return _append_request_id("로그인 요청이 일시적으로 제한되었습니다. 잠시 후 시도해주세요.", request_id)
 
     # Fallback generic message
-    return "로그인에 실패했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요."
+    return _append_request_id("로그인에 실패했습니다. 잠시 후 다시 시도하거나 관리자에게 문의하세요.", request_id)
 
 
 def _get_auth_token() -> Optional[str]:
@@ -488,26 +584,62 @@ def login(**data) -> Dict[str, Any]:
 
     try:
         # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
-        logger.info(f"[Login] Requesting login to: {main_server}/user/login/god")
         logger.debug(f"[Login] Params: id={_sanitize_user_id_for_logging(user_id)}, ip={ip_address}, force={data.get('force', False)}")
-        
-        start_time = time.time()
-        response = _secure_session.post(
-            f"{main_server}/user/login/god",
-            json=body,
-            timeout=(3, 10),
-        )
-        elapsed = time.time() - start_time
-        
-        logger.info(f"[Login] Response received in {elapsed:.2f}s, Status: {response.status_code}")
+
+        candidate_servers = _candidate_login_servers()
+        response: Optional[requests.Response] = None
+
+        for idx, base_url in enumerate(candidate_servers):
+            login_url = f"{base_url}/user/login/god"
+            logger.info(f"[Login] Requesting login to: {login_url}")
+            start_time = time.time()
+            try:
+                attempted_response = _secure_session.post(
+                    login_url,
+                    json=body,
+                    timeout=(3, 10),
+                )
+            except requests.exceptions.RequestException:
+                if idx < len(candidate_servers) - 1:
+                    logger.warning(
+                        "[Login] Request failed at %s. Trying fallback endpoint.",
+                        base_url,
+                    )
+                    continue
+                raise
+
+            elapsed = time.time() - start_time
+            logger.info(
+                f"[Login] Response received in {elapsed:.2f}s, Status: {attempted_response.status_code}"
+            )
+
+            # Retry one of fallback endpoints when this specific host returns 5xx.
+            if attempted_response.status_code >= 500 and idx < len(candidate_servers) - 1:
+                logger.warning(
+                    "[Login] Server returned %s at %s. Trying fallback endpoint.",
+                    attempted_response.status_code,
+                    base_url,
+                )
+                response = attempted_response
+                continue
+
+            response = attempted_response
+            break
+
+        if response is None:
+            return {"status": "error", "message": _ERROR_MESSAGES["network"]}
+
         # Raw response logged at TRACE level only (contains token)
         logger.debug("[Login] Raw response received (length=%d)", len(response.text))
         
+        loginObject: Dict[str, Any] = {}
         # Parse response body for logging (mask sensitive data)
         try:
-            loginObject = json.loads(response.text)
-            # ??? ??? ? ?
-            safe_log_obj = loginObject.copy()
+            parsed_body = json.loads(response.text)
+            if isinstance(parsed_body, dict):
+                loginObject = parsed_body
+
+            safe_log_obj = parsed_body.copy() if isinstance(parsed_body, dict) else {"raw": str(parsed_body)}
             if "data" in safe_log_obj and isinstance(safe_log_obj["data"], dict):
                 data_part = safe_log_obj["data"].copy()
                 if "token" in data_part:
@@ -516,8 +648,22 @@ def login(**data) -> Dict[str, Any]:
             logger.info(f"[Login] Response body: {json.dumps(safe_log_obj, ensure_ascii=False)}")
         except Exception:
             logger.warning("[Login] Failed to parse response body for logging")
+            loginObject = {
+                "status": "error",
+                "message": _ERROR_MESSAGES["parse"],
+            }
 
-        response.raise_for_status()
+        # Surface backend errors (code/message/requestId) without losing context.
+        if response.status_code >= 400:
+            if not isinstance(loginObject, dict):
+                loginObject = {"status": "error"}
+            loginObject.setdefault("status", "error")
+            loginObject.setdefault("http_status", response.status_code)
+            _, _, request_id = _extract_error_fields(loginObject)
+            if request_id:
+                loginObject.setdefault("requestId", request_id)
+            loginObject["message"] = _friendly_login_message(loginObject)
+            return loginObject
 
         # Store JWT token securely on successful login
         if loginObject.get("status") == True and "data" in loginObject:
@@ -558,35 +704,9 @@ def login(**data) -> Dict[str, Any]:
     except requests.exceptions.ConnectionError as e:
         logger.error(f"Login connection error: {e}")
         return {"status": "error", "message": _ERROR_MESSAGES["connection"]}
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 401:
-            return {
-                "status": "error",
-                "message": "아이디 또는 비밀번호가 올바르지 않습니다.",
-            }
-        elif e.response.status_code == 404:
-            return {"status": "error", "message": "해당 계정을 찾을 수 없습니다."}
-        elif e.response.status_code == 403:
-            return {
-                "status": "error",
-                "message": "접근이 거부되었습니다. (인증 또는 권한 오류)",
-            }
-        elif e.response.status_code == 429:
-            # 서버가 rate limit을 반환해도 사용자에게는 일반 로그인 오류만 알림
-            return {
-                "status": "error",
-                "message": "아이디 또는 비밀번호가 올바르지 않습니다.",
-            }
-        return {
-            "status": "error",
-            "message": f"서버 오류가 발생했습니다. (HTTP {e.response.status_code})",
-        }
     except requests.exceptions.RequestException as e:
         logger.error(f"Login network error: {str(e)[:100]}")
         return {"status": "error", "message": _ERROR_MESSAGES["network"]}
-    except json.JSONDecodeError as e:
-        logger.error(f"Login JSON parsing error: {str(e)[:50]}")
-        return {"status": "error", "message": _ERROR_MESSAGES["parse"]}
     except Exception as e:
         logger.exception(f"Unexpected login error: {e}")
         return {"status": "error", "message": _ERROR_MESSAGES["unexpected"]}

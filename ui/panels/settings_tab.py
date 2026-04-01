@@ -7,18 +7,23 @@ import os
 import re
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QLineEdit, QPushButton, QScrollArea, QFileDialog
+    QLineEdit, QPushButton, QScrollArea, QFileDialog, QCheckBox
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
 from ui.design_system_v2 import get_design_system
 from ui.components.base_widget import ThemedMixin
 from utils.secrets_manager import SecretsManager
+from utils.logging_config import get_logger
 from core.api.ApiKeyManager import APIKeyManager
+from managers.settings_manager import get_settings_manager
+from managers.coupang_manager import get_coupang_manager
+from managers.linktree_manager import get_linktree_manager
 import config
 
 # Gemini API 키 패턴 검증
 GEMINI_API_KEY_PATTERN = re.compile(r"^AIza[A-Za-z0-9_-]{35,96}$")
+logger = get_logger(__name__)
 
 
 class SettingsSection(QFrame):
@@ -417,6 +422,140 @@ class SettingsTab(QWidget, ThemedMixin):
         # 저장된 키 개수만 표시 (값은 자동으로 입력칸에 채우지 않음)
         self._update_key_count()
         
+        # =================== SECTION: Coupang + Linktree Automation ===================
+        self.link_automation_section = SettingsSection("쿠팡/링크트리 자동 링크 (테스트)")
+
+        automation_intro = QLabel(
+            "영상 생성 후 쿠팡 딥링크를 만들고, 원하면 Linktree로 자동 업로드(웹훅 방식)까지 연결합니다."
+        )
+        automation_intro.setWordWrap(True)
+        automation_intro.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.link_automation_section.content_layout.addWidget(automation_intro)
+
+        linktree_guide = QLabel(
+            "Linktree 일반 쓰기 API는 공개 범위가 제한적이라, 테스트는 Webhook URL + API Key 연동을 권장합니다."
+        )
+        linktree_guide.setWordWrap(True)
+        linktree_guide.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.link_automation_section.content_layout.addWidget(linktree_guide)
+
+        linktree_docs_link = QLabel(
+            '<a href="https://docs.linktr.ee/" style="color: #3B82F6; text-decoration: none;">Linktree 개발 문서 보기</a>'
+        )
+        linktree_docs_link.setOpenExternalLinks(True)
+        linktree_docs_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
+        self.link_automation_section.content_layout.addWidget(linktree_docs_link)
+
+        integration_steps = QLabel(
+            "연동 순서: 1) Webhook URL 발급(Make/Zapier/Cloudflare Worker 등) 2) API Key 발급 "
+            "3) 아래 값 저장 4) 테스트 업로드 버튼으로 검증"
+        )
+        integration_steps.setWordWrap(True)
+        integration_steps.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.link_automation_section.content_layout.addWidget(integration_steps)
+
+        automation_input_style = f"""
+            QLineEdit {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                padding: 8px 12px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {c.primary};
+            }}
+        """
+
+        self.coupang_access_input = QLineEdit()
+        self.coupang_access_input.setPlaceholderText("Coupang Access Key")
+        self.coupang_access_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.coupang_access_input.setStyleSheet(automation_input_style)
+        self.link_automation_section.add_row("Coupang Access", self.coupang_access_input)
+
+        self.coupang_secret_input = QLineEdit()
+        self.coupang_secret_input.setPlaceholderText("Coupang Secret Key")
+        self.coupang_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.coupang_secret_input.setStyleSheet(automation_input_style)
+        self.link_automation_section.add_row("Coupang Secret", self.coupang_secret_input)
+
+        coupang_btn_container = QWidget()
+        coupang_btn_layout = QHBoxLayout(coupang_btn_container)
+        coupang_btn_layout.setContentsMargins(0, 0, 0, 0)
+        coupang_btn_layout.setSpacing(8)
+
+        self.coupang_save_btn = QPushButton("쿠팡 키 저장")
+        self.coupang_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coupang_save_btn.clicked.connect(self._save_coupang_settings)
+        coupang_btn_layout.addWidget(self.coupang_save_btn)
+
+        self.coupang_test_btn = QPushButton("쿠팡 연결 테스트")
+        self.coupang_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coupang_test_btn.clicked.connect(self._test_coupang_connection)
+        coupang_btn_layout.addWidget(self.coupang_test_btn)
+        coupang_btn_layout.addStretch()
+        self.link_automation_section.add_row("Coupang 액션", coupang_btn_container)
+
+        self.linktree_webhook_input = QLineEdit()
+        self.linktree_webhook_input.setPlaceholderText("Webhook URL (https://...)")
+        self.linktree_webhook_input.setStyleSheet(automation_input_style)
+        self.link_automation_section.add_row("Linktree Webhook", self.linktree_webhook_input)
+
+        self.linktree_api_key_input = QLineEdit()
+        self.linktree_api_key_input.setPlaceholderText("Webhook/API Key (optional)")
+        self.linktree_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.linktree_api_key_input.setStyleSheet(automation_input_style)
+        self.link_automation_section.add_row("Linktree API Key", self.linktree_api_key_input)
+
+        self.linktree_profile_input = QLineEdit()
+        self.linktree_profile_input.setPlaceholderText("Linktree profile URL (optional)")
+        self.linktree_profile_input.setStyleSheet(automation_input_style)
+        self.link_automation_section.add_row("Linktree Profile", self.linktree_profile_input)
+
+        checkbox_container = QWidget()
+        checkbox_layout = QHBoxLayout(checkbox_container)
+        checkbox_layout.setContentsMargins(0, 0, 0, 0)
+        self.linktree_auto_checkbox = QCheckBox("쿠팡 링크 생성 시 Linktree 자동 업로드")
+        self.linktree_auto_checkbox.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        checkbox_layout.addWidget(self.linktree_auto_checkbox)
+        checkbox_layout.addStretch()
+        self.link_automation_section.add_row("자동 업로드", checkbox_container)
+
+        linktree_btn_container = QWidget()
+        linktree_btn_layout = QHBoxLayout(linktree_btn_container)
+        linktree_btn_layout.setContentsMargins(0, 0, 0, 0)
+        linktree_btn_layout.setSpacing(8)
+
+        self.linktree_save_btn = QPushButton("링크트리 설정 저장")
+        self.linktree_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_save_btn.clicked.connect(self._save_linktree_settings)
+        linktree_btn_layout.addWidget(self.linktree_save_btn)
+
+        self.linktree_test_btn = QPushButton("테스트 업로드")
+        self.linktree_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_test_btn.clicked.connect(self._test_linktree_publish)
+        linktree_btn_layout.addWidget(self.linktree_test_btn)
+        linktree_btn_layout.addStretch()
+        self.link_automation_section.add_row("Linktree 액션", linktree_btn_container)
+
+        self.link_automation_status = QLabel("상태: 미설정")
+        self.link_automation_status.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.link_automation_section.content_layout.addWidget(self.link_automation_status)
+
+        content_layout.addWidget(self.link_automation_section)
+        self._load_link_automation_settings()
+        
         # =================== SECTION: App Info ===================
         info_section = SettingsSection("앱 정보")
 
@@ -548,6 +687,146 @@ class SettingsTab(QWidget, ThemedMixin):
             from ui.components.custom_dialog import show_warning
             show_warning(self, "알림", "저장 폴더가 설정되지 않았거나 존재하지 않습니다.")
     
+    def _load_link_automation_settings(self):
+        """Load Coupang/Linktree automation settings into UI controls."""
+        try:
+            settings = get_settings_manager()
+            coupang = settings.get_coupang_keys()
+            linktree = settings.get_linktree_settings()
+
+            self.coupang_access_input.setText(coupang.get("access_key", ""))
+            self.coupang_secret_input.setText(coupang.get("secret_key", ""))
+            self.linktree_webhook_input.setText(linktree.get("webhook_url", ""))
+            self.linktree_api_key_input.setText(linktree.get("api_key", ""))
+            self.linktree_profile_input.setText(linktree.get("profile_url", ""))
+            self.linktree_auto_checkbox.setChecked(bool(linktree.get("auto_publish", False)))
+            self._update_link_automation_status()
+        except Exception as exc:
+            logger.warning("[Settings] Failed to load link automation settings: %s", exc)
+
+    def _update_link_automation_status(self):
+        """Refresh status label for Coupang/Linktree setup."""
+        coupang_ready = bool(self.coupang_access_input.text().strip() and self.coupang_secret_input.text().strip())
+        linktree_ready = bool(self.linktree_webhook_input.text().strip())
+        auto_enabled = bool(self.linktree_auto_checkbox.isChecked())
+        self.link_automation_status.setText(
+            f"상태: Coupang={'설정됨' if coupang_ready else '미설정'} / "
+            f"Linktree={'설정됨' if linktree_ready else '미설정'} / "
+            f"Auto={'ON' if auto_enabled else 'OFF'}"
+        )
+
+    def _save_coupang_settings(self):
+        """Persist Coupang API keys."""
+        from ui.components.custom_dialog import show_info, show_warning, show_error
+
+        access_key = self.coupang_access_input.text().strip()
+        secret_key = self.coupang_secret_input.text().strip()
+        if not access_key or not secret_key:
+            show_warning(self, "입력 확인", "Coupang Access Key와 Secret Key를 모두 입력해 주세요.")
+            return
+
+        try:
+            saved = get_settings_manager().set_coupang_keys(access_key, secret_key)
+            if not saved:
+                show_error(self, "저장 실패", "쿠팡 API 키를 저장하지 못했습니다.")
+                return
+            self._update_link_automation_status()
+            show_info(self, "저장 완료", "쿠팡 API 키를 저장했습니다.")
+        except Exception as exc:
+            logger.error("[Settings] Failed to save Coupang settings: %s", exc)
+            show_error(self, "저장 실패", f"쿠팡 설정 저장 중 오류가 발생했습니다.\n{exc}")
+
+    def _test_coupang_connection(self):
+        """Validate Coupang API keys by requesting one test deep link."""
+        from ui.components.custom_dialog import show_info, show_warning, show_error
+
+        access_key = self.coupang_access_input.text().strip()
+        secret_key = self.coupang_secret_input.text().strip()
+        if not access_key or not secret_key:
+            show_warning(self, "입력 확인", "먼저 쿠팡 API 키를 입력하세요.")
+            return
+
+        # Save latest input before running test.
+        get_settings_manager().set_coupang_keys(access_key, secret_key)
+        self._update_link_automation_status()
+
+        try:
+            manager = getattr(self.gui, "coupang_manager", None) if self.gui else None
+            if manager is None:
+                manager = get_coupang_manager()
+
+            if manager.check_connection():
+                show_info(self, "연결 성공", "쿠팡 딥링크 생성 테스트가 성공했습니다.")
+            else:
+                show_warning(self, "연결 실패", "쿠팡 딥링크 생성 테스트가 실패했습니다. 키 권한/값을 확인하세요.")
+        except Exception as exc:
+            logger.error("[Settings] Coupang connection test failed: %s", exc)
+            show_error(self, "연결 테스트 실패", f"쿠팡 연결 테스트 중 오류가 발생했습니다.\n{exc}")
+
+    def _save_linktree_settings(self):
+        """Persist Linktree webhook/API-key settings."""
+        from ui.components.custom_dialog import show_info, show_warning, show_error
+
+        webhook_url = self.linktree_webhook_input.text().strip()
+        api_key = self.linktree_api_key_input.text().strip()
+        profile_url = self.linktree_profile_input.text().strip()
+        auto_publish = self.linktree_auto_checkbox.isChecked()
+
+        if webhook_url and not webhook_url.lower().startswith(("http://", "https://")):
+            show_warning(self, "입력 확인", "Webhook URL은 http:// 또는 https:// 형식이어야 합니다.")
+            return
+
+        if profile_url and not profile_url.lower().startswith(("http://", "https://")):
+            show_warning(self, "입력 확인", "Linktree Profile URL은 http:// 또는 https:// 형식이어야 합니다.")
+            return
+
+        try:
+            saved = get_settings_manager().set_linktree_settings(
+                webhook_url=webhook_url,
+                api_key=api_key,
+                profile_url=profile_url,
+                auto_publish=auto_publish,
+            )
+            if not saved:
+                show_error(self, "저장 실패", "링크트리 설정을 저장하지 못했습니다.")
+                return
+            self._update_link_automation_status()
+            show_info(self, "저장 완료", "링크트리 설정을 저장했습니다.")
+        except Exception as exc:
+            logger.error("[Settings] Failed to save Linktree settings: %s", exc)
+            show_error(self, "저장 실패", f"링크트리 설정 저장 중 오류가 발생했습니다.\n{exc}")
+
+    def _test_linktree_publish(self):
+        """Send test payload via configured Linktree webhook integration."""
+        from ui.components.custom_dialog import show_info, show_warning, show_error
+
+        webhook_url = self.linktree_webhook_input.text().strip()
+        if not webhook_url:
+            show_warning(self, "입력 확인", "먼저 Linktree Webhook URL을 입력하세요.")
+            return
+
+        # Save latest input before running test.
+        get_settings_manager().set_linktree_settings(
+            webhook_url=webhook_url,
+            api_key=self.linktree_api_key_input.text().strip(),
+            profile_url=self.linktree_profile_input.text().strip(),
+            auto_publish=self.linktree_auto_checkbox.isChecked(),
+        )
+        self._update_link_automation_status()
+
+        try:
+            manager = getattr(self.gui, "linktree_manager", None) if self.gui else None
+            if manager is None:
+                manager = get_linktree_manager()
+
+            if manager.test_connection():
+                show_info(self, "테스트 성공", "Linktree 테스트 업로드 요청을 전송했습니다.")
+            else:
+                show_warning(self, "테스트 실패", "테스트 업로드에 실패했습니다. Webhook URL/API Key를 확인하세요.")
+        except Exception as exc:
+            logger.error("[Settings] Linktree test publish failed: %s", exc)
+            show_error(self, "테스트 실패", f"링크트리 테스트 업로드 중 오류가 발생했습니다.\n{exc}")
+
     @staticmethod
     def _resolve_creator_level(used_count: int):
         """Return gamified community level and next target."""
