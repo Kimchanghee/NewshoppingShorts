@@ -408,6 +408,8 @@ class SourcingPanel(QWidget):
                 if result is not False:  # add_url_to_queue returns None or True on success
                     enqueued += 1
                     logger.info("[SourcingPanel] Enqueued: %s", os.path.basename(vpath))
+                    # Enforce one-link policy consistently across all modes.
+                    break
                 else:
                     logger.warning("[SourcingPanel] Failed to enqueue: %s", os.path.basename(vpath))
             except Exception as e:
@@ -415,6 +417,8 @@ class SourcingPanel(QWidget):
 
         if enqueued > 0:
             logger.info("[SourcingPanel] Total %d videos enqueued", enqueued)
+            if len(video_paths) > 1:
+                logger.info("[SourcingPanel] One-link policy active: queued only the first valid sourced video")
             # Navigate to voice selection
             if hasattr(self.gui, '_on_step_selected'):
                 QTimer.singleShot(500, lambda: self.gui._on_step_selected('voice'))
@@ -429,4 +433,3 @@ class SourcingPanel(QWidget):
         if self._pipeline:
             return self._pipeline.get_report()
         return None
-

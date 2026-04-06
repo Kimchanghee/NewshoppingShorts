@@ -670,7 +670,11 @@ class URLInputPanel(QWidget):
                                  f"로컬 영상이 대기열에 추가되었습니다.\n{os.path.basename(self._single_local_path)}")
                     self._reset_single_local()
                 else:
-                    show_warning(self, "안내", "이미 대기열에 있는 파일입니다.")
+                    show_warning(
+                        self,
+                        "Notice",
+                        "Cannot add this file. It is duplicate or another waiting/processing item already exists.",
+                    )
             else:
                 show_warning(self, "오류", "대기열 관리자를 찾을 수 없습니다.")
 

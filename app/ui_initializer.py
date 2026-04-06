@@ -33,9 +33,13 @@ from ui.panels import (
 )
 from ui.panels.subtitle_settings_panel import SubtitleSettingsPanel
 from ui.panels.settings_tab import SettingsTab
+from ui.panels.sourcing_panel import SourcingPanel
 from ui.panels.topbar_panel import TopBarPanel
 from ui.components.status_bar import StatusBar
 from ui.components.step_nav import StepNav
+
+from utils.logging_config import get_logger
+logger = get_logger(__name__)
 
 if TYPE_CHECKING:
     from main import VideoAnalyzerGUI
@@ -104,7 +108,8 @@ class UIInitializer:
         # 1. Sidebar (StepNav)
         steps = [
             ("mode", "모드 선택", "mode"),
-            ("source", "소스 입력", "source"),
+            ("sourcing", "소싱 설정", "sourcing"),       # Mode 3 only
+            ("source", "소스 입력", "source"),             # Mode 1/2 only
             ("voice", "음성 선택", "voice"),
             ("cta", "CTA 선택", "cta"),
             ("font", "폰트 선택", "font"),
@@ -165,20 +170,27 @@ class UIInitializer:
         main_layout.addWidget(right_container, stretch=1)
 
         # Build pages as cards
+        logger.info("[UI] 패널 생성 중... (잠시 기다려주세요)")
+        print("[UI] 패널 생성 중... 잠시 기다려주세요 (Ctrl+C 누르지 마세요)")
         mode_selection_panel = ModeSelectionPanel(stack, gui, theme_manager=self.theme_manager)
+        sourcing_panel = SourcingPanel(stack, gui, theme_manager=self.theme_manager)
         url_input_panel = URLInputPanel(stack, gui, theme_manager=self.theme_manager)
         voice_panel = VoicePanel(stack, gui, theme_manager=self.theme_manager)
         cta_panel = CTAPanel(stack, gui, theme_manager=self.theme_manager)
         font_panel = FontPanel(stack, gui, theme_manager=self.theme_manager)
         subtitle_settings_panel = SubtitleSettingsPanel(stack, gui, theme_manager=self.theme_manager)
         watermark_panel = WatermarkPanel(stack, gui, theme_manager=self.theme_manager)
+        logger.info("[UI] 업로드/대기열 패널 생성 중...")
         upload_panel = UploadPanel(stack, gui, theme_manager=self.theme_manager)
         queue_panel = QueuePanel(stack, gui, theme_manager=self.theme_manager)
         settings_tab = SettingsTab(stack, gui, theme_manager=self.theme_manager)
         subscription_panel = SubscriptionPanel(stack, gui)
+        logger.info("[UI] 모든 패널 생성 완료")
+        print("[UI] [OK] 모든 패널 생성 완료 - 앱을 표시합니다")
 
         pages = [
             ("mode", "모드 선택", "영상 제작 방식을 선택하세요.", mode_selection_panel),
+            ("sourcing", "소싱 설정", "쿠팡 상품 링크를 입력하면 자동으로 소싱합니다.", sourcing_panel),
             ("source", "소스 입력", "숏폼으로 변환할 쇼핑몰 링크나 영상을 추가하세요.", url_input_panel),
             ("voice", "음성 선택", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", voice_panel),
             ("cta", "CTA 선택", "영상 마지막 클릭 유도 멘트를 선택하세요.", cta_panel),
@@ -211,6 +223,7 @@ class UIInitializer:
             "status_bar": status_bar,
             # Panels
             "mode_selection_panel": mode_selection_panel,
+            "sourcing_panel": sourcing_panel,
             "url_input_panel": url_input_panel,
             "voice_panel": voice_panel,
             "cta_panel": cta_panel,

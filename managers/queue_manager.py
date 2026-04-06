@@ -204,15 +204,45 @@ class QueueManager:
                 return key
         return display_value
 
+    def _get_active_queue_keys(self) -> List[str]:
+        """Return keys currently waiting/processing in queue/status."""
+        active_keys: List[str] = []
+        seen = set()
+
+        for key in self.gui.url_queue:
+            status = self._normalize_status(self.gui.url_status.get(key))
+            if status in ("waiting", "processing"):
+                active_keys.append(key)
+                seen.add(key)
+
+        for key, raw_status in self.gui.url_status.items():
+            if key in seen:
+                continue
+            status = self._normalize_status(raw_status)
+            if status in ("waiting", "processing"):
+                active_keys.append(key)
+
+        return active_keys
+
+    def has_active_queue_item(self) -> bool:
+        """Whether there is any waiting/processing queue item."""
+        return bool(self._get_active_queue_keys())
+
     def add_mix_job(self, urls: Sequence[str]) -> str:
         clean_urls = [u.strip() for u in urls if isinstance(u, str) and u.strip()]
         clean_urls = clean_urls[:5]
         if len(clean_urls) < 2:
             raise ValueError("믹스 모드는 링크가 최소 2개 필요합니다.")
+        if self.has_active_queue_item():
+            raise ValueError(
+                "Only one active job is allowed. Finish or clear the current waiting/processing item first."
+            )
 
         key = f"{MIX_JOB_PREFIX}{uuid4().hex[:12]}"
         self._set_mix_job_urls(key, clean_urls)
-        self.add_url_to_queue(key)
+        if not self.add_url_to_queue(key):
+            self._remove_mix_job(key)
+            raise ValueError("Failed to add mix job to queue.")
         return key
 
     # ----------------------- queue operations -----------------------
@@ -223,6 +253,9 @@ class QueueManager:
         if not key:
             return False
         if key in self.gui.url_queue or key in self.gui.url_status:
+            return False
+        if self.has_active_queue_item():
+            logger.info("[Queue] Reject enqueue while active item exists: %s", key)
             return False
 
         self.gui.url_queue.append(key)
@@ -513,9 +546,18 @@ class QueueManager:
         urls = URL_PATTERN.findall(text)
         if not urls:
             return 0, 0
+        if self.has_active_queue_item():
+            show_warning(
+                self.gui,
+                "Notice",
+                "Only one active link is allowed. Finish or clear the current waiting/processing item first.",
+            )
+            return 0, 0
 
         added_count = 0
         duplicate_count = 0
+        ignored_count = 0
+        first_candidate = None
 
         for raw_url in urls:
             url = raw_url.strip()
@@ -524,16 +566,20 @@ class QueueManager:
             if url in self.gui.url_queue or url in self.gui.url_status:
                 duplicate_count += 1
                 continue
-            self.gui.url_queue.append(url)
-            self.gui.url_status[url] = "waiting"
-            self.gui.url_timestamps[url] = datetime.now()
-            added_count += 1
+            if first_candidate is None:
+                first_candidate = url
+            else:
+                ignored_count += 1
 
-        self.update_url_listbox()
-        self.update_queue_count()
+        if first_candidate and self.add_url_to_queue(first_candidate):
+            added_count = 1
+        elif first_candidate:
+            ignored_count += 1
 
         if added_count > 0:
             msg = f"{source_label}에서 링크 {added_count}개를 추가했습니다."
+            if ignored_count > 0:
+                msg += f"\nOne-link policy: ignored {ignored_count} extra link(s)."
             if duplicate_count > 0:
                 msg += f"\n중복 링크 {duplicate_count}개는 제외했습니다."
             show_info(self.gui, "완료", msg)
@@ -546,7 +592,10 @@ class QueueManager:
             except Exception:
                 pass
         elif duplicate_count > 0:
-            show_warning(self.gui, "안내", f"입력한 링크가 모두 중복입니다. ({duplicate_count}개)")
+            msg = f"입력한 링크가 모두 중복입니다. ({duplicate_count}개)"
+            if ignored_count > 0:
+                msg += f"\nOne-link policy: ignored {ignored_count} extra link(s)."
+            show_warning(self.gui, "안내", msg)
 
         return added_count, duplicate_count
 
