@@ -165,12 +165,12 @@ class SourcingManager:
                 # Title might be in differnet places depending on layout
                 try:
                     title = item.find_element(By.CSS_SELECTOR, ".desc").text
-                except:
+                except Exception:
                     title = "Unknown Product"
                     
                 try:
                     price = item.find_element(By.CSS_SELECTOR, ".price").text
-                except:
+                except Exception:
                     price = "0"
                     
                 products.append({

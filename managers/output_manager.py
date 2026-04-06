@@ -94,7 +94,11 @@ class OutputManager:
             if os.name == "nt":
                 os.startfile(path)
             elif os.name == "posix":
-                subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", path])
+                subprocess.run(
+                    ["open" if sys.platform == "darwin" else "xdg-open", path],
+                    check=False,
+                    timeout=10,
+                )
         except Exception as exc:
             logger.error("Failed to open folder %s: %s", path, exc)
             show_info(self.gui, "안내", "폴더를 열 수 없습니다.")

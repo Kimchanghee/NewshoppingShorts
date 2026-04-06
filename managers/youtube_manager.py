@@ -139,7 +139,8 @@ class YouTubeManager:
                     ["attrib", "-R", "-H", directory],
                     check=False,
                     capture_output=True,
-                    text=True
+                    text=True,
+                    timeout=10,
                 )
             except Exception:
                 pass
@@ -491,7 +492,8 @@ class YouTubeManager:
                     ["attrib", "-R", "-H", path],
                     check=False,
                     capture_output=True,
-                    text=True
+                    text=True,
+                    timeout=10,
                 )
             except Exception:
                 pass
@@ -557,13 +559,15 @@ class YouTubeManager:
                     ["attrib", "+H", "+R", path],
                     check=False,
                     capture_output=True,
-                    text=True
+                    text=True,
+                    timeout=10,
                 )
                 subprocess.run(
                     ["attrib", "+H", os.path.dirname(path)],
                     check=False,
                     capture_output=True,
-                    text=True
+                    text=True,
+                    timeout=10,
                 )
             except Exception as e:
                 logger.debug(f"[YouTube] OAuth 파일 hidden/readonly 속성 설정 실패: {e}")
