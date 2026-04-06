@@ -36,8 +36,8 @@ except ImportError as e:
     sys.path.append(parent_dir)
     try:
         from backend.app.database import engine
-    except:
-        print(f"Import failed: {e}")
+    except ImportError as fallback_error:
+        print(f"Import failed: {e}; fallback import failed: {fallback_error}")
         sys.exit(1)
 
 logging.basicConfig(level=logging.INFO)

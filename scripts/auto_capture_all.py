@@ -30,7 +30,11 @@ try:
     pyautogui.FAILSAFE = False
 except ImportError:
     print("Installing required packages...")
-    subprocess.run([sys.executable, "-m", "pip", "install", "pillow", "pyautogui", "-q"])
+    subprocess.run(
+        [sys.executable, "-m", "pip", "install", "pillow", "pyautogui", "-q"],
+        check=False,
+        timeout=300,
+    )
     from PIL import ImageGrab
     import pyautogui
     pyautogui.FAILSAFE = False

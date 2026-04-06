@@ -95,7 +95,7 @@ def main():
                         os.remove(dest_path)
                     os.rename(dest_path + ".bak", dest_path)
                     logging.info("Restored backup.")
-                except:
+                except OSError:
                     pass
             sys.exit(1)
 

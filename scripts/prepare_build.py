@@ -39,8 +39,10 @@ def prepare_whisper_models():
         # Cleanup subfolders
         for item in model_path.iterdir():
             if item.is_dir() and item.name not in ["tiny", "base"]:
-                try: shutil.rmtree(item)
-                except: pass
+                try:
+                    shutil.rmtree(item)
+                except OSError:
+                    pass
         print(f"Successfully flattened {model_name}")
 
 def build_apps():
@@ -49,7 +51,11 @@ def build_apps():
     # 1. Shorts Maker
     print("\nBuilding ShortsMaker...")
     try:
-        subprocess.run(["pyinstaller", "--noconfirm", "--clean", "ssmaker.spec"], check=True)
+        subprocess.run(
+            ["pyinstaller", "--noconfirm", "--clean", "ssmaker.spec"],
+            check=True,
+            timeout=1800,
+        )
         print("ShortsMaker build finished successfully.")
     except subprocess.CalledProcessError as e:
         print(f"ShortsMaker build failed: {e}")

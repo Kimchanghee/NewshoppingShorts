@@ -46,7 +46,7 @@ for user in all_users:
             dt_kst = dt + timedelta(hours=9)
             date_str = dt_kst.strftime("%Y-%m-%d")
             daily_stats[date_str] = daily_stats.get(date_str, 0) + 1
-        except:
+        except (ValueError, TypeError):
             pass
 
 # Write to file
@@ -81,7 +81,7 @@ with open("user_report.txt", "w", encoding="utf-8") as f:
                 dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
                 dt_kst = dt + timedelta(hours=9)
                 created_str = dt_kst.strftime("%Y-%m-%d %H:%M:%S")
-            except:
+            except (ValueError, TypeError):
                 created_str = created_at
         else:
             created_str = "-"

@@ -95,7 +95,8 @@ def run_command(command: List[str]) -> Tuple[bool, str]:
             command,
             capture_output=True,
             text=True,
-            check=False
+            check=False,
+            timeout=1800,
         )
         
         if result.returncode == 0:
