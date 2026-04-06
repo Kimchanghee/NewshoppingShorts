@@ -228,7 +228,7 @@ class SourcingManager:
     def download_video(self, video_url: str, output_path: str) -> bool:
         """Download video content to file"""
         try:
-            response = requests.get(video_url, stream=True)
+            response = requests.get(video_url, stream=True, timeout=(15, 120))
             response.raise_for_status()
             
             with open(output_path, 'wb') as f:

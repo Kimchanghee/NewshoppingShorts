@@ -228,7 +228,10 @@ def _ffprobe_info(path: str) -> Tuple[bool, str]:
         "json",
         path,
     ]
-    proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, check=False, timeout=30)
+    except subprocess.TimeoutExpired:
+        return False, "ffprobe timed out after 30s"
     if proc.returncode != 0:
         return False, (proc.stderr or "").strip() or "ffprobe failed"
 

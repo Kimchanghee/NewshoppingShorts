@@ -91,7 +91,7 @@ class CoupangManager:
                 "Content-Type": "application/json"
             }
             
-            response = requests.post(target_url, headers=headers, json=payload)
+            response = requests.post(target_url, headers=headers, json=payload, timeout=30)
             response.raise_for_status()
             
             result = response.json()
