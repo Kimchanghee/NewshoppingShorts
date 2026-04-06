@@ -89,3 +89,38 @@ def test_add_mix_job_is_rejected_when_active_item_exists(monkeypatch):
 
     with pytest.raises(ValueError, match="Only one active job is allowed"):
         manager.add_mix_job(["https://mix.example/1", "https://mix.example/2"])
+
+
+def test_update_queue_status_blocks_new_url_when_active_exists(monkeypatch):
+    """update_queue_status should not append a new URL when an active item exists."""
+    manager, gui, _ = _build_manager(monkeypatch)
+    assert manager.add_url_to_queue("https://example.com/1") is True
+
+    # Try to sneak in a new waiting URL via update_queue_status
+    manager.update_queue_status("https://example.com/2", "waiting")
+
+    assert "https://example.com/2" not in gui.url_queue
+    assert "https://example.com/2" not in gui.url_status
+
+
+def test_update_queue_status_allows_existing_url_status_change(monkeypatch):
+    """update_queue_status should still update status for URLs already in the queue."""
+    manager, gui, _ = _build_manager(monkeypatch)
+    assert manager.add_url_to_queue("https://example.com/1") is True
+
+    manager.update_queue_status("https://example.com/1", "processing", "downloading")
+
+    assert gui.url_status["https://example.com/1"] == "processing"
+    assert gui.url_status_message["https://example.com/1"] == "downloading"
+
+
+def test_update_queue_status_allows_terminal_status_new_url(monkeypatch):
+    """update_queue_status should allow adding a URL with terminal status (e.g. completed)."""
+    manager, gui, _ = _build_manager(monkeypatch)
+    assert manager.add_url_to_queue("https://example.com/1") is True
+
+    # A completed URL should be allowed even when active item exists
+    manager.update_queue_status("https://example.com/done", "completed")
+
+    assert "https://example.com/done" in gui.url_queue
+    assert gui.url_status["https://example.com/done"] == "completed"

@@ -5,6 +5,7 @@ import os
 import sys
 import json
 import stat
+from contextlib import nullcontext
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from pathlib import Path
@@ -310,6 +311,27 @@ class SessionManager:
                         self.gui.url_status[url] = 'waiting'
                     processing_count += 1
                     logger.info(f"[세션] 처리 중단된 URL 재시작: {url[:50]}...")
+
+            # ── 1-link policy enforcement ──
+            # After normalisation the queue may contain multiple waiting items
+            # saved from a previous version.  Keep only the first active
+            # (waiting) item; demote the rest to 'skipped'.
+            first_active_found = False
+            demoted_count = 0
+            _lock = getattr(self.gui, 'url_status_lock', None)
+            _ctx = _lock if _lock is not None else nullcontext()
+            with _ctx:
+                for url in self.gui.url_queue:
+                    st = self.gui.url_status.get(url)
+                    if st == 'waiting':
+                        if not first_active_found:
+                            first_active_found = True
+                        else:
+                            self.gui.url_status[url] = 'skipped'
+                            self.gui.url_status_message[url] = '1-link 정책: 세션 복구 시 초과 항목 건너뜀'
+                            demoted_count += 1
+            if demoted_count > 0:
+                logger.info(f"[세션] 1-link 정책: 복구 시 초과 대기 항목 {demoted_count}개를 skipped 처리")
 
             # 처리 상태 플래그는 복구하지 않음 (재시작 시 자동으로 시작되지 않도록)
             self.gui.batch_processing = False

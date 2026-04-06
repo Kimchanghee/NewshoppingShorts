@@ -531,6 +531,10 @@ class QueueManager:
     def update_queue_status(self, url: str, status: str, message: str = ""):
         normalized_status = self._normalize_status(status)
         if url not in self.gui.url_status:
+            # 1-link policy: block new entries when an active item exists
+            if normalized_status in ("waiting", "processing") and self.has_active_queue_item():
+                logger.info("[Queue] update_queue_status: reject new URL while active item exists: %s", url[:80])
+                return
             self.gui.url_status[url] = normalized_status
             self.gui.url_queue.append(url)
         else:
