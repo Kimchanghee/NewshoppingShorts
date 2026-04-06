@@ -116,7 +116,11 @@ class TestOCREngineSelection:
             os.environ["SSMAKER_ENABLE_RAPIDOCR"] = "1"
             info = check_ocr_availability()
             if sys.version_info < (3, 13) and info["rapidocr_available"]:
-                assert info["recommended_engine"] == "rapidocr"
+                # Current priority: GLM-OCR > RapidOCR(opt-in) > Tesseract
+                if info.get("glm_ocr_available"):
+                    assert info["recommended_engine"] == "glm_ocr"
+                else:
+                    assert info["recommended_engine"] == "rapidocr"
         finally:
             if prev is None:
                 os.environ.pop("SSMAKER_ENABLE_RAPIDOCR", None)
