@@ -33,6 +33,7 @@ _TEST_ENV = {
     "DB_NAME": "test_db",
     "JWT_SECRET_KEY": "a" * 64,
     "ADMIN_API_KEY": "b" * 64,
+    "APP_VERSION_UPDATE_API_KEY": "d" * 64,
     "SSMAKER_API_KEY": "c" * 32,
     "BILLING_KEY_ENCRYPTION_KEY": "uKVciQZlzUKtZPwuiKHl3wVCJJhQrWL6TqrFRClcEOI=",
     "ENVIRONMENT": "production",
