@@ -419,9 +419,36 @@ class SourcingPanel(QWidget):
             logger.info("[SourcingPanel] Total %d videos enqueued", enqueued)
             if len(video_paths) > 1:
                 logger.info("[SourcingPanel] One-link policy active: queued only the first valid sourced video")
-            # Navigate to voice selection
-            if hasattr(self.gui, '_on_step_selected'):
-                QTimer.singleShot(500, lambda: self.gui._on_step_selected('voice'))
+
+            # Linktree auto-publish (if checked and deep link available)
+            if self.chk_linktree.isChecked() and pipeline.deep_link:
+                try:
+                    from managers.linktree_manager import get_linktree_manager
+                    lm = get_linktree_manager()
+                    if lm.is_connected():
+                        product_name = (pipeline.product_info or {}).get("name", "")
+                        ok = lm.publish_coupang_link(
+                            product_name=product_name,
+                            coupang_url=pipeline.deep_link,
+                            source_url=pipeline.coupang_url,
+                        )
+                        logger.info("[SourcingPanel] Linktree publish: %s", "성공" if ok else "실패")
+                    else:
+                        logger.info("[SourcingPanel] Linktree 미연결 - 자동 발행 건너뜀")
+                except Exception as e:
+                    logger.warning("[SourcingPanel] Linktree publish error: %s", e)
+
+            # Full automation: chain to batch processing if YouTube auto-upload is checked
+            if self.chk_upload.isChecked():
+                logger.info("[SourcingPanel] 풀 자동화 모드 - 영상 제작 자동 시작")
+                if hasattr(self.gui, '_on_step_selected'):
+                    QTimer.singleShot(500, lambda: self.gui._on_step_selected('queue'))
+                if hasattr(self.gui, 'start_batch_processing'):
+                    QTimer.singleShot(1000, self.gui.start_batch_processing)
+            else:
+                # Manual mode: stop at voice selection so user can configure
+                if hasattr(self.gui, '_on_step_selected'):
+                    QTimer.singleShot(500, lambda: self.gui._on_step_selected('voice'))
         else:
             logger.warning("[SourcingPanel] No videos were successfully enqueued")
             self.results_label.setText(
