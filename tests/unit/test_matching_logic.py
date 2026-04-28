@@ -178,6 +178,22 @@ def test_keyword_conversion_compact_sponge_holder():
     assert "kitchen sink" in out["english"].lower()
 
 
+def test_keyword_conversion_sink_strainer_holder():
+    title = "존글로벌 음식물 거름망 거치대 + 거름망 - 씽크대거름망"
+    out = convert_keywords_rule_based(title)
+    assert "过滤" in out["chinese"]
+    assert "sink strainer" in out["english"].lower()
+
+    terms = _category_terms_for_keyword(
+        out["english"],
+        reference_name=title,
+        keyword_cn=out["chinese"],
+    )
+    assert terms
+    assert _passes_category_guard("Kitchen Sink Strainer Holder Basket", terms)
+    assert not _passes_category_guard("Universal Phone Holder Stand", terms)
+
+
 def test_keyword_conversion_dumpling_maker():
     out = convert_keywords_rule_based("다용도 만두 메이커 모양틀")
     assert out["chinese"]

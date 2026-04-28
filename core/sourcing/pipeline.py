@@ -14,6 +14,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 MIN_TRUSTED_VIDEO_SCORE = 0.15
+MARKETPLACE_VIDEO_MAX_TRY_WITH_IMAGE = 3
 
 
 class SourcingPipeline:
@@ -395,7 +396,7 @@ class SourcingPipeline:
                 found_ali = await find_products_with_video(
                     browser, candidates_ali, self.output_dir, "aliexpress",
                     count=need_from_ali,
-                    max_try=8 if coupang_image.startswith("http") else 15,
+                    max_try=MARKETPLACE_VIDEO_MAX_TRY_WITH_IMAGE if coupang_image.startswith("http") else 15,
                     category_terms=category_terms,
                     overlap_references=overlap_refs,
                 )
@@ -421,7 +422,7 @@ class SourcingPipeline:
                     if img_candidates:
                         found_img = await find_products_with_video(
                             browser, img_candidates, self.output_dir,
-                            "aliexpress", count=2, max_try=8,
+                            "aliexpress", count=2, max_try=MARKETPLACE_VIDEO_MAX_TRY_WITH_IMAGE,
                             min_score=0.0,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
@@ -470,7 +471,7 @@ class SourcingPipeline:
                     if candidates_ali:
                         found_ali_loose = await find_products_with_video(
                             browser, candidates_ali, self.output_dir, "aliexpress",
-                            count=2, min_score=relaxed, max_try=8,
+                            count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_MAX_TRY_WITH_IMAGE,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
                         )
@@ -570,6 +571,7 @@ class SourcingPipeline:
     def _create_product_image_video_sync(self, image_url: str) -> Optional[Dict[str, Any]]:
         """Blocking implementation for the product-image fallback video."""
         import tempfile
+        import hashlib
         from io import BytesIO
 
         import cv2
@@ -578,6 +580,8 @@ class SourcingPipeline:
         from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
         try:
+            if image_url.startswith("//"):
+                image_url = "https:" + image_url
             headers = {
                 "User-Agent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -601,7 +605,15 @@ class SourcingPipeline:
             fg_base.thumbnail((620, 620), Image.Resampling.LANCZOS)
 
             os.makedirs(self.output_dir, exist_ok=True)
-            output_path = os.path.join(self.output_dir, "sourcing_coupang_image_1_video.mp4")
+            name = (self.product_info or {}).get("name", "")
+            digest = hashlib.sha1(
+                f"{self.coupang_url}|{name}|{image_url}".encode("utf-8")
+            ).hexdigest()[:10]
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            output_path = os.path.join(
+                self.output_dir,
+                f"sourcing_coupang_image_{stamp}_{digest}_video.mp4",
+            )
             tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", dir=self.output_dir)
             os.close(tmp_fd)
 

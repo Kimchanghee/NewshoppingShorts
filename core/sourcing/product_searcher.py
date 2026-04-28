@@ -604,10 +604,33 @@ async def _do_1688_search(
         if "login.taobao.com" in current_url or "login.1688.com" in current_url:
             logger.info("[ProductSearcher] 1688 endpoint %s requires login, trying next", url[:60])
             continue
-        # Scroll for lazy-load
-        await tab.evaluate("window.scrollTo(0, document.body.scrollHeight / 2)")
+        # Scroll for lazy-load. Some 1688 endpoints occasionally return an
+        # intermediate/blank document where document.body is still null; treat
+        # that as an empty endpoint and keep trying the next URL.
+        page_ready = await tab.evaluate("""
+            (() => {
+                const h = Math.max(
+                    document.body?.scrollHeight || 0,
+                    document.documentElement?.scrollHeight || 0
+                );
+                if (!h) return false;
+                window.scrollTo(0, h / 2);
+                return true;
+            })()
+        """)
+        if not page_ready:
+            logger.info("[ProductSearcher] 1688 endpoint %s returned blank document", url[:60])
+            continue
         await tab.sleep(2)
-        await tab.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+        await tab.evaluate("""
+            (() => {
+                const h = Math.max(
+                    document.body?.scrollHeight || 0,
+                    document.documentElement?.scrollHeight || 0
+                );
+                if (h) window.scrollTo(0, h);
+            })()
+        """)
         await tab.sleep(2)
 
         raw = await tab.evaluate("""
@@ -821,6 +844,9 @@ _CATEGORY_GUARDS: Dict[str, List[str]] = {
     "dish rack": ["dish", "drying", "rack", "건조", "식기", "碗碟", "沥水"],
     "dish drainer": ["dish", "drainer", "drying", "rack", "식기", "건조", "碗碟", "沥水"],
     "drying rack": ["dish", "drying", "rack", "건조", "식기", "碗碟", "沥水"],
+    "sink strainer": ["strainer", "sink", "drain", "filter", "거름망", "싱크", "씽크", "水槽", "过滤"],
+    "strainer holder": ["strainer", "sink", "drain", "filter", "거름망", "싱크", "씽크", "水槽", "过滤"],
+    "food waste strainer": ["strainer", "sink", "drain", "filter", "food", "거름망", "음식물", "水槽", "过滤"],
 
     # ──── Kitchen — cutting / chopping ────
     "cutting board": ["cutting", "board", "chop", "도마", "砧板", "切菜"],
@@ -999,7 +1025,7 @@ _DOMAIN_MARKERS: Dict[str, list[str]] = {
     "kitchen": [
         "주방", "조리", "야채", "채칼", "도마", "수세미", "스폰지", "스펀지",
         "식기", "양념", "조미", "마늘", "달걀", "계란", "냄비", "팬", "프라이팬",
-        "밥", "쌀", "냉장고", "kitchen", "cook", "food",
+        "밥", "쌀", "냉장고", "싱크", "씽크", "거름망", "배수구", "kitchen", "cook", "food",
     ],
     "phone": [
         "휴대폰", "핸드폰", "스마트폰", "폰", "아이폰", "갤럭시", "phone", "iphone",
