@@ -182,8 +182,14 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
         print("[!] 업로드 실패. ~/.ssmaker/logs/ssmaker.log 확인.")
         return 5
 
+    video_url = item.get("video_url") or (
+        "https://youtu.be/" + item["video_id"] if item.get("video_id") else ""
+    )
+
     print("=" * 70)
     print("[✓] YouTube 업로드 완료!")
+    if video_url:
+        print(f"    영상: {video_url}")
     print("    채널: https://www.youtube.com/channel/" + (info.get("id") or ""))
     print(f"    공개설정: {privacy}")
     print("=" * 70)

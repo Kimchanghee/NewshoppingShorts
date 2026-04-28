@@ -1023,6 +1023,8 @@ class YouTubeManager:
             logger.info(f"[YouTube] 업로드 완료: https://youtu.be/{video_id}")
 
             if video_id:
+                item["video_id"] = video_id
+                item["video_url"] = f"https://youtu.be/{video_id}"
                 self._try_post_auto_comment(video_id, item)
             return True
 
