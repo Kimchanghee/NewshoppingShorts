@@ -112,6 +112,9 @@ def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
         "source_url": original_url,
         "coupang_deep_link": deep_link,
         "matched_title": str(matched_item.get("title") or "").strip(),
+        "source": str(matched_item.get("source") or "").strip(),
+        "auto_publish_safe": matched_item.get("auto_publish_safe"),
+        "requires_review": matched_item.get("requires_review"),
     }
 
 
@@ -1586,7 +1589,16 @@ def _process_single_video(app, url, current_number, total_urls):
                                         video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..."
 
                             # 3. Add to YouTube Upload Queue
-                            if yt_manager and yt_manager.get_upload_settings().enabled:
+                            review_only_source = (
+                                str(sourcing_context.get("source") or "").lower() == "coupang_image"
+                                or sourcing_context.get("auto_publish_safe") is False
+                                or sourcing_context.get("requires_review") is True
+                            )
+                            if yt_manager and yt_manager.get_upload_settings().enabled and review_only_source:
+                                logger.warning(
+                                    "[Automation] YouTube auto-upload skipped: sourced video requires review"
+                                )
+                            elif yt_manager and yt_manager.get_upload_settings().enabled:
                                 yt_manager.add_to_upload_queue(
                                     video_path=final_video_path,
                                     title=video_title,

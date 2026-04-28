@@ -58,11 +58,19 @@ def _load_context(video_path: str, coupang_url: str = "") -> dict:
 
     def _context_from_report(data: dict) -> dict:
         product = data.get("product_info") or {}
+        matched_item = {}
+        for item in data.get("sourced_products") or data.get("sourcing_results") or []:
+            if os.path.abspath(str(item.get("video_file", ""))) == video_abs:
+                matched_item = item
+                break
         return {
             "coupang_url": data.get("deep_link") or coupang_url or data.get("coupang_url") or COUPANG_URL,
             "source_url": data.get("coupang_url") or coupang_url or COUPANG_URL,
             "product_name": product.get("name") or "",
             "description": data.get("description") or "",
+            "source": str(matched_item.get("source") or ""),
+            "auto_publish_safe": matched_item.get("auto_publish_safe"),
+            "requires_review": matched_item.get("requires_review"),
         }
 
     for report_path in reports:
@@ -88,7 +96,23 @@ def _load_context(video_path: str, coupang_url: str = "") -> dict:
         "source_url": coupang_url or COUPANG_URL,
         "product_name": "",
         "description": "",
+        "source": "",
+        "auto_publish_safe": None,
+        "requires_review": None,
     }
+
+
+def _is_review_only_fallback(video_path: str, context: dict) -> bool:
+    source = str(context.get("source") or "").lower()
+    auto_publish_safe = context.get("auto_publish_safe")
+    requires_review = context.get("requires_review")
+    basename = os.path.basename(str(video_path))
+    return (
+        source == "coupang_image"
+        or basename.startswith("sourcing_coupang_image")
+        or auto_publish_safe is False
+        or requires_review is True
+    )
 
 
 def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> int:
@@ -105,6 +129,16 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
     product_name = context.get("product_name") or PRODUCT_INFO
     purchase_url = context.get("coupang_url") or coupang_url or COUPANG_URL
     source_url = context.get("source_url") or purchase_url
+
+    if (
+        privacy == "public"
+        and _is_review_only_fallback(video_path, context)
+        and os.environ.get("ALLOW_COUPANG_IMAGE_PUBLIC_UPLOAD") != "1"
+    ):
+        print("[!] 공개 업로드 차단: 쿠팡 상품 이미지 폴백 영상은 검수 필요 소스입니다.")
+        print("    실제 상품 시연 영상이 잡히지 않은 상태라 쇼츠 품질 기준을 통과하지 못합니다.")
+        print("    정말 공개 업로드가 필요하면 ALLOW_COUPANG_IMAGE_PUBLIC_UPLOAD=1 을 설정하세요.")
+        return 6
 
     print("=" * 70)
     print("[+] YouTube 업로드 시작")

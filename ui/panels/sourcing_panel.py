@@ -379,13 +379,33 @@ class SourcingPanel(QWidget):
 
     def _enqueue_sourced_videos(self, pipeline):
         """Add sourced video files to the processing queue."""
-        video_paths = pipeline.get_video_paths()
-        if not video_paths:
+        source_items = [
+            item for item in (pipeline.sourced_products or [])
+            if os.path.isfile(str(item.get("video_file", "")))
+        ]
+        if not source_items:
             logger.warning("[SourcingPanel] No video files to enqueue")
             self.results_label.setText(
                 self.results_label.text() + "\n\n※ 다운로드된 영상이 없어 큐에 등록하지 못했습니다."
             )
             return
+
+        if self.chk_upload.isChecked():
+            safe_items = [
+                item for item in source_items
+                if bool(item.get("auto_publish_safe", item.get("source") != "coupang_image"))
+            ]
+            if not safe_items:
+                logger.warning("[SourcingPanel] Auto-upload blocked: only image fallback videos were sourced")
+                self.results_label.setText(
+                    self.results_label.text()
+                    + "\n\n※ 실제 상품 시연 영상을 찾지 못해 쿠팡 상품 이미지 폴백만 생성되었습니다."
+                    + "\n※ 품질 검수 없이 YouTube 자동 업로드/Linktree 발행을 진행하지 않습니다."
+                )
+                return
+            if len(safe_items) < len(source_items):
+                logger.warning("[SourcingPanel] Skipping %d review-only fallback video(s)", len(source_items) - len(safe_items))
+            source_items = safe_items
 
         # Add as local:// URLs to the queue
         queue_mgr = getattr(self.gui, 'queue_manager', None)
@@ -398,7 +418,8 @@ class SourcingPanel(QWidget):
             )
             return
 
-        for vpath in video_paths:
+        for item in source_items:
+            vpath = str(item.get("video_file", ""))
             if not os.path.isfile(vpath):
                 logger.warning("[SourcingPanel] Video file missing: %s", vpath)
                 continue
@@ -417,7 +438,7 @@ class SourcingPanel(QWidget):
 
         if enqueued > 0:
             logger.info("[SourcingPanel] Total %d videos enqueued", enqueued)
-            if len(video_paths) > 1:
+            if len(source_items) > 1:
                 logger.info("[SourcingPanel] One-link policy active: queued only the first valid sourced video")
 
             # Linktree auto-publish (prefer Partners deep link, fall back to

@@ -670,6 +670,9 @@ class SourcingPipeline:
                 "video_url": image_url,
                 "video_file": output_path,
                 "size_mb": size_mb,
+                "fallback_reason": "no_marketplace_video",
+                "auto_publish_safe": False,
+                "requires_review": True,
             }
         except Exception as exc:
             logger.warning("[Pipeline] Product image fallback failed: %s", exc)
@@ -694,6 +697,9 @@ class SourcingPipeline:
                 "similarity": p["product"].get("score"),
                 "video_file": p["video_file"],
                 "video_size_mb": p["size_mb"],
+                "fallback_reason": p.get("fallback_reason") or p["product"].get("fallback_reason"),
+                "auto_publish_safe": bool(p.get("auto_publish_safe", p["source"] != "coupang_image")),
+                "requires_review": bool(p.get("requires_review", p["source"] == "coupang_image")),
             }
             for p in self.sourced_products
         ]
