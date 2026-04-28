@@ -92,29 +92,76 @@ class UsernameCheckWorker(QThread):
         logger = logging.getLogger(__name__)
 
         try:
-            api_url = os.getenv(
-                "API_SERVER_URL",
-                "https://ssmaker-auth-api-1049571775048.us-central1.run.app/",
-            )
-            if not api_url.endswith("/"):
-                api_url += "/"
+            default_api_url = "https://13-124-7-65.nip.io"
+            deprecated_404_urls = {
+                "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
+                "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
+            }
+            candidates = []
+            for raw in (
+                os.getenv("API_SERVER_URL", ""),
+                os.getenv("USER_DASHBOARD_API_URL", ""),
+                os.getenv("API_SERVER_URL_FALLBACK", ""),
+                default_api_url,
+            ):
+                api_url = (raw or "").strip().rstrip("/")
+                if api_url in deprecated_404_urls:
+                    api_url = default_api_url
+                if api_url and api_url not in candidates:
+                    candidates.append(api_url)
 
-            target_url = f"{api_url}user/check-username/{self.username}"
-            logger.info(f"[UsernameCheck] 중복확인 요청 중: {target_url}")
+            route_missing = False
+            last_error_message = "서버 연결 실패"
 
-            resp = requests.get(target_url, params={"program_type": "ssmaker"}, timeout=5)
+            for api_url in candidates:
+                target_url = f"{api_url}/user/check-username/{self.username}"
+                logger.info(f"[UsernameCheck] 중복확인 요청 중: {target_url}")
 
-            if resp.status_code == 200:
-                data = resp.json()
-                available = data.get("available", False)
-                message = data.get("message", "")
-                logger.info(f"[UsernameCheck] 중복확인 성공: available={available}, msg={message}")
-                self.finished.emit(available, message)
-            else:
+                try:
+                    resp = requests.get(
+                        target_url, params={"program_type": "ssmaker"}, timeout=5
+                    )
+                except requests.exceptions.ConnectionError:
+                    continue
+                except Exception as e:
+                    last_error_message = f"오류 발생 ({str(e)})"
+                    continue
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    available = data.get("available", False)
+                    message = data.get("message", "")
+                    logger.info(f"[UsernameCheck] 중복확인 성공: available={available}, msg={message}")
+                    self.finished.emit(available, message)
+                    return
+
+                if resp.status_code == 404:
+                    route_missing = True
+                    logger.info(
+                        "[UsernameCheck] check-username route returned 404 at %s. Trying fallback.",
+                        api_url,
+                    )
+                    continue
+
+                last_error_message = f"서버 오류 ({resp.status_code})"
                 logger.warning(
                     f"[UsernameCheck] 중복확인 실패 (HTTP {resp.status_code}): {resp.text}"
                 )
-                self.finished.emit(False, f"서버 오류 ({resp.status_code})")
+                if resp.status_code < 500:
+                    self.finished.emit(False, last_error_message)
+                    return
+
+            if route_missing:
+                # 일부 자체 호스팅 서버에는 /user/check-username 라우트가 없습니다.
+                # 회원가입 차단을 막기 위해 "사용 가능"으로 처리하고, 실제 중복 충돌은
+                # /user/register/request 단계에서 서버가 거절하도록 둡니다.
+                logger.info(
+                    "[UsernameCheck] 모든 후보 서버에서 check-username 라우트가 없어 통과 처리 (404)."
+                )
+                self.finished.emit(True, "사용 가능 (서버 검증 생략)")
+                return
+
+            self.finished.emit(False, last_error_message)
         except requests.exceptions.ConnectionError:
             self.finished.emit(False, "서버 연결 실패")
         except Exception as e:

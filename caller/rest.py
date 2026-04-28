@@ -39,28 +39,45 @@ _ERROR_MESSAGES = {
     "invalid_input": "입력값이 올바르지 않습니다.",
 }
 
-# Server URL from environment variable (secure configuration)
-# Priority:
-# 1) API_SERVER_URL (legacy/current client variable)
-# 2) USER_DASHBOARD_API_URL (shared backend repo variable)
-# 3) built-in fallback URL
-_DEFAULT_API_SERVER_URL = "https://ssmaker-auth-api-1049571775048.us-central1.run.app"
-_ALT_API_SERVER_URL = "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app"
-main_server = (
-    os.getenv("API_SERVER_URL", "").strip()
-    or os.getenv("USER_DASHBOARD_API_URL", "").strip()
-    or _DEFAULT_API_SERVER_URL
-).rstrip("/")
+_DEFAULT_API_SERVER_URL = "https://13-124-7-65.nip.io"
+_DEPRECATED_404_API_SERVER_URLS = {
+    "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
+    "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
+}
 
 
 def _normalize_server_url(raw: str) -> str:
     return (raw or "").strip().rstrip("/")
 
 
-def _candidate_login_servers() -> list[str]:
+def _configured_server_url() -> str:
+    configured = _normalize_server_url(
+        os.getenv("API_SERVER_URL", "").strip()
+        or os.getenv("USER_DASHBOARD_API_URL", "").strip()
+        or _DEFAULT_API_SERVER_URL
+    )
+    if configured in _DEPRECATED_404_API_SERVER_URLS:
+        logger.warning(
+            "Configured API server %s is deprecated and returns 404. Using %s.",
+            configured,
+            _DEFAULT_API_SERVER_URL,
+        )
+        return _DEFAULT_API_SERVER_URL
+    return configured or _DEFAULT_API_SERVER_URL
+
+
+# Server URL from environment variable (secure configuration)
+# Priority:
+# 1) API_SERVER_URL (legacy/current client variable)
+# 2) USER_DASHBOARD_API_URL (shared backend repo variable)
+# 3) built-in fallback URL
+main_server = _configured_server_url()
+
+
+def _candidate_api_servers() -> list[str]:
     """
-    Return login endpoint candidates in priority order.
-    Used to recover from endpoint-specific 5xx without user action.
+    Return API endpoint candidates in priority order.
+    Used to recover from stale hosts, endpoint-specific 404, or transient 5xx.
     """
     candidates: list[str] = []
     for raw in (
@@ -68,12 +85,17 @@ def _candidate_login_servers() -> list[str]:
         os.getenv("USER_DASHBOARD_API_URL", ""),
         os.getenv("API_SERVER_URL_FALLBACK", ""),
         _DEFAULT_API_SERVER_URL,
-        _ALT_API_SERVER_URL,
     ):
         normalized = _normalize_server_url(raw)
+        if normalized in _DEPRECATED_404_API_SERVER_URLS:
+            normalized = _DEFAULT_API_SERVER_URL
         if normalized and normalized not in candidates:
             candidates.append(normalized)
     return candidates
+
+
+def _candidate_login_servers() -> list[str]:
+    return _candidate_api_servers()
 
 # Production environment detection
 # ? ? ?
@@ -185,7 +207,12 @@ def _normalize_cert_pin(value: str) -> str:
 
 def _server_cert_sha256(host: str, port: int, timeout: int = 5) -> str:
     """Fetch leaf certificate and return SHA256 fingerprint."""
-    context = ssl.create_default_context()
+    try:
+        import certifi
+
+        context = ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        context = ssl.create_default_context()
     with socket.create_connection((host, port), timeout=timeout) as sock:
         with context.wrap_socket(sock, server_hostname=host) as tls_sock:
             cert_der = tls_sock.getpeercert(binary_form=True)
@@ -554,6 +581,8 @@ def login(**data) -> Dict[str, Any]:
     Returns:
         Login response dict
     """
+    global main_server
+
     # HTTPS security check for production
     # ? ?? HTTPS  ?
     if not _check_https_security():
@@ -613,8 +642,12 @@ def login(**data) -> Dict[str, Any]:
                 f"[Login] Response received in {elapsed:.2f}s, Status: {attempted_response.status_code}"
             )
 
-            # Retry one of fallback endpoints when this specific host returns 5xx.
-            if attempted_response.status_code >= 500 and idx < len(candidate_servers) - 1:
+            # Retry fallback endpoints when this host is stale/misrouted (404)
+            # or temporarily unavailable (5xx).
+            if (
+                attempted_response.status_code == 404
+                or attempted_response.status_code >= 500
+            ) and idx < len(candidate_servers) - 1:
                 logger.warning(
                     "[Login] Server returned %s at %s. Trying fallback endpoint.",
                     attempted_response.status_code,
@@ -624,6 +657,7 @@ def login(**data) -> Dict[str, Any]:
                 continue
 
             response = attempted_response
+            main_server = base_url
             break
 
         if response is None:
@@ -929,20 +963,20 @@ def loginCheck(**data) -> Dict[str, Any]:
 def getVersion() -> str:
     """
     Get server version with fallback.
-    ???? ?   ??
 
     Returns:
         Version string
     """
     try:
-        response = _secure_session.get(
-            f"{main_server}/free/lately/?item=22", timeout=15
-        )
-        response.raise_for_status()
-        bodyObject = json.loads(response.text)
-        version = bodyObject.get("version", "1.0.0")
-        logger.info(f"Server version: {version}")
-        return version
+        response = _secure_session.get(f"{main_server}/health", timeout=15)
+        if response.status_code == 200:
+            logger.debug("Server health check succeeded; using bundled version")
+        else:
+            logger.debug(
+                "Server health check returned %s; using bundled version",
+                response.status_code,
+            )
+        return "1.0.0"
     except (
         requests.exceptions.ConnectTimeout,
         requests.exceptions.ConnectionError,
@@ -976,6 +1010,8 @@ def submitRegistrationRequest(
     Returns:
         Response dict with 'success' boolean and optional 'message'
     """
+    global main_server
+
     # HTTPS security check
     if not _check_https_security():
         return {"success": False, "message": "Secure connection required."}
@@ -1010,13 +1046,11 @@ def submitRegistrationRequest(
         "username": username.strip().lower(),
         "password": password,
         "contact": contact_clean,
-        "email": email.strip()
+        "email": email.strip(),
+        "program_type": "ssmaker",
     }
 
     try:
-        logger.info(
-            f"Sending registration request to: {main_server}/user/register/request"
-        )
         masked_contact = contact_clean[:3] + "****" + contact_clean[-4:] if len(contact_clean) >= 7 else "****"
         logger.info(
             "Registration payload: name=%s username=%s contact=%s",
@@ -1024,9 +1058,43 @@ def submitRegistrationRequest(
             _sanitize_user_id_for_logging(username),
             masked_contact,
         )
-        response = _secure_session.post(
-            f"{main_server}/user/register/request", json=body, timeout=30
-        )
+        response: Optional[requests.Response] = None
+        candidate_servers = _candidate_api_servers()
+
+        for idx, base_url in enumerate(candidate_servers):
+            register_url = f"{base_url}/user/register/request"
+            logger.info("Sending registration request to: %s", register_url)
+            try:
+                attempted_response = _secure_session.post(
+                    register_url, json=body, timeout=30
+                )
+            except requests.exceptions.RequestException:
+                if idx < len(candidate_servers) - 1:
+                    logger.warning(
+                        "Registration request failed at %s. Trying fallback endpoint.",
+                        base_url,
+                    )
+                    continue
+                raise
+
+            if (
+                attempted_response.status_code == 404
+                or attempted_response.status_code >= 500
+            ) and idx < len(candidate_servers) - 1:
+                logger.warning(
+                    "Registration endpoint returned %s at %s. Trying fallback endpoint.",
+                    attempted_response.status_code,
+                    base_url,
+                )
+                response = attempted_response
+                continue
+
+            response = attempted_response
+            main_server = base_url
+            break
+
+        if response is None:
+            return {"success": False, "message": _ERROR_MESSAGES["network"]}
 
         logger.info(f"Registration response status: {response.status_code}")
 

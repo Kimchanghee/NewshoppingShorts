@@ -6,7 +6,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-API_URL = os.getenv("API_SERVER_URL", "https://ssmaker-auth-api-1049571775048.us-central1.run.app")
+API_URL = os.getenv("API_SERVER_URL", "https://13-124-7-65.nip.io")
 API_KEY = os.getenv("SSMAKER_ADMIN_KEY") or os.getenv("ADMIN_API_KEY")
 
 headers = {"X-Admin-API-Key": API_KEY, "Content-Type": "application/json"}
