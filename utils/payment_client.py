@@ -1,5 +1,8 @@
 ﻿"""
 Payment client for web-based checkout + status polling + PayApp 가상계좌/카드/정기결제.
+# NOTE: uses PEP 604 (X | None) annotations that require Python 3.10+.
+# With `from __future__ import annotations` below, annotations are lazy strings
+# so Python 3.9 can still import this module.
 Server endpoints expected:
   POST /payments/create -> {payment_id, checkout_url}
   POST /payments/payapp/create -> {payment_id, payurl, mul_no}
@@ -15,6 +18,8 @@ Server endpoints expected:
   POST /payments/payapp/subscribe/start -> {success, message}
   GET  /payments/payapp/subscribe/status -> {success, subscriptions: [...]}
 """
+from __future__ import annotations
+
 import re
 
 import requests

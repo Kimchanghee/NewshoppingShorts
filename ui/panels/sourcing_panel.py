@@ -1,6 +1,6 @@
 """
-Sourcing Panel ??Mode 3 (?꾩껜 ?먮룞?? UI.
-Coupang link input ??progress display ??results.
+Sourcing Panel - Mode 3 (전체 자동화) UI.
+Coupang link input → progress display → results.
 """
 from __future__ import annotations
 
@@ -34,7 +34,7 @@ class _StepIndicator(QFrame):
         layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(8)
 
-        self.icon_label = QLabel("\u25CB")  # ??
+        self.icon_label = QLabel("\u25CB")  # ○
         self.icon_label.setFixedWidth(20)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.icon_label)
@@ -57,19 +57,19 @@ class _StepIndicator(QFrame):
 
     def _apply_style(self, state: str):
         if state == "completed":
-            self.icon_label.setText("\u2713")  # ??
+            self.icon_label.setText("\u2713")  # ✓
             self.icon_label.setStyleSheet(f"color: {get_color('success')}; font-weight: bold;")
             self.text_label.setStyleSheet(f"color: {get_color('text_secondary')};")
         elif state == "in_progress":
-            self.icon_label.setText("\u25CF")  # ??
+            self.icon_label.setText("\u25CF")  # ●
             self.icon_label.setStyleSheet(f"color: {get_color('primary')}; font-weight: bold;")
             self.text_label.setStyleSheet(f"color: {get_color('text_primary')}; font-weight: bold;")
         elif state == "error":
-            self.icon_label.setText("\u2717")  # ??
+            self.icon_label.setText("\u2717")  # ✗
             self.icon_label.setStyleSheet(f"color: {get_color('error')}; font-weight: bold;")
             self.text_label.setStyleSheet(f"color: {get_color('error')};")
         else:  # pending
-            self.icon_label.setText("\u25CB")  # ??
+            self.icon_label.setText("\u25CB")  # ○
             self.icon_label.setStyleSheet(f"color: {get_color('text_muted')};")
             self.text_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
@@ -110,7 +110,7 @@ class SourcingPanel(QWidget):
         main_layout.setContentsMargins(ds.spacing.space_6, ds.spacing.space_4, ds.spacing.space_6, ds.spacing.space_4)
         main_layout.setSpacing(ds.spacing.space_4)
 
-        # ?? Input Section ??
+        # ── Input Section ──
         input_frame = QFrame()
         input_frame.setStyleSheet(f"""
             QFrame {{
@@ -124,7 +124,7 @@ class SourcingPanel(QWidget):
         input_layout.setSpacing(ds.spacing.space_3)
 
         # URL input
-        url_label = QLabel("荑좏뙜 ?곹뭹 留곹겕")
+        url_label = QLabel("쿠팡 상품 링크")
         url_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
         input_layout.addWidget(url_label)
 
@@ -152,7 +152,7 @@ class SourcingPanel(QWidget):
         opts_layout = QHBoxLayout()
         opts_layout.setSpacing(ds.spacing.space_4)
 
-        self.chk_linktree = QCheckBox("留곹겕?몃━ ?먮룞 諛쒗뻾")
+        self.chk_linktree = QCheckBox("링크트리 자동 발행")
         self.chk_linktree.setChecked(True)
         self.chk_linktree.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
         opts_layout.addWidget(self.chk_linktree)
@@ -166,7 +166,7 @@ class SourcingPanel(QWidget):
         input_layout.addLayout(opts_layout)
 
         # Start button
-        self.btn_start = QPushButton("?뚯떛 ?쒖옉")
+        self.btn_start = QPushButton("소싱 시작")
         self.btn_start.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
         self.btn_start.setMinimumHeight(42)
         self.btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -176,7 +176,7 @@ class SourcingPanel(QWidget):
 
         main_layout.addWidget(input_frame)
 
-        # ?? Progress Section ??
+        # ── Progress Section ──
         progress_frame = QFrame()
         progress_frame.setStyleSheet(f"""
             QFrame {{
@@ -189,7 +189,7 @@ class SourcingPanel(QWidget):
         progress_layout.setContentsMargins(ds.spacing.space_4, ds.spacing.space_3, ds.spacing.space_4, ds.spacing.space_3)
         progress_layout.setSpacing(2)
 
-        progress_title = QLabel("吏꾪뻾 ?곹솴")
+        progress_title = QLabel("진행 상황")
         progress_title.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         progress_layout.addWidget(progress_title)
 
@@ -202,7 +202,7 @@ class SourcingPanel(QWidget):
 
         main_layout.addWidget(progress_frame)
 
-        # ?? Results Section ??
+        # ── Results Section ──
         self.results_frame = QFrame()
         self.results_frame.setStyleSheet(f"""
             QFrame {{
@@ -215,11 +215,11 @@ class SourcingPanel(QWidget):
         results_layout.setContentsMargins(ds.spacing.space_4, ds.spacing.space_3, ds.spacing.space_4, ds.spacing.space_3)
         results_layout.setSpacing(ds.spacing.space_2)
 
-        results_title = QLabel("寃곌낵")
+        results_title = QLabel("결과")
         results_title.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         results_layout.addWidget(results_title)
 
-        self.results_label = QLabel("?뚯떛???쒖옉?섎㈃ 寃곌낵媛 ?ш린???쒖떆?⑸땲??")
+        self.results_label = QLabel("소싱을 시작하면 결과가 여기에 표시됩니다.")
         self.results_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
         self.results_label.setWordWrap(True)
@@ -255,11 +255,11 @@ class SourcingPanel(QWidget):
     def _on_start_clicked(self):
         url = self.url_input.text().strip()
         if not url:
-            self.results_label.setText("荑좏뙜 ?곹뭹 留곹겕瑜??낅젰?댁＜?몄슂.")
+            self.results_label.setText("쿠팡 상품 링크를 입력해주세요.")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if "coupang.com" not in url:
-            self.results_label.setText("?좏슚??荑좏뙜 留곹겕瑜??낅젰?댁＜?몄슂. (coupang.com)")
+            self.results_label.setText("유효한 쿠팡 링크를 입력해주세요. (coupang.com)")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if self._running:
@@ -267,13 +267,13 @@ class SourcingPanel(QWidget):
 
         self._running = True
         self.btn_start.setEnabled(False)
-        self.btn_start.setText("?뚯떛 吏꾪뻾 以?..")
+        self.btn_start.setText("소싱 진행 중...")
         self._apply_button_style(disabled=True)
 
         # Reset indicators
         for ind in self._step_indicators.values():
             ind.set_state("pending", "")
-        self.results_label.setText("?뚯떛???쒖옉?⑸땲??..")
+        self.results_label.setText("소싱을 시작합니다...")
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
         # Run in background thread
@@ -332,10 +332,10 @@ class SourcingPanel(QWidget):
                 indicator.set_state("in_progress", message)
 
     def _on_pipeline_done(self, success: bool, pipeline):
-        """Pipeline finished ??update UI and emit results."""
+        """Pipeline finished - update UI and emit results."""
         self._running = False
         self.btn_start.setEnabled(True)
-        self.btn_start.setText("?뚯떛 ?쒖옉")
+        self.btn_start.setText("소싱 시작")
         self._apply_button_style(disabled=False)
 
         report = pipeline.get_report()
@@ -344,22 +344,22 @@ class SourcingPanel(QWidget):
             # Build results text
             lines = []
             pi = pipeline.product_info or {}
-            lines.append(f"[?먮낯] {pi.get('name', 'N/A')[:50]}")
-            lines.append(f"  留곹겕: {pipeline.coupang_url}")
+            lines.append(f"[원본] {pi.get('name', 'N/A')[:50]}")
+            lines.append(f"  링크: {pipeline.coupang_url}")
             if pipeline.deep_link:
-                lines.append(f"  ?뚰듃?덉뒪: {pipeline.deep_link}")
+                lines.append(f"  파트너스: {pipeline.deep_link}")
             lines.append("")
             for i, sp in enumerate(pipeline.sourced_products):
                 p = sp["product"]
-                lines.append(f"[?뚯떛 {i+1}] ({sp['source'].upper()}) ?좎궗?? {p.get('score', 0):.1%}")
-                lines.append(f"  ?쒕ぉ: {p.get('title', 'N/A')[:50]}")
-                lines.append(f"  留곹겕: {p.get('url', 'N/A')}")
-                lines.append(f"  ?곸긽: {sp['video_file']}")
-                lines.append(f"  ?ш린: {sp['size_mb']}MB")
+                lines.append(f"[소싱 {i+1}] ({sp['source'].upper()}) 유사도: {p.get('score', 0):.1%}")
+                lines.append(f"  제목: {p.get('title', 'N/A')[:50]}")
+                lines.append(f"  링크: {p.get('url', 'N/A')}")
+                lines.append(f"  영상: {sp['video_file']}")
+                lines.append(f"  크기: {sp['size_mb']}MB")
                 lines.append("")
 
             if pipeline.description:
-                lines.append(f"[?ㅻ챸] {pipeline.description[:100]}")
+                lines.append(f"[설명] {pipeline.description[:100]}")
 
             self.results_label.setText("\n".join(lines))
             self.results_label.setStyleSheet(f"color: {get_color('text_primary')};")
@@ -373,8 +373,8 @@ class SourcingPanel(QWidget):
 
             self.sourcing_completed.emit(report)
         else:
-            error_msg = pipeline.error or "?뚯떛???ㅽ뙣?덉뒿?덈떎."
-            self.results_label.setText(f"?뚯떛 ?ㅽ뙣: {error_msg}")
+            error_msg = pipeline.error or "소싱에 실패했습니다."
+            self.results_label.setText(f"소싱 실패: {error_msg}")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
 
     def _enqueue_sourced_videos(self, pipeline):
@@ -383,7 +383,7 @@ class SourcingPanel(QWidget):
         if not video_paths:
             logger.warning("[SourcingPanel] No video files to enqueue")
             self.results_label.setText(
-                self.results_label.text() + "\n\n???ㅼ슫濡쒕뱶???곸긽???놁뼱 ?먯뿉 ?깅줉?섏? 紐삵뻽?듬땲??"
+                self.results_label.text() + "\n\n※ 다운로드된 영상이 없어 큐에 등록하지 못했습니다."
             )
             return
 
@@ -394,7 +394,7 @@ class SourcingPanel(QWidget):
         if not queue_mgr or not hasattr(queue_mgr, 'add_url_to_queue'):
             logger.error("[SourcingPanel] queue_manager not available, cannot enqueue videos")
             self.results_label.setText(
-                self.results_label.text() + "\n\n????留ㅻ땲?瑜?李얠쓣 ???놁뒿?덈떎. ?섎룞?쇰줈 ?곸긽??異붽??댁＜?몄슂."
+                self.results_label.text() + "\n\n※ 큐 매니저를 찾을 수 없습니다. 수동으로 영상을 추가해주세요."
             )
             return
 
@@ -452,7 +452,7 @@ class SourcingPanel(QWidget):
         else:
             logger.warning("[SourcingPanel] No videos were successfully enqueued")
             self.results_label.setText(
-                self.results_label.text() + "\n\n???곸긽 ???깅줉???ㅽ뙣?덉뒿?덈떎. ?곸긽 ?뚯씪???뺤씤?댁＜?몄슂."
+                self.results_label.text() + "\n\n※ 영상 큐 등록에 실패했습니다. 영상 파일을 확인해주세요."
             )
 
     def get_sourcing_result(self) -> Optional[dict]:

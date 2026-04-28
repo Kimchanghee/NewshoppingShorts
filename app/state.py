@@ -54,11 +54,14 @@ class AppState:
         self.dynamic_processing = False
         self.batch_processing = False
 
-        # Processing mode (single / mix)
-        self.processing_mode = "single"  # "single" or "mix"
+        # Processing mode (single / mix / sourcing)
+        self.processing_mode = "single"  # "single", "mix", or "sourcing"
         self.mix_video_urls: List[str] = []
         self.mix_jobs: Dict[str, List[str]] = {}
         self.mode_selected = False  # 모드 선택 완료 여부
+
+        # Sourcing (Mode 3) pipeline result cache
+        self.sourcing_result: Optional[Dict[str, Any]] = None
 
         # Video source variables
         self.video_source = "none"

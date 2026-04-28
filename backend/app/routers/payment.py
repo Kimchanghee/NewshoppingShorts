@@ -9,6 +9,8 @@ Security:
 - User authentication required for mock endpoints
 - PayApp webhook validates linkkey/linkval
 """
+from __future__ import annotations
+
 import logging
 import os
 import secrets

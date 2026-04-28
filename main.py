@@ -24,17 +24,34 @@ from PyQt6.QtWidgets import QApplication, QMainWindow
 
 import config
 
-FFMPEG_FALLBACK = r"C:\Program Files (x86)\UltData\Resources\ffmpegs"
-if os.path.isdir(FFMPEG_FALLBACK) and FFMPEG_FALLBACK not in os.environ.get("PATH", ""):
-    os.environ["PATH"] = FFMPEG_FALLBACK + os.pathsep + os.environ.get("PATH", "")
+# Platform-specific ffmpeg fallback locations.
+# Windows: bundled UltData path. macOS: Homebrew (/opt/homebrew, /usr/local), MacPorts.
+# Linux: common package-manager locations.
+if sys.platform.startswith("win"):
+    FFMPEG_FALLBACKS = [r"C:\Program Files (x86)\UltData\Resources\ffmpegs"]
+elif sys.platform == "darwin":
+    FFMPEG_FALLBACKS = [
+        "/opt/homebrew/bin"
+        "/usr/local/bin",
+        "/opt/local/bin",
+    ]
+else:  # linux and others
+    FFMPEG_FALLBACKS = ["/usr/bin", "/usr/local/bin"]
+
+for _fb in FFMPEG_FALLBACKS:
+    if os.path.isdir(_fb) and _fb not in os.environ.get("PATH", ""):
+        os.environ["PATH"] = _fb + os.pathsep + os.environ.get("PATH", "")
 
 # imageio-ffmpeg / moviepy 호환: IMAGEIO_FFMPEG_EXE 설정
 import shutil as _shutil
 _ffmpeg_exe = _shutil.which("ffmpeg")
 if not _ffmpeg_exe:
-    _candidate = os.path.join(FFMPEG_FALLBACK, "ffmpeg.exe")
-    if os.path.isfile(_candidate):
-        _ffmpeg_exe = _candidate
+    _exe_name = "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg"
+    for _fb in FFMPEG_FALLBACKS:
+        _candidate = os.path.join(_fb, _exe_name)
+        if os.path.isfile(_candidate):
+            _ffmpeg_exe = _candidate
+            break
 if _ffmpeg_exe:
     os.environ.setdefault("IMAGEIO_FFMPEG_EXE", _ffmpeg_exe)
 
@@ -256,11 +273,43 @@ class VideoAnalyzerGUI(
         self.step_nav.step_selected.connect(self._on_step_selected)
         self._on_step_selected("mode")
 
+        # Initial sidebar state: no mode chosen yet → use default (single) visibility
+        default_mode = getattr(self.state, 'processing_mode', 'single') or 'single'
+        self._apply_mode_visibility(default_mode)
+
     def _on_mode_selected(self, mode: str):
-        """Handle mode selection."""
+        """Handle mode selection.
+
+        Shows/hides sidebar steps depending on the selected mode:
+        - single / mix : show 'source', hide 'sourcing'
+        - sourcing     : show 'sourcing', hide 'source'
+        """
         logger.info(f"[Mode] 선택된 모드: {mode}")
+        # Keep GUI alias consistent with AppState.processing_mode
+        self.processing_mode = mode
+        if hasattr(self, 'state'):
+            self.state.processing_mode = mode
+
         if hasattr(self, 'url_input_panel') and hasattr(self.url_input_panel, 'refresh_mode'):
             self.url_input_panel.refresh_mode()
+
+        # Mode-specific sidebar visibility
+        self._apply_mode_visibility(mode)
+
+    def _apply_mode_visibility(self, mode: str):
+        """Show/hide step_nav buttons based on selected processing mode."""
+        step_nav = getattr(self, 'step_nav', None)
+        if step_nav is None:
+            return
+        is_sourcing = (mode == "sourcing")
+        show_rules = {
+            "source": not is_sourcing,     # Mode 1/2 only
+            "sourcing": is_sourcing,       # Mode 3 only
+        }
+        for step_id, visible in show_rules.items():
+            btn = step_nav.get_button(step_id) if hasattr(step_nav, 'get_button') else None
+            if btn is not None:
+                btn.setVisible(visible)
 
     def _on_step_selected(self, step_id: str):
         """Handle step navigation."""

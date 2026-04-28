@@ -127,4 +127,5 @@ youtube_settings.json
 tiktok_settings.json
 
 # Virtual environments
+.venv/
 venv*/

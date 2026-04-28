@@ -4,6 +4,8 @@ Utility Functions for Batch Processing
 Contains general-purpose helper functions used across the batch processing module.
 """
 
+from __future__ import annotations
+
 import os
 import re
 import base64

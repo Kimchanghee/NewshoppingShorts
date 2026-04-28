@@ -2,6 +2,7 @@
 """
 인증/로그인 관련 공통 유틸리티 함수.
 """
+from __future__ import annotations
 
 from datetime import datetime, timezone
 

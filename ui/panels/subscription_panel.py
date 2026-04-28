@@ -1,4 +1,6 @@
-﻿"""
+from __future__ import annotations
+
+"""
 Modern Subscription Panel - SaaS-style pricing page design
 
 Features:

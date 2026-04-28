@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from __future__ import annotations
+
 import traceback
 from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QObject
 from PyQt6.QtWidgets import (

@@ -2,6 +2,8 @@
 Step navigation bar for the main shell (PyQt6).
 Modernized with Design System V2 - Clean icon-based design.
 """
+from __future__ import annotations
+
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QPushButton, QSizePolicy, 
     QLabel, QHBoxLayout, QWidget

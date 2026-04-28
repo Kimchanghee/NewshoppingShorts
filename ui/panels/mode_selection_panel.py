@@ -1,6 +1,6 @@
 """
 Mode Selection Panel for PyQt6
-첫 페이지: 단일 영상 모드 vs 믹스 모드 선택
+첫 페이지: 단일 영상 / 믹스 / 소싱(풀 자동화) 3가지 모드 선택
 """
 from typing import Optional, Dict
 from PyQt6.QtWidgets import (
@@ -219,7 +219,7 @@ class ModeCard(QFrame):
 
 class ModeSelectionPanel(QWidget):
     """모드 선택 패널 - 첫 페이지"""
-    mode_selected = pyqtSignal(str)  # "single" or "mix"
+    mode_selected = pyqtSignal(str)  # "single", "mix", or "sourcing"
 
     def __init__(self, parent, gui, theme_manager=None):
         super().__init__(parent)
@@ -319,6 +319,25 @@ class ModeSelectionPanel(QWidget):
         self._cards["mix"] = mix_card
         cards_layout.addWidget(mix_card)
 
+        # Sourcing (Full Automation) Mode Card - Mode 3
+        sourcing_card = ModeCard(
+            mode_id="sourcing",
+            title="풀 자동화 소싱",
+            subtitle="쿠팡 링크 하나로 전체 자동화",
+            description="쿠팡 상품 링크만 입력하면 해외 영상 소싱부터 업로드까지 자동 진행.",
+            icon="🤖",
+            features=[
+                "쿠팡 상품 링크 1개 입력",
+                "해외(도우인/샤오홍슈) 영상 자동 소싱",
+                "파트너스 딥링크 + 링크트리 자동 발행",
+                "영상 제작 → YouTube 업로드까지 자동"
+            ],
+            is_selected=False
+        )
+        sourcing_card.clicked.connect(self._on_mode_clicked)
+        self._cards["sourcing"] = sourcing_card
+        cards_layout.addWidget(sourcing_card)
+
         main_layout.addLayout(cards_layout)
 
         # Bottom hint
@@ -345,19 +364,31 @@ class ModeSelectionPanel(QWidget):
         if hasattr(self.gui, 'state'):
             self.gui.state.processing_mode = mode_id
             self.gui.state.mode_selected = True
+        # Keep GUI alias in sync (StateBridgeMixin copies this at init only)
+        if hasattr(self.gui, 'processing_mode'):
+            self.gui.processing_mode = mode_id
 
         # Emit signal and navigate to next step
         self.mode_selected.emit(mode_id)
 
-        # Navigate to source page after short delay
-        QTimer.singleShot(300, self._navigate_to_source)
+        # Navigate to the next step after short delay (mode-specific)
+        QTimer.singleShot(300, lambda: self._navigate_next(mode_id))
 
-    def _navigate_to_source(self):
-        """소스 입력 페이지로 이동"""
+    def _navigate_next(self, mode_id: str):
+        """모드별 다음 페이지로 이동.
+
+        - single / mix : 'source' (URL/로컬 파일 입력)
+        - sourcing     : 'sourcing' (쿠팡 링크 풀 자동화)
+        """
+        target = 'sourcing' if mode_id == 'sourcing' else 'source'
         if hasattr(self.gui, '_on_step_selected'):
-            self.gui._on_step_selected('source')
+            self.gui._on_step_selected(target)
         if hasattr(self.gui, 'step_nav'):
-            self.gui.step_nav.set_active('source')
+            self.gui.step_nav.set_active(target)
+
+    # Backward compatibility: keep the old method name in case anything calls it externally.
+    def _navigate_to_source(self):
+        self._navigate_next(self._current_mode or 'single')
 
     def get_current_mode(self) -> str:
         """현재 선택된 모드 반환"""

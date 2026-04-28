@@ -3,6 +3,8 @@ Settings tab implementation (PyQt6).
 Provides API key management, output folder settings, theme settings, and app info.
 Uses design system v2 for consistent styling.
 """
+from __future__ import annotations
+
 import os
 import re
 from PyQt6.QtWidgets import (
