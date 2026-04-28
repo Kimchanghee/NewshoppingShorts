@@ -20,6 +20,8 @@
     python run_youtube_upload.py /Users/aicompany/.ssmaker/sourcing_output/sourcing_aliexpress_2_video.mp4
 또는 쿠팡 URL까지 명시:
     python run_youtube_upload.py /path/to/video.mp4 "https://link.coupang.com/a/..."
+또는 공개 범위까지 명시:
+    python run_youtube_upload.py /path/to/video.mp4 "https://link.coupang.com/a/..." public
 """
 from __future__ import annotations
 
@@ -89,9 +91,14 @@ def _load_context(video_path: str, coupang_url: str = "") -> dict:
     }
 
 
-def main(video_path: str, coupang_url: str = "") -> int:
+def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> int:
     if not os.path.exists(video_path):
         print(f"[!] 영상 파일이 없습니다: {video_path}")
+        return 1
+
+    privacy = (privacy or "unlisted").strip().lower()
+    if privacy not in {"private", "unlisted", "public"}:
+        print(f"[!] 공개 범위가 올바르지 않습니다: {privacy} (private/unlisted/public)")
         return 1
 
     context = _load_context(video_path, coupang_url)
@@ -123,8 +130,8 @@ def main(video_path: str, coupang_url: str = "") -> int:
     print(f"[+] 연결됨: {info.get('channel_name', '')} (ID={info.get('id', '')})")
     print(f"    구독자: {info.get('subscriber_count', '0')}, 영상: {info.get('video_count', '0')}")
 
-    # 2) 안전을 위해 첫 업로드는 비공개(unlisted) 로 강제
-    yt._upload_settings.default_privacy = "unlisted"
+    # 2) 기본은 unlisted, 승인 증빙처럼 공개 페이지가 필요할 때만 public 지정
+    yt._upload_settings.default_privacy = privacy
     yt._upload_settings.made_for_kids = False
     yt._upload_settings.auto_title = True
     yt._upload_settings.auto_description = True
@@ -178,7 +185,7 @@ def main(video_path: str, coupang_url: str = "") -> int:
     print("=" * 70)
     print("[✓] YouTube 업로드 완료!")
     print("    채널: https://www.youtube.com/channel/" + (info.get("id") or ""))
-    print("    공개설정: unlisted (비공개 링크 — YouTube Studio에서 공개로 전환 가능)")
+    print(f"    공개설정: {privacy}")
     print("=" * 70)
     return 0
 
@@ -186,4 +193,5 @@ def main(video_path: str, coupang_url: str = "") -> int:
 if __name__ == "__main__":
     video = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_VIDEO
     url = sys.argv[2] if len(sys.argv) > 2 else ""
-    sys.exit(main(video, url))
+    privacy = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("YOUTUBE_PRIVACY", "unlisted")
+    sys.exit(main(video, url, privacy))
