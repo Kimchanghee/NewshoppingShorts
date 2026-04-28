@@ -56,6 +56,65 @@ def _extract_product_name(url: str) -> str:
     return "쇼핑 추천 아이템"
 
 
+def _normalize_local_video_path(url: str) -> str:
+    """Return a comparable absolute path for local:// queue entries."""
+    raw = str(url or "")
+    if raw.startswith("local://"):
+        raw = raw[len("local://"):]
+    if not raw:
+        return ""
+    try:
+        return os.path.abspath(os.path.expanduser(raw))
+    except Exception:
+        return raw
+
+
+def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
+    """Recover original Coupang metadata for a sourced local:// video."""
+    result = {}
+    try:
+        state = getattr(app, "state", None)
+        if state is not None:
+            result = getattr(state, "sourcing_result", None) or {}
+        if not result:
+            panel = getattr(app, "sourcing_panel", None)
+            if panel is not None and hasattr(panel, "get_sourcing_result"):
+                result = panel.get_sourcing_result() or {}
+    except Exception:
+        result = {}
+
+    if not isinstance(result, dict):
+        return {}
+
+    local_path = _normalize_local_video_path(url)
+    matched_item = {}
+    for key in ("sourced_products", "sourcing_results"):
+        for item in result.get(key, []) or []:
+            video_file = _normalize_local_video_path(item.get("video_file", ""))
+            if local_path and video_file and local_path == video_file:
+                matched_item = item
+                break
+        if matched_item:
+            break
+
+    product_info = result.get("product_info") or {}
+    original_url = str(result.get("coupang_url") or "").strip()
+    deep_link = str(result.get("deep_link") or "").strip()
+    product_name = str(product_info.get("name") or "").strip()
+    description = str(result.get("description") or "").strip()
+
+    if not matched_item and not product_name and not original_url:
+        return {}
+
+    return {
+        "product_name": product_name,
+        "product_info": description or product_name,
+        "source_url": original_url,
+        "coupang_deep_link": deep_link,
+        "matched_title": str(matched_item.get("title") or "").strip(),
+    }
+
+
 def _safe_set_url_status(app, url: str, status: str):
     """스레드 안전하게 url_status 설정"""
     lock = getattr(app, "url_status_lock", None)
@@ -1465,14 +1524,23 @@ def _process_single_video(app, url, current_number, total_urls):
 
                         if final_video_path and os.path.exists(final_video_path):
                             # Common Data
-                            product_name = _extract_product_name(url) or "쇼핑 추천 아이템"
+                            sourcing_context = _resolve_sourcing_context(app, url)
+                            original_source_url = (
+                                sourcing_context.get("source_url")
+                                or (url if "coupang.com" in str(url).lower() else "")
+                            )
+                            product_name = (
+                                sourcing_context.get("product_name")
+                                or _extract_product_name(original_source_url or url)
+                                or "쇼핑 추천 아이템"
+                            )
                             
                             # Use analysis result for richer info if available
                             product_info = ""
                             if hasattr(app, "analysis_result") and isinstance(app.analysis_result, dict):
                                 product_info = app.analysis_result.get("summary") or ""
                             if not product_info:
-                                product_info = product_name
+                                product_info = sourcing_context.get("product_info") or product_name
 
                             # SEO Generation (using YouTube Manager helpers)
                             yt_manager = getattr(app, "youtube_manager", None)
@@ -1486,31 +1554,36 @@ def _process_single_video(app, url, current_number, total_urls):
                                 video_tags = yt_manager.generate_seo_hashtags(product_info)
                             
                             # 2. Coupang Partners Link Generation
-                            coupang_link = ""
+                            coupang_link = sourcing_context.get("coupang_deep_link") or ""
                             coupang_manager = getattr(app, "coupang_manager", None)
-                            if coupang_manager and coupang_manager.is_connected():
+                            if not coupang_link and coupang_manager and coupang_manager.is_connected():
                                 # Only try if it looks like a product URL (simple check)
-                                if "coupang.com" in url or "1688.com" in url or "taobao" in url:
+                                link_source = original_source_url or url
+                                if "coupang.com" in link_source or "1688.com" in link_source or "taobao" in link_source:
                                     # For 1688/Taobao, we might need a matching Coupang product.
                                     # For now, if the input URL is Coupang, we generate a deep link.
                                     # If it's 1688, we might not have a direct mapping yet unless sourcing manager found one.
                                     # Assuming direct coupang link generation for now if URL is compatible.
-                                    if "coupang.com" in url:
-                                        coupang_link = coupang_manager.generate_deep_link(url)
+                                    if "coupang.com" in link_source:
+                                        coupang_link = coupang_manager.generate_deep_link(link_source)
                                         if coupang_link:
                                             logger.info(f"[Automation] Coupang link generated: {coupang_link}")
-                                            video_desc += f"\n\n🚀 쿠팡 최저가 구매: {coupang_link}"
-                                            
-                                            # Update Inpock if link generated
-                                            inpock_mgr = getattr(app, "inpock_manager", None)
-                                            if inpock_mgr and inpock_mgr.is_connected():
-                                                success = inpock_mgr.add_link(
-                                                    title=product_name[:30], 
-                                                    url=coupang_link
-                                                )
-                                                if success:
-                                                    logger.info("[Automation] Added to Inpock Link")
-                                                    video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..." # Placeholder or actual profile URL if known
+                            if not coupang_link and "coupang.com" in str(original_source_url).lower():
+                                coupang_link = original_source_url
+
+                            if coupang_link:
+                                video_desc += f"\n\n🚀 쿠팡 최저가 구매: {coupang_link}"
+
+                                # Update Inpock if link generated/configured.
+                                inpock_mgr = getattr(app, "inpock_manager", None)
+                                if inpock_mgr and inpock_mgr.is_connected():
+                                    success = inpock_mgr.add_link(
+                                        title=product_name[:30],
+                                        url=coupang_link,
+                                    )
+                                    if success:
+                                        logger.info("[Automation] Added to Inpock Link")
+                                        video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..."
 
                             # 3. Add to YouTube Upload Queue
                             if yt_manager and yt_manager.get_upload_settings().enabled:
@@ -1520,7 +1593,7 @@ def _process_single_video(app, url, current_number, total_urls):
                                     description=video_desc,
                                     tags=video_tags,
                                     product_info=product_info,
-                                    source_url=url,
+                                    source_url=original_source_url or url,
                                     coupang_deep_link=coupang_link,
                                 )
                                 logger.info("[Automation] Added to YouTube upload queue")

@@ -170,6 +170,14 @@ def test_keyword_conversion_kitchen_scissors():
     assert "scissor" in out["english"].lower() or "剪" in out["chinese"]
 
 
+def test_keyword_conversion_compact_sponge_holder():
+    out = convert_keywords_rule_based("리치덕 싱크대 물빠짐 304 스텐 수세미거치대")
+    assert "海绵架" in out["chinese"]
+    assert "沥水" in out["chinese"]
+    assert "sponge holder" in out["english"].lower()
+    assert "kitchen sink" in out["english"].lower()
+
+
 def test_keyword_conversion_dumpling_maker():
     out = convert_keywords_rule_based("다용도 만두 메이커 모양틀")
     assert out["chinese"]

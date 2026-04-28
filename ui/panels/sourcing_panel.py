@@ -420,8 +420,11 @@ class SourcingPanel(QWidget):
             if len(video_paths) > 1:
                 logger.info("[SourcingPanel] One-link policy active: queued only the first valid sourced video")
 
-            # Linktree auto-publish (if checked and deep link available)
-            if self.chk_linktree.isChecked() and pipeline.deep_link:
+            # Linktree auto-publish (prefer Partners deep link, fall back to
+            # the original Coupang URL so the action is not silently skipped
+            # when Coupang Partners keys are not configured yet).
+            publish_url = pipeline.deep_link or pipeline.coupang_url
+            if self.chk_linktree.isChecked() and publish_url:
                 try:
                     from managers.linktree_manager import get_linktree_manager
                     lm = get_linktree_manager()
@@ -429,7 +432,7 @@ class SourcingPanel(QWidget):
                         product_name = (pipeline.product_info or {}).get("name", "")
                         ok = lm.publish_coupang_link(
                             product_name=product_name,
-                            coupang_url=pipeline.deep_link,
+                            coupang_url=publish_url,
                             source_url=pipeline.coupang_url,
                         )
                         logger.info("[SourcingPanel] Linktree publish: %s", "성공" if ok else "실패")
@@ -441,6 +444,7 @@ class SourcingPanel(QWidget):
             # Full automation: chain to batch processing if YouTube auto-upload is checked
             if self.chk_upload.isChecked():
                 logger.info("[SourcingPanel] 풀 자동화 모드 - 영상 제작 자동 시작")
+                self._enable_youtube_auto_upload_for_pipeline()
                 if hasattr(self.gui, '_on_step_selected'):
                     QTimer.singleShot(500, lambda: self.gui._on_step_selected('queue'))
                 if hasattr(self.gui, 'start_batch_processing'):
@@ -454,6 +458,25 @@ class SourcingPanel(QWidget):
             self.results_label.setText(
                 self.results_label.text() + "\n\n※ 영상 큐 등록에 실패했습니다. 영상 파일을 확인해주세요."
             )
+
+    def _enable_youtube_auto_upload_for_pipeline(self):
+        """Synchronize the sourcing checkbox with the actual YouTube manager."""
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            settings = get_settings_manager()
+            settings.set_youtube_auto_upload(True)
+            yt_manager = getattr(self.gui, "youtube_manager", None)
+            if yt_manager and hasattr(yt_manager, "set_upload_interval"):
+                try:
+                    yt_manager.set_upload_interval(settings.get_youtube_upload_interval())
+                except Exception:
+                    pass
+            if yt_manager and hasattr(yt_manager, "set_upload_enabled"):
+                yt_manager.set_upload_enabled(True)
+                logger.info("[SourcingPanel] YouTube auto-upload enabled for full pipeline")
+        except Exception as exc:
+            logger.warning("[SourcingPanel] Failed to enable YouTube auto-upload: %s", exc)
 
     def get_sourcing_result(self) -> Optional[dict]:
         """Return last pipeline report or None."""

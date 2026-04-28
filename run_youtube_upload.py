@@ -18,9 +18,12 @@
     python run_youtube_upload.py
 또는 영상 파일 경로 명시:
     python run_youtube_upload.py /Users/aicompany/.ssmaker/sourcing_output/sourcing_aliexpress_2_video.mp4
+또는 쿠팡 URL까지 명시:
+    python run_youtube_upload.py /path/to/video.mp4 "https://link.coupang.com/a/..."
 """
 from __future__ import annotations
 
+import json
 import os
 import sys
 from pathlib import Path
@@ -41,14 +44,47 @@ DEFAULT_VIDEO = os.path.expanduser("~/.ssmaker/sourcing_output/sourcing_aliexpre
 PRODUCT_INFO = "쿠팡에서 발견한 추천 상품! 가성비 좋은 인기템 소개합니다."
 
 
-def main(video_path: str) -> int:
+def _load_context(video_path: str, coupang_url: str = "") -> dict:
+    """Best-effort metadata from the newest sourcing report for this video."""
+    out_dir = Path(os.path.expanduser("~/.ssmaker/sourcing_output"))
+    video_abs = os.path.abspath(os.path.expanduser(video_path))
+    for report_path in sorted(out_dir.glob("report_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            data = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        items = data.get("sourced_products") or data.get("sourcing_results") or []
+        if any(os.path.abspath(str(item.get("video_file", ""))) == video_abs for item in items):
+            product = data.get("product_info") or {}
+            return {
+                "coupang_url": coupang_url or data.get("deep_link") or data.get("coupang_url") or COUPANG_URL,
+                "source_url": data.get("coupang_url") or coupang_url or COUPANG_URL,
+                "product_name": product.get("name") or "",
+                "description": data.get("description") or "",
+            }
+    return {
+        "coupang_url": coupang_url or COUPANG_URL,
+        "source_url": coupang_url or COUPANG_URL,
+        "product_name": "",
+        "description": "",
+    }
+
+
+def main(video_path: str, coupang_url: str = "") -> int:
     if not os.path.exists(video_path):
         print(f"[!] 영상 파일이 없습니다: {video_path}")
         return 1
 
+    context = _load_context(video_path, coupang_url)
+    product_name = context.get("product_name") or PRODUCT_INFO
+    purchase_url = context.get("coupang_url") or coupang_url or COUPANG_URL
+    source_url = context.get("source_url") or purchase_url
+
     print("=" * 70)
     print("[+] YouTube 업로드 시작")
     print(f"[+] 영상: {video_path} ({os.path.getsize(video_path)/1024/1024:.1f} MB)")
+    print(f"[+] 상품: {product_name[:80]}")
+    print(f"[+] 링크: {purchase_url}")
     print("=" * 70)
 
     from managers.youtube_manager import get_youtube_manager, YOUTUBE_API_AVAILABLE
@@ -76,12 +112,13 @@ def main(video_path: str) -> int:
     yt._upload_settings.auto_hashtags = True
 
     # 3) 큐에 추가 (제목/설명/태그 자동 SEO)
-    title = "꿀템 발견! 쿠팡 추천 상품 (자동화 테스트)"
+    short_name = product_name[:42] if product_name else "쿠팡 추천 상품"
+    title = f"꿀템 발견! {short_name} #shorts"
     desc_lines = [
         "쿠팡 풀 자동화 파이프라인 테스트 영상입니다.",
         "",
         "🛒 상품 보기:",
-        COUPANG_URL,
+        purchase_url,
         "",
         "🔗 모든 상품 모음:",
         "https://linktr.ee/studio.idol",
@@ -98,9 +135,9 @@ def main(video_path: str) -> int:
         title=title,
         description=description,
         tags=tags,
-        product_info=PRODUCT_INFO,
-        source_url=COUPANG_URL,
-        coupang_deep_link=COUPANG_URL,
+        product_info=product_name,
+        source_url=source_url,
+        coupang_deep_link=purchase_url,
     )
 
     print(f"[2/3] 업로드 큐 등록됨: {title}")
@@ -128,4 +165,5 @@ def main(video_path: str) -> int:
 
 if __name__ == "__main__":
     video = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_VIDEO
-    sys.exit(main(video))
+    url = sys.argv[2] if len(sys.argv) > 2 else ""
+    sys.exit(main(video, url))

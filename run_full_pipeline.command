@@ -1,7 +1,7 @@
 #!/bin/bash
 cd "$(dirname "$0")"
 source .venv/bin/activate
-COUPANG_URL="https://www.coupang.com/vp/products/9423373566?itemId=28009663306"
+COUPANG_URL="${1:-https://www.coupang.com/vp/products/9423373566?itemId=28009663306}"
 LOG_DIR="$HOME/.ssmaker/logs"
 mkdir -p "$LOG_DIR"
 
@@ -34,7 +34,7 @@ if [ -z "$LATEST_VIDEO" ]; then
 fi
 
 echo "업로드 영상: $LATEST_VIDEO"
-python run_youtube_upload.py "$LATEST_VIDEO" 2>&1 | tee "$LOG_DIR/youtube_upload2.log"
+python run_youtube_upload.py "$LATEST_VIDEO" "$COUPANG_URL" 2>&1 | tee "$LOG_DIR/youtube_upload2.log"
 
 echo ""
 echo "===== 풀 자동화 종료 ====="

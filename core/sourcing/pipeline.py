@@ -13,6 +13,8 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+MIN_TRUSTED_VIDEO_SCORE = 0.15
+
 
 class SourcingPipeline:
     """
@@ -392,7 +394,9 @@ class SourcingPipeline:
             if candidates_ali:
                 found_ali = await find_products_with_video(
                     browser, candidates_ali, self.output_dir, "aliexpress",
-                    count=need_from_ali, category_terms=category_terms,
+                    count=need_from_ali,
+                    max_try=8 if coupang_image.startswith("http") else 15,
+                    category_terms=category_terms,
                     overlap_references=overlap_refs,
                 )
                 self.sourced_products.extend(found_ali)
@@ -417,7 +421,7 @@ class SourcingPipeline:
                     if img_candidates:
                         found_img = await find_products_with_video(
                             browser, img_candidates, self.output_dir,
-                            "aliexpress", count=2, max_try=15,
+                            "aliexpress", count=2, max_try=8,
                             min_score=0.0,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
@@ -429,12 +433,27 @@ class SourcingPipeline:
                 except Exception as e:
                     logger.warning("[Pipeline] Last-resort image search failed: %s", e)
 
+            # If strict text/image search found no downloadable video, prefer
+            # an exact Coupang product-image video before loosening thresholds.
+            # The relaxed pass is only useful when we have no product image or
+            # image-video creation fails; otherwise it risks same-category but
+            # visually wrong videos.
+            if not self.sourced_products and coupang_image.startswith("http"):
+                self._progress(
+                    "video_download",
+                    "상품 영상 없음 — 쿠팡 상품 이미지로 대체 영상 생성 중...",
+                    0.9,
+                )
+                fallback = await self._create_product_image_video(coupang_image)
+                if fallback:
+                    self.sourced_products.append(fallback)
+
             # If nothing matched at the strict threshold, retry progressively looser.
             # Korean Coupang title vs Korean AliExpress title often scores < 0.05
             # because the marketplace gives translated/romanized titles, so we
             # fall through to threshold 0 (any candidate that has video) before
-            # giving up. The keyword conversion has already biased the search
-            # toward the correct category.
+            # giving up. For products with a valid Coupang image, the exact
+            # image-video fallback above will normally stop before this point.
             if not self.sourced_products and (candidates_ali or candidates_1688):
                 for relaxed in (0.05, 0.0):
                     if self.sourced_products:
@@ -451,11 +470,34 @@ class SourcingPipeline:
                     if candidates_ali:
                         found_ali_loose = await find_products_with_video(
                             browser, candidates_ali, self.output_dir, "aliexpress",
-                            count=2, min_score=relaxed, max_try=15,
+                            count=2, min_score=relaxed, max_try=8,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
                         )
                         self.sourced_products.extend(found_ali_loose)
+
+            # If the only downloadable marketplace videos are weak textual
+            # matches, prefer a real-product image video over a visually wrong
+            # same-category video. This protects exact-product campaigns where
+            # "sponge holder" candidates vary a lot in shape/material.
+            if self.sourced_products and coupang_image.startswith("http"):
+                best_score = max(
+                    float((p.get("product") or {}).get("score") or 0.0)
+                    for p in self.sourced_products
+                )
+                if best_score < MIN_TRUSTED_VIDEO_SCORE:
+                    self._progress(
+                        "video_download",
+                        "후보 영상 유사도 낮음 — 쿠팡 상품 이미지 영상으로 대체 중...",
+                        0.9,
+                    )
+                    fallback = await self._create_product_image_video(coupang_image)
+                    if fallback:
+                        logger.info(
+                            "[Pipeline] Replaced low-confidence videos (best=%.3f) with product image fallback",
+                            best_score,
+                        )
+                        self.sourced_products = [fallback]
 
             self._progress(
                 "video_download",
@@ -495,14 +537,15 @@ class SourcingPipeline:
 
         if self.gemini_client:
             try:
+                from core.sourcing.keyword_converter import generate_content_text
+
                 prompt = (
                     f"다음 상품에 대한 짧은 마케팅 설명을 한국어로 작성해줘 (2-3문장).\n"
                     f"상품명: {name}\n"
                     f"가격: {price or '미정'}\n"
                     f"SNS 숏폼 영상용 설명이야. 이모지 포함, 구매 유도 문구 넣어줘."
                 )
-                response = await self.gemini_client.generate_content_async(prompt)
-                desc = response.text.strip()
+                desc = await generate_content_text(self.gemini_client, prompt)
                 if desc:
                     return desc
             except Exception as e:
@@ -514,6 +557,116 @@ class SourcingPipeline:
             desc += f" 단돈 {price}원!"
         desc += " 링크 클릭해서 최저가로 구매하세요!"
         return desc
+
+    async def _create_product_image_video(self, image_url: str) -> Optional[Dict[str, Any]]:
+        """Create a short vertical MP4 from the real Coupang product image."""
+        return await self._run_blocking_image_video_create(image_url)
+
+    async def _run_blocking_image_video_create(self, image_url: str) -> Optional[Dict[str, Any]]:
+        import asyncio
+
+        return await asyncio.to_thread(self._create_product_image_video_sync, image_url)
+
+    def _create_product_image_video_sync(self, image_url: str) -> Optional[Dict[str, Any]]:
+        """Blocking implementation for the product-image fallback video."""
+        import tempfile
+        from io import BytesIO
+
+        import cv2
+        import numpy as np
+        import requests
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+
+        try:
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+                ),
+                "Referer": "https://www.coupang.com/",
+            }
+            response = requests.get(image_url, headers=headers, timeout=20)
+            response.raise_for_status()
+            image = Image.open(BytesIO(response.content)).convert("RGB")
+
+            width, height = 720, 1280
+            fps, duration = 24, 8
+            frame_count = fps * duration
+
+            bg = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)
+            bg = bg.filter(ImageFilter.GaussianBlur(radius=26))
+            bg = ImageEnhance.Brightness(bg).enhance(0.62)
+
+            fg_base = image.copy()
+            fg_base.thumbnail((620, 620), Image.Resampling.LANCZOS)
+
+            os.makedirs(self.output_dir, exist_ok=True)
+            output_path = os.path.join(self.output_dir, "sourcing_coupang_image_1_video.mp4")
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", dir=self.output_dir)
+            os.close(tmp_fd)
+
+            writer = cv2.VideoWriter(
+                tmp_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                fps,
+                (width, height),
+            )
+            if not writer.isOpened():
+                raise RuntimeError("OpenCV VideoWriter를 열 수 없습니다.")
+
+            for frame_idx in range(frame_count):
+                t = frame_idx / max(1, frame_count - 1)
+                zoom = 1.0 + 0.045 * t
+                fg_size = (
+                    max(1, int(fg_base.width * zoom)),
+                    max(1, int(fg_base.height * zoom)),
+                )
+                fg = fg_base.resize(fg_size, Image.Resampling.LANCZOS)
+
+                frame = bg.copy()
+                shadow = Image.new("RGBA", (fg.width + 36, fg.height + 36), (0, 0, 0, 0))
+                shadow_box = Image.new("RGBA", (fg.width, fg.height), (0, 0, 0, 145))
+                shadow.paste(shadow_box, (18, 18))
+                shadow = shadow.filter(ImageFilter.GaussianBlur(radius=18))
+
+                x = (width - fg.width) // 2
+                y = int(height * 0.36) - fg.height // 2
+                frame.paste(shadow.convert("RGB"), (x - 18, y - 18), shadow)
+                frame.paste(fg, (x, y))
+
+                arr = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+                writer.write(arr)
+
+            writer.release()
+            os.replace(tmp_path, output_path)
+            size_mb = round(os.path.getsize(output_path) / (1024 * 1024), 1)
+
+            product = {
+                "id": "coupang-image-fallback",
+                "title": (self.product_info or {}).get("name", "쿠팡 상품 이미지 영상"),
+                "price": (self.product_info or {}).get("price"),
+                "image": image_url,
+                "url": self.coupang_url,
+                "score": 1.0,
+                "source": "coupang_image",
+                "fallback_reason": "no_marketplace_video",
+            }
+            logger.info("[Pipeline] Product image fallback video created: %s", output_path)
+            return {
+                "source": "coupang_image",
+                "product": product,
+                "video_url": image_url,
+                "video_file": output_path,
+                "size_mb": size_mb,
+            }
+        except Exception as exc:
+            logger.warning("[Pipeline] Product image fallback failed: %s", exc)
+            try:
+                if "tmp_path" in locals() and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            return None
 
     def get_video_paths(self) -> List[str]:
         """Return list of downloaded video file paths."""

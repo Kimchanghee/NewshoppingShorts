@@ -206,8 +206,30 @@ class YouTubeManager:
                     )
 
                 logger.debug("[YouTube] 설정 로드 완료")
+                self._sync_settings_manager_state()
         except Exception as e:
             logger.error(f"[YouTube] 설정 로드 실패: {e}")
+
+    def _sync_settings_manager_state(self) -> None:
+        """Keep the shared SettingsManager in sync with this manager state."""
+        try:
+            settings = get_settings_manager()
+            connected = bool(
+                self._channel
+                and self._channel.channel_id
+                and os.path.exists(self._get_token_path())
+            )
+            if connected:
+                settings.set_youtube_connected(
+                    True,
+                    self._channel.channel_id,
+                    self._channel.channel_name,
+                )
+            else:
+                settings.set_youtube_connected(False, "", "")
+            settings.set_youtube_auto_upload(bool(self._upload_settings.enabled))
+        except Exception as exc:
+            logger.debug("[YouTube] SettingsManager sync skipped: %s", exc)
 
     def _save_settings(self) -> bool:
         """Save settings to file"""
@@ -397,6 +419,7 @@ class YouTubeManager:
                 logger.debug(f"[YouTube] 토큰 파일 삭제 실패: {e}")
 
         self._save_settings()
+        self._sync_settings_manager_state()
 
         # Stop auto-upload
         self.stop_auto_upload()
@@ -645,6 +668,7 @@ class YouTubeManager:
                 )
 
                 self._save_settings()
+                self._sync_settings_manager_state()
                 logger.info(f"[YouTube] 채널 연결: {self._channel.channel_name}")
 
         except Exception as e:
@@ -660,6 +684,10 @@ class YouTubeManager:
         """Enable/disable auto-upload"""
         self._upload_settings.enabled = enabled
         self._save_settings()
+        try:
+            get_settings_manager().set_youtube_auto_upload(enabled)
+        except Exception as exc:
+            logger.debug("[YouTube] Failed to sync auto-upload setting: %s", exc)
 
         if enabled:
             self.start_auto_upload()

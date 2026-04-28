@@ -4,6 +4,7 @@ Uses Gemini API when available, falls back to rule-based mapping.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Dict, Optional
 
 from utils.logging_config import get_logger
@@ -15,6 +16,8 @@ logger = get_logger(__name__)
 # scan against the Korean product title — if it hits, we use ONLY the compound terms.
 _COMPOUND_MAP = {
     # 주방 — 수세미 / 식기 류
+    "물빠짐 수세미": {"cn": "海绵架 沥水架", "en": "sponge holder kitchen sink"},
+    "수세미거치대": {"cn": "海绵架 沥水架", "en": "sponge holder kitchen sink"},
     "수세미 거치대": {"cn": "海绵架 沥水架", "en": "sponge holder kitchen sink"},
     "수세미걸이": {"cn": "海绵架", "en": "sponge holder"},
     "수세미 받침": {"cn": "海绵沥水架", "en": "sponge drainer"},
@@ -291,6 +294,36 @@ def convert_keywords_rule_based(product_name: str) -> Dict[str, str]:
     return {"chinese": cn, "english": en}
 
 
+async def generate_content_text(gemini_client: object, prompt: str) -> str:
+    """Return text from either the app async wrapper or google-genai Client."""
+    if not gemini_client:
+        return ""
+
+    if hasattr(gemini_client, "generate_content_async"):
+        response = await gemini_client.generate_content_async(prompt)
+        return str(getattr(response, "text", "") or "").strip()
+
+    models = getattr(gemini_client, "models", None)
+    if models is not None and hasattr(models, "generate_content"):
+        import config
+
+        model_name = getattr(config, "GEMINI_TEXT_MODEL", "gemini-2.0-flash")
+        loop = asyncio.get_event_loop()
+
+        def _call():
+            return models.generate_content(model=model_name, contents=prompt)
+
+        response = await loop.run_in_executor(None, _call)
+        return str(getattr(response, "text", "") or "").strip()
+
+    if hasattr(gemini_client, "generate_content"):
+        loop = asyncio.get_event_loop()
+        response = await loop.run_in_executor(None, lambda: gemini_client.generate_content(prompt))
+        return str(getattr(response, "text", "") or "").strip()
+
+    return ""
+
+
 async def convert_keywords_gemini(product_name: str, gemini_client: Optional[object] = None) -> Dict[str, str]:
     """
     Use Gemini API to convert Korean product name to Chinese + English search keywords.
@@ -310,8 +343,10 @@ async def convert_keywords_gemini(product_name: str, gemini_client: Optional[obj
             f"브랜드명은 제외하고 상품 카테고리/특성 위주로."
         )
 
-        response = await gemini_client.generate_content_async(prompt)
-        text = response.text.strip()
+        text = await generate_content_text(gemini_client, prompt)
+        if not text:
+            logger.warning("[KeywordConverter] Gemini client unsupported/empty, fallback to rules")
+            return convert_keywords_rule_based(product_name)
 
         cn = ""
         en = ""

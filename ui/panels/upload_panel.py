@@ -548,6 +548,12 @@ class YouTubeUploadSettingsSection(QFrame):
         self._interval_widget.setVisible(enabled)
         if self.gui and hasattr(self.gui, 'state'):
             self.gui.state.youtube_auto_upload = enabled
+        yt_manager = getattr(self.gui, "youtube_manager", None) if self.gui else None
+        if yt_manager and hasattr(yt_manager, "set_upload_enabled"):
+            try:
+                yt_manager.set_upload_enabled(enabled)
+            except Exception as exc:
+                logger.warning("[UploadPanel] YouTube manager sync failed: %s", exc)
 
     def _on_interval_changed(self, value: int):
         interval_minutes = value * 60
