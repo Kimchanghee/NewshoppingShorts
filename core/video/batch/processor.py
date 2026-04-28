@@ -1572,7 +1572,7 @@ def _process_single_video(app, url, current_number, total_urls):
                                 coupang_link = original_source_url
 
                             if coupang_link:
-                                video_desc += f"\n\n🚀 쿠팡 최저가 구매: {coupang_link}"
+                                video_desc += f"\n\n🛒 쿠팡 상품 보기: {coupang_link}"
 
                                 # Update Inpock if link generated/configured.
                                 inpock_mgr = getattr(app, "inpock_manager", None)

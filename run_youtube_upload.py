@@ -42,26 +42,45 @@ except ImportError:
 COUPANG_URL = "https://www.coupang.com/vp/products/9423373566?itemId=28009663306"
 DEFAULT_VIDEO = os.path.expanduser("~/.ssmaker/sourcing_output/sourcing_aliexpress_2_video.mp4")
 PRODUCT_INFO = "쿠팡에서 발견한 추천 상품! 가성비 좋은 인기템 소개합니다."
+COUPANG_AFFILIATE_DISCLOSURE = (
+    "이 게시물은 쿠팡 파트너스 활동의 일환으로, "
+    "이에 따른 일정액의 수수료를 제공받습니다."
+)
 
 
 def _load_context(video_path: str, coupang_url: str = "") -> dict:
     """Best-effort metadata from the newest sourcing report for this video."""
     out_dir = Path(os.path.expanduser("~/.ssmaker/sourcing_output"))
     video_abs = os.path.abspath(os.path.expanduser(video_path))
-    for report_path in sorted(out_dir.glob("report_*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+    reports = sorted(out_dir.glob("report_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def _context_from_report(data: dict) -> dict:
+        product = data.get("product_info") or {}
+        return {
+            "coupang_url": data.get("deep_link") or coupang_url or data.get("coupang_url") or COUPANG_URL,
+            "source_url": data.get("coupang_url") or coupang_url or COUPANG_URL,
+            "product_name": product.get("name") or "",
+            "description": data.get("description") or "",
+        }
+
+    for report_path in reports:
         try:
             data = json.loads(report_path.read_text(encoding="utf-8"))
         except Exception:
             continue
         items = data.get("sourced_products") or data.get("sourcing_results") or []
         if any(os.path.abspath(str(item.get("video_file", ""))) == video_abs for item in items):
-            product = data.get("product_info") or {}
-            return {
-                "coupang_url": coupang_url or data.get("deep_link") or data.get("coupang_url") or COUPANG_URL,
-                "source_url": data.get("coupang_url") or coupang_url or COUPANG_URL,
-                "product_name": product.get("name") or "",
-                "description": data.get("description") or "",
-            }
+            return _context_from_report(data)
+
+    if coupang_url:
+        for report_path in reports:
+            try:
+                data = json.loads(report_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if data.get("coupang_url") == coupang_url:
+                return _context_from_report(data)
+
     return {
         "coupang_url": coupang_url or COUPANG_URL,
         "source_url": coupang_url or COUPANG_URL,
@@ -115,7 +134,9 @@ def main(video_path: str, coupang_url: str = "") -> int:
     short_name = product_name[:42] if product_name else "쿠팡 추천 상품"
     title = f"꿀템 발견! {short_name} #shorts"
     desc_lines = [
-        "쿠팡 풀 자동화 파이프라인 테스트 영상입니다.",
+        COUPANG_AFFILIATE_DISCLOSURE,
+        "",
+        f"오늘의 쇼핑 추천: {product_name}",
         "",
         "🛒 상품 보기:",
         purchase_url,
@@ -124,8 +145,7 @@ def main(video_path: str, coupang_url: str = "") -> int:
         "https://linktr.ee/studio.idol",
         "",
         "─" * 20,
-        "본 영상은 Shopping Shorts Maker 풀 자동화 파이프라인의 end-to-end 검증을 위해 업로드되었습니다.",
-        "(쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다)",
+        "실사용에 가까운 쇼핑 정보와 자동화된 상품 소개 영상을 제공합니다.",
     ]
     description = "\n".join(desc_lines)
     tags = ["쇼핑", "추천", "꿀템", "쿠팡", "쇼츠", "shorts", "자동화", "automation"]

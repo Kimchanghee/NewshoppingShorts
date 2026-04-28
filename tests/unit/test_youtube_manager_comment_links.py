@@ -1,4 +1,4 @@
-from managers.youtube_manager import YouTubeManager
+from managers.youtube_manager import COUPANG_AFFILIATE_DISCLOSURE, YouTubeManager
 
 
 class _DummySettings:
@@ -77,3 +77,14 @@ def test_auto_comment_skips_original_link_for_non_coupang_source(monkeypatch):
     )
 
     assert text == "댓글 안내문"
+
+
+def test_coupang_description_keeps_disclosure_and_purchase_link_visible():
+    description = YouTubeManager.ensure_coupang_affiliate_compliance(
+        "오늘의 쇼핑 추천입니다.",
+        "https://link.coupang.com/a/example",
+    )
+
+    assert description.startswith(COUPANG_AFFILIATE_DISCLOSURE)
+    assert "오늘의 쇼핑 추천입니다." in description
+    assert "https://link.coupang.com/a/example" in description

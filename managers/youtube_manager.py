@@ -26,6 +26,11 @@ from managers.settings_manager import get_settings_manager
 
 logger = get_logger(__name__)
 
+COUPANG_AFFILIATE_DISCLOSURE = (
+    "이 게시물은 쿠팡 파트너스 활동의 일환으로, "
+    "이에 따른 일정액의 수수료를 제공받습니다."
+)
+
 # YouTube API imports (optional)
 try:
     from google.oauth2.credentials import Credentials
@@ -777,17 +782,18 @@ class YouTubeManager:
         Returns:
             SEO-optimized description
         """
+        purchase_link = str(url or "").strip()
         lines = [
             product_info[:200] if product_info else "쇼핑 추천 영상입니다.",
             "",
-            "👆 더 많은 정보는 링크에서 확인하세요!",
+            "👆 자세한 상품 정보는 아래 링크에서 확인하세요.",
             "",
             "📱 좋아요와 구독 부탁드립니다!",
             "",
         ]
 
-        if url:
-            lines.append(f"🔗 원본: {url}")
+        if purchase_link:
+            lines.append(f"🛒 상품 보기: {purchase_link}")
 
         lines.extend([
             "",
@@ -796,7 +802,24 @@ class YouTubeManager:
             "━━━━━━━━━━━━━━━━━━━━",
         ])
 
-        return "\n".join(lines)
+        description = "\n".join(lines)
+        if self._is_coupang_url(purchase_link):
+            description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
+        return description
+
+    @staticmethod
+    def ensure_coupang_affiliate_compliance(description: str, purchase_link: str = "") -> str:
+        """Ensure Coupang affiliate disclosure + purchase link are visible."""
+        desc = str(description or "").strip()
+        link = str(purchase_link or "").strip()
+
+        if COUPANG_AFFILIATE_DISCLOSURE not in desc:
+            desc = f"{COUPANG_AFFILIATE_DISCLOSURE}\n\n{desc}" if desc else COUPANG_AFFILIATE_DISCLOSURE
+
+        if link and link not in desc:
+            desc = f"{desc}\n\n🛒 쿠팡 상품 보기: {link}"
+
+        return desc.strip()
 
     def generate_seo_hashtags(self, product_info: str, max_count: int = 10) -> List[str]:
         """
@@ -863,6 +886,10 @@ class YouTubeManager:
 
         if not description and self._upload_settings.auto_description:
             description = self.generate_seo_description(product_info, source_url)
+
+        purchase_link = coupang_deep_link or source_url
+        if self._is_coupang_url(purchase_link) or self._is_coupang_url(source_url):
+            description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
 
         if not tags and self._upload_settings.auto_hashtags:
             tags = self.generate_seo_hashtags(product_info, self._upload_settings.max_hashtags)
@@ -955,6 +982,9 @@ class YouTubeManager:
             tags = item.get("tags", [])
             hashtag_str = " ".join([f"#{tag}" for tag in tags])
             description = item.get("description", "")
+            purchase_link = item.get("coupang_deep_link") or item.get("source_url") or ""
+            if self._is_coupang_url(purchase_link):
+                description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
             if hashtag_str:
                 description = f"{description}\n\n{hashtag_str}"
 
