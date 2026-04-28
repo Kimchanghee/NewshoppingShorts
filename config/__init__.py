@@ -88,11 +88,26 @@ VERTEX_JSON_KEY_PATH = os.getenv("VERTEX_JSON_KEY_PATH", "")
 # Payment API (web checkout + polling)
 # Set PAYMENT_API_BASE_URL via environment variable or .env file.
 # Default to the main API server URL so payments work out-of-the-box in dev/prod.
-_DEFAULT_API_SERVER_URL = os.getenv(
-    "API_SERVER_URL",
+_PUBLIC_API_SERVER_URL = "https://13-124-7-65.nip.io"
+_DEPRECATED_404_API_SERVER_URLS = {
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
-).rstrip("/")
-PAYMENT_API_BASE_URL = os.getenv("PAYMENT_API_BASE_URL", _DEFAULT_API_SERVER_URL).rstrip("/")
+    "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
+}
+
+
+def _normalize_api_server_url(raw: str) -> str:
+    url = (raw or "").strip().rstrip("/")
+    if url in _DEPRECATED_404_API_SERVER_URLS:
+        return _PUBLIC_API_SERVER_URL
+    return url or _PUBLIC_API_SERVER_URL
+
+
+_DEFAULT_API_SERVER_URL = _normalize_api_server_url(
+    os.getenv("API_SERVER_URL", _PUBLIC_API_SERVER_URL)
+)
+PAYMENT_API_BASE_URL = _normalize_api_server_url(
+    os.getenv("PAYMENT_API_BASE_URL", _DEFAULT_API_SERVER_URL)
+)
 CHECKOUT_POLL_INTERVAL = float(os.getenv("CHECKOUT_POLL_INTERVAL", "3"))
 CHECKOUT_POLL_MAX_TRIES = int(os.getenv("CHECKOUT_POLL_MAX_TRIES", "20"))
 

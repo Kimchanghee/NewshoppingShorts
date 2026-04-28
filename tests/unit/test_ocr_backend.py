@@ -50,7 +50,10 @@ class TestOCRBackend:
         from utils.error_handlers import OCRInitializationError
 
         # Deterministic failure: disable GLM-OCR and force Tesseract init to fail.
-        with patch.dict(os.environ, {"GLM_OCR_DISABLED": "1"}):
+        with patch.dict(
+            os.environ,
+            {"GLM_OCR_DISABLED": "1", "SSMAKER_ENABLE_RAPIDOCR": "0"},
+        ):
             with patch("utils.ocr_backend.time.sleep", return_value=None):
                 with patch.object(OCRBackend, "_init_tesseract", side_effect=ImportError("pytesseract not found")):
                     with pytest.raises(OCRInitializationError) as exc_info:
@@ -106,7 +109,7 @@ class TestOCREngineSelection:
     """Test OCR engine selection logic"""
 
     def test_rapidocr_preferred_python_312(self):
-        """RapidOCR is opt-in on Python < 3.13 (stability: onnxruntime may crash on Windows)."""
+        """RapidOCR is the default local fallback except on Windows."""
         import os
         import sys
         from utils.ocr_backend import check_ocr_availability
@@ -116,7 +119,7 @@ class TestOCREngineSelection:
             os.environ["SSMAKER_ENABLE_RAPIDOCR"] = "1"
             info = check_ocr_availability()
             if sys.version_info < (3, 13) and info["rapidocr_available"]:
-                # Current priority: GLM-OCR > RapidOCR(opt-in) > Tesseract
+                # Current priority: GLM-OCR > RapidOCR > Tesseract
                 if info.get("glm_ocr_available"):
                     assert info["recommended_engine"] == "glm_ocr"
                 else:

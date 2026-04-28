@@ -4,6 +4,8 @@ Application flow controller for PyQt6.
 Game-like auto-update: login ??check ??download ??replace ??restart (no user interaction).
 After restart: show update-complete dialog with release notes + 5s countdown.
 """
+from __future__ import annotations
+
 from typing import Optional, List, Tuple, Any, Dict
 import sys
 import os
@@ -24,11 +26,26 @@ _PENDING_UPDATE_PATH = os.path.join(
 )
 
 # Keep API endpoint overridable in local/dev network environments.
-API_SERVER_URL = os.getenv(
-    "API_SERVER_URL",
+_PUBLIC_API_SERVER_URL = "https://13-124-7-65.nip.io"
+_DEPRECATED_404_API_SERVER_URLS = {
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
-).rstrip("/")
-PAYMENT_API_BASE_URL = os.getenv("PAYMENT_API_BASE_URL", "").strip().rstrip("/")
+    "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
+}
+
+
+def _normalize_api_server_url(raw: str) -> str:
+    url = (raw or "").strip().rstrip("/")
+    if url in _DEPRECATED_404_API_SERVER_URLS:
+        return _PUBLIC_API_SERVER_URL
+    return url
+
+
+API_SERVER_URL = _normalize_api_server_url(
+    os.getenv("API_SERVER_URL", _PUBLIC_API_SERVER_URL)
+) or _PUBLIC_API_SERVER_URL
+PAYMENT_API_BASE_URL = _normalize_api_server_url(
+    os.getenv("PAYMENT_API_BASE_URL", "")
+)
 GITHUB_RELEASE_API_URL = os.getenv(
     "GITHUB_RELEASE_API_URL",
     "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases/latest",

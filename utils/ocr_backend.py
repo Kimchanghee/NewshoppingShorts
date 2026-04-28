@@ -29,6 +29,16 @@ _OCR_CACHED_BACKEND = None
 _OCR_INIT_ATTEMPTED = False
 _OCR_LAST_ERROR: Optional[str] = None
 
+
+def _is_rapidocr_enabled() -> bool:
+    raw = os.getenv("SSMAKER_ENABLE_RAPIDOCR")
+    if raw is not None:
+        return raw.strip().lower() in {"1", "true", "yes", "on"}
+    # rapidocr_onnxruntime has had native crashes on some Windows machines.
+    # Keep Windows opt-in, but use it as the local fallback on macOS/Linux.
+    return sys.platform != "win32"
+
+
 # GLM-OCR 사용 가능 여부 플래그
 GLM_OCR_AVAILABLE = False
 try:
@@ -100,9 +110,8 @@ class OCRBackend:
                 engines.append(("glm_ocr", self._init_glm_ocr))
 
         # Priority 2: RapidOCR (Python < 3.13 only)
-        # NOTE: rapidocr_onnxruntime can crash the interpreter on some Windows machines
-        # (onnxruntime access violation). Keep it opt-in for stability.
-        if sys.version_info < (3, 13) and os.getenv("SSMAKER_ENABLE_RAPIDOCR"):
+        # Enabled by default on macOS/Linux; Windows remains opt-in for native stability.
+        if sys.version_info < (3, 13) and _is_rapidocr_enabled():
             engines.append(("rapidocr", self._init_rapidocr))
 
         # Priority 3: Tesseract (final fallback)
@@ -677,8 +686,7 @@ def check_ocr_availability() -> dict:
             pass
 
     # RapidOCR 체크 (Python 3.13 미만)
-    # NOTE: rapidocr_onnxruntime import may crash the interpreter on some Windows machines.
-    # Only treat it as "usable" when explicitly enabled.
+    # Windows remains opt-in because rapidocr_onnxruntime can crash the interpreter there.
     if sys.version_info < (3, 13):
         try:
             import importlib.util
@@ -702,12 +710,12 @@ def check_ocr_availability() -> dict:
     except ImportError:
         pass
 
-    # 추천 엔진 (우선순위: GLM-OCR > RapidOCR(opt-in) > Tesseract)
+    # 추천 엔진 (우선순위: GLM-OCR > RapidOCR > Tesseract)
     if info["glm_ocr_available"]:
         info["recommended_engine"] = "glm_ocr"
     elif sys.version_info >= (3, 13):
         info["recommended_engine"] = "tesseract"
-    elif info["rapidocr_available"] and os.getenv("SSMAKER_ENABLE_RAPIDOCR"):
+    elif info["rapidocr_available"] and _is_rapidocr_enabled():
         info["recommended_engine"] = "rapidocr"
     elif info["tesseract_available"]:
         info["recommended_engine"] = "tesseract"

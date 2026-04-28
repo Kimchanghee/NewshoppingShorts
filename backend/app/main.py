@@ -609,6 +609,15 @@ async def get_app_version():
     return APP_VERSION_INFO
 
 
+@app.get("/free/lately/")
+async def get_legacy_free_lately(item: Optional[int] = Query(None)):
+    """Legacy desktop-client version endpoint compatibility."""
+    return {
+        **APP_VERSION_INFO,
+        "item": item,
+    }
+
+
 @app.post("/app/version/update")
 async def update_app_version(
     request: VersionUpdateRequest,

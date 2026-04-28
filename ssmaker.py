@@ -14,8 +14,9 @@ os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
 # Windows DPI awareness (must be called before QApplication)
 try:
-    from startup.environment import setup_dpi_awareness
+    from startup.environment import setup_dpi_awareness, setup_ffmpeg_path
     setup_dpi_awareness()
+    setup_ffmpeg_path()
 except Exception as e:
     # Logging isn't configured yet; best-effort stderr for troubleshooting.
     try:

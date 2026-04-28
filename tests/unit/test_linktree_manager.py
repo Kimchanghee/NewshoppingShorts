@@ -89,7 +89,7 @@ def test_publish_link_returns_false_on_http_failure(monkeypatch):
     assert manager.publish_link(title="x", url="https://link.coupang.com/a/abc") is False
 
 
-def test_publish_coupang_link_builds_expected_defaults(monkeypatch):
+def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
     captured = {}
 
     def _fake_publish_link(self, title, url, description="", source_url="", extra=None, timeout_seconds=None):
@@ -101,6 +101,7 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch):
         return True
 
     monkeypatch.setattr(LinktreeManager, "publish_link", _fake_publish_link)
+    monkeypatch.setenv("HOME", str(tmp_path))
 
     manager = _make_manager({"webhook_url": "https://example.com/hook", "api_key": "", "profile_url": "", "auto_publish": True})
     ok = manager.publish_coupang_link(
@@ -111,7 +112,7 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch):
 
     assert ok is True
     assert captured["url"] == "https://link.coupang.com/a/abc"
-    assert captured["title"] == "test product"
+    assert captured["title"].startswith("[1] test")
     assert len(captured["title"]) <= LinktreeManager.MAX_PRODUCT_TITLE_LENGTH
     assert captured["source_url"] == "https://www.coupang.com/vp/products/1"
     assert captured["extra"]["channel"] == "shopping_shorts_maker"

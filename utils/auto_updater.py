@@ -29,9 +29,14 @@ logger = get_logger(__name__)
 CURRENT_VERSION = "1.4.24"
 
 # 甕곌쑴???類ㅼ뵥 API ?遺얜굡?????
+_DEFAULT_UPDATE_BASE_URL = (
+    os.getenv("PAYMENT_API_BASE_URL", "").strip()
+    or os.getenv("API_SERVER_URL", "").strip()
+    or "https://13-124-7-65.nip.io"
+).rstrip("/")
 UPDATE_CHECK_URL = os.getenv(
     "UPDATE_CHECK_URL",
-    "https://ssmaker-auth-api-1049571775048.us-central1.run.app/app/version"
+    f"{_DEFAULT_UPDATE_BASE_URL}/app/version",
 )
 
 # Allowed domains for update downloads (security: prevent redirect to malicious hosts)
@@ -39,6 +44,7 @@ _ALLOWED_DOWNLOAD_DOMAINS: frozenset[str] = frozenset({
     "github.com",
     "objects.githubusercontent.com",
     "storage.googleapis.com",
+    "13-124-7-65.nip.io",
     "ssmaker-auth-api-1049571775048.us-central1.run.app",
 })
 
@@ -248,7 +254,7 @@ class UpdateChecker:
                 result["is_mandatory"] = data.get("is_mandatory", False)
                 result["file_hash"] = data.get("file_hash")  # SHA256 hash for integrity verification
                 
-                # 甕곌쑴????쑨??                comparison = compare_versions(self.current_version, latest_version)
+                comparison = compare_versions(self.current_version, latest_version)
                 if comparison < 0:
                     if not result["download_url"]:
                         result["error"] = "Missing download_url in update metadata"
@@ -505,4 +511,3 @@ def check_for_updates_on_startup(
         callback: ??낅쑓??꾨뱜 ?類ㅼ뵥 ?袁⑥┷ ???꾩뮆媛?    """
     checker = get_update_checker()
     checker.check_async(callback)
-
