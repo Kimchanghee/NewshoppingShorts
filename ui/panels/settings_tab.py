@@ -428,10 +428,11 @@ class SettingsTab(QWidget, ThemedMixin):
         self._update_key_count()
         
         # =================== SECTION: Coupang + Linktree Automation ===================
-        self.link_automation_section = SettingsSection("쿠팡/링크트리 자동 링크 (테스트)")
+        self.link_automation_section = SettingsSection("쿠팡/링크트리 자동 링크 (선택)")
 
         automation_intro = QLabel(
-            "영상 생성 후 쿠팡 딥링크를 만들고, 원하면 Linktree로 자동 업로드(웹훅 방식)까지 연결합니다."
+            "이미 쿠팡 파트너스 단축 링크(link.coupang.com/a/...)를 넣는다면 쿠팡 API Key는 필요 없습니다. "
+            "원본 coupang.com 링크를 자동 딥링크로 바꾸거나 Linktree 자동 발행까지 쓰고 싶을 때만 아래 선택 항목을 설정하세요."
         )
         automation_intro.setWordWrap(True)
         automation_intro.setStyleSheet(
@@ -500,7 +501,8 @@ class SettingsTab(QWidget, ThemedMixin):
         self.link_automation_section.content_layout.addWidget(linktree_beginner_card)
 
         linktree_guide = QLabel(
-            "자동 발행은 Linktree에 직접 쓰는 대신 Make/Zapier/n8n/Cloudflare Worker 같은 Webhook 중계 주소를 사용합니다."
+            "자동 발행은 Linktree에 직접 쓰는 대신 Make/Zapier/n8n/Cloudflare Worker 같은 Webhook 중계 주소를 사용합니다. "
+            "Webhook 인증 키는 중계 서버가 요구할 때만 입력합니다."
         )
         linktree_guide.setWordWrap(True)
         linktree_guide.setStyleSheet(
@@ -523,6 +525,8 @@ class SettingsTab(QWidget, ThemedMixin):
             ' · '
             f'<a href="{SETUP_NOTICE_BASE_URL}/coupang-partners-product-link" style="color: #3B82F6; text-decoration: none;">상품 링크 가져오기</a>'
             ' · '
+            f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-oauth-client-guide" style="color: #3B82F6; text-decoration: none;">YouTube OAuth 설정</a>'
+            ' · '
             f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-linktree-upload-check" style="color: #3B82F6; text-decoration: none;">업로드 후 검수</a>'
         )
         setup_notice_links.setWordWrap(True)
@@ -534,8 +538,8 @@ class SettingsTab(QWidget, ThemedMixin):
         self.link_automation_section.content_layout.addWidget(setup_notice_links)
 
         integration_steps = QLabel(
-            "자동 발행 순서: 1) Webhook URL 준비 2) API Key가 있으면 입력 3) 아래 값 저장 "
-            "4) 테스트 업로드 버튼으로 Linktree 반영 여부 검증"
+            "권장 순서: 1) 쿠팡 파트너스 단축 링크 수동 생성 2) Linktree Profile 저장 "
+            "3) 자동 발행이 필요할 때만 Webhook URL/인증 키 추가 4) 테스트 업로드로 검증"
         )
         integration_steps.setWordWrap(True)
         integration_steps.setStyleSheet(
@@ -558,18 +562,18 @@ class SettingsTab(QWidget, ThemedMixin):
         """
 
         self.coupang_access_input = QLineEdit()
-        self.coupang_access_input.setPlaceholderText("Coupang Access Key")
+        self.coupang_access_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Access Key")
         self.coupang_access_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.coupang_access_input.setStyleSheet(automation_input_style)
         self.coupang_access_input.textChanged.connect(self._update_link_automation_status)
-        self.link_automation_section.add_row("Coupang Access", self.coupang_access_input)
+        self.link_automation_section.add_row("Coupang Access (선택)", self.coupang_access_input)
 
         self.coupang_secret_input = QLineEdit()
-        self.coupang_secret_input.setPlaceholderText("Coupang Secret Key")
+        self.coupang_secret_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Secret Key")
         self.coupang_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.coupang_secret_input.setStyleSheet(automation_input_style)
         self.coupang_secret_input.textChanged.connect(self._update_link_automation_status)
-        self.link_automation_section.add_row("Coupang Secret", self.coupang_secret_input)
+        self.link_automation_section.add_row("Coupang Secret (선택)", self.coupang_secret_input)
 
         coupang_btn_container = QWidget()
         coupang_btn_layout = QHBoxLayout(coupang_btn_container)
@@ -596,10 +600,10 @@ class SettingsTab(QWidget, ThemedMixin):
         self.link_automation_section.add_row("Linktree Webhook", self.linktree_webhook_input)
 
         self.linktree_api_key_input = QLineEdit()
-        self.linktree_api_key_input.setPlaceholderText("선택: Webhook/API Key")
+        self.linktree_api_key_input.setPlaceholderText("선택: Webhook 인증 키")
         self.linktree_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.linktree_api_key_input.setStyleSheet(automation_input_style)
-        self.link_automation_section.add_row("Linktree API Key", self.linktree_api_key_input)
+        self.link_automation_section.add_row("Webhook 인증 키", self.linktree_api_key_input)
 
         self.linktree_profile_input = QLineEdit()
         self.linktree_profile_input.setPlaceholderText("권장: 내 공개 주소 예) https://linktr.ee/myshop")
@@ -802,9 +806,9 @@ class SettingsTab(QWidget, ThemedMixin):
         linktree_auto_ready = bool(self.linktree_webhook_input.text().strip())
         auto_enabled = bool(self.linktree_auto_checkbox.isChecked())
         self.link_automation_status.setText(
-            f"상태: Coupang={'설정됨' if coupang_ready else '미설정'} / "
+            f"상태: Coupang 자동딥링크={'설정됨' if coupang_ready else '선택'} / "
             f"Linktree Profile={'설정됨' if linktree_profile_ready else '미설정'} / "
-            f"자동발행={'준비됨' if linktree_auto_ready else 'Webhook 필요'} / "
+            f"Linktree 자동발행={'준비됨' if linktree_auto_ready else '선택'} / "
             f"Auto={'ON' if auto_enabled else 'OFF'}"
         )
 
@@ -840,7 +844,13 @@ class SettingsTab(QWidget, ThemedMixin):
         access_key = self.coupang_access_input.text().strip()
         secret_key = self.coupang_secret_input.text().strip()
         if not access_key or not secret_key:
-            show_warning(self, "입력 확인", "Coupang Access Key와 Secret Key를 모두 입력해 주세요.")
+            show_warning(
+                self,
+                "입력 확인",
+                "쿠팡 API Key는 필수 항목이 아닙니다.\n"
+                "원본 coupang.com 링크를 자동으로 파트너스 딥링크로 바꾸고 싶을 때만 "
+                "Coupang Access Key와 Secret Key를 모두 입력해 주세요.",
+            )
             return
 
         try:
@@ -861,7 +871,7 @@ class SettingsTab(QWidget, ThemedMixin):
         access_key = self.coupang_access_input.text().strip()
         secret_key = self.coupang_secret_input.text().strip()
         if not access_key or not secret_key:
-            show_warning(self, "입력 확인", "먼저 쿠팡 API 키를 입력하세요.")
+            show_warning(self, "입력 확인", "자동 딥링크 기능을 테스트하려면 쿠팡 API 키 2개를 모두 입력하세요.")
             return
 
         # Save latest input before running test.

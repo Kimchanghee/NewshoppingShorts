@@ -1226,6 +1226,16 @@ class UploadPanel(QFrame, ThemedMixin):
         inst.setStyleSheet(f"color: {c.text_secondary};")
         layout.addWidget(inst)
 
+        guide_link = QLabel(
+            '<a href="https://shoppingshorts.store/notice/youtube-oauth-client-guide" '
+            'style="color: #3B82F6; text-decoration: none;">Google Cloud OAuth 설정 가이드 보기 →</a>'
+        )
+        guide_link.setOpenExternalLinks(True)
+        guide_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        guide_link.setFont(QFont(ds.typography.font_family_primary, 10))
+        guide_link.setStyleSheet("border: none; background: transparent;")
+        layout.addWidget(guide_link)
+
         file_info = QLabel("선택된 파일: 없음")
         file_info.setWordWrap(True)
         file_info.setFont(QFont(ds.typography.font_family_primary, 10))
