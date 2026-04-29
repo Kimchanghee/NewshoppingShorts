@@ -112,7 +112,7 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
 
     assert ok is True
     assert captured["url"] == "https://link.coupang.com/a/abc"
-    assert captured["title"].startswith("[1] test")
+    assert captured["title"].startswith("[001] test")
     assert len(captured["title"]) <= LinktreeManager.MAX_PRODUCT_TITLE_LENGTH
     assert captured["source_url"] == "https://www.coupang.com/vp/products/1"
     assert captured["extra"]["channel"] == "shopping_shorts_maker"

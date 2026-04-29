@@ -174,7 +174,8 @@ class LinktreeManager:
         """Increment & return monotonic publish counter persisted on disk.
 
         First call returns 1, then 2, 3, ... — used to prefix card titles
-        with [N] so the Linktree page reads as a numbered curation list.
+        with [001], [002], ... so the Linktree page reads as a numbered
+        curation list.
         """
         import json
         path = self._counter_path()
@@ -193,7 +194,7 @@ class LinktreeManager:
         return new_index
 
     def reset_publish_counter(self) -> None:
-        """Reset the [N] prefix counter back to 0 (next publish becomes [1])."""
+        """Reset the [001] prefix counter back to 0."""
         import json, os
         path = self._counter_path()
         try:
@@ -206,13 +207,13 @@ class LinktreeManager:
     def publish_coupang_link(self, product_name: str, coupang_url: str, source_url: str = "") -> bool:
         """Publish Coupang deep-link payload for the generated product.
 
-        Title format: "[N] 상품명" where N is the monotonic upload order.
+        Title format: "[001] 상품명" where the number is the monotonic upload order.
         Final length is still capped at MAX_PRODUCT_TITLE_LENGTH after the prefix
         so it stays readable on Linktree cards.
         """
         concise = self._build_concise_product_title(product_name)
         index = self._next_publish_index()
-        prefix = f"[{index}] "
+        prefix = f"[{index:03d}] "
         # Trim concise body so prefix + body fits the visual budget.
         compose_cap = self.MAX_PRODUCT_TITLE_LENGTH
         body = concise[: max(1, compose_cap - len(prefix))]

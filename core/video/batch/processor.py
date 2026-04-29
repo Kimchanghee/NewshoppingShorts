@@ -1574,6 +1574,17 @@ def _process_single_video(app, url, current_number, total_urls):
                             if not coupang_link and "coupang.com" in str(original_source_url).lower():
                                 coupang_link = original_source_url
 
+                            linktree_url = ""
+                            try:
+                                linktree_manager = getattr(app, "linktree_manager", None)
+                                if linktree_manager is None:
+                                    from managers.linktree_manager import get_linktree_manager
+                                    linktree_manager = get_linktree_manager()
+                                if linktree_manager and hasattr(linktree_manager, "get_profile_url"):
+                                    linktree_url = linktree_manager.get_profile_url()
+                            except Exception as linktree_err:
+                                logger.debug("[Automation] Linktree profile lookup skipped: %s", linktree_err)
+
                             if coupang_link:
                                 video_desc += f"\n\n🛒 쿠팡 상품 보기: {coupang_link}"
 
@@ -1607,6 +1618,7 @@ def _process_single_video(app, url, current_number, total_urls):
                                     product_info=product_info,
                                     source_url=original_source_url or url,
                                     coupang_deep_link=coupang_link,
+                                    linktree_url=linktree_url,
                                 )
                                 logger.info("[Automation] Added to YouTube upload queue")
                                 try:

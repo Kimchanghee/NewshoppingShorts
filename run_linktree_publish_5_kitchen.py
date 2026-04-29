@@ -93,9 +93,9 @@ async def main() -> int:
         print("    설정 → 링크트리 탭에서 webhook URL을 입력해주세요.")
         return 1
 
-    # Reset publish counter so this run starts at [1].
+    # Reset publish counter so this run starts at [001].
     lm.reset_publish_counter()
-    print("[+] Linktree publish counter reset → next publish = [1]")
+    print("[+] Linktree publish counter reset → next publish = [001]")
 
     results = []
     for idx, url in enumerate(urls, start=1):
@@ -126,7 +126,7 @@ async def main() -> int:
             source_url=url,
         )
         if ok:
-            print(f"  [✓] Published to Linktree as [{idx}] {lm._build_concise_product_title(name)}")
+            print(f"  [✓] Published to Linktree as [{idx:03d}] {lm._build_concise_product_title(name)}")
         else:
             print(f"  [✗] Linktree publish failed")
         results.append({"idx": idx, "url": url, "name": name, "ok": ok})

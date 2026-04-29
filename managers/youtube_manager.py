@@ -868,6 +868,7 @@ class YouTubeManager:
         product_info: str = "",
         source_url: str = "",
         coupang_deep_link: str = "",
+        linktree_url: str = "",
     ) -> None:
         """
         Add video to upload queue.
@@ -879,6 +880,7 @@ class YouTubeManager:
             tags: Video tags (auto-generated if empty and enabled)
             product_info: Product information for SEO generation
             source_url: Source URL
+            linktree_url: Public Linktree profile URL for the auto-comment
         """
         # Generate SEO content if enabled and not provided
         if not title and self._upload_settings.auto_title:
@@ -902,6 +904,7 @@ class YouTubeManager:
             "product_info": product_info or "",
             "source_url": source_url or "",
             "coupang_deep_link": coupang_deep_link or "",
+            "linktree_url": linktree_url or "",
             "added_at": datetime.now().isoformat()
         })
 
@@ -1048,6 +1051,8 @@ class YouTubeManager:
         template: str,
         purchase_link: str,
         original_link: str,
+        product_description: str = "",
+        linktree_link: str = "",
     ) -> str:
         replacements = {
             "{구매링크}": purchase_link,
@@ -1057,12 +1062,63 @@ class YouTubeManager:
             "{원상품링크}": original_link,
             "{쿠팡원상품링크}": original_link,
             "{original_link}": original_link,
+            "{상품설명}": product_description,
+            "{상품 설명}": product_description,
+            "{product_description}": product_description,
+            "{링크트리}": linktree_link,
+            "{링크트리링크}": linktree_link,
+            "{linktree_link}": linktree_link,
         }
 
         rendered = str(template or "")
         for token, value in replacements.items():
             rendered = rendered.replace(token, value or "")
         return rendered.strip()
+
+    @staticmethod
+    def _field_has_comment_placeholder(raw_prompt: str, tokens: List[str]) -> bool:
+        return any(token in raw_prompt for token in tokens)
+
+    def _resolve_comment_linktree_url(self, settings: Any, item: Dict[str, Any]) -> str:
+        for key in ("linktree_url", "linktree_profile_url"):
+            value = str(item.get(key, "") or "").strip()
+            if value:
+                return value
+
+        try:
+            if hasattr(settings, "get_linktree_settings"):
+                linktree_settings = settings.get_linktree_settings() or {}
+                profile_url = str(linktree_settings.get("profile_url", "") or "").strip()
+                if profile_url:
+                    return profile_url
+        except Exception as exc:
+            logger.debug("[YouTube] Linktree profile lookup skipped: %s", exc)
+
+        description = str(item.get("description", "") or "")
+        try:
+            import re
+            match = re.search(r"https?://(?:www\.)?linktr\.ee/[^\s)>\]]+", description)
+            if match:
+                return match.group(0).rstrip(".,")
+        except Exception:
+            pass
+        return ""
+
+    @staticmethod
+    def _build_comment_product_description(item: Dict[str, Any], limit: int = 220) -> str:
+        raw = (
+            item.get("product_description")
+            or item.get("product_info")
+            or item.get("product_name")
+            or item.get("title")
+            or ""
+        )
+        text = " ".join(str(raw or "").split())
+        if not text:
+            return ""
+        if len(text) <= limit:
+            return text
+        return text[: limit - 3].rstrip() + "..."
 
     def _resolve_comment_original_link(self, item: Dict[str, Any]) -> str:
         settings = get_settings_manager()
@@ -1077,41 +1133,69 @@ class YouTubeManager:
 
     def _build_auto_comment_text(self, item: Dict[str, Any]) -> str:
         settings = get_settings_manager()
-        if not settings.get_youtube_comment_enabled():
-            return ""
-
-        raw_prompt = settings.get_youtube_comment_prompt().strip()
+        comment_enabled = bool(
+            settings.get_youtube_comment_enabled()
+            if hasattr(settings, "get_youtube_comment_enabled")
+            else False
+        )
+        raw_prompt = (
+            settings.get_youtube_comment_prompt().strip()
+            if comment_enabled and hasattr(settings, "get_youtube_comment_prompt")
+            else ""
+        )
         purchase_link = str(item.get("coupang_deep_link", "")).strip()
         original_link = self._resolve_comment_original_link(item)
+        product_description = self._build_comment_product_description(item)
+        linktree_link = self._resolve_comment_linktree_url(settings, item)
+
+        has_shopping_context = any(
+            (product_description, purchase_link, original_link, linktree_link)
+        )
+        if not comment_enabled and not has_shopping_context:
+            return ""
 
         prompt_with_tokens = self._render_comment_template(
             raw_prompt,
             purchase_link=purchase_link or original_link,
             original_link=original_link,
+            product_description=product_description,
+            linktree_link=linktree_link,
         )
 
-        has_placeholder = any(
-            token in raw_prompt
-            for token in (
-                "{구매링크}",
-                "{쿠팡링크}",
-                "{딥링크}",
-                "{purchase_link}",
-                "{원상품링크}",
-                "{쿠팡원상품링크}",
-                "{original_link}",
-            )
+        purchase_tokens = ("{구매링크}", "{쿠팡링크}", "{딥링크}", "{purchase_link}")
+        original_tokens = ("{원상품링크}", "{쿠팡원상품링크}", "{original_link}")
+        product_tokens = ("{상품설명}", "{상품 설명}", "{product_description}")
+        linktree_tokens = ("{링크트리}", "{링크트리링크}", "{linktree_link}")
+
+        has_purchase_placeholder = self._field_has_comment_placeholder(
+            raw_prompt, list(purchase_tokens)
+        )
+        has_original_placeholder = self._field_has_comment_placeholder(
+            raw_prompt, list(original_tokens)
+        )
+        has_product_placeholder = self._field_has_comment_placeholder(
+            raw_prompt, list(product_tokens)
+        )
+        has_linktree_placeholder = self._field_has_comment_placeholder(
+            raw_prompt, list(linktree_tokens)
         )
 
         if not prompt_with_tokens:
             prompt_with_tokens = "영상에서 소개한 상품 정보를 공유드립니다."
 
         extra_lines = []
-        if not has_placeholder:
-            if purchase_link:
-                extra_lines.append(f"구매 링크: {purchase_link}")
-            if original_link and original_link != purchase_link:
-                extra_lines.append(f"원상품 링크: {original_link}")
+        if product_description and not has_product_placeholder:
+            extra_lines.append(f"상품 설명: {product_description}")
+        if purchase_link and not has_purchase_placeholder:
+            extra_lines.append(f"구매 링크: {purchase_link}")
+        if linktree_link and not has_linktree_placeholder:
+            extra_lines.append(f"Linktree: {linktree_link}")
+        if (
+            original_link
+            and original_link != purchase_link
+            and not has_original_placeholder
+        ):
+            extra_lines.append(f"원상품 링크: {original_link}")
 
         if extra_lines:
             text = f"{prompt_with_tokens}\n\n" + "\n".join(extra_lines)

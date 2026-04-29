@@ -171,6 +171,13 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
     yt._upload_settings.auto_description = True
     yt._upload_settings.auto_hashtags = True
 
+    linktree_url = "https://linktr.ee/studio.idol"
+    try:
+        from managers.linktree_manager import get_linktree_manager
+        linktree_url = get_linktree_manager().get_profile_url() or linktree_url
+    except Exception:
+        pass
+
     # 3) 큐에 추가 (제목/설명/태그 자동 SEO)
     short_name = product_name[:42] if product_name else "쿠팡 추천 상품"
     title = f"꿀템 발견! {short_name} #shorts"
@@ -183,7 +190,7 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
         purchase_url,
         "",
         "🔗 모든 상품 모음:",
-        "https://linktr.ee/studio.idol",
+        linktree_url,
         "",
         "─" * 20,
         "실사용에 가까운 쇼핑 정보와 자동화된 상품 소개 영상을 제공합니다.",
@@ -199,6 +206,7 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
         product_info=product_name,
         source_url=source_url,
         coupang_deep_link=purchase_url,
+        linktree_url=linktree_url,
     )
 
     print(f"[2/3] 업로드 큐 등록됨: {title}")

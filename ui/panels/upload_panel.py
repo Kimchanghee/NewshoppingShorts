@@ -305,7 +305,7 @@ class YouTubeCommentSection(QFrame):
         self.comment_checkbox.stateChanged.connect(self._on_checkbox_changed)
         layout.addWidget(self.comment_checkbox)
 
-        desc = QLabel("체크하면 영상 업로드 후 자동으로 댓글을 작성합니다. (셀프 댓글로 참여도를 높일 수 있습니다.)")
+        desc = QLabel("쿠팡 풀자동 업로드는 상품 설명, 구매 링크, Linktree 링크 댓글을 기본으로 남깁니다. 체크하면 댓글 문구를 직접 조정할 수 있습니다.")
         desc.setWordWrap(True)
         desc.setFont(QFont(ds.typography.font_family_primary, 10))
         desc.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
