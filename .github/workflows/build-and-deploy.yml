@@ -137,11 +137,11 @@ jobs:
           ## SSMaker v${{ steps.version.outputs.VERSION }}
 
           ### 이번 업데이트 핵심
-          - API KEY 없이 작업 시작 버튼을 누르면 설정 > API 키 화면으로 즉시 안내/이동되도록 개선했습니다.
-          - YouTube 자동 댓글에 쿠팡 원상품 링크를 자연스럽게 포함할 수 있도록 설정을 추가했습니다.
-          - 업데이트 설치 안정성을 개선했습니다. (기존 파일 충돌로 인한 시작 오류 예방)
-          - 자동 업데이트/수동 설치 모두에서 이전 버전 잔여 파일 정리 로직을 강화했습니다.
-          - 일부 PC에서 발생하던 API 키 저장 실패를 보완했습니다.
+          - Linktree 자동 등록 시 상품 링크 제목 앞에 `[000]` 형식 번호가 유지되도록 개선했습니다.
+          - YouTube 자동 댓글에 상품 설명과 Linktree 안내 링크가 함께 남도록 업로드 로직을 보강했습니다.
+          - Linktree 초기 가입, 쿠팡 파트너스 상품 링크, Google Cloud 실제 캡쳐 OAuth 매뉴얼을 프로그램 안에서 바로 열 수 있게 안내 링크를 정리했습니다.
+          - Google Cloud 실제 화면 캡쳐 기반 YouTube OAuth 설정 공지를 새로 연결했습니다.
+          - 초보 사용자가 API Key 없이도 쿠팡 파트너스 단축 링크 방식으로 시작할 수 있도록 안내를 명확히 했습니다.
 
           ### 설치 방법
           1. 설치 파일을 실행하면 기존 설치를 감지합니다.
@@ -162,7 +162,7 @@ jobs:
         $payload = [ordered]@{
           version = $version
           download_url = $downloadUrl
-          release_notes = "API KEY 미입력 시작 방지 및 설정 이동 개선, YouTube 자동 댓글 쿠팡 원상품 링크 반영, 설치/저장 안정성 개선"
+          release_notes = "Linktree 번호 자동 등록, YouTube 댓글 상품 설명·Linktree 링크 반영, Google Cloud OAuth 실제 캡쳐 매뉴얼 연결"
           is_mandatory = $false
           file_hash = "${{ steps.hash.outputs.FILE_HASH }}"
         }
