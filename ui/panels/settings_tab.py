@@ -25,6 +25,8 @@ import config
 
 # Gemini API 키 패턴 검증
 GEMINI_API_KEY_PATTERN = re.compile(r"^AIza[A-Za-z0-9_-]{35,96}$")
+LINKTREE_SIGNUP_URL = "https://linktr.ee/register"
+LINKTREE_ADMIN_URL = "https://linktr.ee/admin/links"
 logger = get_logger(__name__)
 
 
@@ -436,8 +438,68 @@ class SettingsTab(QWidget, ThemedMixin):
         )
         self.link_automation_section.content_layout.addWidget(automation_intro)
 
+        linktree_beginner_card = QFrame()
+        linktree_beginner_card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+        """)
+        beginner_layout = QVBoxLayout(linktree_beginner_card)
+        beginner_layout.setContentsMargins(14, 12, 14, 12)
+        beginner_layout.setSpacing(8)
+
+        beginner_title = QLabel("Linktree 처음 쓰는 분은 이것만 따라 하세요")
+        beginner_title.setFont(QFont(ds.typography.font_family_primary, 12, QFont.Weight.Bold))
+        beginner_title.setStyleSheet(f"color: {c.text_primary}; border: none; background: transparent;")
+        beginner_layout.addWidget(beginner_title)
+
+        beginner_steps = QLabel(
+            "1. 가입/로그인 버튼을 눌러 Linktree 계정을 만듭니다.\n"
+            "2. 관리자 화면에서 Add link를 눌러 쿠팡 링크 카드가 보이는지 먼저 확인합니다.\n"
+            "3. 내 공개 주소(예: https://linktr.ee/아이디)를 아래 Profile에 저장합니다.\n"
+            "4. 완전 자동 발행까지 원하면 Webhook URL을 추가하고 테스트 업로드를 누릅니다."
+        )
+        beginner_steps.setWordWrap(True)
+        beginner_steps.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 11px; line-height: 1.4;"
+        )
+        beginner_layout.addWidget(beginner_steps)
+
+        beginner_note = QLabel(
+            "처음에는 Profile만 저장해도 충분합니다. Webhook은 자동으로 Linktree 카드를 추가하고 싶을 때만 설정하세요."
+        )
+        beginner_note.setWordWrap(True)
+        beginner_note.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        beginner_layout.addWidget(beginner_note)
+
+        beginner_btn_row = QHBoxLayout()
+        beginner_btn_row.setSpacing(8)
+
+        self.linktree_signup_btn = QPushButton("Linktree 가입/로그인")
+        self.linktree_signup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_signup_btn.clicked.connect(self._open_linktree_signup)
+        beginner_btn_row.addWidget(self.linktree_signup_btn)
+
+        self.linktree_admin_btn = QPushButton("관리자 열기")
+        self.linktree_admin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_admin_btn.clicked.connect(self._open_linktree_admin)
+        beginner_btn_row.addWidget(self.linktree_admin_btn)
+
+        self.linktree_profile_open_btn = QPushButton("내 공개 페이지 열기")
+        self.linktree_profile_open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_profile_open_btn.clicked.connect(self._open_linktree_profile)
+        beginner_btn_row.addWidget(self.linktree_profile_open_btn)
+        beginner_btn_row.addStretch()
+
+        beginner_layout.addLayout(beginner_btn_row)
+        self.link_automation_section.content_layout.addWidget(linktree_beginner_card)
+
         linktree_guide = QLabel(
-            "Linktree 일반 쓰기 API는 공개 범위가 제한적이라, 테스트는 Webhook URL + API Key 연동을 권장합니다."
+            "자동 발행은 Linktree에 직접 쓰는 대신 Make/Zapier/n8n/Cloudflare Worker 같은 Webhook 중계 주소를 사용합니다."
         )
         linktree_guide.setWordWrap(True)
         linktree_guide.setStyleSheet(
@@ -453,8 +515,8 @@ class SettingsTab(QWidget, ThemedMixin):
         self.link_automation_section.content_layout.addWidget(linktree_docs_link)
 
         integration_steps = QLabel(
-            "연동 순서: 1) Webhook URL 발급(Make/Zapier/Cloudflare Worker 등) 2) API Key 발급 "
-            "3) 아래 값 저장 4) 테스트 업로드 버튼으로 검증"
+            "자동 발행 순서: 1) Webhook URL 준비 2) API Key가 있으면 입력 3) 아래 값 저장 "
+            "4) 테스트 업로드 버튼으로 Linktree 반영 여부 검증"
         )
         integration_steps.setWordWrap(True)
         integration_steps.setStyleSheet(
@@ -480,12 +542,14 @@ class SettingsTab(QWidget, ThemedMixin):
         self.coupang_access_input.setPlaceholderText("Coupang Access Key")
         self.coupang_access_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.coupang_access_input.setStyleSheet(automation_input_style)
+        self.coupang_access_input.textChanged.connect(self._update_link_automation_status)
         self.link_automation_section.add_row("Coupang Access", self.coupang_access_input)
 
         self.coupang_secret_input = QLineEdit()
         self.coupang_secret_input.setPlaceholderText("Coupang Secret Key")
         self.coupang_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.coupang_secret_input.setStyleSheet(automation_input_style)
+        self.coupang_secret_input.textChanged.connect(self._update_link_automation_status)
         self.link_automation_section.add_row("Coupang Secret", self.coupang_secret_input)
 
         coupang_btn_container = QWidget()
@@ -506,28 +570,34 @@ class SettingsTab(QWidget, ThemedMixin):
         self.link_automation_section.add_row("Coupang 액션", coupang_btn_container)
 
         self.linktree_webhook_input = QLineEdit()
-        self.linktree_webhook_input.setPlaceholderText("Webhook URL (https://...)")
+        self.linktree_webhook_input.setPlaceholderText("선택: 자동 발행용 Webhook URL (https://...)")
+        self.linktree_webhook_input.setToolTip("Linktree 카드를 프로그램이 자동으로 추가하려면 Webhook URL이 필요합니다.")
         self.linktree_webhook_input.setStyleSheet(automation_input_style)
+        self.linktree_webhook_input.textChanged.connect(self._update_link_automation_status)
         self.link_automation_section.add_row("Linktree Webhook", self.linktree_webhook_input)
 
         self.linktree_api_key_input = QLineEdit()
-        self.linktree_api_key_input.setPlaceholderText("Webhook/API Key (optional)")
+        self.linktree_api_key_input.setPlaceholderText("선택: Webhook/API Key")
         self.linktree_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.linktree_api_key_input.setStyleSheet(automation_input_style)
         self.link_automation_section.add_row("Linktree API Key", self.linktree_api_key_input)
 
         self.linktree_profile_input = QLineEdit()
-        self.linktree_profile_input.setPlaceholderText("Linktree profile URL (optional)")
+        self.linktree_profile_input.setPlaceholderText("권장: 내 공개 주소 예) https://linktr.ee/myshop")
+        self.linktree_profile_input.setToolTip("YouTube 설명과 검수 화면에서 사용할 Linktree 공개 프로필 주소입니다.")
         self.linktree_profile_input.setStyleSheet(automation_input_style)
+        self.linktree_profile_input.textChanged.connect(self._update_link_automation_status)
         self.link_automation_section.add_row("Linktree Profile", self.linktree_profile_input)
 
         checkbox_container = QWidget()
         checkbox_layout = QHBoxLayout(checkbox_container)
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
         self.linktree_auto_checkbox = QCheckBox("쿠팡 링크 생성 시 Linktree 자동 업로드")
+        self.linktree_auto_checkbox.setToolTip("Webhook URL이 있어야 실제 자동 업로드가 됩니다.")
         self.linktree_auto_checkbox.setStyleSheet(
             f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
         )
+        self.linktree_auto_checkbox.stateChanged.connect(self._update_link_automation_status)
         checkbox_layout.addWidget(self.linktree_auto_checkbox)
         checkbox_layout.addStretch()
         self.link_automation_section.add_row("자동 업로드", checkbox_container)
@@ -709,13 +779,40 @@ class SettingsTab(QWidget, ThemedMixin):
     def _update_link_automation_status(self):
         """Refresh status label for Coupang/Linktree setup."""
         coupang_ready = bool(self.coupang_access_input.text().strip() and self.coupang_secret_input.text().strip())
-        linktree_ready = bool(self.linktree_webhook_input.text().strip())
+        linktree_profile_ready = bool(self.linktree_profile_input.text().strip())
+        linktree_auto_ready = bool(self.linktree_webhook_input.text().strip())
         auto_enabled = bool(self.linktree_auto_checkbox.isChecked())
         self.link_automation_status.setText(
             f"상태: Coupang={'설정됨' if coupang_ready else '미설정'} / "
-            f"Linktree={'설정됨' if linktree_ready else '미설정'} / "
+            f"Linktree Profile={'설정됨' if linktree_profile_ready else '미설정'} / "
+            f"자동발행={'준비됨' if linktree_auto_ready else 'Webhook 필요'} / "
             f"Auto={'ON' if auto_enabled else 'OFF'}"
         )
+
+    def _open_external_url(self, url: str):
+        """Open a setup URL in the user's default browser."""
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _open_linktree_signup(self):
+        self._open_external_url(LINKTREE_SIGNUP_URL)
+
+    def _open_linktree_admin(self):
+        self._open_external_url(LINKTREE_ADMIN_URL)
+
+    def _open_linktree_profile(self):
+        from ui.components.custom_dialog import show_warning
+
+        profile_url = self.linktree_profile_input.text().strip()
+        if not profile_url:
+            show_warning(
+                self,
+                "Linktree Profile 필요",
+                "먼저 Linktree 공개 주소를 입력해 주세요.\n예: https://linktr.ee/myshop",
+            )
+            return
+        if not profile_url.lower().startswith(("http://", "https://")):
+            profile_url = "https://" + profile_url
+        self._open_external_url(profile_url)
 
     def _save_coupang_settings(self):
         """Persist Coupang API keys."""
@@ -782,6 +879,15 @@ class SettingsTab(QWidget, ThemedMixin):
             show_warning(self, "입력 확인", "Linktree Profile URL은 http:// 또는 https:// 형식이어야 합니다.")
             return
 
+        if auto_publish and not webhook_url:
+            show_warning(
+                self,
+                "Webhook 필요",
+                "Linktree 자동 업로드를 켜려면 Webhook URL이 필요합니다.\n"
+                "처음이라면 자동 업로드 체크를 끄고 Profile URL만 먼저 저장해도 됩니다.",
+            )
+            return
+
         try:
             saved = get_settings_manager().set_linktree_settings(
                 webhook_url=webhook_url,
@@ -804,7 +910,12 @@ class SettingsTab(QWidget, ThemedMixin):
 
         webhook_url = self.linktree_webhook_input.text().strip()
         if not webhook_url:
-            show_warning(self, "입력 확인", "먼저 Linktree Webhook URL을 입력하세요.")
+            show_warning(
+                self,
+                "Webhook 필요",
+                "테스트 업로드는 Webhook URL이 있어야 보낼 수 있습니다.\n"
+                "처음 사용자는 위의 'Linktree 가입/로그인'과 '관리자 열기'로 수동 카드 추가부터 확인하세요.",
+            )
             return
 
         # Save latest input before running test.
