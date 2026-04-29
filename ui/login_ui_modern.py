@@ -40,6 +40,52 @@ def login_color(key: str) -> str:
     """Get color from light palette for login UI"""
     return getattr(light_colors, key, "#000000")
 
+
+def apply_visible_line_edit_style(
+    widget: QLineEdit,
+    *,
+    radius: int,
+    vertical_padding: int,
+    horizontal_padding: int,
+) -> None:
+    """Force login form inputs to keep readable colors on every OS theme."""
+    text_color = login_color("text_primary")
+    placeholder_color = login_color("text_muted")
+    background_color = login_color("background")
+    focused_background = login_color("surface")
+    border_color = login_color("border")
+    primary_color = login_color("primary")
+
+    palette = widget.palette()
+    palette.setColor(QtGui.QPalette.ColorRole.Text, QtGui.QColor(text_color))
+    palette.setColor(QtGui.QPalette.ColorRole.Base, QtGui.QColor(background_color))
+    palette.setColor(QtGui.QPalette.ColorRole.PlaceholderText, QtGui.QColor(placeholder_color))
+    palette.setColor(QtGui.QPalette.ColorRole.Highlight, QtGui.QColor(primary_color))
+    palette.setColor(QtGui.QPalette.ColorRole.HighlightedText, QtGui.QColor(focused_background))
+    widget.setPalette(palette)
+    widget.setStyleSheet(f"""
+        QLineEdit {{
+            background-color: {background_color};
+            color: {text_color};
+            placeholder-text-color: {placeholder_color};
+            selection-background-color: {primary_color};
+            selection-color: {focused_background};
+            border: 1px solid {border_color};
+            border-radius: {radius}px;
+            padding: {vertical_padding}px {horizontal_padding}px;
+        }}
+        QLineEdit:focus {{
+            color: {text_color};
+            border: 2px solid {primary_color};
+            background-color: {focused_background};
+        }}
+        QLineEdit:disabled {{
+            color: {login_color('text_secondary')};
+            background-color: {login_color('surface_variant')};
+            border: 1px solid {border_color};
+        }}
+    """)
+
 FONT_FAMILY = "맑은 고딕"
 logger = logging.getLogger(__name__)
 
@@ -326,16 +372,14 @@ class ModernLoginUi:
 
         self.idEdit = QLineEdit(self.rightFrame)
         self.idEdit.setMinimumHeight(ds.button_sizes["md"].height)
+        self.idEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
         self.idEdit.setPlaceholderText("아이디를 입력하세요")
-        self.idEdit.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {login_color('background')};
-                border: 1px solid {login_color('border')};
-                border-radius: {ds.radius.md}px;
-                padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
-            }}
-            QLineEdit:focus {{ border: 2px solid {login_color('primary')}; background-color: {login_color('surface')}; }}
-        """)
+        apply_visible_line_edit_style(
+            self.idEdit,
+            radius=ds.radius.md,
+            vertical_padding=ds.spacing.space_3,
+            horizontal_padding=ds.spacing.space_4,
+        )
         right_layout.addWidget(self.idEdit)
         right_layout.addSpacing(4)
 
@@ -347,17 +391,15 @@ class ModernLoginUi:
 
         self.pwEdit = QLineEdit(self.rightFrame)
         self.pwEdit.setMinimumHeight(ds.button_sizes["md"].height)
+        self.pwEdit.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
         self.pwEdit.setPlaceholderText("비밀번호를 입력하세요")
         self.pwEdit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.pwEdit.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {login_color('background')};
-                border: 1px solid {login_color('border')};
-                border-radius: {ds.radius.md}px;
-                padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
-            }}
-            QLineEdit:focus {{ border: 2px solid {login_color('primary')}; background-color: {login_color('surface')}; }}
-        """)
+        apply_visible_line_edit_style(
+            self.pwEdit,
+            radius=ds.radius.md,
+            vertical_padding=ds.spacing.space_3,
+            horizontal_padding=ds.spacing.space_4,
+        )
         right_layout.addWidget(self.pwEdit)
         right_layout.addSpacing(4)
 
@@ -647,20 +689,12 @@ class RegistrationRequestDialog(QWidget):
         form_layout.addStretch(1)
 
     def _apply_input_style(self, widget):
-        widget.setStyleSheet(f"""
-            QLineEdit {{
-                background-color: {login_color('background')};
-                color: {login_color('text_primary')};
-                border: 1px solid {login_color('border')};
-                border-radius: {ds.radius.base}px;
-                padding: {ds.spacing.space_2}px {ds.spacing.space_3}px;
-            }}
-            QLineEdit:focus {{
-                border: 2px solid {login_color('primary')};
-                background-color: {login_color('surface')};
-            }}
-            QLineEdit::placeholder {{ color: {login_color('text_muted')}; }}
-        """)
+        apply_visible_line_edit_style(
+            widget,
+            radius=ds.radius.base,
+            vertical_padding=ds.spacing.space_2,
+            horizontal_padding=ds.spacing.space_3,
+        )
 
     def _connect_validation_signals(self):
         """모든 입력 필드에 실시간 검증 연결"""
