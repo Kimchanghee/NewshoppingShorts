@@ -18,6 +18,8 @@ from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
+DEFAULT_LINKTREE_PROFILE_URL = "https://linktr.ee/studio.idol"
+
 
 class LinktreeManager:
     """Manages Linktree webhook publishing for generated affiliate links."""
@@ -78,7 +80,7 @@ class LinktreeManager:
 
     def get_profile_url(self) -> str:
         """Return configured public Linktree profile URL."""
-        return str(self.get_settings().get("profile_url", "")).strip()
+        return str(self.get_settings().get("profile_url", "")).strip() or DEFAULT_LINKTREE_PROFILE_URL
 
     def is_connected(self) -> bool:
         """A webhook URL is required for Linktree publishing."""

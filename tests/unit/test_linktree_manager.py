@@ -128,3 +128,9 @@ def test_concise_product_title_is_limited_to_15_chars():
 
 def test_concise_product_title_has_fallback():
     assert LinktreeManager._build_concise_product_title("") == "추천상품"
+
+
+def test_profile_url_uses_default_when_not_configured():
+    manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "", "auto_publish": False})
+
+    assert manager.get_profile_url() == "https://linktr.ee/studio.idol"

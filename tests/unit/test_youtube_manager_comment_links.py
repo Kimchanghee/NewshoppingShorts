@@ -108,6 +108,27 @@ def test_auto_comment_always_includes_product_and_linktree_for_shopping_item(mon
     assert "원상품 링크: https://www.coupang.com/vp/products/12345" in text
 
 
+def test_auto_comment_uses_default_linktree_when_profile_is_empty(monkeypatch):
+    manager = object.__new__(YouTubeManager)
+    settings = _DummySettings(
+        enabled=False,
+        prompt="",
+        manual_link="",
+        linktree_profile_url="",
+    )
+    monkeypatch.setattr("managers.youtube_manager.get_settings_manager", lambda: settings)
+
+    text = manager._build_auto_comment_text(
+        {
+            "product_info": "접이식 주방 선반 정리대",
+            "source_url": "https://www.coupang.com/vp/products/12345",
+            "coupang_deep_link": "https://link.coupang.com/a/abc123",
+        }
+    )
+
+    assert "Linktree: https://linktr.ee/studio.idol" in text
+
+
 def test_auto_comment_product_and_linktree_placeholders_do_not_duplicate(monkeypatch):
     manager = object.__new__(YouTubeManager)
     settings = _DummySettings(

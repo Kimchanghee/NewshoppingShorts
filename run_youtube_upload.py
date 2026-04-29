@@ -171,12 +171,11 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
     yt._upload_settings.auto_description = True
     yt._upload_settings.auto_hashtags = True
 
-    linktree_url = "https://linktr.ee/studio.idol"
     try:
-        from managers.linktree_manager import get_linktree_manager
-        linktree_url = get_linktree_manager().get_profile_url() or linktree_url
+        from managers.linktree_manager import DEFAULT_LINKTREE_PROFILE_URL, get_linktree_manager
+        linktree_url = get_linktree_manager().get_profile_url() or DEFAULT_LINKTREE_PROFILE_URL
     except Exception:
-        pass
+        linktree_url = "https://linktr.ee/studio.idol"
 
     # 3) 큐에 추가 (제목/설명/태그 자동 SEO)
     short_name = product_name[:42] if product_name else "쿠팡 추천 상품"

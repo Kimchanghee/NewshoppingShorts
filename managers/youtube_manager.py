@@ -1102,7 +1102,12 @@ class YouTubeManager:
                 return match.group(0).rstrip(".,")
         except Exception:
             pass
-        return ""
+
+        try:
+            from managers.linktree_manager import DEFAULT_LINKTREE_PROFILE_URL
+            return DEFAULT_LINKTREE_PROFILE_URL
+        except Exception:
+            return ""
 
     @staticmethod
     def _build_comment_product_description(item: Dict[str, Any], limit: int = 220) -> str:
@@ -1146,7 +1151,12 @@ class YouTubeManager:
         purchase_link = str(item.get("coupang_deep_link", "")).strip()
         original_link = self._resolve_comment_original_link(item)
         product_description = self._build_comment_product_description(item)
-        linktree_link = self._resolve_comment_linktree_url(settings, item)
+        has_product_context = any((product_description, purchase_link, original_link))
+        linktree_link = (
+            self._resolve_comment_linktree_url(settings, item)
+            if has_product_context
+            else ""
+        )
 
         has_shopping_context = any(
             (product_description, purchase_link, original_link, linktree_link)
