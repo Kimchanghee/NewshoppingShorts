@@ -527,6 +527,8 @@ class SettingsTab(QWidget, ThemedMixin):
             ' · '
             f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-oauth-client-guide" style="color: #3B82F6; text-decoration: none;">YouTube OAuth 설정</a>'
             ' · '
+            f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-google-cloud-oauth-screenshots" style="color: #3B82F6; text-decoration: none;">Google Cloud 실제 캡쳐</a>'
+            ' · '
             f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-linktree-upload-check" style="color: #3B82F6; text-decoration: none;">업로드 후 검수</a>'
         )
         setup_notice_links.setWordWrap(True)

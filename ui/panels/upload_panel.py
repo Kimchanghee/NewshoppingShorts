@@ -1227,8 +1227,8 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addWidget(inst)
 
         guide_link = QLabel(
-            '<a href="https://shoppingshorts.store/notice/youtube-oauth-client-guide" '
-            'style="color: #3B82F6; text-decoration: none;">Google Cloud OAuth 설정 가이드 보기 →</a>'
+            '<a href="https://shoppingshorts.store/notice/youtube-google-cloud-oauth-screenshots" '
+            'style="color: #3B82F6; text-decoration: none;">Google Cloud 실제 캡쳐 OAuth 가이드 보기 →</a>'
         )
         guide_link.setOpenExternalLinks(True)
         guide_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
