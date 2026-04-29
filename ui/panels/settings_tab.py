@@ -27,6 +27,7 @@ import config
 GEMINI_API_KEY_PATTERN = re.compile(r"^AIza[A-Za-z0-9_-]{35,96}$")
 LINKTREE_SIGNUP_URL = "https://linktr.ee/register"
 LINKTREE_ADMIN_URL = "https://linktr.ee/admin/links"
+SETUP_NOTICE_BASE_URL = "https://shoppingshorts.store/notice"
 logger = get_logger(__name__)
 
 
@@ -513,6 +514,24 @@ class SettingsTab(QWidget, ThemedMixin):
         linktree_docs_link.setOpenExternalLinks(True)
         linktree_docs_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
         self.link_automation_section.content_layout.addWidget(linktree_docs_link)
+
+        setup_notice_links = QLabel(
+            '세팅별 캡쳐 매뉴얼: '
+            f'<a href="{SETUP_NOTICE_BASE_URL}/coupang-partners-channel-setup" style="color: #3B82F6; text-decoration: none;">쿠파스 채널 등록</a>'
+            ' · '
+            f'<a href="{SETUP_NOTICE_BASE_URL}/linktree-signup-link-setup" style="color: #3B82F6; text-decoration: none;">Linktree 가입·세팅</a>'
+            ' · '
+            f'<a href="{SETUP_NOTICE_BASE_URL}/coupang-partners-product-link" style="color: #3B82F6; text-decoration: none;">상품 링크 가져오기</a>'
+            ' · '
+            f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-linktree-upload-check" style="color: #3B82F6; text-decoration: none;">업로드 후 검수</a>'
+        )
+        setup_notice_links.setWordWrap(True)
+        setup_notice_links.setOpenExternalLinks(True)
+        setup_notice_links.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        setup_notice_links.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px;"
+        )
+        self.link_automation_section.content_layout.addWidget(setup_notice_links)
 
         integration_steps = QLabel(
             "자동 발행 순서: 1) Webhook URL 준비 2) API Key가 있으면 입력 3) 아래 값 저장 "
