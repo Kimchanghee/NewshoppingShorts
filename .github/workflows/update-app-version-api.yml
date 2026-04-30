@@ -1,0 +1,120 @@
+name: Update App Version API
+
+on:
+  push:
+    tags:
+      - 'metadata-v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to publish, for example 1.4.39'
+        required: true
+      file_hash:
+        description: 'Optional installer SHA256. If omitted, the workflow downloads the release asset and computes it.'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Resolve version
+        id: version
+        shell: bash
+        run: |
+          if [[ -n "${{ github.event.inputs.version }}" ]]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#metadata-v}"
+          fi
+          echo "VERSION=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "Resolved version: ${VERSION}"
+
+      - name: Resolve installer hash
+        id: hash
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          HASH="${{ github.event.inputs.file_hash }}"
+          if [[ -z "$HASH" ]]; then
+            DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/v${VERSION}/SSMaker_Setup_v${VERSION}.exe"
+            curl -L --fail --retry 3 --retry-delay 5 -o installer.exe "$DOWNLOAD_URL"
+            HASH="$(sha256sum installer.exe | awk '{print $1}')"
+          fi
+          echo "FILE_HASH=${HASH}" >> "$GITHUB_OUTPUT"
+          echo "Resolved SHA256: ${HASH}"
+
+      - name: Update server version API
+        shell: python
+        env:
+          VERSION: ${{ steps.version.outputs.VERSION }}
+          FILE_HASH: ${{ steps.hash.outputs.FILE_HASH }}
+          REPOSITORY: ${{ github.repository }}
+          APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
+          APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}
+          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+          APP_VERSION_UPDATE_HMAC_KEY: ${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}
+        run: |
+          import hashlib
+          import hmac
+          import json
+          import os
+          import urllib.error
+          import urllib.request
+
+          version = os.environ["VERSION"].strip()
+          repository = os.environ["REPOSITORY"].strip()
+          api_base_url = (os.environ.get("APP_VERSION_API_BASE_URL") or "https://13-124-7-65.nip.io").rstrip("/")
+          download_url = f"https://github.com/{repository}/releases/download/v{version}/SSMaker_Setup_v{version}.exe"
+
+          payload = {
+              "version": version,
+              "download_url": download_url,
+              "release_notes": "신규 가입 후 구독 확정 시 1개월 자동 추가 이벤트, 이벤트 자동 마감, 구독 관리 화면 이벤트 안내",
+              "is_mandatory": False,
+              "file_hash": os.environ["FILE_HASH"].strip(),
+          }
+          body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+
+          token_candidates = [
+              ("APP_VERSION_UPDATE_API_KEY", os.environ.get("APP_VERSION_UPDATE_API_KEY", "").strip()),
+              ("ADMIN_API_KEY", os.environ.get("ADMIN_API_KEY", "").strip()),
+          ]
+          signing_key = os.environ.get("APP_VERSION_UPDATE_HMAC_KEY", "").strip()
+          signature = ""
+          if signing_key:
+              signature = hmac.new(signing_key.encode("utf-8"), body, hashlib.sha256).hexdigest()
+
+          last_error = None
+          for token_name, token in token_candidates:
+              if not token:
+                  continue
+              headers = {
+                  "Content-Type": "application/json",
+                  "Authorization": f"Bearer {token}",
+              }
+              if signature:
+                  headers["X-Update-Signature"] = signature
+              request = urllib.request.Request(
+                  f"{api_base_url}/app/version/update",
+                  data=body,
+                  headers=headers,
+                  method="POST",
+              )
+              try:
+                  with urllib.request.urlopen(request, timeout=30) as response:
+                      print(f"Server version updated with {token_name}: {response.status}")
+                      print(response.read().decode("utf-8", errors="replace"))
+                      break
+              except urllib.error.HTTPError as error:
+                  error_body = error.read().decode("utf-8", errors="replace")
+                  last_error = f"{token_name} failed: HTTP {error.code} {error_body}"
+                  print(last_error)
+              except Exception as error:
+                  last_error = f"{token_name} failed: {error}"
+                  print(last_error)
+          else:
+              raise SystemExit(last_error or "No usable update token configured")

@@ -174,20 +174,40 @@ jobs:
         }
         $body = $payload | ConvertTo-Json -Compress
 
-        $headers = @{
-          "Content-Type" = "application/json"
-          "Authorization" = "Bearer ${{ secrets.APP_VERSION_UPDATE_API_KEY }}"
-        }
         $hmacKey = "${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}"
-        if (-not [string]::IsNullOrWhiteSpace($hmacKey)) {
-          $hmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($hmacKey))
-          $sigBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))
-          $signature = -join ($sigBytes | ForEach-Object { $_.ToString("x2") })
-          $headers["X-Update-Signature"] = $signature
+        $tokenCandidates = @(
+          @{ Name = "APP_VERSION_UPDATE_API_KEY"; Token = "${{ secrets.APP_VERSION_UPDATE_API_KEY }}" },
+          @{ Name = "ADMIN_API_KEY"; Token = "${{ secrets.ADMIN_API_KEY }}" }
+        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Token) }
+
+        $updated = $false
+        $lastError = $null
+        foreach ($candidate in $tokenCandidates) {
+          $headers = @{
+            "Content-Type" = "application/json"
+            "Authorization" = "Bearer $($candidate.Token)"
+          }
+          if (-not [string]::IsNullOrWhiteSpace($hmacKey)) {
+            $hmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($hmacKey))
+            $sigBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))
+            $signature = -join ($sigBytes | ForEach-Object { $_.ToString("x2") })
+            $headers["X-Update-Signature"] = $signature
+          }
+
+          try {
+            Invoke-RestMethod -Uri "$apiBaseUrl/app/version/update" `
+              -Method POST `
+              -Headers $headers `
+              -Body $body
+            Write-Host "Server version updated successfully with $($candidate.Name): $apiBaseUrl"
+            $updated = $true
+            break
+          } catch {
+            $lastError = $_
+            Write-Host "Version update failed with $($candidate.Name): $($_.Exception.Message)"
+          }
         }
 
-        Invoke-RestMethod -Uri "$apiBaseUrl/app/version/update" `
-          -Method POST `
-          -Headers $headers `
-          -Body $body
-        Write-Host "Server version updated successfully: $apiBaseUrl"
+        if (-not $updated) {
+          throw $lastError
+        }
