@@ -77,3 +77,4 @@ class SubscriptionStatusResponse(BaseModel):
     can_work: bool = Field(..., description="작업 가능 여부")
     subscription_expires_at: Optional[str] = None
     has_pending_request: bool = Field(default=False, description="대기 중인 구독 신청 있음")
+    promotion: Optional[dict] = Field(default=None, description="현재 구독 이벤트 정보")

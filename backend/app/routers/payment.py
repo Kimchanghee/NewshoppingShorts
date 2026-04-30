@@ -31,6 +31,7 @@ import re
 from app.database import get_db
 from app.utils.ip_utils import get_client_ip
 from app.utils.subscription_utils import calculate_subscription_expiry, _ensure_aware
+from app.utils.promotion import get_new_subscriber_promotion_days
 from app.utils.jwt_handler import decode_access_token
 from app.utils.billing_crypto import (
     decrypt_billing_key,
@@ -698,12 +699,23 @@ def _activate_subscription(db: Session, user_id: str, plan_id: str) -> None:
             logger.error(f"[Payment] Unknown plan_id for activation: user={user_id}, plan={plan_id}")
             return
 
+        # Track free-to-paid conversion
+        user_type = getattr(user, "user_type", None)
+        user_type_value = (
+            user_type.value
+            if hasattr(user_type, "value")
+            else (str(user_type) if user_type is not None else "trial")
+        )
+        was_free = user_type_value == "trial"
+        promotion_extra_days = get_new_subscriber_promotion_days(
+            getattr(user, "created_at", None),
+            was_free=was_free,
+        )
+        total_plan_days = plan_days + promotion_extra_days
+
         # Calculate new expiry date, extending from current expiry if it exists
         current_expiry = user.subscription_expires_at
-        new_expiry = calculate_subscription_expiry(plan_days, current_expiry)
-
-        # Track free-to-paid conversion
-        was_free = user.user_type != UserType.SUBSCRIBER
+        new_expiry = calculate_subscription_expiry(total_plan_days, current_expiry)
         
         user.user_type = UserType.SUBSCRIBER
         user.subscription_expires_at = new_expiry
@@ -717,12 +729,14 @@ def _activate_subscription(db: Session, user_id: str, plan_id: str) -> None:
         if was_free:
             logger.info(
                 f"[Payment] FREE->PAID conversion: user={user_id}, plan={plan_id}, "
-                f"days={plan_days}, expires_at={new_expiry}"
+                f"days={total_plan_days}, promotion_extra_days={promotion_extra_days}, "
+                f"expires_at={new_expiry}"
             )
         else:
             logger.info(
                 f"[Payment] Subscription renewed: user={user_id}, plan={plan_id}, "
-                f"days={plan_days}, expires_at={new_expiry}"
+                f"days={total_plan_days}, promotion_extra_days={promotion_extra_days}, "
+                f"expires_at={new_expiry}"
             )
     except Exception as e:
         db.rollback()

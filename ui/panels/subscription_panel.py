@@ -12,7 +12,8 @@ Features:
 """
 
 import webbrowser
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QProgressBar,
@@ -52,6 +53,35 @@ PAYAPP_METHOD_INFOS = {
     "apay": "애플페이 인증은 새 창에서 진행됩니다.",
     "tpay": "토스페이 로그인/인증은 새 창에서 진행됩니다.",
 }
+
+try:
+    PROMOTION_TIMEZONE = ZoneInfo("Asia/Seoul")
+except Exception:
+    PROMOTION_TIMEZONE = timezone(timedelta(hours=9))
+
+PROMOTION_START_KST = datetime(2026, 4, 30, 0, 0, 0, tzinfo=PROMOTION_TIMEZONE)
+PROMOTION_END_EXCLUSIVE_KST = datetime(2026, 5, 15, 0, 0, 0, tzinfo=PROMOTION_TIMEZONE)
+PROMOTION_PERIOD_LABEL = "2026.04.30 - 2026.05.14"
+PROMOTION_BONUS_TEXT = "신규 가입 후 구독 확정 시 1개월 추가 제공"
+
+
+def get_local_promotion_status() -> str:
+    now_kst = datetime.now(timezone.utc).astimezone(PROMOTION_TIMEZONE)
+    if now_kst < PROMOTION_START_KST:
+        return "upcoming"
+    if now_kst < PROMOTION_END_EXCLUSIVE_KST:
+        return "active"
+    return "closed"
+
+
+def build_promotion_banner_text(promotion: dict | None = None) -> str:
+    status = (promotion or {}).get("status") or get_local_promotion_status()
+    period = (promotion or {}).get("period_label") or PROMOTION_PERIOD_LABEL
+    if status == "active":
+        return f"이벤트 진행중 · {period} · {PROMOTION_BONUS_TEXT}"
+    if status == "closed":
+        return f"이벤트 마감 · {period} · 신규 구독 추가 1개월 혜택 종료"
+    return f"이벤트 예정 · {period} · {PROMOTION_BONUS_TEXT}"
 
 # Plan definitions with features
 def format_price_korean(amount: int) -> str:
@@ -1231,6 +1261,11 @@ class SubscriptionPanel(QWidget):
         subtitle = QLabel("숏폼 메이커의 모든 기능을 해제하세요")
         subtitle.setObjectName("page_subtitle")
         main_layout.addWidget(subtitle)
+
+        self.promotion_banner = QLabel(build_promotion_banner_text())
+        self.promotion_banner.setObjectName("promotion_banner")
+        self.promotion_banner.setWordWrap(True)
+        main_layout.addWidget(self.promotion_banner)
         
         main_layout.addSpacing(ds.spacing.space_4)
         
@@ -1330,7 +1365,21 @@ class SubscriptionPanel(QWidget):
             #inquiry_button:pressed {{
                 background-color: #CA8A04;
             }}
+
+            #promotion_banner {{
+                background-color: #FFF7ED;
+                color: #9A3412;
+                border: 1px solid #FDBA74;
+                border-radius: {ds.radius.md}px;
+                padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
+                font-size: {ds.typography.size_sm}px;
+                font-weight: {ds.typography.weight_semibold};
+            }}
         """)
+
+    def _update_promotion_banner(self, promotion: dict | None = None):
+        if hasattr(self, "promotion_banner"):
+            self.promotion_banner.setText(build_promotion_banner_text(promotion))
         
     def _show_plans(self):
         """Show plan selection"""
@@ -1614,6 +1663,7 @@ class SubscriptionPanel(QWidget):
             from caller import rest
             status = rest.getSubscriptionStatus(user_id)
             if status.get("success", True):
+                self._update_promotion_banner(status.get("promotion"))
                 work_count = status.get("work_count", -1)
                 work_used = status.get("work_used", 0)
 
@@ -1655,6 +1705,7 @@ class SubscriptionPanel(QWidget):
             status = rest.getSubscriptionStatus(user_id)
 
             if status.get("success", True):
+                self._update_promotion_banner(status.get("promotion"))
                 work_count = status.get("work_count", -1)
                 work_used = status.get("work_used", 0)
 
@@ -1703,5 +1754,4 @@ class SubscriptionPanel(QWidget):
         super().showEvent(event)
         # Refresh subscription status when panel is shown
         QTimer.singleShot(100, self.refresh_from_server)
-
 

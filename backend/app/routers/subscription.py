@@ -23,6 +23,10 @@ from app.dependencies import verify_admin_api_key, get_current_user_id
 from app.models.subscription_request import SubscriptionRequest, SubscriptionRequestStatus
 from app.models.user import User, UserType
 from app.utils.subscription_utils import is_subscription_active, calculate_subscription_expiry
+from app.utils.promotion import (
+    build_promotion_payload,
+    get_new_subscriber_promotion_days,
+)
 from app.schemas.subscription import (
     SubscriptionRequestCreate,
     SubscriptionRequestResponse,
@@ -268,7 +272,11 @@ async def get_my_subscription_status(
             remaining=remaining,
             can_work=can_work,
             subscription_expires_at=subscription_expires_at,
-            has_pending_request=pending_request is not None
+            has_pending_request=pending_request is not None,
+            promotion=build_promotion_payload(
+                getattr(user, "created_at", None),
+                was_free=is_trial,
+            ),
         )
 
     except Exception as e:
@@ -392,10 +400,26 @@ async def approve_subscription(
                 f"Override work_count to unlimited for paid subscription: requested={data.work_count}"
             )
 
+        user_type = getattr(user, "user_type", None)
+        user_type_value = (
+            user_type.value
+            if hasattr(user_type, "value")
+            else (str(user_type) if user_type is not None else "trial")
+        )
+        was_free = user_type_value == "trial"
+        promotion_extra_days = get_new_subscriber_promotion_days(
+            getattr(user, "created_at", None),
+            was_free=was_free,
+        )
+        total_subscription_days = data.subscription_days + promotion_extra_days
+
         # Update user subscription
         user.work_count = effective_work_count
         user.work_used = 0  # Reset work used
-        user.subscription_expires_at = calculate_subscription_expiry(data.subscription_days, user.subscription_expires_at)
+        user.subscription_expires_at = calculate_subscription_expiry(
+            total_subscription_days,
+            user.subscription_expires_at,
+        )
         user.user_type = UserType.SUBSCRIBER
 
         # Update subscription request
@@ -410,14 +434,25 @@ async def approve_subscription(
         )
 
         work_count_str = "무제한"
+        promotion_note = (
+            f"기본 {data.subscription_days}일 + 이벤트 {promotion_extra_days}일"
+            if promotion_extra_days
+            else f"{data.subscription_days}일"
+        )
         return SubscriptionResponse(
             success=True,
-            message=f"구독이 승인되었습니다. (작업: {work_count_str}, 기간: {data.subscription_days}일)",
+            message=(
+                f"구독이 승인되었습니다. "
+                f"(작업: {work_count_str}, 기간: 총 {total_subscription_days}일, {promotion_note})"
+            ),
             data={
                 "user_id": user.id,
                 "username": user.username,
                 "work_count": effective_work_count,
-                "subscription_days": data.subscription_days
+                "subscription_days": total_subscription_days,
+                "base_subscription_days": data.subscription_days,
+                "promotion_extra_days": promotion_extra_days,
+                "promotion_applied": promotion_extra_days > 0,
             }
         )
 
