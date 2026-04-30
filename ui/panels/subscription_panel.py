@@ -134,6 +134,27 @@ PLANS = {
         "color": "#9A9A9A",
         "popular": False,
     },
+    "test_3days": {
+        "id": "test_3days",
+        "name": "테스트 3일",
+        "price": 5000,
+        "price_text": format_price_korean(5000),
+        "period": "3일",
+        "months": 0,
+        "description": "실결제 흐름 확인용 3일 테스트 플랜",
+        "features": [
+            "3일간 무제한 영상 생성",
+            "모든 음성 프로필 사용",
+            "AI 콘텐츠 분석",
+            "커스텀 자막 스타일",
+            "1080p 해상도",
+            "실제 PayApp 결제 테스트",
+        ],
+        "not_included": [],
+        "color": "#1B8A5A",
+        "popular": True,
+        "badge": "결제 테스트",
+    },
     "pro_1month": {
         "id": "pro_1month",
         "name": "프로 1개월",
@@ -1213,7 +1234,7 @@ class SubscriptionPanel(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_status)
         self.selected_plan = None
-        self._default_plan_id = "pro_1month"
+        self._default_plan_id = "test_3days"
         self.ds = get_design_system()
         
         self._build_ui()
@@ -1292,7 +1313,7 @@ class SubscriptionPanel(QWidget):
         
         # Create plan cards for all pro tiers
         self.plan_cards = []
-        pro_plan_ids = ["pro_1month", "pro_6months", "pro_12months"]
+        pro_plan_ids = ["test_3days", "pro_1month", "pro_6months", "pro_12months"]
         for plan_id in pro_plan_ids:
             if plan_id in PLANS:
                 plan_data = PLANS[plan_id]
@@ -1754,4 +1775,3 @@ class SubscriptionPanel(QWidget):
         super().showEvent(event)
         # Refresh subscription status when panel is shown
         QTimer.singleShot(100, self.refresh_from_server)
-

@@ -71,6 +71,7 @@ router = APIRouter(prefix="/payments", tags=["payment"])
 # Plan pricing (KRW)
 PLAN_PRICES = {
     "trial": 0,
+    "test_3days": 5000,
     "pro_1month": 190000,
     "pro_6months": 969000,
     "pro_12months": 1596000,
@@ -78,6 +79,7 @@ PLAN_PRICES = {
 
 # Plan durations (days)
 PLAN_DAYS = {
+    "test_3days": 3,
     "pro_1month": 30,
     "pro_6months": 180,
     "pro_12months": 365,
@@ -93,10 +95,13 @@ PLAN_NAMES = {
 # ?ъ슜?먮떦 理쒕? 移대뱶 ?깅줉 ??(Maximum cards per user)
 # Normalize display names used for external payment fields.
 PLAN_NAMES = {
+    "test_3days": "테스트 3일",
     "pro_1month": "프로 1개월",
     "pro_6months": "프로 6개월",
     "pro_12months": "프로 12개월",
 }
+
+PROMOTION_EXCLUDED_PLAN_IDS = {"test_3days"}
 
 MAX_CARDS_PER_USER = 5
 
@@ -707,9 +712,13 @@ def _activate_subscription(db: Session, user_id: str, plan_id: str) -> None:
             else (str(user_type) if user_type is not None else "trial")
         )
         was_free = user_type_value == "trial"
-        promotion_extra_days = get_new_subscriber_promotion_days(
-            getattr(user, "created_at", None),
-            was_free=was_free,
+        promotion_extra_days = (
+            0
+            if plan_id in PROMOTION_EXCLUDED_PLAN_IDS
+            else get_new_subscriber_promotion_days(
+                getattr(user, "created_at", None),
+                was_free=was_free,
+            )
         )
         total_plan_days = plan_days + promotion_extra_days
 

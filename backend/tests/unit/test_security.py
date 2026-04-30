@@ -411,6 +411,19 @@ class TestSensitiveFieldSet:
 
 
 class TestPayAppContract:
+    def test_test_payment_plan_is_configured(self):
+        from app.routers.payment import (
+            PLAN_DAYS,
+            PLAN_NAMES,
+            PLAN_PRICES,
+            PROMOTION_EXCLUDED_PLAN_IDS,
+        )
+
+        assert PLAN_PRICES["test_3days"] == 5000
+        assert PLAN_DAYS["test_3days"] == 3
+        assert PLAN_NAMES["test_3days"] == "테스트 3일"
+        assert "test_3days" in PROMOTION_EXCLUDED_PLAN_IDS
+
     def test_payapp_cancel_states_cover_documented_values(self):
         from app.routers.payment import _PAYAPP_CANCEL_STATES
 
