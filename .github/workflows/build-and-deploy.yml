@@ -137,11 +137,10 @@ jobs:
           ## SSMaker v${{ steps.version.outputs.VERSION }}
 
           ### 이번 업데이트 핵심
-          - Linktree 자동 등록 시 상품 링크 제목 앞에 `[000]` 형식 번호가 유지되도록 개선했습니다.
-          - YouTube 자동 댓글에 상품 설명과 Linktree 안내 링크가 함께 남도록 업로드 로직을 보강했습니다.
-          - Linktree 초기 가입, 쿠팡 파트너스 상품 링크, Google Cloud 실제 캡쳐 OAuth 매뉴얼을 프로그램 안에서 바로 열 수 있게 안내 링크를 정리했습니다.
-          - Google Cloud 실제 화면 캡쳐 기반 YouTube OAuth 설정 공지를 새로 연결했습니다.
-          - 초보 사용자가 API Key 없이도 쿠팡 파트너스 단축 링크 방식으로 시작할 수 있도록 안내를 명확히 했습니다.
+          - 2026년 4월 30일부터 2026년 5월 14일까지 신규 가입 후 구독 확정 시 1개월이 자동 추가되는 2주 한정 이벤트를 반영했습니다.
+          - 결제 성공 웹훅과 관리자 구독 승인 모두 동일한 이벤트 정책을 사용해, 이벤트 종료 후에는 추가 1개월이 자동으로 적용되지 않게 했습니다.
+          - 구독 관리 화면에서 이벤트 진행중/마감 상태와 적용 기간을 바로 확인할 수 있도록 안내 배너를 추가했습니다.
+          - 이벤트 대상은 이벤트 기간 내 신규 가입 후 첫 구독이 확정된 계정이며, 기존 구독자와 갱신 결제에는 중복 적용되지 않습니다.
 
           ### 설치 방법
           1. 설치 파일을 실행하면 기존 설치를 감지합니다.
@@ -162,7 +161,7 @@ jobs:
         $payload = [ordered]@{
           version = $version
           download_url = $downloadUrl
-          release_notes = "Linktree 번호 자동 등록, YouTube 댓글 상품 설명·Linktree 링크 반영, Google Cloud OAuth 실제 캡쳐 매뉴얼 연결"
+          release_notes = "신규 가입 후 구독 확정 시 1개월 자동 추가 이벤트, 이벤트 자동 마감, 구독 관리 화면 이벤트 안내"
           is_mandatory = $false
           file_hash = "${{ steps.hash.outputs.FILE_HASH }}"
         }
