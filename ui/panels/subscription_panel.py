@@ -272,10 +272,6 @@ PLANS = {
     },
 }
 
-# Legacy support: map "pro" to "pro_1month"
-PLANS["pro"] = PLANS["pro_1month"]
-
-
 class PlanCard(QFrame):
     """Modern plan card component"""
     
@@ -717,9 +713,8 @@ class CurrentPlanCard(QFrame):
             plan_id: Plan identifier (e.g., "pro_1month", "pro_6months", "trial")
             used: Number of works used
             total: Total work count (-1 for unlimited)
-            expires_at_str: ISO format expiry date string for dynamic plan detection
+            expires_at_str: ISO format expiry date string for remaining-time display
         """
-        self.current_plan = plan_id
         self.usage_used = used
         self.usage_total = total
         self._expires_at_str = expires_at_str
@@ -728,30 +723,21 @@ class CurrentPlanCard(QFrame):
         except (TypeError, ValueError):
             used_num = 0
 
-        # Try to determine specific plan from expiry date if generic "pro" is passed
-        if plan_id == "pro" and expires_at_str:
-            expires_dt = parse_utc_datetime(expires_at_str)
-            if expires_dt is not None:
-                now = datetime.now(timezone.utc)
-                days_remaining = (expires_dt - now).days
-
-                # Determine plan based on days remaining (with some tolerance)
-                if 0 <= days_remaining <= 4:
-                    plan_id = "test_3days"
-                elif days_remaining >= 335:  # ~11 months (12개월 plan)
-                    plan_id = "pro_12months"
-                elif days_remaining >= 155:  # ~5 months (6개월 plan)
-                    plan_id = "pro_6months"
-                elif days_remaining >= 15:  # ~1 month (1개월 plan)
-                    plan_id = "pro_1month"
-                # else: keep as "pro"
-
-        plan_data = PLANS.get(plan_id, PLANS["trial"])
+        # The paid plan must come from the payment session's plan_id. Never infer a
+        # plan from the remaining expiry, because promotions and repairs can change
+        # the expiry without changing the purchased product.
+        display_plan_id = plan_id if plan_id in PLANS else ("pro" if total < 0 else "trial")
+        self.current_plan = display_plan_id
+        plan_data = PLANS.get(display_plan_id, PLANS["trial"])
 
         self.status_badge.setText(plan_data["name"])
         self.plan_name.setText(plan_data["name"])
 
-        is_unlimited = (total < 0) or str(plan_id).startswith("pro") or plan_id == "test_3days"
+        is_unlimited = (
+            (total < 0)
+            or str(display_plan_id).startswith("pro")
+            or display_plan_id == "test_3days"
+        )
         if is_unlimited:
             self.usage_text.setText("무제한")
             self.progress_bar.setMaximum(1)
@@ -772,7 +758,7 @@ class CurrentPlanCard(QFrame):
         self._update_remaining_time_label()
         
         # Update badge color
-        if plan_id == "trial":
+        if display_plan_id == "trial":
             self.status_badge.setStyleSheet(f"""
                 #status_badge {{
                     background-color: {ds.colors.surface_variant};

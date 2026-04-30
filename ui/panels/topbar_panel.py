@@ -9,7 +9,7 @@ backward compatibility with existing cross-references.
 
 from datetime import datetime
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
 
@@ -194,6 +194,9 @@ class TopBarPanel(QFrame):
         """Navigate to subscription panel."""
         if hasattr(self.gui, "_on_step_selected"):
             self.gui._on_step_selected("subscription")
+        panel = getattr(self.gui, "subscription_panel", None)
+        if panel is not None and hasattr(panel, "refresh_from_server"):
+            QTimer.singleShot(0, panel.refresh_from_server)
 
     def refresh_user_status(self):
         """Update user subscription status, credits, and user info from server."""
