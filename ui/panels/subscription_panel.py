@@ -111,6 +111,28 @@ def format_price_korean(amount: int) -> str:
 from utils.auth_helpers import parse_utc_datetime, extract_user_id as _extract_user_id_util
 
 
+def format_kst_datetime(value: str | None) -> str:
+    dt = parse_utc_datetime(value)
+    if dt is None:
+        return "-"
+    return dt.astimezone(PROMOTION_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def format_remaining_duration(expires_at_str: str | None) -> str:
+    expires_dt = parse_utc_datetime(expires_at_str)
+    if expires_dt is None:
+        return "-"
+    total_seconds = int((expires_dt - datetime.now(timezone.utc)).total_seconds())
+    if total_seconds <= 0:
+        return "만료"
+    days, rem = divmod(total_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if days > 0:
+        return f"{days}일 {hours}시간 {minutes}분 {seconds}초"
+    return f"{hours}시간 {minutes}분 {seconds}초"
+
+
 PLANS = {
     "trial": {
         "id": "trial",
@@ -154,6 +176,27 @@ PLANS = {
         "color": "#1B8A5A",
         "popular": True,
         "badge": "결제 테스트",
+    },
+    "pro": {
+        "id": "pro",
+        "name": "구독중",
+        "price": 0,
+        "price_text": "구독중",
+        "period": "",
+        "months": 0,
+        "description": "무제한 영상 생성 + 모든 기능 해제",
+        "features": [
+            "무제한 영상 생성",
+            "모든 음성 프로필 사용",
+            "AI 콘텐츠 분석",
+            "커스텀 자막 스타일",
+            "1080p 해상도",
+            "우선 처리",
+        ],
+        "not_included": [],
+        "color": "#E31639",
+        "popular": False,
+        "badge": "구독중",
     },
     "pro_1month": {
         "id": "pro_1month",
@@ -550,6 +593,7 @@ class CurrentPlanCard(QFrame):
         self.current_plan = "trial"  # Default
         self.usage_used = 0
         self.usage_total = 2
+        self._expires_at_str = None
         self._build_ui()
         
     def _build_ui(self):
@@ -626,6 +670,18 @@ class CurrentPlanCard(QFrame):
         self.usage_cumulative = QLabel("누적 작업 수: 0회")
         self.usage_cumulative.setObjectName("usage_cumulative")
         layout.addWidget(self.usage_cumulative)
+
+        self.payment_time_label = QLabel("결제일시: -")
+        self.payment_time_label.setObjectName("subscription_meta")
+        layout.addWidget(self.payment_time_label)
+
+        self.remaining_time_label = QLabel("남은 구독시간: -")
+        self.remaining_time_label.setObjectName("subscription_meta")
+        layout.addWidget(self.remaining_time_label)
+
+        self._remaining_timer = QTimer(self)
+        self._remaining_timer.timeout.connect(self._update_remaining_time_label)
+        self._remaining_timer.start(1000)
         
         layout.addSpacing(ds.spacing.space_4)
         
@@ -647,7 +703,14 @@ class CurrentPlanCard(QFrame):
         
         self._apply_styles()
         
-    def update_plan(self, plan_id: str, used: int = 0, total: int = 2, expires_at_str: str = None):
+    def update_plan(
+        self,
+        plan_id: str,
+        used: int = 0,
+        total: int = 2,
+        expires_at_str: str = None,
+        last_payment_at_str: str = None,
+    ):
         """Update current plan display
 
         Args:
@@ -659,6 +722,7 @@ class CurrentPlanCard(QFrame):
         self.current_plan = plan_id
         self.usage_used = used
         self.usage_total = total
+        self._expires_at_str = expires_at_str
         try:
             used_num = max(int(used), 0)
         except (TypeError, ValueError):
@@ -672,7 +736,9 @@ class CurrentPlanCard(QFrame):
                 days_remaining = (expires_dt - now).days
 
                 # Determine plan based on days remaining (with some tolerance)
-                if days_remaining >= 335:  # ~11 months (12개월 plan)
+                if 0 <= days_remaining <= 4:
+                    plan_id = "test_3days"
+                elif days_remaining >= 335:  # ~11 months (12개월 plan)
                     plan_id = "pro_12months"
                 elif days_remaining >= 155:  # ~5 months (6개월 plan)
                     plan_id = "pro_6months"
@@ -685,7 +751,7 @@ class CurrentPlanCard(QFrame):
         self.status_badge.setText(plan_data["name"])
         self.plan_name.setText(plan_data["name"])
 
-        is_unlimited = (total < 0) or str(plan_id).startswith("pro")
+        is_unlimited = (total < 0) or str(plan_id).startswith("pro") or plan_id == "test_3days"
         if is_unlimited:
             self.usage_text.setText("무제한")
             self.progress_bar.setMaximum(1)
@@ -698,6 +764,12 @@ class CurrentPlanCard(QFrame):
             remaining = max(total - used_num, 0)
             self.usage_hint.setText(f"남은 영상 생성 횟수: {remaining}회")
         self.usage_cumulative.setText(f"누적 작업 수: {used_num}회")
+
+        if last_payment_at_str:
+            self.payment_time_label.setText(f"결제일시: {format_kst_datetime(last_payment_at_str)}")
+        else:
+            self.payment_time_label.setText("결제일시: -")
+        self._update_remaining_time_label()
         
         # Update badge color
         if plan_id == "trial":
@@ -723,6 +795,14 @@ class CurrentPlanCard(QFrame):
                     font-weight: {ds.typography.weight_bold};
                 }}
             """)
+
+    def _update_remaining_time_label(self):
+        if self._expires_at_str:
+            remaining = format_remaining_duration(self._expires_at_str)
+            expires_at = format_kst_datetime(self._expires_at_str)
+            self.remaining_time_label.setText(f"남은 구독시간: {remaining} · 만료일시: {expires_at}")
+        else:
+            self.remaining_time_label.setText("남은 구독시간: -")
     
     def _apply_styles(self):
         self.setStyleSheet(f"""
@@ -769,6 +849,11 @@ class CurrentPlanCard(QFrame):
                 color: {ds.colors.text_primary};
                 font-size: {ds.typography.size_sm}px;
                 font-weight: {ds.typography.weight_semibold};
+            }}
+
+            #subscription_meta {{
+                color: {ds.colors.text_secondary};
+                font-size: {ds.typography.size_sm}px;
             }}
             
             #usage_progress {{
@@ -1689,7 +1774,11 @@ class SubscriptionPanel(QWidget):
                 work_used = status.get("work_used", 0)
 
                 # Check if subscription is actually active
-                expires_at_str = status.get("subscription_expires_at") or status.get("data", {}).get("subscription_expires_at")
+                data_payload = status.get("data", {}) if isinstance(status.get("data", {}), dict) else {}
+                expires_at_str = status.get("subscription_expires_at") or data_payload.get("subscription_expires_at")
+                server_plan_id = status.get("plan_id") or data_payload.get("plan_id")
+                display_plan_id = server_plan_id if server_plan_id in PLANS else "pro"
+                last_payment_at_str = status.get("last_payment_at") or data_payload.get("last_payment_at")
                 expires_dt = parse_utc_datetime(expires_at_str)
                 is_active_subscription = bool(
                     expires_dt and expires_dt > datetime.now(timezone.utc)
@@ -1698,7 +1787,13 @@ class SubscriptionPanel(QWidget):
                 is_pro = (work_count == -1) and is_active_subscription
 
                 if is_pro:
-                    self.current_plan_card.update_plan("pro", used=work_used, total=-1, expires_at_str=expires_at_str)
+                    self.current_plan_card.update_plan(
+                        display_plan_id,
+                        used=work_used,
+                        total=-1,
+                        expires_at_str=expires_at_str,
+                        last_payment_at_str=last_payment_at_str,
+                    )
                 else:
                     remaining = max(work_count - work_used, 0)
                     self.current_plan_card.update_plan("trial", used=work_used, total=work_count, expires_at_str=None)
@@ -1731,7 +1826,11 @@ class SubscriptionPanel(QWidget):
                 work_used = status.get("work_used", 0)
 
                 # Check if subscription is actually active
-                expires_at_str = status.get("subscription_expires_at") or status.get("data", {}).get("subscription_expires_at")
+                data_payload = status.get("data", {}) if isinstance(status.get("data", {}), dict) else {}
+                expires_at_str = status.get("subscription_expires_at") or data_payload.get("subscription_expires_at")
+                server_plan_id = status.get("plan_id") or data_payload.get("plan_id")
+                display_plan_id = server_plan_id if server_plan_id in PLANS else "pro"
+                last_payment_at_str = status.get("last_payment_at") or data_payload.get("last_payment_at")
                 expires_dt = parse_utc_datetime(expires_at_str)
                 is_active_subscription = bool(
                     expires_dt and expires_dt > datetime.now(timezone.utc)
@@ -1740,8 +1839,16 @@ class SubscriptionPanel(QWidget):
                 is_pro = (work_count == -1) and is_active_subscription
 
                 if is_pro:
-                    self.current_plan_card.update_plan("pro", used=work_used, total=-1, expires_at_str=expires_at_str)
-                    logger.info(f"[Subscription] Refreshed: PRO account (expires_at={expires_at_str})")
+                    self.current_plan_card.update_plan(
+                        display_plan_id,
+                        used=work_used,
+                        total=-1,
+                        expires_at_str=expires_at_str,
+                        last_payment_at_str=last_payment_at_str,
+                    )
+                    logger.info(
+                        f"[Subscription] Refreshed: {display_plan_id} account (expires_at={expires_at_str})"
+                    )
                 else:
                     remaining = max(work_count - work_used, 0)
                     self.current_plan_card.update_plan("trial", used=work_used, total=work_count, expires_at_str=None)

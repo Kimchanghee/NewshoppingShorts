@@ -76,5 +76,13 @@ class SubscriptionStatusResponse(BaseModel):
     remaining: int = Field(..., description="남은 작업 횟수 (-1 = 무제한)")
     can_work: bool = Field(..., description="작업 가능 여부")
     subscription_expires_at: Optional[str] = None
+    subscription_remaining_seconds: Optional[int] = Field(
+        default=None,
+        description="구독 만료까지 남은 초",
+    )
+    plan_id: Optional[str] = Field(default=None, description="현재 결제 플랜 ID")
+    plan_name: Optional[str] = Field(default=None, description="현재 결제 플랜 이름")
+    last_payment_at: Optional[str] = Field(default=None, description="마지막 결제 성공 일시")
+    last_payment_id: Optional[str] = Field(default=None, description="마지막 결제 ID")
     has_pending_request: bool = Field(default=False, description="대기 중인 구독 신청 있음")
     promotion: Optional[dict] = Field(default=None, description="현재 구독 이벤트 정보")

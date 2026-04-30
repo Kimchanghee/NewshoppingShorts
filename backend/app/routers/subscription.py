@@ -21,8 +21,14 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.database import get_db
 from app.dependencies import verify_admin_api_key, get_current_user_id
 from app.models.subscription_request import SubscriptionRequest, SubscriptionRequestStatus
+from app.models.payment_session import PaymentSession, PaymentStatus
 from app.models.user import User, UserType
-from app.utils.subscription_utils import is_subscription_active, calculate_subscription_expiry
+from app.utils.payment_plans import PLAN_DAYS, PLAN_NAMES
+from app.utils.subscription_utils import (
+    _ensure_aware,
+    is_subscription_active,
+    calculate_subscription_expiry,
+)
 from app.utils.promotion import (
     build_promotion_payload,
     get_new_subscriber_promotion_days,
@@ -51,6 +57,78 @@ from app.utils.ip_utils import get_client_ip
 limiter = Limiter(key_func=get_client_ip)
 
 router = APIRouter(prefix="/user/subscription", tags=["subscription"])
+
+
+def _latest_successful_payment(db: Session, user_id: int) -> PaymentSession | None:
+    """Return the newest successful payment for subscription display/audit."""
+    return (
+        db.query(PaymentSession)
+        .filter(
+            PaymentSession.user_id == str(user_id),
+            PaymentSession.status == PaymentStatus.SUCCEEDED,
+        )
+        .order_by(PaymentSession.updated_at.desc(), PaymentSession.created_at.desc())
+        .first()
+    )
+
+
+def _payment_completed_at(payment: PaymentSession | None) -> datetime | None:
+    if not payment:
+        return None
+    paid_at = payment.updated_at or payment.created_at
+    if not paid_at:
+        return None
+    return _ensure_aware(paid_at)
+
+
+def _remaining_seconds(expiry: datetime | None) -> int | None:
+    if not expiry:
+        return None
+    seconds = int((_ensure_aware(expiry) - datetime.now(timezone.utc)).total_seconds())
+    return max(seconds, 0)
+
+
+def _maybe_repair_fixed_test_plan_expiry(
+    db: Session,
+    user: User,
+    user_id: int,
+    latest_payment: PaymentSession | None,
+    user_type_value: str,
+) -> datetime | None:
+    """Clamp the 3-day test plan to the payment completion time.
+
+    Older activation logic extended from trial validity dates, so a freshly paid
+    3-day test subscription could appear to last about a year. This repair runs
+    during status reads and corrects already affected accounts.
+    """
+    expiry = getattr(user, "subscription_expires_at", None)
+    if user_type_value != "subscriber" or not latest_payment:
+        return expiry
+    if latest_payment.plan_id != "test_3days":
+        return expiry
+
+    paid_at = _payment_completed_at(latest_payment)
+    plan_days = PLAN_DAYS.get(latest_payment.plan_id)
+    if not paid_at or not plan_days:
+        return expiry
+
+    expected_expiry = paid_at + timedelta(days=plan_days)
+    if expiry is None or _ensure_aware(expiry) > expected_expiry + timedelta(seconds=60):
+        try:
+            user.subscription_expires_at = expected_expiry
+            db.commit()
+            logger.info(
+                "Repaired test_3days expiry: user_id=%s, payment_id=%s, expires_at=%s",
+                user_id,
+                latest_payment.payment_id,
+                expected_expiry.isoformat(),
+            )
+            return expected_expiry
+        except Exception:
+            db.rollback()
+            logger.exception("Failed to repair test_3days expiry for user_id=%s", user_id)
+
+    return expiry
 
 
 @router.post("/request", response_model=SubscriptionResponse)
@@ -186,7 +264,18 @@ async def get_my_subscription_status(
             else (str(user_type) if user_type is not None else "trial")
         )
 
-        expiry = getattr(user, "subscription_expires_at", None)
+        latest_payment = _latest_successful_payment(db, user_id)
+        latest_payment_at = _payment_completed_at(latest_payment)
+        latest_plan_id = latest_payment.plan_id if latest_payment else None
+        latest_plan_name = PLAN_NAMES.get(latest_plan_id) if latest_plan_id else None
+
+        expiry = _maybe_repair_fixed_test_plan_expiry(
+            db,
+            user,
+            user_id,
+            latest_payment,
+            user_type_value,
+        )
         work_count = getattr(user, "work_count", 0)
         is_expired = expiry is not None and (not is_subscription_active(expiry))
 
@@ -209,6 +298,16 @@ async def get_my_subscription_status(
                 # Proceed as subscriber anyway to avoid blocking paid users
                 user_type_value = "subscriber"
 
+        if user_type_value == "subscriber":
+            expiry = _maybe_repair_fixed_test_plan_expiry(
+                db,
+                user,
+                user_id,
+                latest_payment,
+                user_type_value,
+            )
+            is_expired = expiry is not None and (not is_subscription_active(expiry))
+
         # Auto-heal: subscriber with expired subscription → revert to trial
         if user.user_type == UserType.SUBSCRIBER and user.subscription_expires_at and not is_subscription_active(user.subscription_expires_at):
             try:
@@ -217,6 +316,7 @@ async def get_my_subscription_status(
                 user.work_used = 0
                 db.commit()
                 user_type_value = "trial"
+                expiry = None
                 logger.info(f"Auto-healed user {user_id}: subscriber → trial (expired subscription)")
             except Exception:
                 db.rollback()
@@ -263,6 +363,7 @@ async def get_my_subscription_status(
         subscription_expires_at = None
         if user_type_value in ("admin", "subscriber"):
             subscription_expires_at = expiry.isoformat() if expiry else None
+        remaining_seconds = _remaining_seconds(expiry) if subscription_expires_at else None
 
         return SubscriptionStatusResponse(
             success=True,
@@ -272,6 +373,11 @@ async def get_my_subscription_status(
             remaining=remaining,
             can_work=can_work,
             subscription_expires_at=subscription_expires_at,
+            subscription_remaining_seconds=remaining_seconds,
+            plan_id=latest_plan_id if user_type_value == "subscriber" else None,
+            plan_name=latest_plan_name if user_type_value == "subscriber" else None,
+            last_payment_at=latest_payment_at.isoformat() if latest_payment_at else None,
+            last_payment_id=latest_payment.payment_id if latest_payment else None,
             has_pending_request=pending_request is not None,
             promotion=build_promotion_payload(
                 getattr(user, "created_at", None),

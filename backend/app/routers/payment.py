@@ -32,6 +32,13 @@ from app.database import get_db
 from app.utils.ip_utils import get_client_ip
 from app.utils.subscription_utils import calculate_subscription_expiry, _ensure_aware
 from app.utils.promotion import get_new_subscriber_promotion_days
+from app.utils.payment_plans import (
+    PLAN_DAYS,
+    PLAN_NAMES,
+    PLAN_PRICES,
+    PROMOTION_EXCLUDED_PLAN_IDS,
+    should_extend_from_current_expiry,
+)
 from app.utils.jwt_handler import decode_access_token
 from app.utils.billing_crypto import (
     decrypt_billing_key,
@@ -67,41 +74,6 @@ logger = logging.getLogger(__name__)
 limiter = Limiter(key_func=get_client_ip)
 
 router = APIRouter(prefix="/payments", tags=["payment"])
-
-# Plan pricing (KRW)
-PLAN_PRICES = {
-    "trial": 0,
-    "test_3days": 5000,
-    "pro_1month": 190000,
-    "pro_6months": 969000,
-    "pro_12months": 1596000,
-}
-
-# Plan durations (days)
-PLAN_DAYS = {
-    "test_3days": 3,
-    "pro_1month": 30,
-    "pro_6months": 180,
-    "pro_12months": 365,
-}
-
-# Plan display names (?뚮옖 ?쒖떆 ?대쫫)
-PLAN_NAMES = {
-    "pro_1month": "?꾨줈 援щ룆 (1媛쒖썡)",
-    "pro_6months": "?꾨줈 援щ룆 (6媛쒖썡)",
-    "pro_12months": "?꾨줈 援щ룆 (12媛쒖썡)",
-}
-
-# ?ъ슜?먮떦 理쒕? 移대뱶 ?깅줉 ??(Maximum cards per user)
-# Normalize display names used for external payment fields.
-PLAN_NAMES = {
-    "test_3days": "테스트 3일",
-    "pro_1month": "프로 1개월",
-    "pro_6months": "프로 6개월",
-    "pro_12months": "프로 12개월",
-}
-
-PROMOTION_EXCLUDED_PLAN_IDS = {"test_3days"}
 
 MAX_CARDS_PER_USER = 5
 
@@ -739,8 +711,13 @@ def _activate_subscription(db: Session, user_id: str, plan_id: str) -> None:
         )
         total_plan_days = plan_days + promotion_extra_days
 
-        # Calculate new expiry date, extending from current expiry if it exists
-        current_expiry = user.subscription_expires_at
+        # Calculate new expiry date. Trial/free accounts can have their own
+        # validity date; paid entitlement must not extend from that trial date.
+        current_expiry = (
+            user.subscription_expires_at
+            if should_extend_from_current_expiry(plan_id, was_free)
+            else None
+        )
         new_expiry = calculate_subscription_expiry(total_plan_days, current_expiry)
         
         user.user_type = UserType.SUBSCRIBER

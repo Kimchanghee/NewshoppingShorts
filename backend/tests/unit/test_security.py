@@ -445,6 +445,56 @@ class TestPayAppContract:
         request = SimpleNamespace(base_url="http://untrusted.example.test/")
         assert _resolve_payment_base_url(request) == "https://payments.example.com"
 
+    def test_test_plan_activation_ignores_trial_expiry(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        from types import SimpleNamespace
+
+        from app.models.user import UserType
+        from app.routers import payment
+
+        now = datetime.now(timezone.utc)
+        trial_expiry = now + timedelta(days=365)
+        user = SimpleNamespace(
+            id=7,
+            user_type=UserType.TRIAL,
+            subscription_expires_at=trial_expiry,
+            created_at=now,
+            work_count=5,
+            work_used=2,
+        )
+
+        class FakeQuery:
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return user
+
+        class FakeDB:
+            def __init__(self):
+                self.committed = False
+
+            def query(self, _model):
+                return FakeQuery()
+
+            def commit(self):
+                self.committed = True
+
+            def rollback(self):
+                pass
+
+        monkeypatch.setattr(payment, "update_user_payment_stats", lambda *_args, **_kwargs: None)
+
+        db = FakeDB()
+        payment._activate_subscription(db, "7", "test_3days")
+
+        assert db.committed is True
+        assert user.user_type == UserType.SUBSCRIBER
+        assert user.work_count == -1
+        assert user.work_used == 0
+        assert user.subscription_expires_at < trial_expiry
+        assert timedelta(days=2, hours=23) <= (user.subscription_expires_at - now) <= timedelta(days=3, minutes=1)
+
     def test_payapp_cancel_states_cover_documented_values(self):
         from app.routers.payment import _PAYAPP_CANCEL_STATES
 
