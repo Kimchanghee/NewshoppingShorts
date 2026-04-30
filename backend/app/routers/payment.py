@@ -112,6 +112,10 @@ PAYAPP_USERID = os.getenv("PAYAPP_USERID", "")
 PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
 PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
 PAYAPP_SHOPNAME = os.getenv("PAYAPP_SHOPNAME", "NewshoppingShorts")
+DEFAULT_PAYMENT_API_BASE_URL = os.getenv(
+    "DEFAULT_PAYMENT_API_BASE_URL",
+    "https://13-124-7-65.nip.io",
+).strip().rstrip("/")
 _PAYAPP_API_URL_RAW = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
 _PAYAPP_WEBHOOK_ALLOWED_IPS_RAW = os.getenv("PAYAPP_WEBHOOK_ALLOWED_IPS", "")
 PAYAPP_WEBHOOK_ALLOWED_IPS = tuple(
@@ -256,20 +260,33 @@ def _resolve_payment_base_url(request: Request) -> str:
     Resolve public backend base URL used in feedbackurl.
 
     Security:
-    - Production requires explicit PAYMENT_API_BASE_URL.
+    - PAYMENT_API_BASE_URL is preferred when configured.
+    - Production falls back to the verified public API URL so PayApp checkout
+      does not break when an older deployment misses the env var.
     - Dynamic host-based fallback is allowed only for local development.
     """
-    configured = os.getenv("PAYMENT_API_BASE_URL", "").strip().rstrip("/")
-    if configured:
-        parsed = _urlparse(configured)
+    def _validate_base_url(raw_url: str, source: str) -> str:
+        base_url = (raw_url or "").strip().rstrip("/")
+        if not base_url:
+            return ""
+        parsed = _urlparse(base_url)
         if not parsed.scheme or not parsed.hostname:
-            raise RuntimeError("Invalid PAYMENT_API_BASE_URL")
+            raise RuntimeError(f"Invalid {source}")
         if parsed.scheme != "https" and parsed.hostname not in ("localhost", "127.0.0.1"):
-            raise RuntimeError("PAYMENT_API_BASE_URL must use HTTPS")
+            raise RuntimeError(f"{source} must use HTTPS")
+        return base_url
+
+    configured = _validate_base_url(os.getenv("PAYMENT_API_BASE_URL", ""), "PAYMENT_API_BASE_URL")
+    if configured:
         return configured
 
     if os.getenv("ENVIRONMENT", "development").lower() == "production":
-        raise RuntimeError("PAYMENT_API_BASE_URL must be configured in production")
+        public_base = _validate_base_url(
+            os.getenv("PUBLIC_BASE_URL", "") or DEFAULT_PAYMENT_API_BASE_URL,
+            "DEFAULT_PAYMENT_API_BASE_URL",
+        )
+        if public_base:
+            return public_base
 
     dynamic_base = str(request.base_url).rstrip("/")
     parsed_dynamic = _urlparse(dynamic_base)

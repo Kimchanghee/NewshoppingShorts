@@ -424,6 +424,27 @@ class TestPayAppContract:
         assert PLAN_NAMES["test_3days"] == "테스트 3일"
         assert "test_3days" in PROMOTION_EXCLUDED_PLAN_IDS
 
+    def test_payment_base_url_falls_back_to_public_api_in_production(self, monkeypatch):
+        from types import SimpleNamespace
+        from app.routers.payment import _resolve_payment_base_url
+
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.delenv("PAYMENT_API_BASE_URL", raising=False)
+        monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+
+        request = SimpleNamespace(base_url="http://untrusted.example.test/")
+        assert _resolve_payment_base_url(request) == "https://13-124-7-65.nip.io"
+
+    def test_payment_base_url_prefers_configured_url(self, monkeypatch):
+        from types import SimpleNamespace
+        from app.routers.payment import _resolve_payment_base_url
+
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("PAYMENT_API_BASE_URL", "https://payments.example.com/")
+
+        request = SimpleNamespace(base_url="http://untrusted.example.test/")
+        assert _resolve_payment_base_url(request) == "https://payments.example.com"
+
     def test_payapp_cancel_states_cover_documented_values(self):
         from app.routers.payment import _PAYAPP_CANCEL_STATES
 
