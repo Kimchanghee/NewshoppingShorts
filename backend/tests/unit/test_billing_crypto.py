@@ -64,3 +64,27 @@ def test_validate_startup_requires_key(monkeypatch):
 
     with pytest.raises(RuntimeError):
         billing_crypto.validate_billing_crypto_startup(require_key=True)
+
+
+def test_billing_key_model_uses_hash_for_uniqueness():
+    from app.models.billing import BillingKey
+
+    constraints = {
+        tuple(constraint.columns.keys())
+        for constraint in BillingKey.__table__.constraints
+        if constraint.__class__.__name__ == "UniqueConstraint"
+    }
+
+    assert ("user_id", "enc_bill_hash") in constraints
+    assert "enc_bill_hash" in BillingKey.__table__.columns
+
+
+def test_enc_bill_hash_is_stable_and_not_plaintext():
+    from app.routers.payment import _calc_enc_bill_hash
+
+    raw = "encBill_token_123"
+    digest = _calc_enc_bill_hash(raw)
+
+    assert digest == _calc_enc_bill_hash(raw)
+    assert digest != raw
+    assert len(digest) == 64

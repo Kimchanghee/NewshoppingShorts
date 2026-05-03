@@ -232,6 +232,11 @@ def _force_masked_card_number(value: str | None, fallback_mask: str) -> str:
     return fallback_mask
 
 
+def _calc_enc_bill_hash(enc_bill: str) -> str:
+    """Stable SHA-256 hash for the raw PayApp encBill token."""
+    return hashlib.sha256(enc_bill.encode("utf-8")).hexdigest()
+
+
 def _resolve_payment_base_url(request: Request) -> str:
     """
     Resolve public backend base URL used in feedbackurl.
@@ -1575,16 +1580,42 @@ async def register_card(
             except RuntimeError as e:
                 logger.error(f"[PayApp Card] Billing key encryption failed: {e}")
                 return {"success": False, "message": "결제 보안 설정 오류로 카드 등록에 실패했습니다."}
+            enc_bill_hash = _calc_enc_bill_hash(enc_bill)
             card_no_masked = _force_masked_card_number(
                 result.get("cardno", ""),
                 masked_card,
             )
             card_name = result.get("cardname", "")
+            existing_card = (
+                db.query(BillingKey)
+                .filter(
+                    BillingKey.user_id == user_id,
+                    BillingKey.enc_bill_hash == enc_bill_hash,
+                )
+                .first()
+            )
+            if existing_card:
+                if not existing_card.is_active:
+                    existing_card.is_active = True
+                    existing_card.card_no_masked = card_no_masked
+                    existing_card.card_name = card_name
+                    existing_card.enc_bill = encrypted_enc_bill
+                    db.commit()
+                    db.refresh(existing_card)
+                logger.info("[PayApp Card] Duplicate billing key reused: user=%s", user_id)
+                return {
+                    "success": True,
+                    "card_id": existing_card.id,
+                    "card_no_masked": existing_card.card_no_masked,
+                    "card_name": existing_card.card_name,
+                    "message": "이미 등록된 카드입니다.",
+                }
 
             # DB??鍮뚮쭅?????(Save billing key to DB)
             billing_key = BillingKey(
                 user_id=user_id,
                 enc_bill=encrypted_enc_bill,
+                enc_bill_hash=enc_bill_hash,
                 card_no_masked=card_no_masked,
                 card_name=card_name,
                 is_active=True,
@@ -1688,7 +1719,8 @@ async def pay_with_card(
     payapp_enc_bill = _decrypt_enc_bill_or_raise(billing_key.enc_bill)
     if not is_encrypted(billing_key.enc_bill) and has_encryption_key():
         try:
-            billing_key.enc_bill = encrypt_billing_key(billing_key.enc_bill)
+            billing_key.enc_bill = encrypt_billing_key(payapp_enc_bill)
+            billing_key.enc_bill_hash = _calc_enc_bill_hash(payapp_enc_bill)
             db.commit()
         except Exception as e:
             db.rollback()
@@ -1876,7 +1908,8 @@ async def delete_card(
     payapp_enc_bill = _decrypt_enc_bill_or_raise(billing_key.enc_bill)
     if not is_encrypted(billing_key.enc_bill) and has_encryption_key():
         try:
-            billing_key.enc_bill = encrypt_billing_key(billing_key.enc_bill)
+            billing_key.enc_bill = encrypt_billing_key(payapp_enc_bill)
+            billing_key.enc_bill_hash = _calc_enc_bill_hash(payapp_enc_bill)
             db.commit()
         except Exception as e:
             db.rollback()

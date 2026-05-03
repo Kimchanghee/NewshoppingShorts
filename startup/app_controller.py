@@ -12,6 +12,7 @@ import os
 import json
 import re
 import subprocess
+from urllib.parse import urlparse
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QMessageBox
 from utils.logging_config import get_logger
@@ -50,6 +51,23 @@ GITHUB_RELEASE_API_URL = os.getenv(
     "GITHUB_RELEASE_API_URL",
     "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases/latest",
 ).strip()
+
+_ALLOWED_UPDATE_DOWNLOAD_DOMAINS = frozenset({
+    "github.com",
+    "objects.githubusercontent.com",
+    "storage.googleapis.com",
+    "13-124-7-65.nip.io",
+    "ssmaker-auth-api-1049571775048.us-central1.run.app",
+})
+
+
+def _is_allowed_update_download_url(download_url: str) -> bool:
+    parsed = urlparse(str(download_url or "").strip())
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and parsed.hostname.lower() in _ALLOWED_UPDATE_DOWNLOAD_DOMAINS
+    )
 
 def _env_truthy(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
@@ -189,7 +207,12 @@ class UpdateCheckWorker(QtCore.QThread):
     def _has_required_update_metadata(update_data: Dict[str, Any]) -> bool:
         download_url = str(update_data.get("download_url", "")).strip()
         file_hash = str(update_data.get("file_hash", "")).strip()
-        return bool(download_url and file_hash)
+        if not download_url or not file_hash:
+            return False
+        if not _is_allowed_update_download_url(download_url):
+            logger.error("[Security] Rejecting update metadata from untrusted download URL: %s", download_url)
+            return False
+        return True
 
     def _pick_newer_result(
         self,
@@ -921,6 +944,18 @@ class AppController:
             self._fallback_after_update_failure()
             return
 
+        if not _is_allowed_update_download_url(download_url):
+            logger.error("[Security] Refusing update from untrusted URL: %s", download_url)
+            if self._update_is_mandatory:
+                QMessageBox.critical(
+                    None,
+                    "?ㅻ쪟",
+                    "?낅뜲?댄듃 ?뚯씪 寃쎈줈媛 蹂댁븞 寃利앹뿉 ?ㅽ뙣?덉뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                )
+                sys.exit(1)
+            self._fallback_after_update_failure()
+            return
+
         import tempfile
         temp_dir = tempfile.gettempdir()
         installer_path = os.path.join(temp_dir, "SSMaker_Setup_update.exe")
@@ -1046,6 +1081,8 @@ class DownloadWorker(QtCore.QThread):
             sha256 = hashlib.sha256()
             with requests.get(self.url, stream=True, timeout=(10, 120)) as r:
                 r.raise_for_status()
+                if not _is_allowed_update_download_url(r.url):
+                    raise ValueError(f"Untrusted final download URL: {r.url}")
                 total_size = int(r.headers.get("content-length", 0))
                 downloaded = 0
                 with open(self.dest_path, "wb") as f:

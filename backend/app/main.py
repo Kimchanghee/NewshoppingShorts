@@ -25,7 +25,7 @@ from app.routers import auth, registration, admin, subscription, payment, logs
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
 from app.database import init_db
-from app.utils.billing_crypto import validate_billing_crypto_startup
+from app.utils.billing_crypto import decrypt_billing_key, validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
 
 # 濡쒓퉭 ?ㅼ젙 - 紐⑤뱺 濡쒓렇瑜??곕??먯뿉 異쒕젰
@@ -63,6 +63,79 @@ app = FastAPI(
 from sqlalchemy import text
 from app.database import engine
 
+
+def _calc_billing_key_hash(enc_bill: str) -> str:
+    return hashlib.sha256(enc_bill.encode("utf-8")).hexdigest()
+
+
+def _ensure_billing_key_hash_index(conn) -> None:
+    """Backfill billing key hashes and add the duplicate-protection index."""
+    try:
+        rows = conn.execute(
+            text(
+                """
+                SELECT id, enc_bill
+                FROM `billing_keys`
+                WHERE enc_bill_hash IS NULL OR enc_bill_hash = ''
+                """
+            )
+        ).fetchall()
+    except Exception as e:
+        logger.debug("billing_keys hash backfill skipped: %s", e)
+        return
+
+    for row in rows:
+        try:
+            raw_enc_bill = decrypt_billing_key(row[1])
+            conn.execute(
+                text("UPDATE `billing_keys` SET enc_bill_hash = :hash WHERE id = :id"),
+                {"hash": _calc_billing_key_hash(raw_enc_bill), "id": row[0]},
+            )
+        except Exception as e:
+            logger.warning("billing_keys hash backfill skipped for id=%s: %s", row[0], e)
+
+    try:
+        missing_count = conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM `billing_keys`
+                WHERE enc_bill_hash IS NULL OR enc_bill_hash = ''
+                """
+            )
+        ).scalar() or 0
+    except Exception:
+        missing_count = 1
+
+    if missing_count:
+        logger.warning("billing_keys hash index skipped because %s rows are not backfilled", missing_count)
+        return
+
+    try:
+        conn.execute(text("ALTER TABLE `billing_keys` DROP INDEX `uq_user_enc_bill`"))
+    except Exception as e:
+        msg = str(e).lower()
+        if "1091" not in msg and "can't drop" not in msg and "check that column/key exists" not in msg:
+            logger.debug("Old billing key index drop skipped: %s", e)
+
+    try:
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX `uq_user_enc_bill_hash`
+                ON `billing_keys` (`user_id`, `enc_bill_hash`)
+                """
+            )
+        )
+        logger.info("billing_keys hash unique index ensured.")
+    except Exception as e:
+        msg = str(e).lower()
+        if "1061" in msg or "duplicate key name" in msg or "already exists" in msg:
+            logger.debug("billing_keys hash unique index already exists.")
+        else:
+            logger.warning("billing_keys hash unique index creation skipped: %s", e)
+
+
 def run_auto_migration():
     """Directly attempt to add missing columns and ignore if already exists (1060)"""
     logger.info("Starting schema auto-migration...")
@@ -85,7 +158,11 @@ def run_auto_migration():
                 "registration_requests": [
                     ("email", "VARCHAR(255) NULL"),
                     ("ym_news_opt_in", "BOOLEAN DEFAULT FALSE"),
-                ]
+                ],
+                "billing_keys": [
+                    # SHA-256 hex of enc_bill for duplicate checks without indexing encrypted secret material.
+                    ("enc_bill_hash", "CHAR(64) NOT NULL DEFAULT ''"),
+                ],
             }
             
             # Ensure user_logs table exists
@@ -124,6 +201,8 @@ def run_auto_migration():
                         else:
                             # Log other errors but try to proceed
                             logger.warning(f"Migration warning for {table}.{col}: {e}")
+
+            _ensure_billing_key_hash_index(conn)
                             
     except Exception as e:
         logger.error(f"Migration critical error: {e}", exc_info=True)
