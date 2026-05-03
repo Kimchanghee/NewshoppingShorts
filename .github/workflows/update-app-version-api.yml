@@ -73,7 +73,7 @@ jobs:
           payload = {
               "version": version,
               "download_url": download_url,
-              "release_notes": "신규 가입 후 구독 확정 시 1개월 자동 추가 이벤트, 이벤트 자동 마감, 구독 관리 화면 이벤트 안내",
+              "release_notes": "7일 테스트 상품 49,000원, 프로 1개월 149,000원, 6개월/12개월 할인 금액 조정",
               "is_mandatory": False,
               "file_hash": os.environ["FILE_HASH"].strip(),
           }

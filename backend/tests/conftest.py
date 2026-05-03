@@ -69,5 +69,5 @@ def sample_payment_data():
         "plan_id": "pro_1month",
         "user_id": "user_123",
         "status": "pending",
-        "amount": 190000,
+        "amount": 149000,
     }

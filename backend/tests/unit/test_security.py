@@ -422,7 +422,12 @@ class TestPayAppContract:
         assert PLAN_PRICES["test_3days"] == 5000
         assert PLAN_DAYS["test_3days"] == 3
         assert PLAN_NAMES["test_3days"] == "테스트 3일"
+        assert PLAN_PRICES["test_7days"] == 49000
+        assert PLAN_DAYS["test_7days"] == 7
+        assert PLAN_NAMES["test_7days"] == "1주 테스트 상품"
+        assert PLAN_PRICES["pro_1month"] == 149000
         assert "test_3days" in PROMOTION_EXCLUDED_PLAN_IDS
+        assert "test_7days" in PROMOTION_EXCLUDED_PLAN_IDS
 
     def test_payment_base_url_falls_back_to_public_api_in_production(self, monkeypatch):
         from types import SimpleNamespace

@@ -88,7 +88,7 @@ def format_price_korean(amount: int) -> str:
     """
     Format price in Korean style with 만원 units
     Examples:
-        190000 -> "19만원"
+        149000 -> "149,000원"
         161500 -> "161,500원"
         133000 -> "133,000원"
         50000 -> "5만원"
@@ -177,6 +177,27 @@ PLANS = {
         "popular": True,
         "badge": "결제 테스트",
     },
+    "test_7days": {
+        "id": "test_7days",
+        "name": "1주 테스트 상품",
+        "price": 49000,
+        "price_text": format_price_korean(49000),
+        "period": "7일",
+        "months": 0,
+        "description": "일주일 동안 모든 기능을 확인하는 테스트 상품",
+        "features": [
+            "7일간 무제한 영상 생성",
+            "모든 음성 프로필 사용",
+            "AI 콘텐츠 분석",
+            "커스텀 자막 스타일",
+            "1080p 해상도",
+            "실제 PayApp 결제 테스트",
+        ],
+        "not_included": [],
+        "color": "#1B8A5A",
+        "popular": True,
+        "badge": "1주 테스트",
+    },
     "pro": {
         "id": "pro",
         "name": "구독중",
@@ -201,8 +222,8 @@ PLANS = {
     "pro_1month": {
         "id": "pro_1month",
         "name": "프로 1개월",
-        "price": 190000,
-        "price_text": format_price_korean(190000),
+        "price": 149000,
+        "price_text": format_price_korean(149000),
         "period": "월",
         "months": 1,
         "description": "무제한 영상 생성 + 모든 기능 해제",
@@ -221,12 +242,12 @@ PLANS = {
     },
     "pro_6months": {
         "id": "pro_6months",
-        "price": 969000,
+        "price": 759900,
         "name": "프로 6개월",
-        "price_text": format_price_korean(161500),  # Show per-month price
-        "price_per_month": 161500,
-        "original_price_per_month": 190000,
-        "original_price": 1140000,
+        "price_text": format_price_korean(126650),  # Show per-month price
+        "price_per_month": 126650,
+        "original_price_per_month": 149000,
+        "original_price": 894000,
         "discount_percent": 15,
         "period": "6개월",
         "months": 6,
@@ -247,11 +268,11 @@ PLANS = {
     "pro_12months": {
         "id": "pro_12months",
         "name": "프로 12개월",
-        "price": 1596000,
-        "price_text": format_price_korean(133000),  # Show per-month price
-        "price_per_month": 133000,
-        "original_price_per_month": 190000,
-        "original_price": 2280000,
+        "price": 1251600,
+        "price_text": format_price_korean(104300),  # Show per-month price
+        "price_per_month": 104300,
+        "original_price_per_month": 149000,
+        "original_price": 1788000,
         "discount_percent": 30,
         "period": "12개월",
         "months": 12,
@@ -736,7 +757,7 @@ class CurrentPlanCard(QFrame):
         is_unlimited = (
             (total < 0)
             or str(display_plan_id).startswith("pro")
-            or display_plan_id == "test_3days"
+            or str(display_plan_id).startswith("test_")
         )
         if is_unlimited:
             self.usage_text.setText("무제한")
@@ -1305,7 +1326,7 @@ class SubscriptionPanel(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_status)
         self.selected_plan = None
-        self._default_plan_id = "test_3days"
+        self._default_plan_id = "test_7days"
         self.ds = get_design_system()
         
         self._build_ui()
@@ -1384,7 +1405,7 @@ class SubscriptionPanel(QWidget):
         
         # Create plan cards for all pro tiers
         self.plan_cards = []
-        pro_plan_ids = ["test_3days", "pro_1month", "pro_6months", "pro_12months"]
+        pro_plan_ids = ["test_7days", "pro_1month", "pro_6months", "pro_12months"]
         for plan_id in pro_plan_ids:
             if plan_id in PLANS:
                 plan_data = PLANS[plan_id]

@@ -23,7 +23,7 @@ from app.dependencies import verify_admin_api_key, get_current_user_id
 from app.models.subscription_request import SubscriptionRequest, SubscriptionRequestStatus
 from app.models.payment_session import PaymentSession, PaymentStatus
 from app.models.user import User, UserType
-from app.utils.payment_plans import PLAN_DAYS, PLAN_NAMES
+from app.utils.payment_plans import FIXED_TEST_PLAN_IDS, PLAN_DAYS, PLAN_NAMES
 from app.utils.subscription_utils import (
     _ensure_aware,
     is_subscription_active,
@@ -95,16 +95,16 @@ def _maybe_repair_fixed_test_plan_expiry(
     latest_payment: PaymentSession | None,
     user_type_value: str,
 ) -> datetime | None:
-    """Clamp the 3-day test plan to the payment completion time.
+    """Clamp fixed-window test plans to the payment completion time.
 
     Older activation logic extended from trial validity dates, so a freshly paid
-    3-day test subscription could appear to last about a year. This repair runs
+    short test subscription could appear to last about a year. This repair runs
     during status reads and corrects already affected accounts.
     """
     expiry = getattr(user, "subscription_expires_at", None)
     if user_type_value != "subscriber" or not latest_payment:
         return expiry
-    if latest_payment.plan_id != "test_3days":
+    if latest_payment.plan_id not in FIXED_TEST_PLAN_IDS:
         return expiry
 
     paid_at = _payment_completed_at(latest_payment)
@@ -118,15 +118,16 @@ def _maybe_repair_fixed_test_plan_expiry(
             user.subscription_expires_at = expected_expiry
             db.commit()
             logger.info(
-                "Repaired test_3days expiry: user_id=%s, payment_id=%s, expires_at=%s",
+                "Repaired fixed test plan expiry: user_id=%s, plan_id=%s, payment_id=%s, expires_at=%s",
                 user_id,
+                latest_payment.plan_id,
                 latest_payment.payment_id,
                 expected_expiry.isoformat(),
             )
             return expected_expiry
         except Exception:
             db.rollback()
-            logger.exception("Failed to repair test_3days expiry for user_id=%s", user_id)
+            logger.exception("Failed to repair fixed test plan expiry for user_id=%s", user_id)
 
     return expiry
 
