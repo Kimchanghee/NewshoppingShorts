@@ -37,6 +37,7 @@ from app.utils.payment_plans import (
     PLAN_NAMES,
     PLAN_PRICES,
     PROMOTION_EXCLUDED_PLAN_IDS,
+    get_sellable_plan_price,
     should_extend_from_current_expiry,
 )
 from app.utils.jwt_handler import decode_access_token
@@ -107,6 +108,10 @@ else:
 # Keep this superset to avoid missing legitimate cancellation callbacks.
 _PAYAPP_SUCCESS_STATE = "4"
 _PAYAPP_CANCEL_STATES = frozenset({"8", "9", "16", "31", "32", "64"})
+
+
+def _build_payapp_good_name(plan_id: str) -> str:
+    return PLAN_NAMES.get(plan_id, "프로 구독")
 
 _TERMINAL_PAYMENT_STATUSES = frozenset(
     {
@@ -387,7 +392,7 @@ async def create_payment(
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
 
     # Get plan price and validate
-    amount = PLAN_PRICES.get(data.plan_id)
+    amount = get_sellable_plan_price(data.plan_id)
     if amount is None:
         raise HTTPException(status_code=400, detail=f"Invalid plan_id: {data.plan_id}")
 
@@ -884,8 +889,8 @@ async def create_payapp_payment(
         logger.error(f"[PayApp] Invalid feedback URL configuration: {e}")
         return PayAppCreateResponse(success=False, message="Payment server configuration error.")
 
-    plan_price = PLAN_PRICES.get(data.plan_id)
-    if plan_price is None or plan_price <= 0:
+    plan_price = get_sellable_plan_price(data.plan_id)
+    if plan_price is None:
         return PayAppCreateResponse(success=False, message=f"Invalid plan_id: {data.plan_id}")
 
     existing_pending = _find_existing_pending_payment(db, user_id, data.plan_id)
@@ -896,7 +901,7 @@ async def create_payapp_payment(
             message="Pending payment already exists. Complete or cancel it before creating a new one.",
         )
 
-    good_name = PLAN_NAMES.get(data.plan_id, "Pro subscription")
+    good_name = _build_payapp_good_name(data.plan_id)
     local_payment_id = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
 
@@ -1690,9 +1695,9 @@ async def pay_with_card(
             logger.warning(f"[PayApp Card] Legacy billing key re-encryption skipped: {e}")
 
     # ?뚮옖 媛寃?議고쉶 (Get plan price)
-    plan_price = PLAN_PRICES.get(data.plan_id)
-    if plan_price is None or plan_price <= 0:
-        return {"success": False, "message": f"?좏슚?섏? ?딆? ?뚮옖?낅땲?? {data.plan_id}"}
+    plan_price = get_sellable_plan_price(data.plan_id)
+    if plan_price is None:
+        return {"success": False, "message": f"유효하지 않은 플랜입니다: {data.plan_id}"}
 
     existing_pending = _find_existing_pending_payment(db, user_id, data.plan_id)
     if existing_pending:
@@ -1702,7 +1707,7 @@ async def pay_with_card(
             "message": "Pending payment already exists. Complete or cancel it before retrying.",
         }
 
-    good_name = f"?쇳븨?륂뤌硫붿씠而?{PLAN_NAMES.get(data.plan_id, '?꾨줈 援щ룆')}"
+    good_name = _build_payapp_good_name(data.plan_id)
 
     # 濡쒖뺄 寃곗젣 ?몄뀡 ?앹꽦 (Create local payment session)
     local_payment_id = secrets.token_urlsafe(32)
@@ -1979,11 +1984,11 @@ async def create_subscription(
         return {"success": False, "message": "寃곗젣 ?ㅼ젙???꾨즺?섏? ?딆븯?듬땲??"}
 
     # ?뚮옖 媛寃?議고쉶 (Get plan price)
-    plan_price = PLAN_PRICES.get(data.plan_id)
-    if plan_price is None or plan_price <= 0:
-        return {"success": False, "message": f"?좏슚?섏? ?딆? ?뚮옖?낅땲?? {data.plan_id}"}
+    plan_price = get_sellable_plan_price(data.plan_id)
+    if plan_price is None:
+        return {"success": False, "message": f"유효하지 않은 플랜입니다: {data.plan_id}"}
 
-    good_name = f"?쇳븨?륂뤌硫붿씠而?{PLAN_NAMES.get(data.plan_id, '?꾨줈 援щ룆')}"
+    good_name = _build_payapp_good_name(data.plan_id)
 
     # 留뚮즺??湲곕낯媛? 1????(Default expire date: 1 year from now)
     expire_date = data.expire_date

@@ -138,11 +138,11 @@ jobs:
           ## SSMaker v${{ steps.version.outputs.VERSION }}
 
           ### 이번 업데이트 핵심
-          - 테스트 상품을 7일 테스트 상품으로 개편하고 결제 금액을 49,000원으로 변경했습니다.
-          - 프로 1개월 상품 금액을 149,000원으로 변경했습니다.
-          - 6개월/12개월 상품은 변경된 1개월 금액 기준으로 할인 금액을 다시 맞췄습니다.
-          - 기존 3일 테스트 결제 이력은 과거 구독 표시와 만료일 보정이 깨지지 않도록 유지했습니다.
-          - 프로그램 구독 화면, 결제 API, 로컬 결제 확인 페이지가 같은 상품 금액을 사용하도록 정리했습니다.
+          - 기존 3일 테스트 상품은 과거 결제 이력 표시용으로만 유지하고, 신규 결제 생성에서는 차단했습니다.
+          - 신규 테스트 상품은 7일 테스트 상품 49,000원으로만 구매되도록 결제 API를 보강했습니다.
+          - 프로 1개월 149,000원 및 6개월/12개월 할인 금액을 유지했습니다.
+          - 운영 버전 API가 낡아도 GitHub 최신 릴리즈를 확인해 업데이트를 놓치지 않도록 보강했습니다.
+          - PayApp 결제 상품명이 깨져 보이지 않도록 상품명 문자열을 정리했습니다.
 
           ### 설치 방법
           1. 설치 파일을 실행하면 기존 설치를 감지합니다.
@@ -155,59 +155,73 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Update server version API
+      shell: python
+      env:
+        VERSION: ${{ steps.version.outputs.VERSION }}
+        FILE_HASH: ${{ steps.hash.outputs.FILE_HASH }}
+        REPOSITORY: ${{ github.repository }}
+        APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
+        APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}
+        ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
+        APP_VERSION_UPDATE_HMAC_KEY: ${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}
       run: |
-        $version = "${{ steps.version.outputs.VERSION }}"
-        $downloadUrl = "https://github.com/${{ github.repository }}/releases/download/v${version}/SSMaker_Setup_v${version}.exe"
-        $apiBaseUrl = "${{ secrets.APP_VERSION_API_BASE_URL }}"
-        if ([string]::IsNullOrWhiteSpace($apiBaseUrl)) {
-          $apiBaseUrl = "https://13-124-7-65.nip.io"
+        import hashlib
+        import hmac
+        import json
+        import os
+        import urllib.error
+        import urllib.request
+
+        version = os.environ["VERSION"].strip()
+        repository = os.environ["REPOSITORY"].strip()
+        api_base_url = (os.environ.get("APP_VERSION_API_BASE_URL") or "https://13-124-7-65.nip.io").rstrip("/")
+        download_url = f"https://github.com/{repository}/releases/download/v{version}/SSMaker_Setup_v{version}.exe"
+
+        payload = {
+            "version": version,
+            "download_url": download_url,
+            "release_notes": "7일 테스트 상품 신규 구매 제한 보강, 프로 1개월 149,000원, PayApp 상품명 정리",
+            "is_mandatory": False,
+            "file_hash": os.environ["FILE_HASH"].strip(),
         }
-        $apiBaseUrl = $apiBaseUrl.TrimEnd("/")
+        body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
-        # Canonicalize JSON so HMAC signature matches backend verification.
-        $payload = [ordered]@{
-          version = $version
-          download_url = $downloadUrl
-          release_notes = "7일 테스트 상품 49,000원, 프로 1개월 149,000원, 6개월/12개월 할인 금액 조정"
-          is_mandatory = $false
-          file_hash = "${{ steps.hash.outputs.FILE_HASH }}"
-        }
-        $body = $payload | ConvertTo-Json -Compress
+        token_candidates = [
+            ("APP_VERSION_UPDATE_API_KEY", os.environ.get("APP_VERSION_UPDATE_API_KEY", "").strip()),
+            ("ADMIN_API_KEY", os.environ.get("ADMIN_API_KEY", "").strip()),
+        ]
+        signing_key = os.environ.get("APP_VERSION_UPDATE_HMAC_KEY", "").strip()
+        signature = ""
+        if signing_key:
+            signature = hmac.new(signing_key.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
-        $hmacKey = "${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}"
-        $tokenCandidates = @(
-          @{ Name = "APP_VERSION_UPDATE_API_KEY"; Token = "${{ secrets.APP_VERSION_UPDATE_API_KEY }}" },
-          @{ Name = "ADMIN_API_KEY"; Token = "${{ secrets.ADMIN_API_KEY }}" }
-        ) | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Token) }
-
-        $updated = $false
-        $lastError = $null
-        foreach ($candidate in $tokenCandidates) {
-          $headers = @{
-            "Content-Type" = "application/json"
-            "Authorization" = "Bearer $($candidate.Token)"
-          }
-          if (-not [string]::IsNullOrWhiteSpace($hmacKey)) {
-            $hmac = [System.Security.Cryptography.HMACSHA256]::new([System.Text.Encoding]::UTF8.GetBytes($hmacKey))
-            $sigBytes = $hmac.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($body))
-            $signature = -join ($sigBytes | ForEach-Object { $_.ToString("x2") })
-            $headers["X-Update-Signature"] = $signature
-          }
-
-          try {
-            Invoke-RestMethod -Uri "$apiBaseUrl/app/version/update" `
-              -Method POST `
-              -Headers $headers `
-              -Body $body
-            Write-Host "Server version updated successfully with $($candidate.Name): $apiBaseUrl"
-            $updated = $true
-            break
-          } catch {
-            $lastError = $_
-            Write-Host "Version update failed with $($candidate.Name): $($_.Exception.Message)"
-          }
-        }
-
-        if (-not $updated) {
-          throw $lastError
-        }
+        last_error = None
+        for token_name, token in token_candidates:
+            if not token:
+                continue
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            }
+            if signature:
+                headers["X-Update-Signature"] = signature
+            request = urllib.request.Request(
+                f"{api_base_url}/app/version/update",
+                data=body,
+                headers=headers,
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    print(f"Server version updated with {token_name}: {response.status}")
+                    print(response.read().decode("utf-8", errors="replace"))
+                    break
+            except urllib.error.HTTPError as error:
+                error_body = error.read().decode("utf-8", errors="replace")
+                last_error = f"{token_name} failed: HTTP {error.code} {error_body}"
+                print(last_error)
+            except Exception as error:
+                last_error = f"{token_name} failed: {error}"
+                print(last_error)
+        else:
+            raise SystemExit(last_error or "No usable update token configured")

@@ -117,3 +117,44 @@ def test_update_check_returns_newest_no_update_result_when_everything_is_up_to_d
 
     assert result["update_available"] is False
     assert result["latest_version"] == "1.4.12"
+
+
+def test_auto_updater_uses_github_when_server_version_is_stale(monkeypatch):
+    from utils import auto_updater
+
+    class FakeResponse:
+        status_code = 200
+
+        @staticmethod
+        def json():
+            return {
+                "version": "1.4.39",
+                "download_url": "https://github.com/example/old.exe",
+                "release_notes": "old",
+                "file_hash": "1" * 64,
+                "is_mandatory": False,
+            }
+
+    checker = auto_updater.UpdateChecker("https://api.example.com/app/version")
+    checker.current_version = "1.4.41"
+    monkeypatch.setattr(auto_updater.requests, "get", lambda *_args, **_kwargs: FakeResponse())
+    monkeypatch.setattr(
+        checker,
+        "_query_github_latest_release",
+        lambda: {
+            "update_available": True,
+            "current_version": "1.4.41",
+            "latest_version": "1.4.43",
+            "download_url": "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.4.43/SSMaker_Setup_v1.4.43.exe",
+            "release_notes": "new",
+            "file_hash": "a" * 64,
+            "is_mandatory": False,
+            "error": None,
+        },
+    )
+
+    result = checker.check_for_updates()
+
+    assert result["update_available"] is True
+    assert result["latest_version"] == "1.4.43"
+    assert result["file_hash"] == "a" * 64

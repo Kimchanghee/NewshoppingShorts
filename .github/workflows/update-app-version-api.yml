@@ -73,7 +73,7 @@ jobs:
           payload = {
               "version": version,
               "download_url": download_url,
-              "release_notes": "7일 테스트 상품 49,000원, 프로 1개월 149,000원, 6개월/12개월 할인 금액 조정",
+              "release_notes": "7일 테스트 상품 신규 구매 제한 보강, 프로 1개월 149,000원, PayApp 상품명 정리",
               "is_mandatory": False,
               "file_hash": os.environ["FILE_HASH"].strip(),
           }

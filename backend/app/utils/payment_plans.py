@@ -29,6 +29,7 @@ PLAN_NAMES = {
 
 FIXED_TEST_PLAN_IDS = {"test_3days", "test_7days"}
 PROMOTION_EXCLUDED_PLAN_IDS = set(FIXED_TEST_PLAN_IDS)
+SELLABLE_PLAN_IDS = {"test_7days", "pro_1month", "pro_6months", "pro_12months"}
 
 
 def get_plan_name(plan_id: str | None) -> str | None:
@@ -41,6 +42,19 @@ def get_plan_days(plan_id: str | None) -> int | None:
     if not plan_id:
         return None
     return PLAN_DAYS.get(plan_id)
+
+
+def is_sellable_plan(plan_id: str | None) -> bool:
+    return bool(plan_id and plan_id in SELLABLE_PLAN_IDS)
+
+
+def get_sellable_plan_price(plan_id: str | None) -> int | None:
+    if not is_sellable_plan(plan_id):
+        return None
+    amount = PLAN_PRICES.get(plan_id)
+    if amount is None or amount <= 0:
+        return None
+    return amount
 
 
 def should_extend_from_current_expiry(plan_id: str | None, was_free: bool) -> bool:
