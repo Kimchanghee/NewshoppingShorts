@@ -293,6 +293,43 @@ class TestAuthentication:
         )
         assert response.status_code == 403
 
+    def test_version_check_uses_github_fallback_when_server_metadata_is_stale(self, client, monkeypatch):
+        """Version check should not be pinned to stale persisted metadata."""
+        from app import main
+
+        monkeypatch.setattr(
+            main,
+            "APP_VERSION_INFO",
+            {
+                "version": "1.4.39",
+                "min_required_version": "1.0.0",
+                "download_url": "https://github.com/example/old.exe",
+                "release_notes": "old",
+                "is_mandatory": False,
+                "file_hash": "1" * 64,
+            },
+        )
+        monkeypatch.setattr(
+            main,
+            "_fetch_github_release_version_info",
+            lambda: {
+                "version": "1.4.43",
+                "download_url": "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.4.43/SSMaker_Setup_v1.4.43.exe",
+                "release_notes": "new",
+                "is_mandatory": False,
+                "file_hash": "a" * 64,
+                "update_channel": "stable",
+            },
+        )
+
+        response = client.get("/app/version/check?current_version=1.4.42")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["update_available"] is True
+        assert payload["latest_version"] == "1.4.43"
+        assert payload["file_hash"] == "a" * 64
+
 
 # ===== 6. SSRF Prevention =====
 

@@ -73,7 +73,7 @@ jobs:
           payload = {
               "version": version,
               "download_url": download_url,
-              "release_notes": "7일 테스트 상품 신규 구매 제한 보강, 프로 1개월 149,000원, PayApp 상품명 정리",
+              "release_notes": "7일 테스트 상품 신규 구매 제한 보강, 운영 버전 API GitHub fallback, PayApp 상품명 정리",
               "is_mandatory": False,
               "file_hash": os.environ["FILE_HASH"].strip(),
           }

@@ -141,7 +141,8 @@ jobs:
           - 기존 3일 테스트 상품은 과거 결제 이력 표시용으로만 유지하고, 신규 결제 생성에서는 차단했습니다.
           - 신규 테스트 상품은 7일 테스트 상품 49,000원으로만 구매되도록 결제 API를 보강했습니다.
           - 프로 1개월 149,000원 및 6개월/12개월 할인 금액을 유지했습니다.
-          - 운영 버전 API가 낡아도 GitHub 최신 릴리즈를 확인해 업데이트를 놓치지 않도록 보강했습니다.
+          - 운영 버전 API가 낡아도 서버/앱 모두 GitHub 최신 릴리즈를 확인해 업데이트를 놓치지 않도록 보강했습니다.
+          - 운영 버전 API 갱신 시크릿 문제가 있어도 릴리즈 자체가 실패 처리되지 않도록 분리했습니다.
           - PayApp 결제 상품명이 깨져 보이지 않도록 상품명 문자열을 정리했습니다.
 
           ### 설치 방법
@@ -155,6 +156,7 @@ jobs:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
     - name: Update server version API
+      continue-on-error: true
       shell: python
       env:
         VERSION: ${{ steps.version.outputs.VERSION }}
@@ -180,7 +182,7 @@ jobs:
         payload = {
             "version": version,
             "download_url": download_url,
-            "release_notes": "7일 테스트 상품 신규 구매 제한 보강, 프로 1개월 149,000원, PayApp 상품명 정리",
+            "release_notes": "7일 테스트 상품 신규 구매 제한 보강, 운영 버전 API GitHub fallback, PayApp 상품명 정리",
             "is_mandatory": False,
             "file_hash": os.environ["FILE_HASH"].strip(),
         }

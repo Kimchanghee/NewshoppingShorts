@@ -6,6 +6,9 @@ import hashlib
 import hmac
 import json
 import asyncio
+import time
+import urllib.error
+import urllib.request
 from uuid import uuid4
 from fastapi import FastAPI, Request, Header, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
@@ -579,6 +582,117 @@ def _persist_app_version_info_to_db(version_info: dict) -> None:
 
 
 APP_VERSION_INFO = _load_app_version_info_from_db(APP_VERSION_INFO)
+_GITHUB_RELEASE_API_URL = os.getenv(
+    "APP_VERSION_GITHUB_RELEASE_API_URL",
+    "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases/latest",
+).strip()
+_GITHUB_VERSION_CACHE_TTL_SECONDS = int(os.getenv("APP_VERSION_GITHUB_CACHE_TTL_SECONDS", "300") or "300")
+_GITHUB_VERSION_CACHE: dict = {"checked_at": 0.0, "info": None}
+
+
+def _parse_version_tuple(version: str) -> tuple[int, int, int]:
+    try:
+        parts = str(version or "").strip().split(".")
+        parsed = [int(p) for p in parts[:3]]
+        while len(parsed) < 3:
+            parsed.append(0)
+        return tuple(parsed[:3])
+    except (ValueError, TypeError):
+        return (0, 0, 0)
+
+
+def _extract_sha256(text_value: str) -> str:
+    match = re.search(r"\b([a-fA-F0-9]{64})\b", str(text_value or ""))
+    return match.group(1).lower() if match else ""
+
+
+def _fetch_github_release_version_info() -> Optional[dict]:
+    if not _GITHUB_RELEASE_API_URL:
+        return None
+
+    now = time.time()
+    cached_info = _GITHUB_VERSION_CACHE.get("info")
+    checked_at = float(_GITHUB_VERSION_CACHE.get("checked_at") or 0)
+    if cached_info is not None and now - checked_at < _GITHUB_VERSION_CACHE_TTL_SECONDS:
+        return cached_info
+
+    try:
+        request = urllib.request.Request(
+            _GITHUB_RELEASE_API_URL,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "SSMaker-Version-API",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        latest_version = str(payload.get("tag_name", "")).strip().lstrip("vV")
+        if not latest_version:
+            return None
+
+        assets = payload.get("assets", []) or []
+        preferred_name = f"ssmaker_setup_v{latest_version}.exe"
+        installer_asset = next(
+            (
+                asset
+                for asset in assets
+                if str(asset.get("name", "")).lower() == preferred_name
+            ),
+            None,
+        )
+        if installer_asset is None:
+            installer_asset = next(
+                (
+                    asset
+                    for asset in assets
+                    if str(asset.get("name", "")).lower().endswith(".exe")
+                ),
+                None,
+            )
+        if installer_asset is None:
+            return None
+
+        digest = str(installer_asset.get("digest", "")).strip()
+        file_hash = digest.split(":", 1)[1].strip() if digest.lower().startswith("sha256:") else ""
+        if not file_hash:
+            file_hash = _extract_sha256(payload.get("body", ""))
+        download_url = str(installer_asset.get("browser_download_url", "")).strip()
+        if not download_url or not file_hash:
+            return None
+
+        info = {
+            "version": latest_version,
+            "download_url": download_url,
+            "release_notes": payload.get("body", ""),
+            "is_mandatory": False,
+            "file_hash": file_hash,
+            "update_channel": "stable",
+        }
+        _GITHUB_VERSION_CACHE["checked_at"] = now
+        _GITHUB_VERSION_CACHE["info"] = info
+        return info
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as e:
+        logger.warning("GitHub version fallback failed: %s", e)
+        _GITHUB_VERSION_CACHE["checked_at"] = now
+        _GITHUB_VERSION_CACHE["info"] = None
+        return None
+
+
+def _get_effective_app_version_info() -> dict:
+    effective_info = dict(APP_VERSION_INFO)
+    github_info = _fetch_github_release_version_info()
+    if not github_info:
+        return effective_info
+
+    if _parse_version_tuple(str(effective_info.get("version", "0.0.0"))) < _parse_version_tuple(
+        str(github_info.get("version", "0.0.0"))
+    ):
+        merged = dict(effective_info)
+        merged.update(github_info)
+        merged.setdefault("min_required_version", effective_info.get("min_required_version", "1.0.0"))
+        return merged
+    return effective_info
 
 
 class VersionUpdateRequest(BaseModel):
@@ -606,14 +720,14 @@ async def get_app_version():
             "is_mandatory": false
         }
     """
-    return APP_VERSION_INFO
+    return _get_effective_app_version_info()
 
 
 @app.get("/free/lately/")
 async def get_legacy_free_lately(item: Optional[int] = Query(None)):
     """Legacy desktop-client version endpoint compatibility."""
     return {
-        **APP_VERSION_INFO,
+        **_get_effective_app_version_info(),
         "item": item,
     }
 
@@ -715,20 +829,13 @@ async def check_app_version(current_version: str = Query(..., max_length=20)):
             "is_mandatory": false
         }
     """
-    latest_version = APP_VERSION_INFO["version"]
-    min_required = APP_VERSION_INFO.get("min_required_version", "0.0.0")
+    version_info = _get_effective_app_version_info()
+    latest_version = version_info["version"]
+    min_required = version_info.get("min_required_version", "0.0.0")
     
-    # Parse versions for comparison
-    def parse_ver(v: str):
-        try:
-            parts = v.strip().split('.')
-            return tuple(int(p) for p in parts[:3])
-        except (ValueError, IndexError):
-            return (0, 0, 0)
-    
-    current_tuple = parse_ver(current_version)
-    latest_tuple = parse_ver(latest_version)
-    min_tuple = parse_ver(min_required)
+    current_tuple = _parse_version_tuple(current_version)
+    latest_tuple = _parse_version_tuple(latest_version)
+    min_tuple = _parse_version_tuple(min_required)
     
     update_available = current_tuple < latest_tuple
     is_mandatory = current_tuple < min_tuple
@@ -737,8 +844,8 @@ async def check_app_version(current_version: str = Query(..., max_length=20)):
         "update_available": update_available,
         "current_version": current_version,
         "latest_version": latest_version,
-        "download_url": APP_VERSION_INFO.get("download_url"),
-        "release_notes": APP_VERSION_INFO.get("release_notes", ""),
+        "download_url": version_info.get("download_url"),
+        "release_notes": version_info.get("release_notes", ""),
         "is_mandatory": is_mandatory,
-        "file_hash": APP_VERSION_INFO.get("file_hash", ""),
+        "file_hash": version_info.get("file_hash", ""),
     }
