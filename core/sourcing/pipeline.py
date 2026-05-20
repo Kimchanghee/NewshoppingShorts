@@ -5,6 +5,7 @@ This module orchestrates the entire Mode 3 flow.
 """
 from __future__ import annotations
 
+import asyncio
 import os
 import json
 import time
@@ -23,6 +24,12 @@ REPLACE_LOW_CONFIDENCE_WITH_IMAGE = (
 )
 MARKETPLACE_VIDEO_INITIAL_MAX_TRY_WITH_IMAGE = 3
 MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE = 12
+MARKETPLACE_SEARCH_STAGE_TIMEOUT = int(
+    os.getenv("SSMAKER_MARKETPLACE_SEARCH_STAGE_TIMEOUT", "90")
+)
+MARKETPLACE_VIDEO_SCAN_TIMEOUT = int(
+    os.getenv("SSMAKER_MARKETPLACE_VIDEO_SCAN_TIMEOUT", "240")
+)
 
 
 class SourcingPipeline:
@@ -215,6 +222,8 @@ class SourcingPipeline:
         from core.sourcing.product_searcher import (
             search_aliexpress,
             search_1688,
+            search_aliexpress_quick,
+            search_1688_quick,
             search_1688_by_image,
             search_aliexpress_by_image,
             find_products_with_video,
@@ -297,12 +306,20 @@ class SourcingPipeline:
             if coupang_image.startswith("http"):
                 self._progress("overseas_search", "1688 이미지 검색(우선) 중...", 0.08)
                 try:
-                    candidates_1688_img = await search_1688_by_image(
-                        browser,
-                        coupang_image,
-                        self.product_info["name"],
-                        cn_kw,
-                        en_kw,
+                    candidates_1688_img = await asyncio.wait_for(
+                        search_1688_by_image(
+                            browser,
+                            coupang_image,
+                            self.product_info["name"],
+                            cn_kw,
+                            en_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] 1688 image-first search timeout (%ss)",
+                        MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
                 except Exception as e:
                     logger.warning("[Pipeline] 1688 image-first search failed: %s", e)
@@ -312,9 +329,17 @@ class SourcingPipeline:
             if coupang_image.startswith("http"):
                 self._progress("overseas_search", "AliExpress 이미지 검색(우선) 중...", 0.15)
                 try:
-                    candidates_ali_img = await search_aliexpress_by_image(
-                        browser, coupang_image,
-                        self.product_info["name"], en_kw, cn_kw,
+                    candidates_ali_img = await asyncio.wait_for(
+                        search_aliexpress_by_image(
+                            browser, coupang_image,
+                            self.product_info["name"], en_kw, cn_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] AliExpress image-first search timeout (%ss)",
+                        MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
                 except Exception as e:
                     logger.warning("[Pipeline] Image-first search failed: %s", e)
@@ -323,9 +348,42 @@ class SourcingPipeline:
             candidates_1688_text: List[Dict] = []
             should_run_1688_text = len(candidates_1688_img) < 12
             if should_run_1688_text and cn_kw:
-                candidates_1688_text = await search_1688(
-                    browser, cn_kw, self.product_info["name"]
-                )
+                try:
+                    candidates_1688_text = await asyncio.wait_for(
+                        search_1688(
+                            browser, cn_kw, self.product_info["name"]
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] 1688 text search timeout (%ss)",
+                        MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                    quick_timeout = max(
+                        30, min(60, MARKETPLACE_SEARCH_STAGE_TIMEOUT)
+                    )
+                    try:
+                        candidates_1688_text = await asyncio.wait_for(
+                            search_1688_quick(
+                                browser,
+                                cn_kw,
+                                self.product_info["name"],
+                                en_kw,
+                            ),
+                            timeout=quick_timeout,
+                        )
+                        logger.info(
+                            "[Pipeline] 1688 quick fallback returned %d candidates after timeout",
+                            len(candidates_1688_text),
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[Pipeline] 1688 quick fallback timeout (%ss)",
+                            quick_timeout,
+                        )
+                    except Exception as e:
+                        logger.warning("[Pipeline] 1688 quick fallback failed: %s", e)
             elif not cn_kw:
                 logger.info("[Pipeline] Skipping 1688 text search: no Chinese keyword")
 
@@ -353,10 +411,43 @@ class SourcingPipeline:
             # image candidates are too few.
             should_run_ali_text = len(candidates_ali_img) < 12
             if should_run_ali_text and en_kw:
-                candidates_ali_text = await search_aliexpress(
-                    browser, en_kw,
-                    self.product_info["name"], cn_kw,
-                )
+                try:
+                    candidates_ali_text = await asyncio.wait_for(
+                        search_aliexpress(
+                            browser, en_kw,
+                            self.product_info["name"], cn_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] AliExpress text search timeout (%ss)",
+                        MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                    quick_timeout = max(
+                        30, min(60, MARKETPLACE_SEARCH_STAGE_TIMEOUT)
+                    )
+                    try:
+                        candidates_ali_text = await asyncio.wait_for(
+                            search_aliexpress_quick(
+                                browser,
+                                en_kw,
+                                self.product_info["name"],
+                                cn_kw,
+                            ),
+                            timeout=quick_timeout,
+                        )
+                        logger.info(
+                            "[Pipeline] AliExpress quick fallback returned %d candidates after timeout",
+                            len(candidates_ali_text),
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[Pipeline] AliExpress quick fallback timeout (%ss)",
+                            quick_timeout,
+                        )
+                    except Exception as e:
+                        logger.warning("[Pipeline] AliExpress quick fallback failed: %s", e)
             elif not en_kw:
                 logger.info("[Pipeline] Skipping AliExpress text search: no English keyword")
 
@@ -391,9 +482,12 @@ class SourcingPipeline:
                 print(msg)
                 logger.info(msg)
                 try:
-                    img_candidates = await search_aliexpress_by_image(
-                        browser, coupang_image,
-                        self.product_info["name"], en_kw, cn_kw,
+                    img_candidates = await asyncio.wait_for(
+                        search_aliexpress_by_image(
+                            browser, coupang_image,
+                            self.product_info["name"], en_kw, cn_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
                     if img_candidates:
                         # Merge by ID — don't double-count items already in pool
@@ -410,11 +504,11 @@ class SourcingPipeline:
                     logger.warning("[Pipeline] Image search fallback failed: %s", e)
 
             if not candidates_1688 and not candidates_ali:
-                self.error = "해외 상품을 찾지 못했습니다."
-                self._progress("overseas_search", self.error, 1.0)
-                return False
-
-            self._progress("overseas_search", "검색 완료", 1.0)
+                msg = "후보 0개 — 검색을 종료하고 폴백 단계로 진행합니다."
+                logger.warning("[Pipeline] %s", msg)
+                self._progress("overseas_search", msg, 1.0)
+            else:
+                self._progress("overseas_search", "검색 완료", 1.0)
 
             # ── Step 5: Find products with video + download ──
             self._progress("video_download", "영상 있는 상품 탐색 중...", 0.0)
@@ -453,11 +547,21 @@ class SourcingPipeline:
 
             # 1688
             if need_from_1688 > 0 and candidates_1688:
-                found_1688 = await find_products_with_video(
-                    browser, candidates_1688, self.output_dir, "1688",
-                    count=need_from_1688, category_terms=category_terms,
-                    overlap_references=overlap_refs,
-                )
+                try:
+                    found_1688 = await asyncio.wait_for(
+                        find_products_with_video(
+                            browser, candidates_1688, self.output_dir, "1688",
+                            count=need_from_1688, category_terms=category_terms,
+                            overlap_references=overlap_refs,
+                        ),
+                        timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] 1688 video scan timeout (%ss)",
+                        MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                    )
+                    found_1688 = []
                 self.sourced_products.extend(found_1688)
                 if len(found_1688) < need_from_1688:
                     need_from_ali += (need_from_1688 - len(found_1688))
@@ -471,13 +575,23 @@ class SourcingPipeline:
                     if coupang_image.startswith("http")
                     else 15
                 )
-                found_ali = await find_products_with_video(
-                    browser, candidates_ali, self.output_dir, "aliexpress",
-                    count=need_from_ali,
-                    max_try=ali_max_try,
-                    category_terms=category_terms,
-                    overlap_references=overlap_refs,
-                )
+                try:
+                    found_ali = await asyncio.wait_for(
+                        find_products_with_video(
+                            browser, candidates_ali, self.output_dir, "aliexpress",
+                            count=need_from_ali,
+                            max_try=ali_max_try,
+                            category_terms=category_terms,
+                            overlap_references=overlap_refs,
+                        ),
+                        timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] AliExpress video scan timeout (%ss)",
+                        MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                    )
+                    found_ali = []
                 self.sourced_products.extend(found_ali)
                 # If quick scan missed everything, keep scanning deeper candidates
                 # before giving up to image fallback.
@@ -492,16 +606,26 @@ class SourcingPipeline:
                         "초기 후보에서 영상 미발견 — AliExpress 추가 후보 탐색 중...",
                         0.58,
                     )
-                    found_ali_extra = await find_products_with_video(
-                        browser,
-                        candidates_ali[ali_max_try:],
-                        self.output_dir,
-                        "aliexpress",
-                        count=need_from_ali,
-                        max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
-                        category_terms=category_terms,
-                        overlap_references=overlap_refs,
-                    )
+                    try:
+                        found_ali_extra = await asyncio.wait_for(
+                            find_products_with_video(
+                                browser,
+                                candidates_ali[ali_max_try:],
+                                self.output_dir,
+                                "aliexpress",
+                                count=need_from_ali,
+                                max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                category_terms=category_terms,
+                                overlap_references=overlap_refs,
+                            ),
+                            timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[Pipeline] AliExpress expanded scan timeout (%ss)",
+                            MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                        )
+                        found_ali_extra = []
                     self.sourced_products.extend(found_ali_extra)
 
             # FINAL fallback: if we have candidates but extracted 0 videos,
@@ -517,18 +641,31 @@ class SourcingPipeline:
                 print(msg)
                 logger.info(msg)
                 try:
-                    img_candidates = await search_aliexpress_by_image(
-                        browser, coupang_image,
-                        self.product_info["name"], en_kw, cn_kw,
+                    img_candidates = await asyncio.wait_for(
+                        search_aliexpress_by_image(
+                            browser, coupang_image,
+                            self.product_info["name"], en_kw, cn_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
                     if img_candidates:
-                        found_img = await find_products_with_video(
-                            browser, img_candidates, self.output_dir,
-                            "aliexpress", count=2, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
-                            min_score=0.0,
-                            category_terms=category_terms,
-                            overlap_references=overlap_refs,
-                        )
+                        try:
+                            found_img = await asyncio.wait_for(
+                                find_products_with_video(
+                                    browser, img_candidates, self.output_dir,
+                                    "aliexpress", count=2, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                    min_score=0.0,
+                                    category_terms=category_terms,
+                                    overlap_references=overlap_refs,
+                                ),
+                                timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[Pipeline] Image-search fallback video scan timeout (%ss)",
+                                MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                            )
+                            found_img = []
                         self.sourced_products.extend(found_img)
                         msg2 = f"[Pipeline] Image-search fallback yielded {len(found_img)} video(s)"
                         print(msg2)
@@ -569,12 +706,23 @@ class SourcingPipeline:
                         0.7,
                     )
                     if candidates_ali:
-                        found_ali_loose = await find_products_with_video(
-                            browser, candidates_ali, self.output_dir, "aliexpress",
-                            count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
-                            category_terms=category_terms,
-                            overlap_references=overlap_refs,
-                        )
+                        try:
+                            found_ali_loose = await asyncio.wait_for(
+                                find_products_with_video(
+                                    browser, candidates_ali, self.output_dir, "aliexpress",
+                                    count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                    category_terms=category_terms,
+                                    overlap_references=overlap_refs,
+                                ),
+                                timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[Pipeline] AliExpress relaxed scan timeout (%ss, min_score=%.2f)",
+                                MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                                relaxed,
+                            )
+                            found_ali_loose = []
                         self.sourced_products.extend(found_ali_loose)
 
             # Final exact-product fallback: only after strict + relaxed

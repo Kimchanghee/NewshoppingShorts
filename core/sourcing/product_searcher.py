@@ -36,6 +36,23 @@ _STOPWORD_TOKENS = {
     "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
 }
 
+# Descriptive modifiers that frequently hurt search recall when used as head
+# terms (e.g. "triangle sink" retrieves basin fixtures instead of strainers).
+_HEAD_NOISE_TOKENS = {
+    "triangle", "triangular", "round", "square", "magnetic",
+    "stainless", "steel", "kitchen", "bathroom", "household",
+    "small", "large", "mini",
+}
+
+# Product-family anchors used to prioritize semantically important tokens over
+# shape/color/material descriptors in head-noun search queries.
+_HEAD_ANCHOR_PARTS = (
+    "strainer", "filter", "drain", "basket", "holder", "rack", "sink",
+    "sponge", "garbage", "waste",
+    "거름망", "싱크", "배수", "필터", "걸이", "수세미",
+    "水槽", "过滤", "沥水", "挂架",
+)
+
 
 # Korean / English / Chinese synonym groups. The tokenizer rewrites every member
 # of a group to a canonical form so `수세미`, `스폰지`, `스펀지` all become the same
@@ -412,13 +429,32 @@ def _simplify_to_head_noun(keyword: str, max_tokens: int = 2) -> str:
     for t in raw_tokens:
         if t in _STOPWORD_TOKENS:
             continue
+        if t in _HEAD_NOISE_TOKENS:
+            continue
         if t in seen:
             continue
         seen.add(t)
         kept.append(t)
-        if len(kept) >= max_tokens:
+    if not kept:
+        return ""
+
+    anchors = [t for t in kept if any(a in t for a in _HEAD_ANCHOR_PARTS)]
+    head_tokens: list[str] = []
+    for t in anchors:
+        if t not in head_tokens:
+            head_tokens.append(t)
+        if len(head_tokens) >= max_tokens:
             break
-    return " ".join(kept)
+
+    if len(head_tokens) < max_tokens:
+        for t in kept:
+            if t in head_tokens:
+                continue
+            head_tokens.append(t)
+            if len(head_tokens) >= max_tokens:
+                break
+
+    return " ".join(head_tokens)
 
 
 async def _do_aliexpress_search(
@@ -562,6 +598,71 @@ async def search_aliexpress(
     candidates.sort(key=lambda x: x["score"], reverse=True)
 
     logger.info("[ProductSearcher] AliExpress: %d candidates", len(candidates))
+    return candidates
+
+
+async def search_aliexpress_quick(
+    browser: Any,
+    keyword_en: str,
+    reference_name: str,
+    keyword_cn: str = "",
+) -> List[Dict[str, Any]]:
+    """Short fallback for AliExpress when the full multi-pass search times out.
+
+    Runs only 2-3 essential passes and returns partial candidates quickly so the
+    pipeline can continue instead of collapsing to zero candidates.
+    """
+    raw_all: list[dict] = []
+    seen_ids: set[str] = set()
+
+    head = _simplify_to_head_noun(keyword_en, max_tokens=2) or ""
+    attempts: list[tuple[str, str, bool]] = []
+    if head:
+        attempts.append((head, "quick-head-noun", True))
+    if keyword_en and keyword_en != head:
+        attempts.append((keyword_en, "quick-full", True))
+    if head:
+        attempts.append((head, "quick-head-noun", False))
+
+    per_attempt_timeout = 15
+
+    for query, label, use_video_filter in attempts:
+        if not query:
+            continue
+        try:
+            raw = await asyncio.wait_for(
+                _do_aliexpress_search(
+                    browser, query, label, video_filter=use_video_filter
+                ),
+                timeout=per_attempt_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.info(
+                "[ProductSearcher] AliExpress %s timed out (%ss)",
+                label,
+                per_attempt_timeout,
+            )
+            continue
+        except Exception as e:
+            logger.info("[ProductSearcher] AliExpress %s failed: %s", label, e)
+            continue
+
+        for x in raw:
+            xid = x.get("id")
+            if xid and xid not in seen_ids:
+                seen_ids.add(xid)
+                raw_all.append(x)
+        if len(raw_all) >= 20:
+            break
+
+    references = [reference_name, keyword_en, keyword_cn]
+    candidates = []
+    for p in raw_all:
+        title = p.get("title", "")
+        score = _multi_reference_score(title, references)
+        candidates.append({**p, "score": score, "source": "aliexpress"})
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    logger.info("[ProductSearcher] AliExpress quick: %d candidates", len(candidates))
     return candidates
 
 
@@ -743,6 +844,71 @@ async def search_1688(
     candidates.sort(key=lambda x: x["score"], reverse=True)
 
     logger.info("[ProductSearcher] 1688: %d candidates", len(candidates))
+    return candidates
+
+
+async def search_1688_quick(
+    browser: Any,
+    keyword_cn: str,
+    reference_name: str,
+    keyword_en: str = "",
+) -> List[Dict[str, Any]]:
+    """Short fallback for 1688 when the full multi-pass search times out."""
+    raw_all: list[dict] = []
+    seen_ids: set[str] = set()
+
+    head = _simplify_to_head_noun(keyword_cn, max_tokens=4) or ""
+    attempts: list[tuple[str, str, bool]] = []
+    if head:
+        attempts.append((head, "quick-head-noun", True))
+    if keyword_cn and keyword_cn != head:
+        attempts.append((keyword_cn, "quick-full", True))
+    if head:
+        attempts.append((head, "quick-head-noun", False))
+
+    per_attempt_timeout = 15
+
+    for query, label, use_video_filter in attempts:
+        if not query:
+            continue
+        try:
+            raw = await asyncio.wait_for(
+                _do_1688_search(
+                    browser, query, label, video_filter=use_video_filter
+                ),
+                timeout=per_attempt_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.info(
+                "[ProductSearcher] 1688 %s timed out (%ss)",
+                label,
+                per_attempt_timeout,
+            )
+            continue
+        except Exception as e:
+            logger.info("[ProductSearcher] 1688 %s failed: %s", label, e)
+            continue
+
+        for x in raw:
+            xid = x.get("id")
+            if xid and xid not in seen_ids:
+                seen_ids.add(xid)
+                raw_all.append(x)
+        if len(raw_all) >= 20:
+            break
+
+    if not raw_all:
+        logger.info("[ProductSearcher] 1688 quick returned 0 candidates")
+        return []
+
+    references = [reference_name, keyword_cn, keyword_en]
+    candidates = []
+    for p in raw_all:
+        title = p.get("title", "")
+        score = _multi_reference_score(title, references)
+        candidates.append({**p, "score": score, "source": "1688"})
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    logger.info("[ProductSearcher] 1688 quick: %d candidates", len(candidates))
     return candidates
 
 
