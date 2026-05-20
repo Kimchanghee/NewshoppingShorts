@@ -2094,7 +2094,8 @@ def _split_subtitle_with_gemini(app, text: str, max_chars: int = 10) -> list:
         prompt = get_subtitle_split_prompt(text)
 
         response = client.models.generate_content(
-            model="gemini-2.0-flash", contents=[prompt]
+            model=getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.5-flash"),
+            contents=[prompt],
         )
 
         result_text = ""

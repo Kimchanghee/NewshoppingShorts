@@ -51,6 +51,15 @@ class TokenCostCalculator:
             "output": 3.00
         },
 
+        # Gemini 3.5 Flash (Standard tier, as of 2026-05-20)
+        "gemini-3.5-flash": {
+            "input_text": 1.50,
+            "input_image": 1.50,
+            "input_video": 1.50,
+            "input_audio": 1.50,
+            "output": 9.00
+        },
+
         # Gemini 2.5 Pro
         "gemini-2.5-pro": {
             "input_small": 1.25,   # <= 200k tokens

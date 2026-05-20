@@ -5,7 +5,8 @@ Uses Gemini API when available, falls back to rule-based mapping.
 from __future__ import annotations
 
 import asyncio
-from typing import Dict, Optional
+import os
+from typing import Dict, List, Optional
 
 from utils.logging_config import get_logger
 
@@ -228,6 +229,18 @@ _KEYWORD_MAP = {
     "후크": {"cn": "挂钩", "en": "hook"},
 }
 
+_MODIFIER_MAP = {
+    "304": {"cn": "304 不锈钢", "en": "304 stainless steel"},
+    "스테인리스": {"cn": "不锈钢", "en": "stainless steel"},
+    "스테인레스": {"cn": "不锈钢", "en": "stainless steel"},
+    "올스텐": {"cn": "全不锈钢", "en": "stainless steel"},
+    "스텐": {"cn": "不锈钢", "en": "stainless steel"},
+    "접착식": {"cn": "粘贴式 免打孔", "en": "adhesive wall mounted"},
+    "접착": {"cn": "粘贴式", "en": "adhesive"},
+    "다용도": {"cn": "多功能", "en": "multipurpose"},
+    "실버": {"cn": "银色", "en": "silver"},
+}
+
 
 def _extract_latin_tokens(name: str) -> str:
     """Pull ASCII / Latin tokens from a Korean product title.
@@ -273,6 +286,16 @@ def convert_keywords_rule_based(product_name: str) -> Dict[str, str]:
                 if tr["en"]:
                     en_parts.append(tr["en"])
 
+    # Pass 3: attribute modifiers always apply, even when a compound matched.
+    # This keeps "수세미거치대" from losing critical qualifiers like
+    # "304 스텐" or "접착식", which otherwise allows broad silicone tray videos.
+    for kr, tr in _MODIFIER_MAP.items():
+        if kr in product_name:
+            if tr["cn"]:
+                cn_parts.append(tr["cn"])
+            if tr["en"]:
+                en_parts.append(tr["en"])
+
     # De-duplicate while preserving order (compound terms may share words like 不锈钢)
     def _uniq_join(items):
         seen, out = set(), []
@@ -312,14 +335,68 @@ async def generate_content_text(gemini_client: object, prompt: str) -> str:
     if models is not None and hasattr(models, "generate_content"):
         import config
 
-        model_name = getattr(config, "GEMINI_TEXT_MODEL", "gemini-2.0-flash")
+        model_name = getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.5-flash")
         loop = asyncio.get_event_loop()
 
-        def _call():
-            return models.generate_content(model=model_name, contents=prompt)
+        def _build_model_fallback_chain(primary: str) -> List[str]:
+            chain: List[str] = []
 
-        response = await loop.run_in_executor(None, _call)
-        return str(getattr(response, "text", "") or "").strip()
+            def _add(name: str):
+                n = (name or "").strip()
+                if n and n not in chain:
+                    chain.append(n)
+
+            _add(primary)
+            # Optional env override for emergency rollout without code edit.
+            for env_name in os.getenv("GEMINI_TEXT_MODEL_FALLBACKS", "").split(","):
+                _add(env_name)
+            # Fallback chain for current + previous stable/preview generations.
+            _add("gemini-3.5-flash")
+            _add("gemini-3.1-pro-preview")
+            _add("gemini-3.1-flash-lite")
+            _add("gemini-2.5-pro")
+            _add("gemini-2.5-flash")
+            _add("gemini-flash-latest")
+            return chain
+
+        def _is_model_not_found_error(exc: Exception) -> bool:
+            msg = str(exc).lower()
+            return (
+                ("404" in msg and "not_found" in msg)
+                or "model not found" in msg
+                or "no longer available to new users" in msg
+            )
+
+        model_chain = _build_model_fallback_chain(model_name)
+        last_error: Optional[Exception] = None
+        for idx, candidate_model in enumerate(model_chain, start=1):
+            def _call(model: str = candidate_model):
+                return models.generate_content(model=model, contents=prompt)
+
+            try:
+                response = await loop.run_in_executor(None, _call)
+                text = str(getattr(response, "text", "") or "").strip()
+                if candidate_model != model_name:
+                    logger.info(
+                        "[KeywordConverter] Gemini model fallback: %s -> %s",
+                        model_name,
+                        candidate_model,
+                    )
+                return text
+            except Exception as e:
+                last_error = e
+                # Retry only when the model itself is unavailable.
+                if idx < len(model_chain) and _is_model_not_found_error(e):
+                    logger.warning(
+                        "[KeywordConverter] Model unavailable (%s), trying next fallback model",
+                        candidate_model,
+                    )
+                    continue
+                break
+
+        if last_error:
+            raise last_error
+        return ""
 
     if hasattr(gemini_client, "generate_content"):
         loop = asyncio.get_event_loop()

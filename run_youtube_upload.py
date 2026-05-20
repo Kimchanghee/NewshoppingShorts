@@ -154,6 +154,9 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
         return 2
 
     yt = get_youtube_manager()
+    if os.environ.get("YOUTUBE_FORCE_RECONNECT", "").lower() in {"1", "true", "yes"}:
+        print("[*] YOUTUBE_FORCE_RECONNECT=1 — 저장된 YouTube 토큰을 끊고 다시 인증합니다.")
+        yt.disconnect_channel()
 
     # 1) 채널 연결 (첫 실행 시 브라우저 OAuth 동의 창 자동으로 열림)
     print("[1/3] YouTube 채널 OAuth 연결 중... (첫 실행이면 브라우저가 열립니다)")
@@ -163,6 +166,19 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
     info = yt.get_channel_info()
     print(f"[+] 연결됨: {info.get('channel_name', '')} (ID={info.get('id', '')})")
     print(f"    구독자: {info.get('subscriber_count', '0')}, 영상: {info.get('video_count', '0')}")
+
+    expected_channel_id = os.environ.get("EXPECTED_YOUTUBE_CHANNEL_ID", "").strip()
+    expected_channel_name = os.environ.get("EXPECTED_YOUTUBE_CHANNEL_NAME", "").strip()
+    if expected_channel_id and info.get("id") != expected_channel_id:
+        print("[!] 업로드 중단: 연결된 YouTube 채널 ID가 기대값과 다릅니다.")
+        print(f"    현재: {info.get('channel_name', '')} ({info.get('id', '')})")
+        print(f"    기대: {expected_channel_name or '(name not set)'} ({expected_channel_id})")
+        return 7
+    if expected_channel_name and info.get("channel_name") != expected_channel_name:
+        print("[!] 업로드 중단: 연결된 YouTube 채널명이 기대값과 다릅니다.")
+        print(f"    현재: {info.get('channel_name', '')} ({info.get('id', '')})")
+        print(f"    기대: {expected_channel_name} ({expected_channel_id or 'id not set'})")
+        return 7
 
     # 2) 기본은 unlisted, 승인 증빙처럼 공개 페이지가 필요할 때만 public 지정
     yt._upload_settings.default_privacy = privacy
@@ -179,7 +195,7 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
 
     # 3) 큐에 추가 (제목/설명/태그 자동 SEO)
     short_name = product_name[:42] if product_name else "쿠팡 추천 상품"
-    title = f"꿀템 발견! {short_name} #shorts"
+    title = f"[광고] 꿀템 발견! {short_name} #shorts"
     desc_lines = [
         COUPANG_AFFILIATE_DISCLOSURE,
         "",
@@ -233,6 +249,11 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
         print(f"    영상: {video_url}")
     print("    채널: https://www.youtube.com/channel/" + (info.get("id") or ""))
     print(f"    공개설정: {privacy}")
+    try:
+        guide_path = yt.write_coupang_partners_submission_guide(linktree_url=linktree_url)
+        print(f"    쿠팡 재신청 체크리스트: {guide_path}")
+    except Exception as guide_error:
+        print(f"    쿠팡 재신청 체크리스트 생성 실패: {guide_error}")
     print("=" * 70)
     return 0
 

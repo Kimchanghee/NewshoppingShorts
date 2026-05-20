@@ -13,6 +13,7 @@ from pydub.utils import which
 from pydub.silence import detect_leading_silence
 
 from caller import ui_controller
+from utils.ffmpeg import ensure_ffmpeg_on_path
 
 
 def _ensure_pydub_converter() -> Optional[str]:
@@ -28,12 +29,7 @@ def _ensure_pydub_converter() -> Optional[str]:
             resolved = which("ffmpeg")
 
         if not resolved:
-            try:
-                import imageio_ffmpeg
-                candidate = imageio_ffmpeg.get_ffmpeg_exe()
-                resolved = candidate if candidate and os.path.exists(candidate) else None
-            except Exception as e:
-                ui_controller.write_error_log(e)
+            resolved = ensure_ffmpeg_on_path()
 
         if resolved:
             AudioSegment.converter = resolved

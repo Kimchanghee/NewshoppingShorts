@@ -1590,14 +1590,29 @@ def _process_single_video(app, url, current_number, total_urls):
 
                                 # Update Inpock if link generated/configured.
                                 inpock_mgr = getattr(app, "inpock_manager", None)
-                                if inpock_mgr and inpock_mgr.is_connected():
-                                    success = inpock_mgr.add_link(
-                                        title=product_name[:30],
-                                        url=coupang_link,
-                                    )
-                                    if success:
-                                        logger.info("[Automation] Added to Inpock Link")
-                                        video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..."
+                                if inpock_mgr:
+                                    try:
+                                        is_inpock_connected = False
+                                        if hasattr(inpock_mgr, "is_connected") and callable(inpock_mgr.is_connected):
+                                            is_inpock_connected = bool(inpock_mgr.is_connected())
+                                        elif hasattr(inpock_mgr, "settings"):
+                                            get_cookies = getattr(inpock_mgr.settings, "get_inpock_cookies", None)
+                                            if callable(get_cookies):
+                                                is_inpock_connected = bool(get_cookies())
+
+                                        if is_inpock_connected and hasattr(inpock_mgr, "add_link"):
+                                            success = bool(
+                                                inpock_mgr.add_link(
+                                                    title=product_name[:30],
+                                                    url=coupang_link,
+                                                )
+                                            )
+                                            if success:
+                                                logger.info("[Automation] Added to Inpock Link")
+                                                video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..."
+                                    except Exception as inpock_err:
+                                        # Inpock 연동 실패가 YouTube 업로드 큐 추가를 막지 않도록 분리 처리
+                                        logger.warning("[Automation] Inpock link update skipped: %s", inpock_err)
 
                             # 3. Add to YouTube Upload Queue
                             review_only_source = (

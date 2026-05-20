@@ -6,15 +6,23 @@ This module orchestrates the entire Mode 3 flow.
 from __future__ import annotations
 
 import os
+import json
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
 
-MIN_TRUSTED_VIDEO_SCORE = 0.15
-MARKETPLACE_VIDEO_MAX_TRY_WITH_IMAGE = 3
+MIN_TRUSTED_VIDEO_SCORE = float(os.getenv("SSMAKER_MIN_TRUSTED_VIDEO_SCORE", "0.10"))
+# Default behavior: keep real marketplace videos once downloaded.
+# Set SSMAKER_REPLACE_LOW_CONFIDENCE_WITH_IMAGE=1 to restore strict replacement.
+REPLACE_LOW_CONFIDENCE_WITH_IMAGE = (
+    os.getenv("SSMAKER_REPLACE_LOW_CONFIDENCE_WITH_IMAGE", "0").strip() == "1"
+)
+MARKETPLACE_VIDEO_INITIAL_MAX_TRY_WITH_IMAGE = 3
+MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE = 12
 
 
 class SourcingPipeline:
@@ -114,13 +122,10 @@ class SourcingPipeline:
         if executable:
             logger.info("[Pipeline] Using browser: %s", executable)
 
-        # Use an isolated user_data_dir so zendriver doesn't collide with the
-        # user's running Chrome (most common cause of "Failed to connect to
-        # browser" on macOS).
-        import tempfile
-        user_data = os.path.join(
-            tempfile.gettempdir(), "ssmaker_zendriver_profile"
-        )
+        # Persist profile across runs so login/session state survives
+        # (important for 1688/taobao anti-bot and login-gated flows).
+        default_profile = os.path.join(str(Path.home()), ".ssmaker", "zendriver_profile")
+        user_data = os.getenv("SSMAKER_ZENDRIVER_PROFILE", default_profile)
         os.makedirs(user_data, exist_ok=True)
 
         kwargs: dict = {
@@ -210,6 +215,7 @@ class SourcingPipeline:
         from core.sourcing.product_searcher import (
             search_aliexpress,
             search_1688,
+            search_1688_by_image,
             search_aliexpress_by_image,
             find_products_with_video,
             _category_terms_for_keyword,
@@ -279,37 +285,104 @@ class SourcingPipeline:
             # ── Step 4: Overseas search ──
             self._progress("overseas_search", "해외 상품 검색 중...", 0.0)
 
-            # 1688 (Chinese keyword required; skip cleanly if missing or login-walled)
-            candidates_1688: List[Dict] = []
-            if cn_kw:
-                candidates_1688 = await search_1688(
+            # Coupang product image (used for image-first search)
+            coupang_image = (self.product_info or {}).get("image") or ""
+            # Normalize protocol-relative URLs (//image.coupangcdn.com/... → https://...)
+            if coupang_image.startswith("//"):
+                coupang_image = "https:" + coupang_image
+            print(f"[Pipeline] Coupang image URL: {coupang_image[:100] or '(none)'}")
+
+            # 1688 image-first search
+            candidates_1688_img: List[Dict] = []
+            if coupang_image.startswith("http"):
+                self._progress("overseas_search", "1688 이미지 검색(우선) 중...", 0.08)
+                try:
+                    candidates_1688_img = await search_1688_by_image(
+                        browser,
+                        coupang_image,
+                        self.product_info["name"],
+                        cn_kw,
+                        en_kw,
+                    )
+                except Exception as e:
+                    logger.warning("[Pipeline] 1688 image-first search failed: %s", e)
+
+            # AliExpress image-first search: prioritize visual match before text keyword matching.
+            candidates_ali_img: List[Dict] = []
+            if coupang_image.startswith("http"):
+                self._progress("overseas_search", "AliExpress 이미지 검색(우선) 중...", 0.15)
+                try:
+                    candidates_ali_img = await search_aliexpress_by_image(
+                        browser, coupang_image,
+                        self.product_info["name"], en_kw, cn_kw,
+                    )
+                except Exception as e:
+                    logger.warning("[Pipeline] Image-first search failed: %s", e)
+
+            # 1688 keyword search (augmentation for image-first mode)
+            candidates_1688_text: List[Dict] = []
+            should_run_1688_text = len(candidates_1688_img) < 12
+            if should_run_1688_text and cn_kw:
+                candidates_1688_text = await search_1688(
                     browser, cn_kw, self.product_info["name"]
                 )
-            else:
-                logger.info("[Pipeline] Skipping 1688: no Chinese keyword")
-            self._progress("overseas_search", f"1688: {len(candidates_1688)}개 발견", 0.3)
+            elif not cn_kw:
+                logger.info("[Pipeline] Skipping 1688 text search: no Chinese keyword")
+
+            # Merge with image-search priority (image candidates first).
+            candidates_1688: List[Dict] = []
+            seen_1688_ids = set()
+            for pool in (candidates_1688_img, candidates_1688_text):
+                for c in pool:
+                    cid = c.get("id")
+                    if cid and cid in seen_1688_ids:
+                        continue
+                    if cid:
+                        seen_1688_ids.add(cid)
+                    candidates_1688.append(c)
+
+            self._progress(
+                "overseas_search",
+                f"1688: {len(candidates_1688)}개 발견 (이미지 {len(candidates_1688_img)} + 텍스트 {len(candidates_1688_text)})",
+                0.3,
+            )
 
             # AliExpress (English keyword required)
-            candidates_ali: List[Dict] = []
-            if en_kw:
-                candidates_ali = await search_aliexpress(
+            candidates_ali_text: List[Dict] = []
+            # Image-first mode still runs text search to widen coverage when
+            # image candidates are too few.
+            should_run_ali_text = len(candidates_ali_img) < 12
+            if should_run_ali_text and en_kw:
+                candidates_ali_text = await search_aliexpress(
                     browser, en_kw,
                     self.product_info["name"], cn_kw,
                 )
-            else:
-                logger.info("[Pipeline] Skipping AliExpress: no English keyword")
-            self._progress("overseas_search", f"AliExpress: {len(candidates_ali)}개 발견", 0.7)
+            elif not en_kw:
+                logger.info("[Pipeline] Skipping AliExpress text search: no English keyword")
+
+            # Merge with image-search priority (image candidates first).
+            candidates_ali: List[Dict] = []
+            seen_ali_ids = set()
+            for pool in (candidates_ali_img, candidates_ali_text):
+                for c in pool:
+                    cid = c.get("id")
+                    if cid and cid in seen_ali_ids:
+                        continue
+                    if cid:
+                        seen_ali_ids.add(cid)
+                    candidates_ali.append(c)
+
+            self._progress(
+                "overseas_search",
+                f"AliExpress: {len(candidates_ali)}개 발견 (이미지 {len(candidates_ali_img)} + 텍스트 {len(candidates_ali_text)})",
+                0.7,
+            )
 
             # Image-based search FALLBACK — when text search yields very few
             # candidates the Coupang product image is a much stronger query
             # because it bypasses translation/synonym variance entirely. We
             # merge image-search candidates into the text-search pool so the
             # find_products_with_video stage gets to pick from the union.
-            coupang_image = (self.product_info or {}).get("image") or ""
-            # Normalize protocol-relative URLs (//image.coupangcdn.com/... → https://...)
-            if coupang_image.startswith("//"):
-                coupang_image = "https:" + coupang_image
-            print(f"[Pipeline] Coupang image URL: {coupang_image[:100] or '(none)'}")
             if (
                 len(candidates_1688) + len(candidates_ali) < 8
                 and coupang_image.startswith("http")
@@ -393,14 +466,43 @@ class SourcingPipeline:
 
             # AliExpress
             if candidates_ali:
+                ali_max_try = (
+                    MARKETPLACE_VIDEO_INITIAL_MAX_TRY_WITH_IMAGE
+                    if coupang_image.startswith("http")
+                    else 15
+                )
                 found_ali = await find_products_with_video(
                     browser, candidates_ali, self.output_dir, "aliexpress",
                     count=need_from_ali,
-                    max_try=MARKETPLACE_VIDEO_MAX_TRY_WITH_IMAGE if coupang_image.startswith("http") else 15,
+                    max_try=ali_max_try,
                     category_terms=category_terms,
                     overlap_references=overlap_refs,
                 )
                 self.sourced_products.extend(found_ali)
+                # If quick scan missed everything, keep scanning deeper candidates
+                # before giving up to image fallback.
+                if (
+                    not found_ali
+                    and coupang_image.startswith("http")
+                    and len(candidates_ali) > ali_max_try
+                    and need_from_ali > 0
+                ):
+                    self._progress(
+                        "video_download",
+                        "초기 후보에서 영상 미발견 — AliExpress 추가 후보 탐색 중...",
+                        0.58,
+                    )
+                    found_ali_extra = await find_products_with_video(
+                        browser,
+                        candidates_ali[ali_max_try:],
+                        self.output_dir,
+                        "aliexpress",
+                        count=need_from_ali,
+                        max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                        category_terms=category_terms,
+                        overlap_references=overlap_refs,
+                    )
+                    self.sourced_products.extend(found_ali_extra)
 
             # FINAL fallback: if we have candidates but extracted 0 videos,
             # the text-search candidates simply don't carry videos. Try
@@ -422,7 +524,7 @@ class SourcingPipeline:
                     if img_candidates:
                         found_img = await find_products_with_video(
                             browser, img_candidates, self.output_dir,
-                            "aliexpress", count=2, max_try=MARKETPLACE_VIDEO_MAX_TRY_WITH_IMAGE,
+                            "aliexpress", count=2, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
                             min_score=0.0,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
@@ -434,20 +536,18 @@ class SourcingPipeline:
                 except Exception as e:
                     logger.warning("[Pipeline] Last-resort image search failed: %s", e)
 
-            # If strict text/image search found no downloadable video, prefer
-            # an exact Coupang product-image video before loosening thresholds.
-            # The relaxed pass is only useful when we have no product image or
-            # image-video creation fails; otherwise it risks same-category but
-            # visually wrong videos.
-            if not self.sourced_products and coupang_image.startswith("http"):
-                self._progress(
-                    "video_download",
-                    "상품 영상 없음 — 쿠팡 상품 이미지로 대체 영상 생성 중...",
-                    0.9,
-                )
-                fallback = await self._create_product_image_video(coupang_image)
-                if fallback:
-                    self.sourced_products.append(fallback)
+            # If live marketplace search cannot extract a fresh video, reuse a
+            # previously sourced safe marketplace video for the same Coupang
+            # product/link before falling back to a static product-image video.
+            if not self.sourced_products:
+                cached = self._find_cached_marketplace_video()
+                if cached:
+                    self._progress(
+                        "video_download",
+                        "실시간 영상 없음 — 이전 안전 자동 산출 영상 재사용",
+                        0.88,
+                    )
+                    self.sourced_products.append(cached)
 
             # If nothing matched at the strict threshold, retry progressively looser.
             # Korean Coupang title vs Korean AliExpress title often scores < 0.05
@@ -471,17 +571,33 @@ class SourcingPipeline:
                     if candidates_ali:
                         found_ali_loose = await find_products_with_video(
                             browser, candidates_ali, self.output_dir, "aliexpress",
-                            count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_MAX_TRY_WITH_IMAGE,
+                            count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
                         )
                         self.sourced_products.extend(found_ali_loose)
 
-            # If the only downloadable marketplace videos are weak textual
-            # matches, prefer a real-product image video over a visually wrong
-            # same-category video. This protects exact-product campaigns where
-            # "sponge holder" candidates vary a lot in shape/material.
-            if self.sourced_products and coupang_image.startswith("http"):
+            # Final exact-product fallback: only after strict + relaxed
+            # marketplace scans are exhausted.
+            if not self.sourced_products and coupang_image.startswith("http"):
+                self._progress(
+                    "video_download",
+                    "상품 영상 없음 — 쿠팡 상품 이미지로 대체 영상 생성 중...",
+                    0.9,
+                )
+                fallback = await self._create_product_image_video(coupang_image)
+                if fallback:
+                    self.sourced_products.append(fallback)
+
+            # Optional strict replacement mode:
+            # if marketplace videos are too low-confidence, replace with exact
+            # product-image fallback. Disabled by default to avoid blocking
+            # auto-upload when valid marketplace videos were found.
+            if (
+                REPLACE_LOW_CONFIDENCE_WITH_IMAGE
+                and self.sourced_products
+                and coupang_image.startswith("http")
+            ):
                 best_score = max(
                     float((p.get("product") or {}).get("score") or 0.0)
                     for p in self.sourced_products
@@ -499,6 +615,18 @@ class SourcingPipeline:
                             best_score,
                         )
                         self.sourced_products = [fallback]
+            elif self.sourced_products:
+                best_score = max(
+                    float((p.get("product") or {}).get("score") or 0.0)
+                    for p in self.sourced_products
+                )
+                if best_score < MIN_TRUSTED_VIDEO_SCORE:
+                    logger.warning(
+                        "[Pipeline] Keeping low-confidence marketplace videos (best=%.3f, threshold=%.3f) "
+                        "because strict replacement is disabled",
+                        best_score,
+                        MIN_TRUSTED_VIDEO_SCORE,
+                    )
 
             self._progress(
                 "video_download",
@@ -562,6 +690,78 @@ class SourcingPipeline:
     async def _create_product_image_video(self, image_url: str) -> Optional[Dict[str, Any]]:
         """Create a short vertical MP4 from the real Coupang product image."""
         return await self._run_blocking_image_video_create(image_url)
+
+    def _find_cached_marketplace_video(self) -> Optional[Dict[str, Any]]:
+        """Find a previous safe marketplace video for the same Coupang target."""
+        current_name = ((self.product_info or {}).get("name") or "").strip()
+        current_url = (self.coupang_url or "").strip()
+        output = Path(self.output_dir).expanduser()
+        if not output.exists():
+            return None
+
+        reports = sorted(
+            output.glob("report_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+
+        def _same_target(report: Dict[str, Any]) -> bool:
+            report_url = str(report.get("coupang_url") or "").strip()
+            report_name = str((report.get("product_info") or {}).get("name") or "").strip()
+            return bool(
+                (current_url and report_url == current_url)
+                or (current_name and report_name and report_name == current_name)
+            )
+
+        for report_path in reports:
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not _same_target(report):
+                continue
+            for item in report.get("sourced_products") or report.get("sourcing_results") or []:
+                source = str(item.get("source") or "").lower()
+                video_file = str(item.get("video_file") or "")
+                if (
+                    source == "coupang_image"
+                    or item.get("requires_review") is True
+                    or item.get("auto_publish_safe") is False
+                    or not video_file
+                    or not os.path.exists(video_file)
+                ):
+                    continue
+
+                size_mb = item.get("video_size_mb")
+                if size_mb is None:
+                    try:
+                        size_mb = round(os.path.getsize(video_file) / (1024 * 1024), 1)
+                    except OSError:
+                        size_mb = 0
+
+                logger.info(
+                    "[Pipeline] Reusing cached marketplace video from %s: %s",
+                    report_path,
+                    video_file,
+                )
+                product = {
+                    "title": item.get("title") or current_name,
+                    "url": item.get("url") or current_url,
+                    "score": item.get("similarity") or 1.0,
+                    "source": item.get("source") or source,
+                    "cached_from_report": str(report_path),
+                }
+                return {
+                    "source": item.get("source") or source,
+                    "product": product,
+                    "video_url": item.get("url") or "",
+                    "video_file": video_file,
+                    "size_mb": size_mb,
+                    "fallback_reason": "cached_marketplace_video",
+                    "auto_publish_safe": True,
+                    "requires_review": False,
+                }
+        return None
 
     async def _run_blocking_image_video_create(self, image_url: str) -> Optional[Dict[str, Any]]:
         import asyncio

@@ -31,6 +31,13 @@ from datetime import datetime
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+try:
+    from utils.ffmpeg import ensure_ffmpeg_on_path
+
+    ensure_ffmpeg_on_path()
+except Exception:
+    pass
+
 # .env 로드
 try:
     from dotenv import load_dotenv
@@ -63,7 +70,7 @@ def _build_gemini_client():
         return None
 
     client = genai.Client(api_key=key)
-    model_name = getattr(config, "GEMINI_TEXT_MODEL", "gemini-2.0-flash")
+    model_name = getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.5-flash")
 
     class GeminiAsyncWrap:
         """SourcingPipeline 이 기대하는 async + .text 응답 인터페이스 래퍼."""

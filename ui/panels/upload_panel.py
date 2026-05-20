@@ -11,8 +11,8 @@ from PyQt6.QtWidgets import (
     QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog, QLineEdit,
     QStackedWidget
 )
-from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QUrl
+from PyQt6.QtGui import QFont, QDesktopServices
 
 from ui.design_system_v2 import get_design_system
 from ui.components.base_widget import ThemedMixin
@@ -1010,6 +1010,7 @@ class UploadPanel(QFrame, ThemedMixin):
             parent=page,
         )
         connect_section.add_widget(self.youtube_card)
+        connect_section.add_widget(self._create_coupang_verification_card(parent=page))
         layout.addWidget(connect_section)
 
         self._yt_upload_settings = YouTubeUploadSettingsSection(self.gui, parent=page)
@@ -1045,6 +1046,58 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addStretch()
         self._set_youtube_feature_enabled(yt_connected)
         return page
+
+    def _create_coupang_verification_card(self, parent: Optional[QWidget] = None) -> QFrame:
+        """Create Coupang Partners verification helper for the connected channel."""
+        ds = self.ds
+        c = ds.colors
+
+        card = QFrame(parent)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+            }}
+            QFrame QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+
+        title = QLabel("쿠팡 파트너스 인증 신청")
+        title.setFont(QFont(ds.typography.font_family_primary, 11, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {c.text_primary};")
+        layout.addWidget(title)
+
+        description = QLabel(
+            "연결된 YouTube 채널 URL, Linktree Profile, 대가성 문구 체크리스트를 재신청 자료로 생성합니다."
+        )
+        description.setWordWrap(True)
+        description.setFont(QFont(ds.typography.font_family_primary, 10))
+        description.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(description)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        generate_btn = QPushButton("인증 자료 생성")
+        generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        generate_btn.clicked.connect(self._create_coupang_verification_pack)
+        btn_row.addWidget(generate_btn)
+
+        notice_btn = QPushButton("쿠팡 공지 열기")
+        notice_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        notice_btn.clicked.connect(self._open_coupang_notice_98)
+        btn_row.addWidget(notice_btn)
+
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        return card
 
     def _build_generic_channel_page(self, platform_id: str, parent: Optional[QWidget] = None) -> QWidget:
         """Build settings page for non-YouTube channels."""
@@ -1184,6 +1237,47 @@ class UploadPanel(QFrame, ThemedMixin):
             """)
 
     # ─── YouTube connection handlers ─────────────────────────────
+
+    def _open_coupang_notice_98(self):
+        """Open Coupang Partners notice #98."""
+        QDesktopServices.openUrl(QUrl("https://partners.coupang.com/#announcements/98"))
+
+    def _create_coupang_verification_pack(self):
+        """Create Coupang Partners channel verification checklist."""
+        from ui.components.custom_dialog import show_error, show_info
+
+        try:
+            yt_manager = getattr(self.gui, "youtube_manager", None) if self.gui else None
+            if yt_manager is None:
+                from managers.youtube_manager import get_youtube_manager
+                yt_manager = get_youtube_manager()
+
+            linktree_url = ""
+            try:
+                linktree_settings = self.settings.get_linktree_settings()
+                linktree_url = str(linktree_settings.get("profile_url", "") or "").strip()
+            except Exception as exc:
+                logger.debug("[UploadPanel] Linktree profile lookup skipped: %s", exc)
+            if not linktree_url:
+                try:
+                    from managers.linktree_manager import get_linktree_manager
+                    linktree_url = get_linktree_manager().get_profile_url()
+                except Exception as exc:
+                    logger.debug("[UploadPanel] Linktree default lookup skipped: %s", exc)
+
+            guide_path = yt_manager.write_coupang_partners_submission_guide(
+                linktree_url=linktree_url
+            )
+            show_info(
+                self,
+                "인증 자료 생성 완료",
+                "쿠팡 파트너스 채널 인증 재신청 체크리스트를 생성했습니다.\n\n"
+                f"{guide_path}\n\n"
+                "YouTube 채널 URL과 대가성 문구가 보이는 스크린샷을 함께 등록하세요.",
+            )
+        except Exception as exc:
+            logger.error("[UploadPanel] Coupang verification guide failed: %s", exc)
+            show_error(self, "인증 자료 생성 실패", str(exc))
 
     def _connect_youtube(self, platform_id: str):
         """Connect YouTube channel via OAuth."""

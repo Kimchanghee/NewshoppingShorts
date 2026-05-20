@@ -1,4 +1,4 @@
-from managers.linktree_manager import LinktreeManager
+from managers.linktree_manager import COUPANG_AFFILIATE_DISCLOSURE, LinktreeManager
 
 
 class _DummySettings:
@@ -114,6 +114,7 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
     assert captured["url"] == "https://link.coupang.com/a/abc"
     assert captured["title"].startswith("[001] test")
     assert len(captured["title"]) <= LinktreeManager.MAX_PRODUCT_TITLE_LENGTH
+    assert captured["description"] == COUPANG_AFFILIATE_DISCLOSURE
     assert captured["source_url"] == "https://www.coupang.com/vp/products/1"
     assert captured["extra"]["channel"] == "shopping_shorts_maker"
 

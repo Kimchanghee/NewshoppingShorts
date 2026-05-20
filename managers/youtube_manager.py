@@ -30,6 +30,8 @@ COUPANG_AFFILIATE_DISCLOSURE = (
     "이 게시물은 쿠팡 파트너스 활동의 일환으로, "
     "이에 따른 일정액의 수수료를 제공받습니다."
 )
+COUPANG_PAID_PROMOTION_TITLE_MARKER = "[광고]"
+COUPANG_PARTNERS_NOTICE_98_URL = "https://partners.coupang.com/#announcements/98"
 
 # YouTube API imports (optional)
 try:
@@ -291,7 +293,14 @@ class YouTubeManager:
             "subscriber_count": self._channel.subscriber_count,
             "video_count": self._channel.video_count,
             "connected_at": self._channel.connected_at,
+            "channel_url": self.get_channel_url(),
         }
+
+    def get_channel_url(self) -> str:
+        """Return a stable YouTube channel URL for Coupang Partners review."""
+        if not self._channel or not self._channel.channel_id:
+            return ""
+        return f"https://www.youtube.com/channel/{self._channel.channel_id}"
 
     def get_last_error(self) -> str:
         """Return the latest YouTube connection error message."""
@@ -339,8 +348,19 @@ class YouTubeManager:
             # Refresh or get new credentials
             if not creds or not creds.valid:
                 if creds and creds.expired and creds.refresh_token:
-                    creds.refresh(Request())
-                else:
+                    try:
+                        creds.refresh(Request())
+                    except Exception as refresh_error:
+                        if "invalid_grant" not in str(refresh_error):
+                            raise
+                        logger.info("[YouTube] OAuth 토큰이 만료/폐기되어 재인증을 진행합니다.")
+                        try:
+                            os.remove(token_path)
+                        except OSError:
+                            pass
+                        creds = None
+
+                if not creds or not creds.valid:
                     oauth_config = self._load_client_secret_config_securely()
                     if oauth_config is None:
                         if not client_secrets_file:
@@ -373,9 +393,18 @@ class YouTubeManager:
                         if oauth_timeout_seconds is not None
                         else self.OAUTH_FLOW_TIMEOUT_SECONDS
                     )
+                    auth_kwargs = {}
+                    if os.environ.get("YOUTUBE_OAUTH_SELECT_ACCOUNT", "1").lower() not in {
+                        "0",
+                        "false",
+                        "no",
+                    }:
+                        auth_kwargs["prompt"] = "consent select_account"
+
                     creds = flow.run_local_server(
                         port=0,
-                        timeout_seconds=timeout_seconds
+                        timeout_seconds=timeout_seconds,
+                        **auth_kwargs,
                     )
 
                 # Save credentials
@@ -679,6 +708,53 @@ class YouTubeManager:
         except Exception as e:
             logger.error(f"[YouTube] 채널 정보 조회 실패: {e}")
 
+    def _ensure_youtube_service(self) -> bool:
+        """
+        Ensure YouTube API service is ready using saved OAuth token (non-interactive).
+
+        Returns:
+            True if service is available.
+        """
+        if self._youtube_service is not None:
+            return True
+        if not YOUTUBE_API_AVAILABLE:
+            return False
+
+        try:
+            self._migrate_legacy_oauth_files()
+            token_path = self._get_token_path()
+            if not os.path.exists(token_path):
+                logger.warning("[YouTube] OAuth 토큰이 없어 업로드를 시작할 수 없습니다.")
+                return False
+
+            creds = Credentials.from_authorized_user_file(token_path, self.SCOPES)
+            if not creds.valid:
+                if creds.expired and creds.refresh_token:
+                    creds.refresh(Request())
+                    try:
+                        with open(token_path, "w", encoding="utf-8") as token:
+                            token.write(creds.to_json())
+                    except Exception as save_err:
+                        logger.debug("[YouTube] 갱신 토큰 저장 실패: %s", save_err)
+                else:
+                    logger.warning("[YouTube] OAuth 토큰이 유효하지 않습니다. 채널을 다시 연결해주세요.")
+                    return False
+
+            self._credentials = creds
+            self._youtube_service = build("youtube", "v3", credentials=creds)
+            if not self._channel or not self._channel.channel_id:
+                self._fetch_channel_info()
+            return self._youtube_service is not None
+        except Exception as e:
+            if "invalid_grant" in str(e).lower():
+                logger.warning("[YouTube] OAuth 토큰이 만료/폐기되었습니다. 채널을 다시 연결해주세요.")
+                try:
+                    self.disconnect_channel()
+                except Exception:
+                    pass
+            logger.warning("[YouTube] 저장된 토큰으로 서비스 복원 실패: %s", e)
+            return False
+
     # ============ Upload Settings ============
 
     def get_upload_settings(self) -> AutoUploadSettings:
@@ -821,6 +897,50 @@ class YouTubeManager:
 
         return desc.strip()
 
+    @staticmethod
+    def ensure_coupang_title_compliance(title: str, max_length: int = 100) -> str:
+        """Ensure Shorts title carries a visible paid-promotion marker."""
+        clean_title = " ".join(str(title or "").split()) or "쇼핑 추천 영상"
+        lowered = clean_title.lower()
+        paid_markers = (
+            COUPANG_PAID_PROMOTION_TITLE_MARKER,
+            "유료광고",
+            "유료 광고",
+            "광고 포함",
+            "유료광고 포함",
+        )
+        if any(marker.lower() in lowered for marker in paid_markers):
+            return clean_title[:max_length].rstrip()
+
+        prefix = f"{COUPANG_PAID_PROMOTION_TITLE_MARKER} "
+        available = max(1, max_length - len(prefix))
+        if len(clean_title) > available:
+            clean_title = clean_title[: max(1, available - 3)].rstrip() + "..."
+        return f"{prefix}{clean_title}".strip()
+
+    @staticmethod
+    def ensure_coupang_comment_compliance(
+        comment: str,
+        purchase_link: str = "",
+        original_link: str = "",
+    ) -> str:
+        """Ensure YouTube comments show disclosure before any collapsed text."""
+        text = str(comment or "").strip()
+        purchase = str(purchase_link or "").strip()
+        original = str(original_link or "").strip()
+
+        if COUPANG_AFFILIATE_DISCLOSURE not in text:
+            text = f"{COUPANG_AFFILIATE_DISCLOSURE}\n\n{text}" if text else COUPANG_AFFILIATE_DISCLOSURE
+
+        preferred_link = purchase or original
+        if preferred_link and preferred_link not in text:
+            text = f"{text}\n\n구매 링크: {preferred_link}"
+
+        if original and original != preferred_link and original not in text:
+            text = f"{text}\n원상품 링크: {original}"
+
+        return text.strip()
+
     def generate_seo_hashtags(self, product_info: str, max_count: int = 10) -> List[str]:
         """
         Generate SEO-optimized hashtags.
@@ -891,6 +1011,7 @@ class YouTubeManager:
 
         purchase_link = coupang_deep_link or source_url
         if self._is_coupang_url(purchase_link) or self._is_coupang_url(source_url):
+            title = self.ensure_coupang_title_compliance(title)
             description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
 
         if not tags and self._upload_settings.auto_hashtags:
@@ -910,6 +1031,10 @@ class YouTubeManager:
 
         logger.info(f"[YouTube] 업로드 대기열 추가: {title}")
 
+        # 업로드 활성화 상태인데 스레드가 꺼져 있으면 자동 재시작
+        if self._upload_settings.enabled and self.is_connected() and not self._upload_running:
+            self.start_auto_upload()
+
     def start_auto_upload(self) -> None:
         """Start auto-upload background thread"""
         if self._upload_running:
@@ -917,6 +1042,10 @@ class YouTubeManager:
 
         if not self.is_connected():
             logger.warning("[YouTube] 채널이 연결되지 않았습니다.")
+            return
+
+        if not self._ensure_youtube_service():
+            logger.warning("[YouTube] 업로드 서비스를 준비하지 못했습니다. 채널 재연결 후 다시 시도해주세요.")
             return
 
         self._upload_running = True
@@ -972,7 +1101,7 @@ class YouTubeManager:
         Returns:
             True if upload successful
         """
-        if not self._youtube_service:
+        if not self._youtube_service and not self._ensure_youtube_service():
             return False
 
         video_path = item.get("video_path", "")
@@ -987,6 +1116,7 @@ class YouTubeManager:
             description = item.get("description", "")
             purchase_link = item.get("coupang_deep_link") or item.get("source_url") or ""
             if self._is_coupang_url(purchase_link):
+                item["title"] = self.ensure_coupang_title_compliance(item.get("title", ""))
                 description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
             if hashtag_str:
                 description = f"{description}\n\n{hashtag_str}"
@@ -1212,7 +1342,73 @@ class YouTubeManager:
         else:
             text = prompt_with_tokens
 
+        if self._is_coupang_url(purchase_link) or self._is_coupang_url(original_link):
+            text = self.ensure_coupang_comment_compliance(
+                text,
+                purchase_link=purchase_link,
+                original_link=original_link,
+            )
+
         return self._trim_comment_text(text)
+
+    def build_coupang_partners_submission_guide(self, linktree_url: str = "") -> str:
+        """Build a markdown checklist for Coupang Partners channel review."""
+        channel_info = self.get_channel_info()
+        channel_name = channel_info.get("channel_name") or channel_info.get("title") or "미연결"
+        channel_url = channel_info.get("channel_url") or self.get_channel_url() or "유튜브 채널 미연결"
+        linktree = str(linktree_url or "").strip() or "Linktree Profile 미설정"
+        generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        return "\n".join([
+            "# 쿠팡 파트너스 채널 인증 재신청 자료",
+            "",
+            f"- 생성일: {generated_at}",
+            f"- 참고 공지: {COUPANG_PARTNERS_NOTICE_98_URL}",
+            "",
+            "## 등록할 채널",
+            f"- YouTube 채널명: {channel_name}",
+            f"- YouTube 채널 URL: {channel_url}",
+            f"- Linktree Profile: {linktree}",
+            "",
+            "## 쿠팡 파트너스 신청 화면 입력",
+            "- 웹사이트 목록에는 YouTube 프로필을 확인할 수 있는 채널 URL을 입력합니다.",
+            "- Linktree를 함께 쓰는 경우 Linktree 공개 Profile URL도 활동 페이지로 추가합니다.",
+            "- 스크린샷에는 유튜브 활동 페이지, 파트너스 링크, 대가성 문구가 모두 보이게 합니다.",
+            "",
+            "## 스크린샷 체크리스트",
+            "- YouTube 채널 홈에서 채널 URL과 채널명이 보이는 화면",
+            "- 쿠팡 파트너스 링크가 들어간 영상 설명란 또는 댓글이 접히지 않고 보이는 화면",
+            "- 쇼츠 제목의 `[광고]` 표기 또는 영상 내부의 `유료광고 포함` 표기가 보이는 화면",
+            "- Linktree를 쓰는 경우 공개 페이지에서 쿠팡 링크 카드와 대가성 문구가 보이는 화면",
+            "",
+            "## 프로그램 자동 보강 내용",
+            f"- 쿠팡 링크가 포함된 YouTube 제목 앞에 `{COUPANG_PAID_PROMOTION_TITLE_MARKER}`를 붙입니다.",
+            f"- YouTube 설명과 자동 댓글 첫 줄에 `{COUPANG_AFFILIATE_DISCLOSURE}` 문구를 넣습니다.",
+            "- 쿠팡 구매 링크가 설명 또는 댓글에 누락되면 자동으로 추가합니다.",
+            "- 자동 댓글은 대가성 문구가 `더보기` 뒤로 밀리지 않도록 첫 줄에 배치합니다.",
+            "",
+            "## 최종 점검",
+            "- 파트너스 링크가 들어간 영상 설명란, 댓글, 커뮤니티 글에 대가성 문구가 빠지지 않았는지 확인",
+            "- 대가성 문구가 `더보기`를 누르지 않아도 보이는지 확인",
+            "- Shorts 제목 또는 영상 내부에 `[광고]`/`유료광고 포함` 등 경제적 이해관계 표시가 있는지 확인",
+            "- 파트너스 활동을 확인할 수 있는 링크와 스크린샷이 쿠팡 파트너스에 모두 등록됐는지 확인",
+            "",
+        ])
+
+    def write_coupang_partners_submission_guide(
+        self,
+        linktree_url: str = "",
+        output_path: str = "",
+    ) -> str:
+        """Write the Coupang Partners review checklist to a user data file."""
+        path = output_path or os.path.join(
+            self._get_user_data_dir(),
+            "coupang_partners_channel_verification.md",
+        )
+        self._ensure_writable_dir(os.path.dirname(path))
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(self.build_coupang_partners_submission_guide(linktree_url=linktree_url))
+        return path
 
     def _post_top_level_comment(self, video_id: str, text: str) -> bool:
         if not self._youtube_service or not video_id or not text:

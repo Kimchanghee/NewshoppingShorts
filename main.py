@@ -24,6 +24,13 @@ from PyQt6.QtWidgets import QApplication, QMainWindow
 
 import config
 
+try:
+    from startup.environment import setup_ffmpeg_path
+
+    setup_ffmpeg_path()
+except Exception:
+    pass
+
 # Platform-specific ffmpeg fallback locations.
 # Windows: bundled UltData path. macOS: Homebrew (/opt/homebrew, /usr/local), MacPorts.
 # Linux: common package-manager locations.
@@ -31,7 +38,7 @@ if sys.platform.startswith("win"):
     FFMPEG_FALLBACKS = [r"C:\Program Files (x86)\UltData\Resources\ffmpegs"]
 elif sys.platform == "darwin":
     FFMPEG_FALLBACKS = [
-        "/opt/homebrew/bin"
+        "/opt/homebrew/bin",
         "/usr/local/bin",
         "/opt/local/bin",
     ]

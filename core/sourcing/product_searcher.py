@@ -746,6 +746,131 @@ async def search_1688(
     return candidates
 
 
+async def search_1688_by_image(
+    browser: Any,
+    image_url: str,
+    reference_name: str,
+    keyword_cn: str = "",
+    keyword_en: str = "",
+) -> List[Dict[str, Any]]:
+    """Image-first 1688 search.
+
+    1688 desktop endpoints are often challenge-gated for bot-like traffic.
+    Mobile endpoints tend to be more tolerant, so we try mobile-first and then
+    desktop URL-parameter image-search endpoints.
+    """
+    import urllib.parse
+
+    if not image_url or not image_url.startswith("http"):
+        return []
+
+    print(f"[ProductSearcher] 1688 IMAGE search: {image_url[:80]}")
+    logger.info("[ProductSearcher] 1688 image search: %s", image_url[:80])
+
+    encoded = urllib.parse.quote(image_url, safe="")
+    search_urls = [
+        # Mobile-first (usually less login pressure)
+        f"https://m.1688.com/offer/search.htm?imageAddress={encoded}",
+        f"https://m.1688.com/page/offerlist.html?imageAddress={encoded}",
+        # Desktop image-search pages (may hit anti-bot wall; still worth trying)
+        f"https://s.1688.com/youyuan/index.htm?imageAddress={encoded}",
+        f"https://s.1688.com/selloffer/offer_search.htm?imageAddress={encoded}",
+    ]
+
+    raw_all: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
+
+    for idx, url in enumerate(search_urls, start=1):
+        try:
+            tab = await browser.get(url)
+            if tab is None:
+                continue
+            await tab.sleep(7)
+
+            current_url = await tab.evaluate("window.location.href") or ""
+            if any(x in current_url for x in ("login.taobao.com", "login.1688.com", "_____tmd_____", "punish")):
+                logger.info("[ProductSearcher] 1688 image endpoint blocked/challenged: %s", current_url[:100])
+                continue
+
+            # Trigger lazy-load before scraping cards.
+            for y in (300, 700, 1200, 1800):
+                await tab.evaluate(f"window.scrollTo(0, {y})")
+                await tab.sleep(1)
+            await tab.evaluate("window.scrollTo(0, 0)")
+            await tab.sleep(1)
+
+            raw = await tab.evaluate("""
+                (() => {
+                    const results = [];
+                    const seen = new Set();
+                    document.querySelectorAll(
+                        'a[href*="detail.1688.com"],'
+                        + 'a[href*="m.1688.com/offer"],'
+                        + 'a[href*="offer/"],'
+                        + 'a[href*="offerId"]'
+                    ).forEach(a => {
+                        if (results.length >= 40) return;
+                        const href = a.href || '';
+                        let oid = null;
+                        let m = href.match(/offer\\/(\\d{10,})/);
+                        if (m) oid = m[1];
+                        if (!oid) { m = href.match(/offerId[=:](\\d{10,})/); if (m) oid = m[1]; }
+                        if (!oid) { m = href.match(/(\\d{10,})\\.html/); if (m) oid = m[1]; }
+                        if (!oid || seen.has(oid)) return;
+                        seen.add(oid);
+                        const c = a.closest('[class*="item"], [class*="card"], [class*="offer"], li, div') || a.parentElement;
+                        const img = c ? c.querySelector('img[src]') : null;
+                        const tEl = c ? (c.querySelector('[class*="title"], h4, h3, h2') || a) : a;
+                        const title = (tEl.title || tEl.textContent || '').trim();
+                        const pEl = c ? c.querySelector('[class*="price"]') : null;
+                        results.push({
+                            id: oid,
+                            title: title.substring(0, 120),
+                            price: pEl ? pEl.textContent.trim() : null,
+                            image: img ? img.src : null,
+                            url: 'https://detail.1688.com/offer/' + oid + '.html'
+                        });
+                    });
+                    return results;
+                })()
+            """) or []
+
+            for x in raw:
+                xid = x.get("id")
+                if xid and xid not in seen_ids:
+                    seen_ids.add(xid)
+                    raw_all.append(x)
+
+            logger.info(
+                "[ProductSearcher] 1688 image endpoint #%d yielded %d new candidates",
+                idx,
+                len(raw),
+            )
+        except Exception as e:
+            logger.warning("[ProductSearcher] 1688 image endpoint #%d error: %s", idx, e)
+
+    if not raw_all:
+        print("[ProductSearcher] 1688 IMAGE search: 0 candidates")
+        return []
+
+    references = [reference_name, keyword_cn, keyword_en]
+    candidates = []
+    for p in raw_all:
+        title = p.get("title", "")
+        text_score = _multi_reference_score(title, references)
+        candidates.append(
+            {
+                **p,
+                "score": min(1.0, text_score + 0.10),
+                "source": "1688",
+                "image_search": True,
+            }
+        )
+    candidates.sort(key=lambda x: x["score"], reverse=True)
+    print(f"[ProductSearcher] 1688 IMAGE search: {len(candidates)} candidates")
+    return candidates
+
+
 
 
 async def search_aliexpress_by_image(
@@ -1129,6 +1254,37 @@ def _passes_category_guard(title: str, terms: List[str]) -> bool:
     return any(term.lower() in t for term in terms)
 
 
+def _passes_reference_constraints(title: str, references: Optional[List[str]]) -> bool:
+    """Reject candidates that match the broad category but contradict key attributes."""
+    if not references:
+        return True
+
+    ref = " ".join(r for r in references if r).lower()
+    title_l = (title or "").lower()
+    if not title_l:
+        return False
+
+    metal_markers = ("스텐", "스테인", "stainless", "steel", "metal", "304")
+    silicone_markers = ("silicone", "실리콘", "硅胶")
+    title_metal_markers = ("stainless", "steel", "metal", "304", "스텐", "스테인", "不锈钢")
+    if any(marker in ref for marker in metal_markers):
+        if any(marker in title_l for marker in silicone_markers) and not any(
+            marker in title_l for marker in title_metal_markers
+        ):
+            return False
+
+    adhesive_markers = ("접착", "adhesive", "stick", "붙")
+    title_adhesive_markers = ("adhesive", "stick", "wall", "mount", "mounted", "붙", "접착")
+    if any(marker in ref for marker in adhesive_markers):
+        soft_countertop_markers = ("soap dish", "silicone", "countertop", "tray")
+        if any(marker in title_l for marker in soft_countertop_markers) and not any(
+            marker in title_l for marker in title_adhesive_markers
+        ):
+            return False
+
+    return True
+
+
 def _has_minimum_overlap(
     title: str,
     references: List[str],
@@ -1191,11 +1347,18 @@ async def find_products_with_video(
             continue
 
         cand_score = float(cand.get("score") or 0.0)
-        if cand_score < min_score:
+        is_image_candidate = bool(cand.get("image_search"))
+        # Image-search candidates are visually pre-filtered, so allow a lower
+        # text-score gate. Keep category/reference guards active below.
+        effective_min_score = min_score
+        if is_image_candidate and min_score >= MIN_SIMILARITY_SCORE:
+            effective_min_score = max(0.05, min_score - 0.10)
+
+        if cand_score < effective_min_score:
             rejected_low_score += 1
             logger.info(
                 "[ProductSearcher] [%s] skip low-score=%.3f (<%.2f) %s",
-                source_label, cand_score, min_score, (cand.get("title") or "")[:50],
+                source_label, cand_score, effective_min_score, (cand.get("title") or "")[:50],
             )
             continue
 
@@ -1216,6 +1379,13 @@ async def find_products_with_video(
         if not _passes_category_guard(cand.get("title"), category_terms or []):
             logger.info(
                 "[ProductSearcher] [%s] skip category-guard %s",
+                source_label, (cand.get("title") or "")[:50],
+            )
+            continue
+
+        if not _passes_reference_constraints(cand.get("title", ""), overlap_references):
+            logger.info(
+                "[ProductSearcher] [%s] skip reference-constraint %s",
                 source_label, (cand.get("title") or "")[:50],
             )
             continue

@@ -428,126 +428,17 @@ class SettingsTab(QWidget, ThemedMixin):
         self._update_key_count()
         
         # =================== SECTION: Coupang + Linktree Automation ===================
-        self.link_automation_section = SettingsSection("쿠팡/링크트리 자동 링크 (선택)")
+        self.link_automation_section = SettingsSection("링크트리 연결 (선택)")
 
         automation_intro = QLabel(
-            "이미 쿠팡 파트너스 단축 링크(link.coupang.com/a/...)를 넣는다면 쿠팡 API Key는 필요 없습니다. "
-            "원본 coupang.com 링크를 자동 딥링크로 바꾸거나 Linktree 자동 발행까지 쓰고 싶을 때만 아래 선택 항목을 설정하세요."
+            "쿠팡 단축 링크를 직접 쓰면 아래 공개 주소만 저장하면 됩니다. "
+            "API와 Webhook은 자동화가 필요할 때만 열어 설정하세요."
         )
         automation_intro.setWordWrap(True)
         automation_intro.setStyleSheet(
             f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
         )
         self.link_automation_section.content_layout.addWidget(automation_intro)
-
-        linktree_beginner_card = QFrame()
-        linktree_beginner_card.setStyleSheet(f"""
-            QFrame {{
-                background-color: {c.surface_variant};
-                border: 1px solid {c.border_light};
-                border-radius: {ds.radius.base}px;
-            }}
-        """)
-        beginner_layout = QVBoxLayout(linktree_beginner_card)
-        beginner_layout.setContentsMargins(14, 12, 14, 12)
-        beginner_layout.setSpacing(8)
-
-        beginner_title = QLabel("Linktree 처음 쓰는 분은 이것만 따라 하세요")
-        beginner_title.setFont(QFont(ds.typography.font_family_primary, 12, QFont.Weight.Bold))
-        beginner_title.setStyleSheet(f"color: {c.text_primary}; border: none; background: transparent;")
-        beginner_layout.addWidget(beginner_title)
-
-        beginner_steps = QLabel(
-            "1. 가입/로그인 버튼을 눌러 Linktree 계정을 만듭니다.\n"
-            "2. 관리자 화면에서 Add link를 눌러 쿠팡 링크 카드가 보이는지 먼저 확인합니다.\n"
-            "3. 내 공개 주소(예: https://linktr.ee/아이디)를 아래 Profile에 저장합니다.\n"
-            "4. 완전 자동 발행까지 원하면 Webhook URL을 추가하고 테스트 업로드를 누릅니다."
-        )
-        beginner_steps.setWordWrap(True)
-        beginner_steps.setStyleSheet(
-            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 11px; line-height: 1.4;"
-        )
-        beginner_layout.addWidget(beginner_steps)
-
-        beginner_note = QLabel(
-            "처음에는 Profile만 저장해도 충분합니다. Webhook은 자동으로 Linktree 카드를 추가하고 싶을 때만 설정하세요."
-        )
-        beginner_note.setWordWrap(True)
-        beginner_note.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
-        )
-        beginner_layout.addWidget(beginner_note)
-
-        beginner_btn_row = QHBoxLayout()
-        beginner_btn_row.setSpacing(8)
-
-        self.linktree_signup_btn = QPushButton("Linktree 가입/로그인")
-        self.linktree_signup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.linktree_signup_btn.clicked.connect(self._open_linktree_signup)
-        beginner_btn_row.addWidget(self.linktree_signup_btn)
-
-        self.linktree_admin_btn = QPushButton("관리자 열기")
-        self.linktree_admin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.linktree_admin_btn.clicked.connect(self._open_linktree_admin)
-        beginner_btn_row.addWidget(self.linktree_admin_btn)
-
-        self.linktree_profile_open_btn = QPushButton("내 공개 페이지 열기")
-        self.linktree_profile_open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.linktree_profile_open_btn.clicked.connect(self._open_linktree_profile)
-        beginner_btn_row.addWidget(self.linktree_profile_open_btn)
-        beginner_btn_row.addStretch()
-
-        beginner_layout.addLayout(beginner_btn_row)
-        self.link_automation_section.content_layout.addWidget(linktree_beginner_card)
-
-        linktree_guide = QLabel(
-            "자동 발행은 Linktree에 직접 쓰는 대신 Make/Zapier/n8n/Cloudflare Worker 같은 Webhook 중계 주소를 사용합니다. "
-            "Webhook 인증 키는 중계 서버가 요구할 때만 입력합니다."
-        )
-        linktree_guide.setWordWrap(True)
-        linktree_guide.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
-        )
-        self.link_automation_section.content_layout.addWidget(linktree_guide)
-
-        linktree_docs_link = QLabel(
-            '<a href="https://docs.linktr.ee/" style="color: #3B82F6; text-decoration: none;">Linktree 개발 문서 보기</a>'
-        )
-        linktree_docs_link.setOpenExternalLinks(True)
-        linktree_docs_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
-        self.link_automation_section.content_layout.addWidget(linktree_docs_link)
-
-        setup_notice_links = QLabel(
-            '세팅별 캡쳐 매뉴얼: '
-            f'<a href="{SETUP_NOTICE_BASE_URL}/coupang-partners-channel-setup" style="color: #3B82F6; text-decoration: none;">쿠파스 채널 등록</a>'
-            ' · '
-            f'<a href="{SETUP_NOTICE_BASE_URL}/linktree-signup-link-setup" style="color: #3B82F6; text-decoration: none;">Linktree 가입·세팅</a>'
-            ' · '
-            f'<a href="{SETUP_NOTICE_BASE_URL}/coupang-partners-product-link" style="color: #3B82F6; text-decoration: none;">상품 링크 가져오기</a>'
-            ' · '
-            f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-oauth-client-guide" style="color: #3B82F6; text-decoration: none;">YouTube OAuth 설정</a>'
-            ' · '
-            f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-google-cloud-oauth-screenshots" style="color: #3B82F6; text-decoration: none;">Google Cloud 실제 캡쳐</a>'
-            ' · '
-            f'<a href="{SETUP_NOTICE_BASE_URL}/youtube-linktree-upload-check" style="color: #3B82F6; text-decoration: none;">업로드 후 검수</a>'
-        )
-        setup_notice_links.setWordWrap(True)
-        setup_notice_links.setOpenExternalLinks(True)
-        setup_notice_links.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
-        setup_notice_links.setStyleSheet(
-            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px;"
-        )
-        self.link_automation_section.content_layout.addWidget(setup_notice_links)
-
-        integration_steps = QLabel(
-            "권장 순서: 1) 쿠팡 파트너스 단축 링크 수동 생성 2) Linktree Profile 저장 "
-            "3) 자동 발행이 필요할 때만 Webhook URL/인증 키 추가 4) 테스트 업로드로 검증"
-        )
-        integration_steps.setWordWrap(True)
-        integration_steps.setStyleSheet(
-            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 11px;"
-        )
-        self.link_automation_section.content_layout.addWidget(integration_steps)
 
         automation_input_style = f"""
             QLineEdit {{
@@ -563,58 +454,184 @@ class SettingsTab(QWidget, ThemedMixin):
             }}
         """
 
+        automation_button_style = f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                padding: 8px 12px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {c.surface};
+            }}
+        """
+        automation_primary_button_style = f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: {c.text_on_primary};
+                padding: 8px 14px;
+                border: 1px solid {c.primary};
+                border-radius: {ds.radius.sm}px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background-color: {c.primary_hover};
+                border-color: {c.primary_hover};
+            }}
+        """
+
+        self.linktree_profile_input = QLineEdit()
+        self.linktree_profile_input.setPlaceholderText("Linktree 공개 주소 예) https://linktr.ee/myshop")
+        self.linktree_profile_input.setToolTip("YouTube 설명과 검수 화면에서 사용할 Linktree 공개 프로필 주소입니다.")
+        self.linktree_profile_input.setStyleSheet(automation_input_style)
+        self.linktree_profile_input.textChanged.connect(self._update_link_automation_status)
+        self.link_automation_section.add_row("공개 주소", self.linktree_profile_input)
+
+        quick_btn_container = QWidget()
+        quick_btn_container.setStyleSheet("background: transparent; border: none;")
+        quick_btn_layout = QHBoxLayout(quick_btn_container)
+        quick_btn_layout.setContentsMargins(0, 0, 0, 0)
+        quick_btn_layout.setSpacing(8)
+
+        self.linktree_save_btn = QPushButton("저장")
+        self.linktree_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_save_btn.setStyleSheet(automation_primary_button_style)
+        self.linktree_save_btn.clicked.connect(self._save_linktree_settings)
+        quick_btn_layout.addWidget(self.linktree_save_btn)
+        quick_btn_layout.addStretch()
+        self.link_automation_section.add_row("Linktree", quick_btn_container)
+
+        setup_notice_links = QLabel(
+            f'<a href="{SETUP_NOTICE_BASE_URL}/linktree-signup-link-setup" style="color: #3B82F6; text-decoration: none;">Linktree 세팅 가이드</a>'
+        )
+        setup_notice_links.setWordWrap(True)
+        setup_notice_links.setOpenExternalLinks(True)
+        setup_notice_links.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        setup_notice_links.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px;"
+        )
+        self.link_automation_section.content_layout.addWidget(setup_notice_links)
+
+        self.link_advanced_toggle = QCheckBox("고급 자동화 설정 보기")
+        self.link_advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.link_advanced_toggle.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        self.link_advanced_toggle.toggled.connect(self._set_link_advanced_visible)
+        self.link_automation_section.content_layout.addWidget(self.link_advanced_toggle)
+
+        self.link_advanced_container = QFrame()
+        self.link_advanced_container.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+        """)
+        link_advanced_layout = QVBoxLayout(self.link_advanced_container)
+        link_advanced_layout.setContentsMargins(14, 12, 14, 12)
+        link_advanced_layout.setSpacing(10)
+
+        advanced_note = QLabel(
+            "원본 coupang.com 링크를 자동 딥링크로 바꾸거나 Linktree 카드까지 자동 발행할 때만 필요합니다."
+        )
+        advanced_note.setWordWrap(True)
+        advanced_note.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        link_advanced_layout.addWidget(advanced_note)
+
+        def add_advanced_row(label_text: str, widget: QWidget):
+            row = QHBoxLayout()
+            row.setSpacing(ds.spacing.space_4)
+
+            label = QLabel(label_text)
+            label.setFont(QFont(ds.typography.font_family_primary, 12))
+            label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+            label.setMinimumWidth(120)
+            row.addWidget(label)
+
+            widget.setStyleSheet(widget.styleSheet() + " border: none;")
+            row.addWidget(widget, stretch=1)
+            link_advanced_layout.addLayout(row)
+
+        shortcut_btn_container = QWidget()
+        shortcut_btn_container.setStyleSheet("background: transparent; border: none;")
+        shortcut_btn_layout = QHBoxLayout(shortcut_btn_container)
+        shortcut_btn_layout.setContentsMargins(0, 0, 0, 0)
+        shortcut_btn_layout.setSpacing(8)
+
+        self.linktree_profile_open_btn = QPushButton("공개 페이지 열기")
+        self.linktree_profile_open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_profile_open_btn.setStyleSheet(automation_button_style)
+        self.linktree_profile_open_btn.clicked.connect(self._open_linktree_profile)
+        shortcut_btn_layout.addWidget(self.linktree_profile_open_btn)
+
+        self.linktree_admin_btn = QPushButton("관리자 열기")
+        self.linktree_admin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_admin_btn.setStyleSheet(automation_button_style)
+        self.linktree_admin_btn.clicked.connect(self._open_linktree_admin)
+        shortcut_btn_layout.addWidget(self.linktree_admin_btn)
+
+        self.linktree_signup_btn = QPushButton("가입/로그인")
+        self.linktree_signup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_signup_btn.setStyleSheet(automation_button_style)
+        self.linktree_signup_btn.clicked.connect(self._open_linktree_signup)
+        shortcut_btn_layout.addWidget(self.linktree_signup_btn)
+        shortcut_btn_layout.addStretch()
+        add_advanced_row("Linktree 바로가기", shortcut_btn_container)
+
         self.coupang_access_input = QLineEdit()
         self.coupang_access_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Access Key")
         self.coupang_access_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.coupang_access_input.setStyleSheet(automation_input_style)
         self.coupang_access_input.textChanged.connect(self._update_link_automation_status)
-        self.link_automation_section.add_row("Coupang Access (선택)", self.coupang_access_input)
+        add_advanced_row("Coupang Access", self.coupang_access_input)
 
         self.coupang_secret_input = QLineEdit()
         self.coupang_secret_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Secret Key")
         self.coupang_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.coupang_secret_input.setStyleSheet(automation_input_style)
         self.coupang_secret_input.textChanged.connect(self._update_link_automation_status)
-        self.link_automation_section.add_row("Coupang Secret (선택)", self.coupang_secret_input)
+        add_advanced_row("Coupang Secret", self.coupang_secret_input)
 
         coupang_btn_container = QWidget()
+        coupang_btn_container.setStyleSheet("background: transparent; border: none;")
         coupang_btn_layout = QHBoxLayout(coupang_btn_container)
         coupang_btn_layout.setContentsMargins(0, 0, 0, 0)
         coupang_btn_layout.setSpacing(8)
 
         self.coupang_save_btn = QPushButton("쿠팡 키 저장")
         self.coupang_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coupang_save_btn.setStyleSheet(automation_button_style)
         self.coupang_save_btn.clicked.connect(self._save_coupang_settings)
         coupang_btn_layout.addWidget(self.coupang_save_btn)
 
         self.coupang_test_btn = QPushButton("쿠팡 연결 테스트")
         self.coupang_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coupang_test_btn.setStyleSheet(automation_button_style)
         self.coupang_test_btn.clicked.connect(self._test_coupang_connection)
         coupang_btn_layout.addWidget(self.coupang_test_btn)
         coupang_btn_layout.addStretch()
-        self.link_automation_section.add_row("Coupang 액션", coupang_btn_container)
+        add_advanced_row("Coupang", coupang_btn_container)
 
         self.linktree_webhook_input = QLineEdit()
         self.linktree_webhook_input.setPlaceholderText("선택: 자동 발행용 Webhook URL (https://...)")
         self.linktree_webhook_input.setToolTip("Linktree 카드를 프로그램이 자동으로 추가하려면 Webhook URL이 필요합니다.")
         self.linktree_webhook_input.setStyleSheet(automation_input_style)
         self.linktree_webhook_input.textChanged.connect(self._update_link_automation_status)
-        self.link_automation_section.add_row("Linktree Webhook", self.linktree_webhook_input)
+        add_advanced_row("Webhook URL", self.linktree_webhook_input)
 
         self.linktree_api_key_input = QLineEdit()
         self.linktree_api_key_input.setPlaceholderText("선택: Webhook 인증 키")
         self.linktree_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.linktree_api_key_input.setStyleSheet(automation_input_style)
-        self.link_automation_section.add_row("Webhook 인증 키", self.linktree_api_key_input)
-
-        self.linktree_profile_input = QLineEdit()
-        self.linktree_profile_input.setPlaceholderText("권장: 내 공개 주소 예) https://linktr.ee/myshop")
-        self.linktree_profile_input.setToolTip("YouTube 설명과 검수 화면에서 사용할 Linktree 공개 프로필 주소입니다.")
-        self.linktree_profile_input.setStyleSheet(automation_input_style)
-        self.linktree_profile_input.textChanged.connect(self._update_link_automation_status)
-        self.link_automation_section.add_row("Linktree Profile", self.linktree_profile_input)
+        add_advanced_row("Webhook 인증 키", self.linktree_api_key_input)
 
         checkbox_container = QWidget()
+        checkbox_container.setStyleSheet("background: transparent; border: none;")
         checkbox_layout = QHBoxLayout(checkbox_container)
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
         self.linktree_auto_checkbox = QCheckBox("쿠팡 링크 생성 시 Linktree 자동 업로드")
@@ -625,24 +642,31 @@ class SettingsTab(QWidget, ThemedMixin):
         self.linktree_auto_checkbox.stateChanged.connect(self._update_link_automation_status)
         checkbox_layout.addWidget(self.linktree_auto_checkbox)
         checkbox_layout.addStretch()
-        self.link_automation_section.add_row("자동 업로드", checkbox_container)
+        add_advanced_row("자동 업로드", checkbox_container)
 
         linktree_btn_container = QWidget()
+        linktree_btn_container.setStyleSheet("background: transparent; border: none;")
         linktree_btn_layout = QHBoxLayout(linktree_btn_container)
         linktree_btn_layout.setContentsMargins(0, 0, 0, 0)
         linktree_btn_layout.setSpacing(8)
 
-        self.linktree_save_btn = QPushButton("링크트리 설정 저장")
-        self.linktree_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.linktree_save_btn.clicked.connect(self._save_linktree_settings)
-        linktree_btn_layout.addWidget(self.linktree_save_btn)
-
         self.linktree_test_btn = QPushButton("테스트 업로드")
         self.linktree_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_test_btn.setStyleSheet(automation_button_style)
         self.linktree_test_btn.clicked.connect(self._test_linktree_publish)
         linktree_btn_layout.addWidget(self.linktree_test_btn)
         linktree_btn_layout.addStretch()
-        self.link_automation_section.add_row("Linktree 액션", linktree_btn_container)
+        add_advanced_row("Linktree", linktree_btn_container)
+
+        linktree_docs_link = QLabel(
+            '<a href="https://docs.linktr.ee/" style="color: #3B82F6; text-decoration: none;">Linktree 개발 문서 보기</a>'
+        )
+        linktree_docs_link.setOpenExternalLinks(True)
+        linktree_docs_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
+        link_advanced_layout.addWidget(linktree_docs_link)
+
+        self.link_automation_section.content_layout.addWidget(self.link_advanced_container)
+        self._set_link_advanced_visible(False)
 
         self.link_automation_status = QLabel("상태: 미설정")
         self.link_automation_status.setStyleSheet(
@@ -797,9 +821,27 @@ class SettingsTab(QWidget, ThemedMixin):
             self.linktree_api_key_input.setText(linktree.get("api_key", ""))
             self.linktree_profile_input.setText(linktree.get("profile_url", ""))
             self.linktree_auto_checkbox.setChecked(bool(linktree.get("auto_publish", False)))
+            has_advanced_settings = any([
+                coupang.get("access_key"),
+                coupang.get("secret_key"),
+                linktree.get("webhook_url"),
+                linktree.get("api_key"),
+                linktree.get("auto_publish", False),
+            ])
+            self._set_link_advanced_visible(has_advanced_settings)
             self._update_link_automation_status()
         except Exception as exc:
             logger.warning("[Settings] Failed to load link automation settings: %s", exc)
+
+    def _set_link_advanced_visible(self, visible: bool):
+        """Show or hide optional Coupang/Webhook fields."""
+        if hasattr(self, "link_advanced_container"):
+            self.link_advanced_container.setVisible(bool(visible))
+
+        if hasattr(self, "link_advanced_toggle") and self.link_advanced_toggle.isChecked() != bool(visible):
+            self.link_advanced_toggle.blockSignals(True)
+            self.link_advanced_toggle.setChecked(bool(visible))
+            self.link_advanced_toggle.blockSignals(False)
 
     def _update_link_automation_status(self):
         """Refresh status label for Coupang/Linktree setup."""
@@ -807,12 +849,16 @@ class SettingsTab(QWidget, ThemedMixin):
         linktree_profile_ready = bool(self.linktree_profile_input.text().strip())
         linktree_auto_ready = bool(self.linktree_webhook_input.text().strip())
         auto_enabled = bool(self.linktree_auto_checkbox.isChecked())
-        self.link_automation_status.setText(
-            f"상태: Coupang 자동딥링크={'설정됨' if coupang_ready else '선택'} / "
-            f"Linktree Profile={'설정됨' if linktree_profile_ready else '미설정'} / "
-            f"Linktree 자동발행={'준비됨' if linktree_auto_ready else '선택'} / "
-            f"Auto={'ON' if auto_enabled else 'OFF'}"
-        )
+
+        status_parts = ["공개 주소 저장됨" if linktree_profile_ready else "공개 주소 미설정"]
+        if coupang_ready:
+            status_parts.append("쿠팡 자동 딥링크 준비")
+        if auto_enabled:
+            status_parts.append("Linktree 자동 발행 준비" if linktree_auto_ready else "자동 발행은 Webhook 필요")
+        elif linktree_auto_ready:
+            status_parts.append("Webhook 저장됨")
+
+        self.link_automation_status.setText("상태: " + " · ".join(status_parts))
 
     def _open_external_url(self, url: str):
         """Open a setup URL in the user's default browser."""
