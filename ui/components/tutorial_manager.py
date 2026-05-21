@@ -19,6 +19,16 @@ if TYPE_CHECKING:
 # tooltip_x, tooltip_y: 툴팁의 절대 좌표
 TUTORIAL_STEPS: List[Dict[str, Any]] = [
     {
+        "id": "setup_assistant",
+        "title": "자동 설정 도우미 (쉬운 시작)",
+        "description": "사용이 어렵다면 설정의 자동 설정 도우미를 먼저 실행하세요.\n필수 연결을 단계별로 안내해줍니다.",
+        "target_type": "widget",
+        "target_widget": "setup_assistant_section",
+        "navigate_to": "settings",
+        "tooltip_x": 700,
+        "tooltip_y": 70,
+    },
+    {
         "id": "mode",
         "title": "모드 선택",
         "description": "영상 제작 방식을 선택하세요.\n\n• 단일 영상: 1개 영상을 변환\n• 믹스 모드: 여러 영상을 믹스",
@@ -111,7 +121,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
     {
         "id": "settings",
         "title": "설정",
-        "description": "저장 경로, API 키, 소셜 미디어 채널 연결 등\n앱 설정을 관리합니다.\n튜토리얼도 여기서 다시 볼 수 있습니다.",
+        "description": "저장 경로, API 키, 소셜 미디어 채널 연결 등\n앱 설정을 관리합니다.\n어렵다면 자동 설정 도우미를 먼저 실행하세요.",
         "target_type": "sidebar",
         "target_id": "settings",
         "navigate_to": "settings",
@@ -141,7 +151,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
     {
         "id": "api_key_setup",
         "title": "API Key 연결",
-        "description": "영상 제작을 시작하려면 Gemini API Key가\n필요합니다. 아래 입력란에 API Key를 붙여넣고\n'모든 키 저장' 버튼을 클릭하세요.",
+        "description": "영상 제작을 시작하려면 Gemini API Key가\n필요합니다. 수동 입력이 어렵다면 위의 자동 설정 도우미를\n실행해 단계대로 진행하세요.",
         "target_type": "widget",
         "target_widget": "api_key_section",
         "navigate_to": "settings",
@@ -319,6 +329,10 @@ class TutorialManager(QObject):
             widget_name = step.get("target_widget")
             if hasattr(self._gui, widget_name):
                 return getattr(self._gui, widget_name)
+            # settings_tab 내부 위젯 fallback
+            settings_tab = getattr(self._gui, "settings_tab", None)
+            if settings_tab is not None and hasattr(settings_tab, widget_name):
+                return getattr(settings_tab, widget_name)
 
         return None
 

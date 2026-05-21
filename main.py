@@ -82,6 +82,7 @@ from managers.session_manager import SessionManager
 from managers.subscription_manager import SubscriptionManager
 from managers.generated_video_manager import GeneratedVideoManager
 from managers.youtube_manager import get_youtube_manager
+from managers.tiktok_manager import get_tiktok_manager
 from managers.coupang_manager import CoupangManager
 from managers.inpock_manager import get_inpock_manager
 from managers.sourcing_manager import get_sourcing_manager
@@ -148,6 +149,7 @@ class VideoAnalyzerGUI(
         self._video_helpers = VideoHelpers(self)
         self._generated_video_manager = GeneratedVideoManager(self)
         self.youtube_manager = get_youtube_manager(gui=self)
+        self.tiktok_manager = get_tiktok_manager(gui=self)
         self.coupang_manager = CoupangManager()
         # Selenium-based managers must not crash the app on machines without selenium/chrome.
         # Their heavy imports are guarded and the driver is created lazily.

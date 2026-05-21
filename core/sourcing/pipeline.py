@@ -94,7 +94,9 @@ class SourcingPipeline:
         PATH (which is the default on macOS).
         """
         import os
+        import re
         import sys
+        import tempfile
         import zendriver as zd
 
         # Probe known browser binaries by platform.
@@ -134,6 +136,46 @@ class SourcingPipeline:
         default_profile = os.path.join(str(Path.home()), ".ssmaker", "zendriver_profile")
         user_data = os.getenv("SSMAKER_ZENDRIVER_PROFILE", default_profile)
         os.makedirs(user_data, exist_ok=True)
+
+        # Chrome crash/forced-kill can leave stale singleton artifacts.
+        # If the profile is currently used by a live Chrome process, switch to
+        # a temporary profile for this run instead of hard-failing browser boot.
+        lock_path = os.path.join(user_data, "SingletonLock")
+        lock_pid: Optional[int] = None
+        profile_in_use = False
+        if os.path.lexists(lock_path):
+            try:
+                lock_target = os.readlink(lock_path)
+                m = re.search(r"-(\d+)$", lock_target)
+                if m:
+                    lock_pid = int(m.group(1))
+            except OSError:
+                pass
+
+            if lock_pid is not None:
+                try:
+                    os.kill(lock_pid, 0)
+                    profile_in_use = True
+                except OSError:
+                    profile_in_use = False
+
+            if profile_in_use:
+                temp_profile = tempfile.mkdtemp(prefix="ssmaker_zendriver_profile_")
+                logger.warning(
+                    "[Pipeline] Profile locked by live Chrome pid=%s; "
+                    "using temp profile: %s",
+                    lock_pid,
+                    temp_profile,
+                )
+                user_data = temp_profile
+            else:
+                for singleton_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                    singleton_path = os.path.join(user_data, singleton_name)
+                    try:
+                        if os.path.lexists(singleton_path):
+                            os.remove(singleton_path)
+                    except OSError:
+                        pass
 
         kwargs: dict = {
             "headless": False,

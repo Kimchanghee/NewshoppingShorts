@@ -146,18 +146,22 @@ class SettingsManager:
         "youtube_comment_manual_product_link": "",
         # COMING SOON 플랫폼
         "tiktok_connected": False,
+        "tiktok_account_name": "",
         "tiktok_title_prompt": "",
         "tiktok_description_prompt": "",
         "tiktok_hashtag_prompt": "",
         "instagram_connected": False,
+        "instagram_account_name": "",
         "instagram_title_prompt": "",
         "instagram_description_prompt": "",
         "instagram_hashtag_prompt": "",
         "threads_connected": False,
+        "threads_account_name": "",
         "threads_title_prompt": "",
         "threads_description_prompt": "",
         "threads_hashtag_prompt": "",
         "x_connected": False,
+        "x_account_name": "",
         "x_title_prompt": "",
         "x_description_prompt": "",
         "x_hashtag_prompt": "",
@@ -631,6 +635,31 @@ class SettingsManager:
         """Get connection status for a social platform"""
         key = f"{platform}_connected"
         return self._settings.get(key, False)
+
+    def set_social_connection_status(self, platform: str, connected: bool, account_name: str = "") -> bool:
+        """Save connection status for non-YouTube social platforms."""
+        normalized = str(platform or "").strip().lower()
+        if normalized == "youtube":
+            return self.set_youtube_connected(bool(connected), channel_name=str(account_name or "").strip())
+
+        if normalized not in {"tiktok", "instagram", "threads", "x"}:
+            logger.warning("[SettingsManager] Unsupported social platform: %s", platform)
+            return False
+
+        with self._lock:
+            self._settings[f"{normalized}_connected"] = bool(connected)
+            if account_name:
+                self._settings[f"{normalized}_account_name"] = str(account_name).strip()
+            elif not connected:
+                self._settings[f"{normalized}_account_name"] = ""
+        return self._save_settings()
+
+    def get_social_account_name(self, platform: str) -> str:
+        """Get stored account display name/identifier for a social platform."""
+        normalized = str(platform or "").strip().lower()
+        if normalized == "youtube":
+            return str(self._settings.get("youtube_channel_name", "") or "").strip()
+        return str(self._settings.get(f"{normalized}_account_name", "") or "").strip()
 
     def get_upload_settings(self) -> Dict[str, Any]:
         """Get all upload-related settings"""

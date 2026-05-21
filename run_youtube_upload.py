@@ -213,25 +213,19 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
     description = "\n".join(desc_lines)
     tags = ["쇼핑", "추천", "꿀템", "쿠팡", "쇼츠", "shorts", "자동화", "automation"]
 
-    yt.add_to_upload_queue(
-        video_path=video_path,
-        title=title,
-        description=description,
-        tags=tags,
-        product_info=product_name,
-        source_url=source_url,
-        coupang_deep_link=purchase_url,
-        linktree_url=linktree_url,
-    )
+    item = {
+        "video_path": video_path,
+        "title": title,
+        "description": description,
+        "tags": tags,
+        "product_info": product_name,
+        "source_url": source_url,
+        "coupang_deep_link": purchase_url,
+        "linktree_url": linktree_url,
+    }
+    print(f"[2/3] 업로드 아이템 준비됨: {title}")
 
-    print(f"[2/3] 업로드 큐 등록됨: {title}")
-
-    # 4) 큐의 첫 번째 아이템을 즉시 업로드 (백그라운드 스레드 안 돌림)
-    if not yt._upload_queue:
-        print("[!] 큐가 비어있습니다.")
-        return 4
-
-    item = yt._upload_queue.pop(0)
+    # 4) 아이템 즉시 업로드 (자동 업로드 스레드/큐와 경쟁하지 않음)
     print(f"[3/3] 업로드 진행 중... (대용량이면 시간 걸립니다)")
 
     success = yt._upload_video(item)
