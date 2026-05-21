@@ -482,32 +482,91 @@ async def _do_aliexpress_search(
     print(f"[ProductSearcher] AliExpress search [{log_label}{' VIDEO' if video_filter else ''}]: {query}")
 
     tab = await browser.get(url)
-    await tab.sleep(6)
-    raw = await tab.evaluate("""
+    if tab is None:
+        return []
+
+    extract_js = """
         (() => {
             const seen = new Set();
             const items = [];
-            document.querySelectorAll('a[href*="/item/"]').forEach(a => {
-                if (items.length >= 30) return;
-                const match = a.href.match(/item\\/(\\d+)/);
-                if (!match || seen.has(match[1])) return;
-                seen.add(match[1]);
-                const card = a.closest('[class*="card"], [class*="Card"], [class*="product"], [class*="snippet"]') || a.parentElement;
-                const img = card ? card.querySelector('img') : null;
-                const priceEl = card ? card.querySelector('[class*="price"], [class*="Price"]') : null;
-                const titleEl = card ? (card.querySelector('h1, h2, h3, [class*="title"], [class*="Title"]') || a) : a;
+            const push = (id, title, price, image) => {
+                if (!id || seen.has(id)) return;
+                seen.add(id);
+                const cleanTitle = (title || '').trim().substring(0, 140);
+                const cleanPrice = (price || '').trim().substring(0, 60);
                 items.push({
-                    id: match[1],
-                    title: titleEl ? titleEl.textContent.trim().substring(0, 120) : null,
-                    price: priceEl ? priceEl.textContent.trim() : null,
-                    image: img ? img.src : null,
-                    url: 'https://ko.aliexpress.com/item/' + match[1] + '.html'
+                    id,
+                    title: cleanTitle || null,
+                    price: cleanPrice || null,
+                    image: image || null,
+                    url: 'https://www.aliexpress.com/item/' + id + '.html',
                 });
+            };
+
+            document.querySelectorAll('a[href*="/item/"], a[href*="aliexpress.us/item/"]').forEach(a => {
+                if (items.length >= 60) return;
+                const href = a.href || a.getAttribute('href') || '';
+                const match = href.match(/item\\/(\\d{9,})/);
+                if (!match) return;
+                const card = a.closest(
+                    '[class*="card"], [class*="Card"], [class*="product"], [class*="snippet"], li, article, div'
+                ) || a.parentElement;
+                const img = card ? card.querySelector('img[src]') : null;
+                const priceEl = card ? card.querySelector('[class*="price"], [class*="Price"], [data-price]') : null;
+                const titleEl = card
+                    ? (card.querySelector('h1, h2, h3, [class*="title"], [class*="Title"], a[title], [aria-label]') || a)
+                    : a;
+                const title = (titleEl?.textContent || titleEl?.getAttribute?.('title') || titleEl?.getAttribute?.('aria-label') || '');
+                const price = (priceEl?.textContent || priceEl?.getAttribute?.('data-price') || '');
+                push(match[1], title, price, img ? img.src : '');
+            });
+
+            // Fallback: when cards are script-rendered, IDs still appear in HTML.
+            const html = document.documentElement ? document.documentElement.innerHTML : '';
+            const idMatches = [...html.matchAll(/item\\/(\\d{9,})\\.html/g)];
+            idMatches.forEach((m) => {
+                if (items.length >= 60) return;
+                push(m[1], '', '', '');
             });
             return items;
         })()
-    """) or []
-    return raw
+    """
+
+    # Wait adaptively for dynamic result rendering instead of one fixed sleep.
+    raw: List[Dict[str, Any]] = []
+    for i in range(8):
+        await tab.sleep(1.2 if i else 2.0)
+        try:
+            raw = await tab.evaluate(extract_js) or []
+        except Exception:
+            raw = []
+        if raw:
+            break
+        try:
+            # Trigger lazy rendering / hydration.
+            await tab.evaluate(f"window.scrollTo(0, {600 + i * 400})")
+        except Exception:
+            pass
+
+    if raw:
+        return raw
+
+    # Detect challenge pages to improve debugging.
+    try:
+        challenge = await tab.evaluate(
+            """
+            (() => {
+                const t = (document.title || '') + '\\n' + (location.href || '');
+                const b = (document.body && document.body.innerText) ? document.body.innerText.slice(0, 5000) : '';
+                return /captcha|verify|robot|security|challenge|punish/i.test(t + '\\n' + b);
+            })()
+            """
+        )
+        if challenge:
+            logger.info("[ProductSearcher] AliExpress endpoint challenged on query='%s'", query[:60])
+    except Exception:
+        pass
+    return []
 
 
 async def search_aliexpress(
@@ -538,48 +597,59 @@ async def search_aliexpress(
 
     head = _simplify_to_head_noun(keyword_en, max_tokens=2) or ""
 
+    per_attempt_timeout = 14
+
+    async def _run_attempt(q: str, label: str, use_video_filter: bool) -> None:
+        if not q:
+            return
+        try:
+            r = await asyncio.wait_for(
+                _do_aliexpress_search(
+                    browser,
+                    q,
+                    label,
+                    video_filter=use_video_filter,
+                ),
+                timeout=per_attempt_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.info(
+                "[ProductSearcher] AliExpress %s attempt timed out (%ss)",
+                label,
+                per_attempt_timeout,
+            )
+            return
+        except Exception as e:
+            logger.info("[ProductSearcher] AliExpress %s attempt failed: %s", label, e)
+            return
+        for x in r:
+            xid = x.get("id")
+            if xid and xid not in seen_ids:
+                seen_ids.add(xid)
+                raw_all.append(x)
+
     # Attempt 1 — head-noun + VIDEO filter (most likely to yield video-bearing items)
     if head:
-        r = await _do_aliexpress_search(browser, head, "head-noun", video_filter=True)
-        for x in r:
-            if x.get("id") and x["id"] not in seen_ids:
-                seen_ids.add(x["id"])
-                raw_all.append(x)
+        await _run_attempt(head, "head-noun", True)
 
     # Attempt 2 — full keyword + VIDEO filter (precision pass)
     if len(raw_all) < 12:
-        r = await _do_aliexpress_search(browser, keyword_en, "full", video_filter=True)
-        for x in r:
-            if x.get("id") and x["id"] not in seen_ids:
-                seen_ids.add(x["id"])
-                raw_all.append(x)
+        await _run_attempt(keyword_en, "full", True)
 
     # Attempt 3 — head-noun without filter (recall pass)
     if len(raw_all) < 12 and head:
-        r = await _do_aliexpress_search(browser, head, "head-noun")
-        for x in r:
-            if x.get("id") and x["id"] not in seen_ids:
-                seen_ids.add(x["id"])
-                raw_all.append(x)
+        await _run_attempt(head, "head-noun", False)
 
     # Attempt 4 — full keyword without filter
     if len(raw_all) < 12:
-        r = await _do_aliexpress_search(browser, keyword_en, "full")
-        for x in r:
-            if x.get("id") and x["id"] not in seen_ids:
-                seen_ids.add(x["id"])
-                raw_all.append(x)
+        await _run_attempt(keyword_en, "full", False)
 
     # Attempt 5 — Korean reference name
     if len(raw_all) < 10 and reference_name:
         kr_head = re.sub(r"[\[\]\(\)\{\}\|/,;]", " ", reference_name)
         kr_head = " ".join(kr_head.split()[:3])
         if kr_head:
-            r = await _do_aliexpress_search(browser, kr_head, "kr-head")
-            for x in r:
-                if x.get("id") and x["id"] not in seen_ids:
-                    seen_ids.add(x["id"])
-                    raw_all.append(x)
+            await _run_attempt(kr_head, "kr-head", False)
 
     raw = raw_all
     print(f"[ProductSearcher] AliExpress merged total: {len(raw)} candidates (video-filter prioritized)")
@@ -700,7 +770,9 @@ async def _do_1688_search(
 
     for url in candidate_urls:
         tab = await browser.get(url)
-        await tab.sleep(5)
+        if tab is None:
+            continue
+        await tab.sleep(3)
         current_url = await tab.evaluate("window.location.href") or ""
         if "login.taobao.com" in current_url or "login.1688.com" in current_url:
             logger.info("[ProductSearcher] 1688 endpoint %s requires login, trying next", url[:60])
@@ -722,7 +794,7 @@ async def _do_1688_search(
         if not page_ready:
             logger.info("[ProductSearcher] 1688 endpoint %s returned blank document", url[:60])
             continue
-        await tab.sleep(2)
+        await tab.sleep(1)
         await tab.evaluate("""
             (() => {
                 const h = Math.max(
@@ -732,7 +804,7 @@ async def _do_1688_search(
                 if (h) window.scrollTo(0, h);
             })()
         """)
-        await tab.sleep(2)
+        await tab.sleep(1)
 
         raw = await tab.evaluate("""
             (() => {
@@ -767,6 +839,22 @@ async def _do_1688_search(
                         url: 'https://detail.1688.com/offer/' + oid + '.html'
                     });
                 });
+                if (!results.length) {
+                    const html = document.documentElement ? document.documentElement.innerHTML : '';
+                    const push = (oid) => {
+                        if (!oid || seen.has(oid) || results.length >= 30) return;
+                        seen.add(oid);
+                        results.push({
+                            id: oid,
+                            title: null,
+                            price: null,
+                            image: null,
+                            url: 'https://detail.1688.com/offer/' + oid + '.html'
+                        });
+                    };
+                    [...html.matchAll(/offer\\/(\\d{10,})\\.html/g)].forEach(m => push(m[1]));
+                    [...html.matchAll(/offerId[=:](\\d{10,})/g)].forEach(m => push(m[1]));
+                }
                 return results;
             })()
         """) or []
@@ -794,38 +882,52 @@ async def search_1688(
     seen_ids: set[str] = set()
 
     head = _simplify_to_head_noun(keyword_cn, max_tokens=2) or ""
+    per_attempt_timeout = 15
+
+    async def _run_attempt(q: str, label: str, use_video_filter: bool) -> None:
+        if not q:
+            return
+        try:
+            r = await asyncio.wait_for(
+                _do_1688_search(
+                    browser,
+                    q,
+                    label,
+                    video_filter=use_video_filter,
+                ),
+                timeout=per_attempt_timeout,
+            )
+        except asyncio.TimeoutError:
+            logger.info(
+                "[ProductSearcher] 1688 %s attempt timed out (%ss)",
+                label,
+                per_attempt_timeout,
+            )
+            return
+        except Exception as e:
+            logger.info("[ProductSearcher] 1688 %s attempt failed: %s", label, e)
+            return
+        for x in r:
+            xid = x.get("id")
+            if xid and xid not in seen_ids:
+                seen_ids.add(xid)
+                raw_all.append(x)
 
     # 1. head-noun + VIDEO
     if head:
-        r = await _do_1688_search(browser, head, "head-noun", video_filter=True)
-        for x in r:
-            if x.get("id") and x["id"] not in seen_ids:
-                seen_ids.add(x["id"])
-                raw_all.append(x)
+        await _run_attempt(head, "head-noun", True)
 
     # 2. full + VIDEO
     if len(raw_all) < 12:
-        r = await _do_1688_search(browser, keyword_cn, "full", video_filter=True)
-        for x in r:
-            if x.get("id") and x["id"] not in seen_ids:
-                seen_ids.add(x["id"])
-                raw_all.append(x)
+        await _run_attempt(keyword_cn, "full", True)
 
     # 3. head-noun no filter
     if len(raw_all) < 12 and head:
-        r = await _do_1688_search(browser, head, "head-noun")
-        for x in r:
-            if x.get("id") and x["id"] not in seen_ids:
-                seen_ids.add(x["id"])
-                raw_all.append(x)
+        await _run_attempt(head, "head-noun", False)
 
     # 4. full no filter
     if len(raw_all) < 12:
-        r = await _do_1688_search(browser, keyword_cn, "full")
-        for x in r:
-            if x.get("id") and x["id"] not in seen_ids:
-                seen_ids.add(x["id"])
-                raw_all.append(x)
+        await _run_attempt(keyword_cn, "full", False)
 
     raw = raw_all
     if not raw:
@@ -1061,39 +1163,83 @@ async def search_aliexpress_by_image(
     logger.info("[ProductSearcher] AliExpress image search: %s", image_url[:80])
 
     encoded = urllib.parse.quote(image_url, safe="")
-    # AliExpress's public image-search redirect — params confirmed against the
-    # site's "Search by Image" button.
-    url = f"https://www.aliexpress.com/p/searchByImg.html?imageAddress={encoded}"
+    search_urls = [
+        f"https://www.aliexpress.com/p/searchByImg.html?imageAddress={encoded}",
+        f"https://www.aliexpress.com/p/imageSearch/index.html?imageAddress={encoded}",
+    ]
 
-    try:
-        tab = await browser.get(url)
-        await tab.sleep(8)  # image-search pages take longer to render
+    raw_all: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
 
-        raw = await tab.evaluate("""
-            (() => {
-                const seen = new Set();
-                const items = [];
-                document.querySelectorAll('a[href*="/item/"]').forEach(a => {
-                    if (items.length >= 30) return;
-                    const match = a.href.match(/item\\/(\\d+)/);
-                    if (!match || seen.has(match[1])) return;
-                    seen.add(match[1]);
-                    const card = a.closest('[class*="card"], [class*="Card"], [class*="product"], [class*="snippet"]') || a.parentElement;
-                    const img = card ? card.querySelector('img') : null;
-                    const titleEl = card ? (card.querySelector('h1, h2, h3, [class*="title"], [class*="Title"]') || a) : a;
-                    items.push({
-                        id: match[1],
-                        title: titleEl ? titleEl.textContent.trim().substring(0, 120) : null,
-                        image: img ? img.src : null,
-                        url: 'https://ko.aliexpress.com/item/' + match[1] + '.html'
+    for idx, url in enumerate(search_urls, start=1):
+        try:
+            tab = await browser.get(url)
+            if tab is None:
+                continue
+            await tab.sleep(7)
+            for y in (300, 700, 1200, 1700):
+                await tab.evaluate(f"window.scrollTo(0, {y})")
+                await tab.sleep(1)
+            await tab.evaluate("window.scrollTo(0, 0)")
+            await tab.sleep(1)
+
+            raw = await tab.evaluate("""
+                (() => {
+                    const seen = new Set();
+                    const items = [];
+                    const pushItem = (id, title, image) => {
+                        if (!id || seen.has(id)) return;
+                        seen.add(id);
+                        items.push({
+                            id,
+                            title: (title || '').trim().substring(0, 120) || null,
+                            image: image || null,
+                            url: 'https://ko.aliexpress.com/item/' + id + '.html',
+                        });
+                    };
+
+                    document.querySelectorAll('a[href*="/item/"]').forEach(a => {
+                        if (items.length >= 60) return;
+                        const href = a.href || '';
+                        const match = href.match(/item\\/(\\d+)/);
+                        if (!match) return;
+                        const card = a.closest('[class*="card"], [class*="Card"], [class*="product"], [class*="snippet"], li, div') || a.parentElement;
+                        const img = card ? card.querySelector('img') : null;
+                        const titleEl = card ? (card.querySelector('h1, h2, h3, [class*="title"], [class*="Title"]') || a) : a;
+                        pushItem(match[1], titleEl ? titleEl.textContent : '', img ? img.src : '');
                     });
-                });
-                return items;
-            })()
-        """) or []
-    except Exception as e:
-        logger.warning("[ProductSearcher] AliExpress image search error: %s", e)
-        return []
+
+                    // Fallback: parse IDs from the full HTML when cards are rendered
+                    // through script-driven templates.
+                    const html = document.documentElement ? document.documentElement.innerHTML : '';
+                    const idMatches = [...html.matchAll(/item\\/(\\d{9,})\\.html/g)];
+                    idMatches.forEach((m) => {
+                        if (items.length >= 60) return;
+                        pushItem(m[1], '', '');
+                    });
+                    return items;
+                })()
+            """) or []
+
+            added = 0
+            for item in raw:
+                iid = str(item.get("id") or "")
+                if not iid or iid in seen_ids:
+                    continue
+                seen_ids.add(iid)
+                raw_all.append(item)
+                added += 1
+            logger.info(
+                "[ProductSearcher] AliExpress image endpoint #%d yielded %d new candidates",
+                idx,
+                added,
+            )
+            if len(raw_all) >= 30:
+                break
+        except Exception as e:
+            logger.warning("[ProductSearcher] AliExpress image endpoint #%d error: %s", idx, e)
+
+    raw = raw_all
 
     # Score candidates against the same reference set as text search. Image
     # search is intrinsically high-precision (visual match) so even a weak text
@@ -1305,6 +1451,9 @@ _CATEGORY_GUARDS: Dict[str, List[str]] = {
     "fitness": ["fitness", "exercise", "운동", "健身"],
 
     # ──── Auto ────
+    "car fan": ["car", "vehicle", "dashboard", "12v", "24v", "fan", "cooling", "차량", "자동차", "车载", "汽车", "风扇"],
+    "vehicle fan": ["car", "vehicle", "dashboard", "12v", "24v", "fan", "cooling", "차량", "자동차", "车载", "汽车", "风扇"],
+    "dashboard fan": ["dashboard", "car", "vehicle", "fan", "차량", "자동차", "车载", "汽车", "风扇"],
     "car phone mount": ["car", "phone", "차량", "手机", "车载"],
     "car charger": ["car", "charger", "차량", "充电", "车载"],
 }
@@ -1340,6 +1489,10 @@ _DOMAIN_MARKERS: Dict[str, list[str]] = {
         "이어폰", "헤드셋", "스피커", "충전기", "케이블", "보조배터리", "스마트워치",
         "태블릿", "earphone", "speaker", "charger", "cable", "watch",
     ],
+    "auto": [
+        "차량", "자동차", "차", "car", "vehicle", "dashboard", "车载", "汽车",
+        "풍량", "선풍기", "fan", "风扇",
+    ],
 }
 
 _DOMAIN_TOKENS: Dict[str, list[str]] = {
@@ -1360,6 +1513,9 @@ _DOMAIN_TOKENS: Dict[str, list[str]] = {
     ],
     "digital": [
         "digital", "electronic", "전자", "디지털", "数码", "电子",
+    ],
+    "auto": [
+        "car", "vehicle", "dashboard", "차량", "자동차", "차", "车载", "汽车",
     ],
 }
 
@@ -1448,6 +1604,48 @@ def _passes_reference_constraints(title: str, references: Optional[List[str]]) -
         ):
             return False
 
+    # Sink-strainer intent: reject basin/wash-sink fixtures unless the title
+    # explicitly includes strainer/filter/drain basket markers.
+    strainer_intent_markers = (
+        "거름망", "배수", "음식물", "strainer", "filter", "drain", "水槽", "过滤", "沥水",
+    )
+    basin_fixture_markers = (
+        "washbasin", "wash basin", "basin", "vanity", "lavabo", "undermount", "topmount",
+        "wall-mounted", "wall mounted", "utility sink", "hand wash sink",
+        "세면대", "洗手盆", "面盆", "台盆",
+    )
+    strainer_title_markers = (
+        "strainer", "filter", "drain", "basket", "waste", "rack", "holder",
+        "거름망", "배수", "음식물", "过滤", "沥水", "挂架",
+    )
+    if any(marker in ref for marker in strainer_intent_markers):
+        if any(marker in title_l for marker in basin_fixture_markers) and not any(
+            marker in title_l for marker in strainer_title_markers
+        ):
+            return False
+
+    # Car-fan intent: require both "fan" semantics and "vehicle" semantics.
+    # This blocks unrelated low-score candidates such as fuses (vehicle-only)
+    # and hand fans (fan-only).
+    car_fan_ref_markers = ("car fan", "vehicle fan", "차량용 선풍기", "车载风扇", "汽车风扇")
+    fan_title_markers = ("fan", "cooling", "blower", "선풍기", "风扇", "散热")
+    vehicle_title_markers = ("car", "vehicle", "auto", "dashboard", "12v", "24v", "차량", "자동차", "车载", "汽车")
+    if any(marker in ref for marker in car_fan_ref_markers):
+        has_fan = any(marker in title_l for marker in fan_title_markers)
+        has_vehicle = any(marker in title_l for marker in vehicle_title_markers)
+        if not (has_fan and has_vehicle):
+            return False
+        rv_roof_markers = (
+            "caravan", "camper", "rv", "motorhome", "roof fan", "roof vent",
+            "ventilator", "ventilation fan", "hatch fan",
+        )
+        # Allow clearly in-cabin product wording, otherwise reject RV/roof-vent class.
+        cabin_markers = ("dashboard", "headrest", "seat", "clip", "usb", "12v", "24v", "cigarette")
+        if any(marker in title_l for marker in rv_roof_markers) and not any(
+            marker in title_l for marker in cabin_markers
+        ):
+            return False
+
     return True
 
 
@@ -1474,6 +1672,70 @@ def _has_minimum_overlap(
     if not ref_tokens:
         return False
     return len(title_tokens & ref_tokens) >= min_overlap
+
+
+_B2B_MARKERS = (
+    # English B2B / wholesale wording
+    "wholesale", "dropshipping", "drop shipping", "bulk", "oem", "odm",
+    "manufacturer", "factory", "supplier", "distributor", "reseller",
+    "minimum order", "moq", "trade assurance", "sample order",
+    # Korean
+    "도매", "대량", "대량구매", "공장", "제조사", "공급업체", "최소주문", "최소 주문",
+    # Chinese
+    "批发", "工厂", "厂家", "源头", "代发", "一件代发", "供货", "供应商", "经销",
+    "起订", "最小起订量", "采购", "现货批发",
+)
+
+
+def _b2b_signal_score(text: str) -> int:
+    """Return a coarse B2B likelihood score from textual markers."""
+    haystack = str(text or "")
+    if not haystack:
+        return 0
+    lowered = haystack.lower()
+    score = sum(1 for marker in _B2B_MARKERS if marker in lowered or marker in haystack)
+
+    # Quantity-per-lot patterns often indicate wholesale listing style.
+    if re.search(r"\b\d+\s*(pcs?|pieces?)\s*/\s*lot\b", lowered):
+        score += 2
+    if re.search(r"\b\d+\s*(pcs?|pieces?)\s*lot\b", lowered):
+        score += 1
+    if re.search(r"\bmin(?:imum)?\s*order\b", lowered):
+        score += 2
+    return score
+
+
+def _looks_b2b_candidate_title(title: str) -> bool:
+    """Title-only gate: skip obvious wholesale/manufacturer listing titles."""
+    score = _b2b_signal_score(title)
+    return score >= 2
+
+
+def _looks_b2b_detail_text(page_text: str, candidate_title: str = "") -> bool:
+    """Detail-page gate: stronger threshold than title-only checks."""
+    page_score = _b2b_signal_score(page_text)
+    title_score = _b2b_signal_score(candidate_title)
+    # Be conservative: require strong page signals, or medium page + title.
+    return page_score >= 4 or (page_score >= 3 and title_score >= 1)
+
+
+async def _extract_page_text_for_b2b_check(tab: Any) -> str:
+    """Extract compact page text for B2B-vs-B2C classification."""
+    text = await tab.evaluate(
+        """
+        (() => {
+            const title = (document.title || '').trim();
+            const body = (document.body && document.body.innerText) ? document.body.innerText : '';
+            const metas = [...document.querySelectorAll('meta[name], meta[property]')]
+                .map((m) => (m.getAttribute('content') || '').trim())
+                .filter(Boolean)
+                .slice(0, 12)
+                .join(' ');
+            return (title + '\\n' + metas + '\\n' + body).slice(0, 18000);
+        })()
+        """
+    )
+    return str(text or "")
 
 
 async def find_products_with_video(
@@ -1513,12 +1775,20 @@ async def find_products_with_video(
             continue
 
         cand_score = float(cand.get("score") or 0.0)
+        cand_title = str(cand.get("title") or "")
         is_image_candidate = bool(cand.get("image_search"))
         # Image-search candidates are visually pre-filtered, so allow a lower
         # text-score gate. Keep category/reference guards active below.
         effective_min_score = min_score
         if is_image_candidate and min_score >= MIN_SIMILARITY_SCORE:
             effective_min_score = max(0.05, min_score - 0.10)
+
+        if _looks_b2b_candidate_title(cand_title):
+            logger.info(
+                "[ProductSearcher] [%s] skip b2b-title %s",
+                source_label, cand_title[:60],
+            )
+            continue
 
         if cand_score < effective_min_score:
             rejected_low_score += 1
@@ -1567,6 +1837,18 @@ async def find_products_with_video(
             if tab is None:
                 logger.warning("[ProductSearcher]   tab open failed, skip")
                 continue
+            # Early B2B screening on the detail page content before expensive
+            # video extraction/downloading.
+            try:
+                page_text = await _extract_page_text_for_b2b_check(tab)
+                if _looks_b2b_detail_text(page_text, cand_title):
+                    logger.info(
+                        "[ProductSearcher] [%s] skip b2b-detail %s",
+                        source_label, cand_title[:60],
+                    )
+                    continue
+            except Exception:
+                pass
             # Wait + scroll + click play. AliExpress / 1688 lazy-load videos:
             #  - Initial render has only image carousel
             #  - Scrolling triggers IntersectionObserver on the video module
@@ -1640,6 +1922,16 @@ async def find_products_with_video(
                         m_tab = await browser.get(mobile_url)
                         if m_tab is not None:
                             await asyncio.wait_for(m_tab.sleep(5), timeout=12)
+                            try:
+                                mobile_page_text = await _extract_page_text_for_b2b_check(m_tab)
+                                if _looks_b2b_detail_text(mobile_page_text, cand_title):
+                                    logger.info(
+                                        "[ProductSearcher] [%s] skip b2b-detail-mobile %s",
+                                        source_label, cand_title[:60],
+                                    )
+                                    continue
+                            except Exception:
+                                pass
                             for y in (0, 400, 800, 0):
                                 await m_tab.evaluate(f"window.scrollTo(0, {y})")
                                 await asyncio.wait_for(m_tab.sleep(1), timeout=4)
@@ -1657,6 +1949,16 @@ async def find_products_with_video(
                         m_tab = await browser.get(mobile_url)
                         if m_tab is not None:
                             await asyncio.wait_for(m_tab.sleep(5), timeout=12)
+                            try:
+                                mobile_page_text = await _extract_page_text_for_b2b_check(m_tab)
+                                if _looks_b2b_detail_text(mobile_page_text, cand_title):
+                                    logger.info(
+                                        "[ProductSearcher] [%s] skip b2b-detail-mobile %s",
+                                        source_label, cand_title[:60],
+                                    )
+                                    continue
+                            except Exception:
+                                pass
                             for y in (0, 400, 800, 0):
                                 await m_tab.evaluate(f"window.scrollTo(0, {y})")
                                 await asyncio.wait_for(m_tab.sleep(1), timeout=4)

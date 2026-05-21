@@ -108,7 +108,7 @@ def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
 
     return {
         "product_name": product_name,
-        "product_info": description or product_name,
+        "product_info": product_name or description,
         "source_url": original_url,
         "coupang_deep_link": deep_link,
         "matched_title": str(matched_item.get("title") or "").strip(),

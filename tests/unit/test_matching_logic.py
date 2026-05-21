@@ -22,11 +22,14 @@ from core.sourcing.product_searcher import (
     _multi_reference_score,
     _category_terms_for_keyword,
     _passes_category_guard,
+    _passes_reference_constraints,
     _tokenize,
     _STOPWORD_TOKENS,
     _normalize_synonyms,
     _has_minimum_overlap,
     _detect_domain,
+    _looks_b2b_candidate_title,
+    _looks_b2b_detail_text,
 )
 from core.sourcing.keyword_converter import convert_keywords_rule_based
 
@@ -137,6 +140,69 @@ def test_category_guard_ice_tray():
     assert terms
     assert _passes_category_guard("Silicone Ice Cube Tray with Lid", terms)
     assert not _passes_category_guard("Phone Magnetic Stand Holder", terms)
+
+
+def test_category_guard_car_fan_blocks_non_car_fan():
+    terms = _category_terms_for_keyword(
+        "car fan, vehicle cooling fan",
+        reference_name="켈리마 차량용 선풍기",
+        keyword_cn="车载风扇",
+    )
+    assert terms
+    assert _passes_category_guard("12V Car Dashboard Cooling Fan", terms)
+    # has "fan" but no vehicle context
+    assert _passes_category_guard("Portable Mini Hand Fan", terms)
+
+
+def test_reference_constraint_blocks_basin_fixture_for_strainer_intent():
+    refs = ["sink strainer holder", "음식물 거름망", "水槽过滤网 架"]
+    assert not _passes_reference_constraints(
+        "Wall Mounted Stainless Wash Basin Vanity Sink",
+        refs,
+    )
+    assert _passes_reference_constraints(
+        "Kitchen Sink Strainer Basket Drain Filter Holder",
+        refs,
+    )
+
+
+def test_reference_constraint_blocks_non_vehicle_or_non_fan_for_car_fan():
+    refs = ["car fan", "vehicle cooling fan", "차량용 선풍기", "车载风扇"]
+    assert _passes_reference_constraints(
+        "12V Car Dashboard Cooling Fan",
+        refs,
+    )
+    # vehicle only, no fan
+    assert not _passes_reference_constraints(
+        "Small Car Blade Fuse 12V 20A",
+        refs,
+    )
+    # fan only, no vehicle
+    assert not _passes_reference_constraints(
+        "Portable Hand Fan USB Rechargeable",
+        refs,
+    )
+    assert not _passes_reference_constraints(
+        "Caravan Roof Ventilation Fan",
+        refs,
+    )
+
+
+def test_b2b_title_gate_blocks_obvious_wholesale_copy():
+    assert _looks_b2b_candidate_title("Factory wholesale sink strainer OEM bulk supplier")
+    assert not _looks_b2b_candidate_title("Kitchen sink strainer basket for home use")
+
+
+def test_b2b_detail_gate_uses_page_signals():
+    page_text = (
+        "Factory direct supplier. MOQ 100 pcs/lot. Trade Assurance. "
+        "Minimum order required for wholesale buyers."
+    )
+    assert _looks_b2b_detail_text(page_text, "Kitchen sink strainer")
+    assert not _looks_b2b_detail_text(
+        "Easy install for home kitchen daily use. No MOQ.",
+        "Kitchen sink strainer for household",
+    )
 
 
 # ──────────────────────── keyword conversion ────────────────────────

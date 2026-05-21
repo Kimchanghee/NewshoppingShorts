@@ -105,9 +105,9 @@ def test_auto_comment_always_includes_product_and_linktree_for_shopping_item(mon
 
     assert "영상에서 소개한 상품 정보를 공유드립니다." in text
     assert text.startswith(COUPANG_AFFILIATE_DISCLOSURE)
-    assert "상품 설명: 접이식 주방 선반 정리대" in text
+    assert "상품: 접이식 주방 선반 정리대" in text
     assert "구매 링크: https://link.coupang.com/a/abc123" in text
-    assert "Linktree: https://linktr.ee/studio.idol" in text
+    assert "링크 모음: https://linktr.ee/studio.idol" in text
     assert "원상품 링크: https://www.coupang.com/vp/products/12345" in text
 
 
@@ -129,7 +129,7 @@ def test_auto_comment_uses_default_linktree_when_profile_is_empty(monkeypatch):
         }
     )
 
-    assert "Linktree: https://linktr.ee/studio.idol" in text
+    assert "링크 모음: https://linktr.ee/studio.idol" in text
 
 
 def test_auto_comment_product_and_linktree_placeholders_do_not_duplicate(monkeypatch):

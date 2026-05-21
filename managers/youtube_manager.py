@@ -11,6 +11,7 @@ Handles:
 
 import json
 import os
+import re
 import shutil
 import stat
 import subprocess
@@ -32,6 +33,24 @@ COUPANG_AFFILIATE_DISCLOSURE = (
 )
 COUPANG_PAID_PROMOTION_TITLE_MARKER = "[광고]"
 COUPANG_PARTNERS_NOTICE_98_URL = "https://partners.coupang.com/#announcements/98"
+
+DEFAULT_HASHTAG_POOL = [
+    "쇼핑추천",
+    "꿀템",
+    "추천템",
+    "핫딜",
+    "쇼츠",
+    "shorts",
+]
+
+HASHTAG_STOPWORDS = {
+    "이", "그", "저", "것", "수", "및", "에서", "으로", "그리고", "하지만",
+    "영상", "소개", "상품", "정보", "확인", "아래", "바로", "지금", "정말",
+    "완전", "추천", "구매", "링크", "클릭", "해요", "하세요", "합니다", "입니다",
+    "the", "and", "for", "with", "from", "this", "that", "video", "item",
+    "product", "link", "shop", "shopping",
+    "틀어도", "안이", "이제", "바로", "후끈후끈", "후끈후끈하시죠",
+}
 
 # YouTube API imports (optional)
 try:
@@ -858,30 +877,20 @@ class YouTubeManager:
         Returns:
             SEO-optimized description
         """
-        purchase_link = str(url or "").strip()
+        purchase_link = self._normalize_public_url(url)
+        product_line = self._sanitize_public_text(product_info, limit=180) or "쇼핑 추천 영상입니다."
         lines = [
-            product_info[:200] if product_info else "쇼핑 추천 영상입니다.",
-            "",
-            "👆 자세한 상품 정보는 아래 링크에서 확인하세요.",
-            "",
-            "📱 좋아요와 구독 부탁드립니다!",
-            "",
+            product_line,
+            "자세한 상품 정보는 아래 링크에서 확인하세요.",
         ]
-
         if purchase_link:
-            lines.append(f"🛒 상품 보기: {purchase_link}")
-
-        lines.extend([
-            "",
-            "━━━━━━━━━━━━━━━━━━━━",
-            "🎬 AI 쇼핑 쇼츠 메이커로 제작",
-            "━━━━━━━━━━━━━━━━━━━━",
-        ])
+            lines.append(f"구매 링크: {purchase_link}")
+        lines.append("좋아요와 구독 부탁드립니다.")
 
         description = "\n".join(lines)
         if self._is_coupang_url(purchase_link):
             description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
-        return description
+        return self._sanitize_public_text(description, limit=5000)
 
     @staticmethod
     def ensure_coupang_affiliate_compliance(description: str, purchase_link: str = "") -> str:
@@ -892,8 +901,8 @@ class YouTubeManager:
         if COUPANG_AFFILIATE_DISCLOSURE not in desc:
             desc = f"{COUPANG_AFFILIATE_DISCLOSURE}\n\n{desc}" if desc else COUPANG_AFFILIATE_DISCLOSURE
 
-        if link and link not in desc:
-            desc = f"{desc}\n\n🛒 쿠팡 상품 보기: {link}"
+        if link and link.startswith(("http://", "https://")) and link not in desc:
+            desc = f"{desc}\n구매 링크: {link}"
 
         return desc.strip()
 
@@ -930,13 +939,22 @@ class YouTubeManager:
         original = str(original_link or "").strip()
 
         if COUPANG_AFFILIATE_DISCLOSURE not in text:
-            text = f"{COUPANG_AFFILIATE_DISCLOSURE}\n\n{text}" if text else COUPANG_AFFILIATE_DISCLOSURE
+            text = f"{COUPANG_AFFILIATE_DISCLOSURE}\n{text}" if text else COUPANG_AFFILIATE_DISCLOSURE
 
         preferred_link = purchase or original
-        if preferred_link and preferred_link not in text:
-            text = f"{text}\n\n구매 링크: {preferred_link}"
+        if (
+            preferred_link
+            and preferred_link.startswith(("http://", "https://"))
+            and preferred_link not in text
+        ):
+            text = f"{text}\n구매 링크: {preferred_link}"
 
-        if original and original != preferred_link and original not in text:
+        if (
+            original
+            and original.startswith(("http://", "https://"))
+            and original != preferred_link
+            and original not in text
+        ):
             text = f"{text}\n원상품 링크: {original}"
 
         return text.strip()
@@ -952,30 +970,39 @@ class YouTubeManager:
         Returns:
             List of hashtags (without # prefix)
         """
-        # Base hashtags for shopping shorts
-        base_tags = [
-            "쇼핑", "추천", "꿀템", "쇼츠", "shorts",
-            "리뷰", "할인", "핫딜", "갓성비"
-        ]
+        raw = self._sanitize_public_text(product_info, limit=260)
+        tokens = re.findall(r"[가-힣]{2,}|[a-zA-Z][a-zA-Z0-9]{1,20}", raw.lower())
 
-        # Extract keywords from product
-        import re
-        if product_info:
-            words = re.findall(r'[가-힣a-zA-Z]+', product_info)
-            keywords = [w for w in words if len(w) >= 2][:5]
-        else:
-            keywords = []
+        keywords: List[str] = []
+        for token in tokens:
+            if token in HASHTAG_STOPWORDS:
+                continue
+            if re.search(r"(하세요|해요|합니다|입니다|보세요|하시죠|나요|네요|까요|였죠|겠죠)$", token):
+                continue
+            if token.endswith(("하다", "하기", "하는", "되는", "같은")):
+                continue
+            if token.isdigit():
+                continue
+            cleaned = self._normalize_hashtag_token(token)
+            if not cleaned:
+                continue
+            keywords.append(cleaned)
+            if len(keywords) >= max(2, max_count):
+                break
 
-        # Combine and deduplicate
-        all_tags = keywords + base_tags
+        all_tags = keywords + DEFAULT_HASHTAG_POOL
         seen = set()
         unique_tags = []
         for tag in all_tags:
-            if tag.lower() not in seen:
-                seen.add(tag.lower())
-                unique_tags.append(tag)
+            normalized = tag.lower()
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            unique_tags.append(tag)
+            if len(unique_tags) >= max_count:
+                break
 
-        return unique_tags[:max_count]
+        return unique_tags
 
     # ============ Auto-Upload ============
 
@@ -1002,34 +1029,44 @@ class YouTubeManager:
             source_url: Source URL
             linktree_url: Public Linktree profile URL for the auto-comment
         """
+        clean_source_url = self._normalize_public_url(source_url)
+        clean_coupang_link = self._normalize_public_url(coupang_deep_link)
+        clean_product_info = self._sanitize_public_text(product_info, limit=220)
+        clean_title = self._sanitize_public_text(title, limit=100)
+        clean_description = self._sanitize_public_text(description, limit=5000)
+
         # Generate SEO content if enabled and not provided
-        if not title and self._upload_settings.auto_title:
-            title = self.generate_seo_title(product_info)
+        if not clean_title and self._upload_settings.auto_title:
+            clean_title = self.generate_seo_title(clean_product_info)
 
-        if not description and self._upload_settings.auto_description:
-            description = self.generate_seo_description(product_info, source_url)
+        if not clean_description and self._upload_settings.auto_description:
+            clean_description = self.generate_seo_description(clean_product_info, clean_source_url)
 
-        purchase_link = coupang_deep_link or source_url
-        if self._is_coupang_url(purchase_link) or self._is_coupang_url(source_url):
-            title = self.ensure_coupang_title_compliance(title)
-            description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
+        purchase_link = clean_coupang_link or clean_source_url
+        if self._is_coupang_url(purchase_link) or self._is_coupang_url(clean_source_url):
+            clean_title = self.ensure_coupang_title_compliance(clean_title)
+            clean_description = self.ensure_coupang_affiliate_compliance(clean_description, purchase_link)
 
-        if not tags and self._upload_settings.auto_hashtags:
-            tags = self.generate_seo_hashtags(product_info, self._upload_settings.max_hashtags)
+        normalized_tags = [
+            t for t in (self._normalize_hashtag_token(tag) for tag in (tags or []))
+            if t
+        ]
+        if not normalized_tags and self._upload_settings.auto_hashtags:
+            normalized_tags = self.generate_seo_hashtags(clean_product_info, self._upload_settings.max_hashtags)
 
         self._upload_queue.append({
             "video_path": video_path,
-            "title": title or "쇼핑 추천 영상",
-            "description": description or "",
-            "tags": tags or [],
-            "product_info": product_info or "",
-            "source_url": source_url or "",
-            "coupang_deep_link": coupang_deep_link or "",
+            "title": clean_title or "쇼핑 추천 영상",
+            "description": clean_description or "",
+            "tags": normalized_tags,
+            "product_info": clean_product_info or "",
+            "source_url": clean_source_url or "",
+            "coupang_deep_link": clean_coupang_link or "",
             "linktree_url": linktree_url or "",
             "added_at": datetime.now().isoformat()
         })
 
-        logger.info(f"[YouTube] 업로드 대기열 추가: {title}")
+        logger.info(f"[YouTube] 업로드 대기열 추가: {clean_title}")
 
         # 업로드 활성화 상태인데 스레드가 꺼져 있으면 자동 재시작
         if self._upload_settings.enabled and self.is_connected() and not self._upload_running:
@@ -1111,19 +1148,26 @@ class YouTubeManager:
 
         try:
             # Add hashtags to description
-            tags = item.get("tags", [])
+            tags = [
+                t for t in (self._normalize_hashtag_token(tag) for tag in item.get("tags", []))
+                if t
+            ]
             hashtag_str = " ".join([f"#{tag}" for tag in tags])
-            description = item.get("description", "")
-            purchase_link = item.get("coupang_deep_link") or item.get("source_url") or ""
+            safe_title = self._sanitize_public_text(item.get("title", ""), limit=100) or "쇼핑 추천 영상"
+            description = self._sanitize_public_text(item.get("description", ""), limit=5000)
+            purchase_link = self._normalize_public_url(
+                item.get("coupang_deep_link") or item.get("source_url") or ""
+            )
             if self._is_coupang_url(purchase_link):
-                item["title"] = self.ensure_coupang_title_compliance(item.get("title", ""))
+                safe_title = self.ensure_coupang_title_compliance(safe_title)
                 description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
+            item["title"] = safe_title
             if hashtag_str:
                 description = f"{description}\n\n{hashtag_str}"
 
             body = {
                 "snippet": {
-                    "title": item.get("title", "쇼핑 추천 영상"),
+                    "title": safe_title,
                     "description": description,
                     "tags": tags,
                     "categoryId": self._upload_settings.category_id
@@ -1170,6 +1214,108 @@ class YouTubeManager:
         return "coupang.com" in str(url or "").lower()
 
     @staticmethod
+    def _normalize_public_url(value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return ""
+        match = re.search(r"https?://[^\s)>\]]+", text)
+        if not match:
+            return ""
+        return match.group(0).rstrip(".,)")
+
+    @staticmethod
+    def _sanitize_public_text(text: str, limit: int = 1000) -> str:
+        raw = str(text or "")
+        if not raw:
+            return ""
+
+        cleaned = (
+            raw.replace("**", "")
+            .replace("__", "")
+            .replace("`", "")
+            .replace("\r", "\n")
+        )
+        cleaned = re.sub(r"\[(.*?)\]\((https?://[^)]+)\)", r"\1 \2", cleaned)
+
+        lines: List[str] = []
+        for line in cleaned.splitlines():
+            compact = " ".join(line.split()).strip()
+            if not compact:
+                if lines and lines[-1] != "":
+                    lines.append("")
+                continue
+            if "local://" in compact.lower() or "file://" in compact.lower():
+                continue
+            lines.append(compact)
+
+        normalized = "\n".join(lines).strip()
+        if len(normalized) <= limit:
+            return normalized
+        return normalized[: limit - 3].rstrip() + "..."
+
+    @staticmethod
+    def _normalize_hashtag_token(token: str) -> str:
+        t = str(token or "").strip().lstrip("#")
+        if not t:
+            return ""
+        t = re.sub(r"[^0-9a-zA-Z가-힣]", "", t)
+        if len(t) < 2:
+            return ""
+        if len(t) > 24:
+            return ""
+        if re.fullmatch(r"[가-힣]+", t) and len(t) > 8:
+            return ""
+        return t
+
+    @staticmethod
+    def _is_instructional_comment_prompt(text: str) -> bool:
+        prompt = str(text or "")
+        if not prompt:
+            return False
+        lowered = prompt.lower()
+        marker_hits = sum(
+            1
+            for marker in (
+                "[형식]",
+                "[작성 원칙]",
+                "작성해주세요",
+                "작성해 주세요",
+                "고정 댓글용",
+                "금지",
+                "원칙",
+            )
+            if marker in prompt
+        )
+        numbered_lines = len(re.findall(r"(?m)^\s*\d+\)", prompt))
+        return marker_hits >= 2 or (marker_hits >= 1 and numbered_lines >= 2) or "형식" in lowered and numbered_lines >= 2
+
+    @staticmethod
+    def _sanitize_comment_body(text: str, max_lines: int = 8) -> str:
+        normalized = YouTubeManager._sanitize_public_text(text, limit=2000)
+        if not normalized:
+            return ""
+        kept: List[str] = []
+        for line in normalized.splitlines():
+            compact = line.strip()
+            if not compact:
+                continue
+            # Remove instruction-like list artifacts from leaked prompt templates.
+            if re.match(r"^\[.*\]$", compact):
+                continue
+            if re.match(r"^\d+\)\s*", compact) and any(
+                hint in compact for hint in ("요약", "상품", "구매", "신뢰", "참여", "원칙")
+            ):
+                continue
+            if compact.startswith("- ") and any(
+                hint in compact for hint in ("금지", "원칙", "이모지", "반복", "수수료")
+            ):
+                continue
+            kept.append(compact)
+            if len(kept) >= max_lines:
+                break
+        return "\n".join(kept).strip()
+
+    @staticmethod
     def _trim_comment_text(text: str, limit: int = 10000) -> str:
         cleaned = str(text or "").strip()
         if len(cleaned) <= limit:
@@ -1211,14 +1357,16 @@ class YouTubeManager:
 
     def _resolve_comment_linktree_url(self, settings: Any, item: Dict[str, Any]) -> str:
         for key in ("linktree_url", "linktree_profile_url"):
-            value = str(item.get(key, "") or "").strip()
+            value = self._normalize_public_url(item.get(key, "") or "")
             if value:
                 return value
 
         try:
             if hasattr(settings, "get_linktree_settings"):
                 linktree_settings = settings.get_linktree_settings() or {}
-                profile_url = str(linktree_settings.get("profile_url", "") or "").strip()
+                profile_url = self._normalize_public_url(
+                    linktree_settings.get("profile_url", "") or ""
+                )
                 if profile_url:
                     return profile_url
         except Exception as exc:
@@ -1226,7 +1374,6 @@ class YouTubeManager:
 
         description = str(item.get("description", "") or "")
         try:
-            import re
             match = re.search(r"https?://(?:www\.)?linktr\.ee/[^\s)>\]]+", description)
             if match:
                 return match.group(0).rstrip(".,")
@@ -1248,20 +1395,18 @@ class YouTubeManager:
             or item.get("title")
             or ""
         )
-        text = " ".join(str(raw or "").split())
+        text = YouTubeManager._sanitize_public_text(raw, limit=limit)
         if not text:
             return ""
-        if len(text) <= limit:
-            return text
-        return text[: limit - 3].rstrip() + "..."
+        return text
 
     def _resolve_comment_original_link(self, item: Dict[str, Any]) -> str:
         settings = get_settings_manager()
-        manual_link = settings.get_youtube_comment_manual_product_link()
+        manual_link = self._normalize_public_url(settings.get_youtube_comment_manual_product_link())
         if manual_link:
             return manual_link
 
-        source_url = str(item.get("source_url", "")).strip()
+        source_url = self._normalize_public_url(item.get("source_url", ""))
         if self._is_coupang_url(source_url):
             return source_url
         return ""
@@ -1274,11 +1419,27 @@ class YouTubeManager:
             else False
         )
         raw_prompt = (
-            settings.get_youtube_comment_prompt().strip()
+            self._sanitize_public_text(settings.get_youtube_comment_prompt().strip(), limit=2500)
             if comment_enabled and hasattr(settings, "get_youtube_comment_prompt")
             else ""
         )
-        purchase_link = str(item.get("coupang_deep_link", "")).strip()
+        if raw_prompt and self._is_instructional_comment_prompt(raw_prompt):
+            logger.warning("[YouTube] Instruction-style comment prompt detected; using safe auto-comment format")
+            try:
+                if hasattr(settings, "set_youtube_comment_prompt"):
+                    settings.set_youtube_comment_prompt(
+                        "영상에서 소개한 상품 안내입니다.\n"
+                        "상품: {상품설명}\n"
+                        "구매 링크: {구매링크}\n"
+                        "원상품 링크: {원상품링크}\n"
+                        "링크 모음: {linktree_link}\n"
+                        "궁금한 점은 댓글로 남겨주세요."
+                    )
+            except Exception as exc:
+                logger.debug("[YouTube] Failed to migrate comment prompt: %s", exc)
+            raw_prompt = ""
+
+        purchase_link = self._normalize_public_url(item.get("coupang_deep_link", ""))
         original_link = self._resolve_comment_original_link(item)
         product_description = self._build_comment_product_description(item)
         has_product_context = any((product_description, purchase_link, original_link))
@@ -1320,16 +1481,17 @@ class YouTubeManager:
             raw_prompt, list(linktree_tokens)
         )
 
+        prompt_with_tokens = self._sanitize_comment_body(prompt_with_tokens)
         if not prompt_with_tokens:
             prompt_with_tokens = "영상에서 소개한 상품 정보를 공유드립니다."
 
         extra_lines = []
         if product_description and not has_product_placeholder:
-            extra_lines.append(f"상품 설명: {product_description}")
+            extra_lines.append(f"상품: {product_description}")
         if purchase_link and not has_purchase_placeholder:
             extra_lines.append(f"구매 링크: {purchase_link}")
         if linktree_link and not has_linktree_placeholder:
-            extra_lines.append(f"Linktree: {linktree_link}")
+            extra_lines.append(f"링크 모음: {linktree_link}")
         if (
             original_link
             and original_link != purchase_link
@@ -1338,10 +1500,11 @@ class YouTubeManager:
             extra_lines.append(f"원상품 링크: {original_link}")
 
         if extra_lines:
-            text = f"{prompt_with_tokens}\n\n" + "\n".join(extra_lines)
+            text = "\n".join([prompt_with_tokens] + extra_lines)
         else:
             text = prompt_with_tokens
 
+        text = self._sanitize_comment_body(text)
         if self._is_coupang_url(purchase_link) or self._is_coupang_url(original_link):
             text = self.ensure_coupang_comment_compliance(
                 text,
@@ -1349,7 +1512,7 @@ class YouTubeManager:
                 original_link=original_link,
             )
 
-        return self._trim_comment_text(text)
+        return self._trim_comment_text(self._sanitize_comment_body(text), limit=10000)
 
     def build_coupang_partners_submission_guide(self, linktree_url: str = "") -> str:
         """Build a markdown checklist for Coupang Partners channel review."""

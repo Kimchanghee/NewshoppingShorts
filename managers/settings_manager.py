@@ -99,20 +99,12 @@ class SettingsManager:
 
 
     DEFAULT_YOUTUBE_COMMENT_PROMPT = (
-        "유튜브 고정 댓글용 상품 안내문 1개를 작성해주세요.\n"
-        "[형식]\n"
-        "1) 한 줄 요약: 이 영상에서 소개한 핵심 포인트\n"
-        "2) 상품 정보: 상품명/모델명, 주요 옵션(색상·사이즈), 추천 대상\n"
-        "3) 구매 정보: 구매 링크, 가격 변동 가능 안내, 쿠폰/할인 유무(확인 필요 시 '수시 변동')\n"
-        "4) 신뢰 문구: 직접 확인한 사실만 안내하고 과장 표현 금지\n"
-        "5) 참여 유도: 궁금한 점 댓글 요청 + 재고/가격 업데이트 시 고정댓글 수정 안내\n\n"
-        "[작성 원칙]\n"
-        "- 5~8줄, 짧고 가독성 높게\n"
-        "- 쿠팡 파트너스 링크가 포함되면 첫 줄에 '이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.'를 정확히 표시\n"
-        "- 대가성 문구가 댓글의 '더보기' 뒤로 밀리지 않도록 가장 앞에 배치\n"
-        "- 이모지는 0~2개만 사용\n"
-        "- 스팸처럼 보이는 반복 문구 금지\n"
-        "- 제휴 링크일 경우 구매 링크와 원상품 링크가 누락되지 않도록 작성"
+        "영상에서 소개한 상품 안내입니다.\n"
+        "상품: {상품설명}\n"
+        "구매 링크: {구매링크}\n"
+        "원상품 링크: {원상품링크}\n"
+        "링크 모음: {linktree_link}\n"
+        "궁금한 점은 댓글로 남겨주세요."
     )
 
     DEFAULT_SETTINGS = {
@@ -181,6 +173,10 @@ class SettingsManager:
         "computer_use_bridge_enabled": False,
         "computer_use_bridge_url": "",
         "computer_use_bridge_api_key": "",
+        # Sourcing AI policy
+        "sourcing_ai_provider": "gemini",
+        "sourcing_use_gemini_computer_use": True,
+        "sourcing_use_codex_computer_use": False,
         "cookies_inpock": {},  # Dict to store Inpock Link cookies
         "cookies_1688": {},  # Dict to store 1688 cookies
     }
@@ -746,6 +742,40 @@ class SettingsManager:
                 self._settings["computer_use_bridge_url"] = str(bridge_url or "").strip()
             if bridge_api_key is not None:
                 self._settings["computer_use_bridge_api_key"] = self._encrypt_value(str(bridge_api_key or "").strip())
+        return self._save_settings()
+
+    def get_sourcing_ai_policy(self) -> Dict[str, Any]:
+        """
+        Get sourcing AI provider policy.
+
+        Product sourcing automation is fixed to Gemini guidance path and
+        explicitly excludes Codex computer-use execution.
+        """
+        provider = str(self._settings.get("sourcing_ai_provider", "gemini") or "gemini").strip().lower()
+        if provider != "gemini":
+            provider = "gemini"
+        return {
+            "provider": provider,
+            "use_gemini_computer_use": bool(self._settings.get("sourcing_use_gemini_computer_use", True)),
+            "use_codex_computer_use": False,
+        }
+
+    def set_sourcing_ai_policy(
+        self,
+        *,
+        use_gemini_computer_use: Optional[bool] = None,
+    ) -> bool:
+        """
+        Persist sourcing AI policy.
+
+        Codex computer-use is forcibly disabled for product sourcing.
+        """
+        with self._lock:
+            self._settings["sourcing_ai_provider"] = "gemini"
+            if use_gemini_computer_use is not None:
+                self._settings["sourcing_use_gemini_computer_use"] = bool(use_gemini_computer_use)
+            # Hard guard requested by product policy/user requirement.
+            self._settings["sourcing_use_codex_computer_use"] = False
         return self._save_settings()
 
     # ============ Upload Prompt Settings ============
