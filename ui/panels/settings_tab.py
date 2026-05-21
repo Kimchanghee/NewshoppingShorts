@@ -10,6 +10,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import sys
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -2818,9 +2819,15 @@ class SettingsTab(QWidget, ThemedMixin):
             "general": "https://aistudio.google.com/app/apikey , https://www.youtube.com/ , https://developers.tiktok.com/ , https://linktr.ee/admin/links",
         }
         pages = suggested_pages.get(focus_key, suggested_pages["general"])
+        if os.name == "nt":
+            host_os = "Windows"
+        elif sys.platform == "darwin":
+            host_os = "macOS"
+        else:
+            host_os = "Linux"
 
         return (
-            "You are helping configure NewshoppingShorts on macOS using computer-use.\n"
+            f"You are helping configure NewshoppingShorts on {host_os} using computer-use.\n"
             f"Current setup scope: {scope}\n"
             f"Current step: {step_title} ({step_id or 'manual'})\n"
             f"Primary focus: {focus_text}\n\n"
@@ -2876,8 +2883,45 @@ class SettingsTab(QWidget, ThemedMixin):
         """Escape shell command text for AppleScript string literal."""
         return str(raw_text or "").replace("\\", "\\\\").replace("\"", "\\\"")
 
+    def _launch_codex_terminal_process(self, args: List[str], workspace: str) -> None:
+        """
+        Launch Codex in a new terminal window according to host OS.
+
+        - Windows: new cmd console (/k keeps session open)
+        - macOS: Terminal via AppleScript
+        - Linux/other: best-effort x-terminal-emulator fallback
+        """
+        if os.name == "nt":
+            windows_cmd = subprocess.list2cmdline(args)
+            creation_flags = int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            subprocess.Popen(
+                ["cmd.exe", "/k", windows_cmd],
+                cwd=workspace,
+                creationflags=creation_flags,
+            )
+            return
+
+        posix_cmd = " ".join(shlex.quote(part) for part in args)
+        if sys.platform == "darwin":
+            apple_script_lines = [
+                'tell application "Terminal"',
+                "activate",
+                f'do script "{self._escape_for_applescript(posix_cmd)}"',
+                "end tell",
+            ]
+            osa_args: List[str] = []
+            for line in apple_script_lines:
+                osa_args.extend(["-e", line])
+            subprocess.run(["osascript", *osa_args], check=True, timeout=8)
+            return
+
+        subprocess.Popen(
+            ["x-terminal-emulator", "-e", "bash", "-lc", posix_cmd],
+            cwd=workspace,
+        )
+
     def _launch_codex_for_current_step(self):
-        """Open macOS Terminal and start Codex with a step-scoped computer-use prompt."""
+        """Open a new terminal and start Codex with a step-scoped computer-use prompt."""
         from ui.components.custom_dialog import show_info, show_warning, show_error
 
         if not self._is_paid_user_for_computer_use(force_refresh=True):
@@ -2959,20 +3003,9 @@ class SettingsTab(QWidget, ThemedMixin):
         if model_name:
             args.extend(["--model", model_name])
         args.append(prompt)
-        shell_cmd = " ".join(shlex.quote(part) for part in args)
-
-        apple_script_lines = [
-            'tell application "Terminal"',
-            "activate",
-            f'do script "{self._escape_for_applescript(shell_cmd)}"',
-            "end tell",
-        ]
-        osa_args: List[str] = []
-        for line in apple_script_lines:
-            osa_args.extend(["-e", line])
 
         try:
-            subprocess.run(["osascript", *osa_args], check=True, timeout=8)
+            self._launch_codex_terminal_process(args=args, workspace=workspace)
             step_id = self._get_active_setup_step_id()
             step_title = self.SETUP_STEP_DEFS.get(step_id, {}).get("title", "수동 설정 지원")
             self._append_setup_log(f"Codex Computer Use 실행: {step_title}")
