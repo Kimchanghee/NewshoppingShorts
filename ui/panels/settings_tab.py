@@ -10,7 +10,7 @@ import re
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QLineEdit, QPushButton, QScrollArea, QFileDialog, QCheckBox, QTextEdit
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
@@ -131,8 +131,14 @@ class SettingsTab(QWidget, ThemedMixin):
         self._setup_action_callback: Optional[Callable[[], None]] = None
         self._setup_rows: Dict[str, Dict[str, QLabel]] = {}
         self._setup_last_tiktok_auth_url = ""
+        self._setup_clipboard_last_text = ""
+        self._setup_clipboard_auto_enabled = True
+        self._setup_clipboard_timer = QTimer(self)
+        self._setup_clipboard_timer.setInterval(1200)
+        self._setup_clipboard_timer.timeout.connect(self._poll_setup_clipboard)
         self._create_widgets()
         self._apply_theme()
+        self._setup_clipboard_timer.start()
         QTimer.singleShot(0, self.refresh_work_community_stats)
     
     def _create_widgets(self):
@@ -1040,6 +1046,31 @@ class SettingsTab(QWidget, ThemedMixin):
         helper_row.addStretch()
         setup_input_layout.addLayout(helper_row)
 
+        clipboard_row = QHBoxLayout()
+        clipboard_row.setSpacing(8)
+
+        self.setup_clipboard_auto_checkbox = QCheckBox("클립보드 자동감지")
+        self.setup_clipboard_auto_checkbox.setChecked(True)
+        self.setup_clipboard_auto_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_clipboard_auto_checkbox.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        self.setup_clipboard_auto_checkbox.stateChanged.connect(self._on_setup_clipboard_auto_toggled)
+        clipboard_row.addWidget(self.setup_clipboard_auto_checkbox)
+
+        self.setup_clipboard_apply_btn = QPushButton("클립보드 즉시 반영")
+        self.setup_clipboard_apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_clipboard_apply_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_clipboard_apply_btn.clicked.connect(self._on_setup_clipboard_apply_clicked)
+        clipboard_row.addWidget(self.setup_clipboard_apply_btn)
+
+        self.setup_clipboard_status = QLabel("대기 중")
+        self.setup_clipboard_status.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        clipboard_row.addWidget(self.setup_clipboard_status, stretch=1)
+        setup_input_layout.addLayout(clipboard_row)
+
         self.setup_assistant_section.add_row("소셜 인증 입력", setup_input_wrap)
 
         # 3) Timeline
@@ -1258,7 +1289,10 @@ class SettingsTab(QWidget, ThemedMixin):
     ):
         """Update current-action card content and buttons."""
         self.setup_current_title.setText(title)
-        self.setup_current_desc.setText(description)
+        desc = str(description or "").strip()
+        if show_done:
+            desc += "\n\n팁: code/프로필 URL/API 키를 복사하면 클립보드 자동감지로 입력됩니다."
+        self.setup_current_desc.setText(desc)
         self._setup_action_callback = action_callback
 
         has_action = bool(action_text and action_callback)
@@ -1282,6 +1316,244 @@ class SettingsTab(QWidget, ThemedMixin):
             except Exception as exc:
                 logger.warning("[SetupAssistant] action callback failed: %s", exc)
                 self._append_setup_log(f"작업 실행 오류: {exc}")
+
+    def _on_setup_clipboard_auto_toggled(self, state: int):
+        """Enable/disable clipboard auto detection while setup assistant runs."""
+        self._setup_clipboard_auto_enabled = bool(state)
+        if self._setup_clipboard_auto_enabled:
+            self._update_setup_clipboard_status("자동감지 활성화", level="ok")
+        else:
+            self._update_setup_clipboard_status("자동감지 비활성화", level="warn")
+
+    def _on_setup_clipboard_apply_clicked(self):
+        """Apply current clipboard text to setup fields immediately."""
+        try:
+            text = str(QApplication.clipboard().text() or "").strip()
+        except Exception:
+            text = ""
+        if not text:
+            self._update_setup_clipboard_status("클립보드가 비어 있습니다", level="warn")
+            return
+        consumed = self._apply_clipboard_payload(text, auto_confirm=True)
+        if not consumed:
+            self._update_setup_clipboard_status("인식 가능한 값이 없습니다", level="warn")
+
+    def _poll_setup_clipboard(self):
+        """Background clipboard poller for setup assistant autofill."""
+        if not self._setup_clipboard_auto_enabled:
+            return
+        if not self._setup_running or not self._setup_waiting_user:
+            return
+        try:
+            text = str(QApplication.clipboard().text() or "").strip()
+        except Exception:
+            return
+        if not text or text == self._setup_clipboard_last_text:
+            return
+        self._setup_clipboard_last_text = text
+        self._apply_clipboard_payload(text, auto_confirm=True)
+
+    def _update_setup_clipboard_status(self, message: str, level: str = "info"):
+        """Render clipboard helper status text."""
+        if not hasattr(self, "setup_clipboard_status"):
+            return
+        c = self.ds.colors
+        if level == "ok":
+            color = c.success
+        elif level == "warn":
+            color = c.warning
+        elif level == "error":
+            color = c.error
+        else:
+            color = c.text_muted
+        self.setup_clipboard_status.setStyleSheet(
+            f"color: {color}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.setup_clipboard_status.setText(str(message or "").strip())
+
+    @staticmethod
+    def _extract_gemini_key_from_text(raw_text: str) -> str:
+        """Extract one Gemini API key token from arbitrary text."""
+        text = str(raw_text or "")
+        match = re.search(r"AIza[A-Za-z0-9_-]{35,96}", text)
+        if not match:
+            return ""
+        key = match.group(0).strip()
+        return key if GEMINI_API_KEY_PATTERN.match(key) else ""
+
+    @staticmethod
+    def _extract_first_http_url(raw_text: str) -> str:
+        """Extract first http(s) URL from arbitrary text."""
+        text = str(raw_text or "")
+        match = re.search(r"https?://[^\s\"'<>]+", text, flags=re.IGNORECASE)
+        if not match:
+            return ""
+        url = match.group(0).rstrip(".,);]")
+        return url.strip()
+
+    @staticmethod
+    def _extract_linktree_url_from_text(raw_text: str) -> str:
+        """Extract Linktree profile URL from text."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+        explicit = re.search(r"https?://(?:www\.)?linktr\.ee/[^\s\"'<>?#]+", text, flags=re.IGNORECASE)
+        if explicit:
+            return explicit.group(0).rstrip(".,);]").strip()
+        shorthand = re.search(r"(?:www\.)?linktr\.ee/[^\s\"'<>?#]+", text, flags=re.IGNORECASE)
+        if shorthand:
+            return ("https://" + shorthand.group(0).rstrip(".,);]").strip()).strip()
+        return ""
+
+    def _extract_social_handle_from_text(self, raw_text: str, platform: str) -> str:
+        """Extract social account handle from URL/text."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+        lower = text.lower()
+        if platform == "instagram" and "instagram.com" in lower:
+            match = re.search(r"https?://(?:www\.)?instagram\.com/([^/?#\s]+)", text, flags=re.IGNORECASE)
+            if match:
+                return self._normalize_social_account_input(match.group(1))
+        if platform == "threads" and ("threads.net" in lower or "threads.com" in lower):
+            match = re.search(r"https?://(?:www\.)?threads\.(?:net|com)/@?([^/?#\s]+)", text, flags=re.IGNORECASE)
+            if match:
+                return self._normalize_social_account_input(match.group(1))
+        if "\n" in text or "\t" in text or " " in text:
+            url = self._extract_first_http_url(text)
+            if url:
+                return self._normalize_social_account_input(url)
+            return ""
+        return self._normalize_social_account_input(text)
+
+    def _extract_oauth_code_candidate_from_text(self, raw_text: str) -> str:
+        """Extract OAuth code from clipboard text with safety checks."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+        code = self._extract_oauth_code(text)
+        if not code:
+            return ""
+        if re.search(r"(?:[?&#]|^)code=", text, flags=re.IGNORECASE):
+            return code
+        if re.search(r"\s", code):
+            return ""
+        if re.fullmatch(r"[A-Za-z0-9._~%-]{8,512}", code):
+            return code
+        return ""
+
+    def _store_gemini_key_silent(self, key_value: str) -> bool:
+        """Store one Gemini API key without modal dialogs."""
+        key = str(key_value or "").strip()
+        if not GEMINI_API_KEY_PATTERN.match(key):
+            return False
+
+        max_keys = len(self.api_key_inputs) if hasattr(self, "api_key_inputs") else 8
+        existing: List[str] = []
+        for i in range(1, max_keys + 1):
+            value = str(SecretsManager.get_api_key(f"gemini_api_{i}") or "").strip()
+            if value and GEMINI_API_KEY_PATTERN.match(value) and value not in existing:
+                existing.append(value)
+
+        for inp in getattr(self, "api_key_inputs", []):
+            value = str(inp.text() or "").strip()
+            if value and GEMINI_API_KEY_PATTERN.match(value) and value not in existing:
+                existing.append(value)
+
+        if key not in existing:
+            existing.append(key)
+        keys = existing[:max_keys]
+
+        for idx, saved_key in enumerate(keys, start=1):
+            if not SecretsManager.store_api_key(f"gemini_api_{idx}", saved_key):
+                return False
+            loaded = str(SecretsManager.get_api_key(f"gemini_api_{idx}") or "").strip()
+            if loaded != saved_key:
+                return False
+        for idx in range(len(keys) + 1, max_keys + 1):
+            SecretsManager.delete_api_key(f"gemini_api_{idx}")
+
+        for inp in getattr(self, "api_key_inputs", []):
+            inp.clear()
+        for i, saved_key in enumerate(keys):
+            if i < len(self.api_key_inputs):
+                self.api_key_inputs[i].setText(saved_key)
+
+        config.GEMINI_API_KEYS = {f"api_{i + 1}": saved_key for i, saved_key in enumerate(keys)}
+        if self.gui and hasattr(self.gui, "api_key_manager"):
+            self.gui.api_key_manager = APIKeyManager(use_secrets_manager=True)
+            if hasattr(self.gui, "init_client"):
+                try:
+                    self.gui.init_client()
+                except Exception:
+                    pass
+        self._update_key_count()
+        self._refresh_setup_assistant_status()
+        return True
+
+    def _apply_clipboard_payload(self, raw_text: str, auto_confirm: bool = False) -> bool:
+        """Apply clipboard text to relevant setup inputs and optionally auto-confirm."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return False
+
+        step_id = ""
+        if self._setup_running and 0 <= self._setup_step_index < len(self._setup_steps):
+            step_id = self._setup_steps[self._setup_step_index]
+
+        consumed = False
+        summary = ""
+
+        # 1) Gemini key
+        if step_id in ("", "precheck"):
+            gemini_key = self._extract_gemini_key_from_text(text)
+            if gemini_key and self._store_gemini_key_silent(gemini_key):
+                consumed = True
+                summary = "Gemini API 키 자동 반영"
+
+        # 2) TikTok OAuth code
+        if not consumed and step_id in ("", "tiktok_user_auth", "tiktok_code_exchange", "tiktok_verify"):
+            auth_code = self._extract_oauth_code_candidate_from_text(text)
+            if auth_code:
+                self.setup_tiktok_code_input.setText(auth_code)
+                consumed = True
+                summary = "TikTok code 자동 입력"
+
+        # 3) Instagram handle
+        if not consumed and step_id in ("", "instagram_user_setup", "instagram_verify"):
+            handle = self._extract_social_handle_from_text(text, "instagram")
+            if handle:
+                self.setup_instagram_handle_input.setText(handle)
+                consumed = True
+                summary = f"Instagram 계정 자동 입력 (@{handle})"
+
+        # 4) Threads handle
+        if not consumed and step_id in ("", "threads_user_setup", "threads_verify"):
+            handle = self._extract_social_handle_from_text(text, "threads")
+            if handle:
+                self.setup_threads_handle_input.setText(handle)
+                consumed = True
+                summary = f"Threads 계정 자동 입력 (@{handle})"
+
+        # 5) Linktree profile
+        if not consumed and step_id in ("", "linktree_user_setup", "linktree_save_verify"):
+            linktree_url = self._extract_linktree_url_from_text(text)
+            if linktree_url:
+                normalized = self._normalize_http_url(linktree_url)
+                if self._is_valid_http_url(normalized):
+                    self.linktree_profile_input.setText(normalized)
+                    consumed = True
+                    summary = "Linktree 공개 주소 자동 입력"
+
+        if not consumed:
+            return False
+
+        self._append_setup_log(f"클립보드 자동 반영: {summary}")
+        self._update_setup_clipboard_status(summary, level="ok")
+
+        if auto_confirm and self._setup_running and self._setup_waiting_user:
+            QTimer.singleShot(10, self._on_setup_done_clicked)
+        return True
 
     def _get_saved_gemini_key_count(self) -> int:
         """Return number of saved Gemini keys in secure store."""
@@ -1373,7 +1645,21 @@ class SettingsTab(QWidget, ThemedMixin):
             value = value[1:]
         if "/" in value:
             value = value.split("/", 1)[0]
-        return value.strip()
+        value = value.strip()
+        if not value:
+            return ""
+
+        blocked_tokens = {
+            "accounts", "login", "logout", "auth", "oauth", "signup", "register",
+            "explore", "reels", "reel", "home", "about", "privacy", "terms",
+            "developers", "developer", "apps", "app",
+        }
+        if value.lower() in blocked_tokens:
+            return ""
+
+        if not re.fullmatch(r"[A-Za-z0-9._]{1,64}", value):
+            return ""
+        return value
 
     def _is_instagram_connected(self) -> bool:
         return bool(get_settings_manager().get_social_connection_status("instagram"))
@@ -1512,6 +1798,7 @@ class SettingsTab(QWidget, ThemedMixin):
         if self._setup_running:
             return
         self._setup_running = True
+        self._setup_clipboard_last_text = ""
         self._setup_scope = scope
         self._setup_steps = self._build_setup_steps(scope)
         self._setup_step_index = 0
@@ -1530,6 +1817,7 @@ class SettingsTab(QWidget, ThemedMixin):
             action_callback=None,
             show_done=False,
         )
+        self._update_setup_clipboard_status("대기 중", level="info")
         QTimer.singleShot(10, self._run_setup_step)
 
     def _stop_setup_assistant(self):
@@ -1548,6 +1836,7 @@ class SettingsTab(QWidget, ThemedMixin):
         )
         self.setup_retry_btn.setVisible(False)
         self.setup_stop_btn.setVisible(False)
+        self._update_setup_clipboard_status("도우미 중단됨", level="warn")
 
     def _run_setup_step(self):
         """Execute current setup step."""
@@ -1567,6 +1856,7 @@ class SettingsTab(QWidget, ThemedMixin):
             self.setup_retry_btn.setVisible(False)
             self.setup_stop_btn.setVisible(False)
             self._append_setup_log("도우미 완료")
+            self._update_setup_clipboard_status("도우미 완료", level="ok")
             return
 
         step_id = self._setup_steps[self._setup_step_index]

@@ -1512,7 +1512,21 @@ class UploadPanel(QFrame, ThemedMixin):
         value = value.split("?", 1)[0].split("#", 1)[0].strip()
         if value.startswith("@"):
             value = value[1:]
-        return value.strip()
+        value = value.strip()
+        if not value:
+            return ""
+
+        blocked_tokens = {
+            "accounts", "login", "logout", "auth", "oauth", "signup", "register",
+            "explore", "reels", "reel", "home", "about", "privacy", "terms",
+            "developers", "developer", "apps", "app",
+        }
+        if value.lower() in blocked_tokens:
+            return ""
+
+        if not re.fullmatch(r"[A-Za-z0-9._]{1,64}", value):
+            return ""
+        return value
 
     @staticmethod
     def _extract_oauth_code(raw_value: str) -> str:
