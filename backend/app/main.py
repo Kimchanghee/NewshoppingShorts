@@ -21,12 +21,13 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from app.errors import AppError
-from app.routers import auth, registration, admin, subscription, payment, logs
+from app.routers import auth, registration, admin, subscription, payment, logs, computer_use
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
 from app.database import init_db
 from app.utils.billing_crypto import decrypt_billing_key, validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
+from app.scheduler.computer_use_worker import run_computer_use_worker_loop
 
 # 濡쒓퉭 ?ㅼ젙 - 紐⑤뱺 濡쒓렇瑜??곕??먯뿉 異쒕젰
 logging.basicConfig(
@@ -44,6 +45,8 @@ settings = get_settings()
 _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _auth_cleanup_stop_event: Optional[asyncio.Event] = None
 _auth_cleanup_task: Optional[asyncio.Task] = None
+_computer_use_worker_stop_event: Optional[asyncio.Event] = None
+_computer_use_worker_task: Optional[asyncio.Task] = None
 
 # Disable docs and OpenAPI schema in production
 _is_prod = settings.ENVIRONMENT == "production"
@@ -235,6 +238,17 @@ async def startup_event():
         if _auth_cleanup_task is None or _auth_cleanup_task.done():
             _auth_cleanup_stop_event.clear()
             _auth_cleanup_task = asyncio.create_task(run_auth_cleanup_loop(_auth_cleanup_stop_event))
+        # 6. Optional centralized Computer Use worker loop.
+        if bool(settings.COMPUTER_USE_WORKER_ENABLED):
+            global _computer_use_worker_task
+            global _computer_use_worker_stop_event
+            if _computer_use_worker_stop_event is None:
+                _computer_use_worker_stop_event = asyncio.Event()
+            if _computer_use_worker_task is None or _computer_use_worker_task.done():
+                _computer_use_worker_stop_event.clear()
+                _computer_use_worker_task = asyncio.create_task(
+                    run_computer_use_worker_loop(_computer_use_worker_stop_event)
+                )
     except Exception as e:
         logger.error(f"Startup error during DB init/migration: {e}", exc_info=True)
         raise
@@ -244,13 +258,21 @@ async def startup_event():
 async def shutdown_event():
     """Gracefully stop background maintenance tasks."""
     global _auth_cleanup_task
+    global _computer_use_worker_task
     if _auth_cleanup_stop_event is not None:
         _auth_cleanup_stop_event.set()
+    if _computer_use_worker_stop_event is not None:
+        _computer_use_worker_stop_event.set()
     if _auth_cleanup_task and not _auth_cleanup_task.done():
         try:
             await asyncio.wait_for(_auth_cleanup_task, timeout=5)
         except Exception:
             _auth_cleanup_task.cancel()
+    if _computer_use_worker_task and not _computer_use_worker_task.done():
+        try:
+            await asyncio.wait_for(_computer_use_worker_task, timeout=5)
+        except Exception:
+            _computer_use_worker_task.cancel()
 
 
 # Register rate limiter with app state
@@ -538,6 +560,7 @@ app.include_router(admin.router)
 app.include_router(subscription.router)
 app.include_router(payment.router)
 app.include_router(logs.router)
+app.include_router(computer_use.router)
 
 @app.get("/health")
 async def health():

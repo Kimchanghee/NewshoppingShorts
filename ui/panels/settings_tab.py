@@ -7,8 +7,13 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
+import shutil
+import subprocess
+import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
+import requests
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QLineEdit, QPushButton, QScrollArea, QFileDialog, QCheckBox, QTextEdit
@@ -136,6 +141,9 @@ class SettingsTab(QWidget, ThemedMixin):
         self._setup_clipboard_timer = QTimer(self)
         self._setup_clipboard_timer.setInterval(1200)
         self._setup_clipboard_timer.timeout.connect(self._poll_setup_clipboard)
+        self._codex_status_summary = "Codex 상태: 미확인"
+        self._computer_use_paid_cache_value = False
+        self._computer_use_paid_cache_ts = 0.0
         self._create_widgets()
         self._apply_theme()
         self._setup_clipboard_timer.start()
@@ -1046,6 +1054,76 @@ class SettingsTab(QWidget, ThemedMixin):
         helper_row.addStretch()
         setup_input_layout.addLayout(helper_row)
 
+        codex_config_row = QHBoxLayout()
+        codex_config_row.setSpacing(8)
+        self.setup_codex_path_input = QLineEdit()
+        self.setup_codex_path_input.setPlaceholderText("Codex CLI 경로 (기본: codex)")
+        self.setup_codex_path_input.setToolTip("예: codex 또는 /usr/local/bin/codex")
+        codex_config_row.addWidget(self.setup_codex_path_input, stretch=1)
+        self.setup_codex_model_input = QLineEdit()
+        self.setup_codex_model_input.setPlaceholderText("모델 (선택, 비우면 기본)")
+        self.setup_codex_model_input.setToolTip("예: gpt-5.4, gpt-5.5")
+        codex_config_row.addWidget(self.setup_codex_model_input, stretch=1)
+        self.setup_codex_save_btn = QPushButton("Codex 설정 저장")
+        self.setup_codex_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_codex_save_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_codex_save_btn.clicked.connect(self._save_codex_cli_settings)
+        codex_config_row.addWidget(self.setup_codex_save_btn)
+        setup_input_layout.addLayout(codex_config_row)
+
+        computer_use_policy_row = QHBoxLayout()
+        computer_use_policy_row.setSpacing(8)
+        self.setup_computer_use_paid_only_checkbox = QCheckBox("Computer Use 유료 전용")
+        self.setup_computer_use_paid_only_checkbox.setChecked(True)
+        self.setup_computer_use_paid_only_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_computer_use_paid_only_checkbox.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        computer_use_policy_row.addWidget(self.setup_computer_use_paid_only_checkbox)
+
+        self.setup_computer_use_bridge_checkbox = QCheckBox("공용 서버 브리지 사용")
+        self.setup_computer_use_bridge_checkbox.setChecked(False)
+        self.setup_computer_use_bridge_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_computer_use_bridge_checkbox.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        computer_use_policy_row.addWidget(self.setup_computer_use_bridge_checkbox)
+        computer_use_policy_row.addStretch()
+        setup_input_layout.addLayout(computer_use_policy_row)
+
+        bridge_row = QHBoxLayout()
+        bridge_row.setSpacing(8)
+        self.setup_computer_use_bridge_url_input = QLineEdit()
+        self.setup_computer_use_bridge_url_input.setPlaceholderText("공용 브리지 URL (예: https://api.yourserver.com)")
+        self.setup_computer_use_bridge_url_input.setToolTip("유료 사용자 Computer Use 요청을 서버로 위임할 때 사용합니다.")
+        bridge_row.addWidget(self.setup_computer_use_bridge_url_input, stretch=1)
+        self.setup_computer_use_bridge_key_input = QLineEdit()
+        self.setup_computer_use_bridge_key_input.setPlaceholderText("브리지 API 키 (선택)")
+        self.setup_computer_use_bridge_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        bridge_row.addWidget(self.setup_computer_use_bridge_key_input, stretch=1)
+        setup_input_layout.addLayout(bridge_row)
+
+        codex_row = QHBoxLayout()
+        codex_row.setSpacing(8)
+        self.setup_codex_check_btn = QPushButton("Codex 상태 점검")
+        self.setup_codex_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_codex_check_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_codex_check_btn.clicked.connect(lambda: self._refresh_codex_cli_status(show_dialog=True))
+        codex_row.addWidget(self.setup_codex_check_btn)
+
+        self.setup_codex_launch_btn = QPushButton("현재 단계 Codex 실행")
+        self.setup_codex_launch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_codex_launch_btn.setStyleSheet(self.setup_start_all_btn.styleSheet())
+        self.setup_codex_launch_btn.clicked.connect(self._launch_codex_for_current_step)
+        codex_row.addWidget(self.setup_codex_launch_btn)
+
+        self.setup_codex_status = QLabel(self._codex_status_summary)
+        self.setup_codex_status.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        codex_row.addWidget(self.setup_codex_status, stretch=1)
+        setup_input_layout.addLayout(codex_row)
+
         clipboard_row = QHBoxLayout()
         clipboard_row.setSpacing(8)
 
@@ -1072,6 +1150,7 @@ class SettingsTab(QWidget, ThemedMixin):
         setup_input_layout.addLayout(clipboard_row)
 
         self.setup_assistant_section.add_row("소셜 인증 입력", setup_input_wrap)
+        self._load_codex_cli_settings()
 
         # 3) Timeline
         timeline_wrap = QFrame()
@@ -1762,6 +1841,7 @@ class SettingsTab(QWidget, ThemedMixin):
         if not hasattr(self, "setup_chip_gemini"):
             return
         self._refresh_setup_connection_chips()
+        QTimer.singleShot(0, self._refresh_computer_use_access_ui)
 
     def _build_setup_steps(self, scope: str) -> List[str]:
         """Return step sequence by setup scope."""
@@ -2413,13 +2493,497 @@ class SettingsTab(QWidget, ThemedMixin):
             self,
             "Computer Use 설정 가이드",
             "권장 순서:\n"
-            "1) YouTube OAuth 창 열기 → 로그인/동의\n"
-            "2) TikTok 인증 페이지 열기 → 승인 후 code 입력\n"
-            "3) Instagram/Threads 로그인 후 계정명 입력\n"
+            "1) Codex 상태 점검 후 '현재 단계 Codex 실행'\n"
+            "2) 로그인/2FA/CAPTCHA/동의만 직접 처리\n"
+            "3) code/프로필 URL/API 키는 복사 (클립보드 자동반영)\n"
             "4) 각 단계에서 '완료했어요'로 검증 진행",
         )
         self._open_external_url(f"{SETUP_NOTICE_BASE_URL}/computer-use-social-setup")
         self._append_setup_log("Computer Use 설정 가이드를 열었습니다.")
+
+    def _load_codex_cli_settings(self):
+        """Load saved Codex CLI bridge settings and refresh status label."""
+        try:
+            mgr = get_settings_manager()
+            settings = mgr.get_codex_cli_settings()
+            cu_settings = mgr.get_computer_use_settings()
+        except Exception:
+            settings = {"path": "codex", "model": "", "enabled": True}
+            cu_settings = {"paid_only": True, "bridge_enabled": False, "bridge_url": "", "bridge_api_key": ""}
+
+        if hasattr(self, "setup_codex_path_input"):
+            self.setup_codex_path_input.setText(str(settings.get("path", "codex") or "codex"))
+        if hasattr(self, "setup_codex_model_input"):
+            self.setup_codex_model_input.setText(str(settings.get("model", "") or ""))
+        if hasattr(self, "setup_computer_use_paid_only_checkbox"):
+            self.setup_computer_use_paid_only_checkbox.setChecked(bool(cu_settings.get("paid_only", True)))
+        if hasattr(self, "setup_computer_use_bridge_checkbox"):
+            self.setup_computer_use_bridge_checkbox.setChecked(bool(cu_settings.get("bridge_enabled", False)))
+        if hasattr(self, "setup_computer_use_bridge_url_input"):
+            self.setup_computer_use_bridge_url_input.setText(str(cu_settings.get("bridge_url", "") or ""))
+        if hasattr(self, "setup_computer_use_bridge_key_input"):
+            self.setup_computer_use_bridge_key_input.setText(str(cu_settings.get("bridge_api_key", "") or ""))
+
+        QTimer.singleShot(120, self._refresh_computer_use_access_ui)
+
+    def _save_codex_cli_settings(self):
+        """Persist Codex CLI bridge settings."""
+        from ui.components.custom_dialog import show_info, show_error
+
+        path_value = "codex"
+        model_value = ""
+        if hasattr(self, "setup_codex_path_input"):
+            path_value = str(self.setup_codex_path_input.text() or "").strip() or "codex"
+            self.setup_codex_path_input.setText(path_value)
+        if hasattr(self, "setup_codex_model_input"):
+            model_value = str(self.setup_codex_model_input.text() or "").strip()
+            self.setup_codex_model_input.setText(model_value)
+
+        bridge_url = ""
+        bridge_api_key = ""
+        paid_only = True
+        bridge_enabled = False
+        if hasattr(self, "setup_computer_use_bridge_url_input"):
+            bridge_url = str(self.setup_computer_use_bridge_url_input.text() or "").strip()
+            self.setup_computer_use_bridge_url_input.setText(bridge_url)
+        if hasattr(self, "setup_computer_use_bridge_key_input"):
+            bridge_api_key = str(self.setup_computer_use_bridge_key_input.text() or "").strip()
+            self.setup_computer_use_bridge_key_input.setText(bridge_api_key)
+        if hasattr(self, "setup_computer_use_paid_only_checkbox"):
+            paid_only = bool(self.setup_computer_use_paid_only_checkbox.isChecked())
+        if hasattr(self, "setup_computer_use_bridge_checkbox"):
+            bridge_enabled = bool(self.setup_computer_use_bridge_checkbox.isChecked())
+
+        try:
+            mgr = get_settings_manager()
+            ok = mgr.set_codex_cli_settings(path=path_value, model=model_value)
+            if not ok:
+                show_error(self, "저장 실패", "Codex CLI 설정을 저장하지 못했습니다.")
+                return
+            ok_policy = mgr.set_computer_use_settings(
+                paid_only=paid_only,
+                bridge_enabled=bridge_enabled,
+                bridge_url=bridge_url,
+                bridge_api_key=bridge_api_key,
+            )
+            if not ok_policy:
+                show_error(self, "저장 실패", "Computer Use 정책 설정을 저장하지 못했습니다.")
+                return
+            self._append_setup_log(f"Codex 설정 저장: path={path_value}, model={model_value or 'default'}")
+            self._refresh_computer_use_access_ui()
+            show_info(self, "저장 완료", "Codex CLI 설정을 저장했습니다.")
+        except Exception as exc:
+            show_error(self, "저장 실패", f"Codex CLI 설정 저장 중 오류가 발생했습니다.\n{exc}")
+
+    @staticmethod
+    def _resolve_codex_binary(configured_path: str) -> str:
+        """Resolve codex executable path from a configured value."""
+        candidate = str(configured_path or "").strip() or "codex"
+        if os.path.sep in candidate or (os.path.altsep and os.path.altsep in candidate):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+            return ""
+        resolved = shutil.which(candidate)
+        return str(resolved or "").strip()
+
+    @staticmethod
+    def _has_enabled_computer_use_mcp(mcp_list_output: str) -> bool:
+        """Check whether codex mcp list output indicates enabled computer-use server."""
+        text = str(mcp_list_output or "")
+        for raw_line in text.splitlines():
+            line = raw_line.strip().lower()
+            if not line or "computer-use" not in line:
+                continue
+            if "enabled" in line:
+                return True
+        return False
+
+    def _set_codex_status_text(self, text: str, level: str = "info"):
+        """Render Codex status helper label."""
+        self._codex_status_summary = str(text or "").strip() or "Codex 상태: 미확인"
+        if not hasattr(self, "setup_codex_status"):
+            return
+        c = self.ds.colors
+        if level == "ok":
+            color = c.success
+        elif level == "warn":
+            color = c.warning
+        elif level == "error":
+            color = c.error
+        else:
+            color = c.text_muted
+        self.setup_codex_status.setStyleSheet(
+            f"color: {color}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.setup_codex_status.setText(self._codex_status_summary)
+
+    def _extract_logged_in_user_id(self) -> str:
+        """Extract current user id from gui login payload."""
+        if not self.gui:
+            return ""
+        try:
+            from utils.auth_helpers import extract_user_id
+
+            user_id = extract_user_id(getattr(self.gui, "login_data", None))
+            return str(user_id or "").strip()
+        except Exception:
+            return ""
+
+    def _extract_logged_in_token(self) -> str:
+        """Extract current login JWT token from gui payload."""
+        if not self.gui:
+            return ""
+        try:
+            login_data = getattr(self.gui, "login_data", None)
+            if not isinstance(login_data, dict):
+                return ""
+            data = login_data.get("data", {})
+            if not isinstance(data, dict):
+                return ""
+            token = str(data.get("token") or "").strip()
+            return token
+        except Exception:
+            return ""
+
+    def _is_computer_use_paid_only(self) -> bool:
+        """Return whether computer-use feature is restricted to paid users."""
+        try:
+            cu = get_settings_manager().get_computer_use_settings()
+            return bool(cu.get("paid_only", True))
+        except Exception:
+            return True
+
+    def _is_paid_user_for_computer_use(self, force_refresh: bool = False) -> bool:
+        """Resolve paid entitlement for computer-use gating."""
+        if not self._is_computer_use_paid_only():
+            return True
+
+        now = time.time()
+        if (not force_refresh) and (now - self._computer_use_paid_cache_ts < 60):
+            return bool(self._computer_use_paid_cache_value)
+
+        paid = False
+        user_id = self._extract_logged_in_user_id()
+        if user_id:
+            try:
+                from caller import rest
+
+                sub_status = rest.getSubscriptionStatus(user_id)
+                has_expiry = bool(sub_status.get("subscription_expires_at"))
+                is_unlimited = sub_status.get("work_count") == -1
+                is_trial_flag = sub_status.get("is_trial")
+                paid = has_expiry or is_unlimited or (is_trial_flag is False)
+            except Exception:
+                paid = False
+
+        self._computer_use_paid_cache_value = bool(paid)
+        self._computer_use_paid_cache_ts = now
+        return bool(paid)
+
+    def _refresh_computer_use_access_ui(self):
+        """Update computer-use access controls by subscription policy/state."""
+        paid_only = self._is_computer_use_paid_only()
+        is_paid = self._is_paid_user_for_computer_use(force_refresh=False)
+        allowed = (not paid_only) or is_paid
+
+        if hasattr(self, "setup_codex_launch_btn"):
+            self.setup_codex_launch_btn.setEnabled(bool(allowed))
+            self.setup_codex_launch_btn.setToolTip(
+                "" if allowed else "유료계정 전용 기능입니다. 무료계정은 수동 설정을 사용하세요."
+            )
+        if hasattr(self, "setup_codex_check_btn"):
+            self.setup_codex_check_btn.setEnabled(bool(allowed))
+            self.setup_codex_check_btn.setToolTip(
+                "" if allowed else "유료계정 전용 기능입니다. 무료계정은 수동 설정을 사용하세요."
+            )
+
+        if not allowed and paid_only:
+            self._set_codex_status_text("Computer Use: 유료계정 전용", level="warn")
+            return
+
+        self._refresh_codex_cli_status(show_dialog=False)
+
+    def _refresh_codex_cli_status(self, show_dialog: bool = False) -> Dict[str, Any]:
+        """Run Codex CLI health checks: binary, login, and computer-use MCP."""
+        from ui.components.custom_dialog import show_info, show_warning
+
+        try:
+            settings = get_settings_manager().get_codex_cli_settings()
+        except Exception:
+            settings = {"path": "codex", "model": "", "enabled": True}
+
+        configured_path = str(settings.get("path", "codex") or "codex")
+        resolved = self._resolve_codex_binary(configured_path)
+        if not resolved:
+            summary = f"Codex 없음: {configured_path}"
+            self._set_codex_status_text(summary, level="error")
+            if show_dialog:
+                show_warning(
+                    self,
+                    "Codex 실행 파일 없음",
+                    "Codex CLI를 찾지 못했습니다.\n"
+                    "설정값을 확인하세요.\n"
+                    f"- 입력 경로: {configured_path}",
+                )
+            return {
+                "available": False,
+                "login_ok": False,
+                "computer_use_ok": False,
+                "version": "",
+                "resolved_path": "",
+            }
+
+        def run_cli(args: List[str], timeout_sec: float = 6.0) -> str:
+            try:
+                completed = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_sec,
+                    cwd=os.path.expanduser("~"),
+                )
+                return (completed.stdout or completed.stderr or "").strip()
+            except Exception as exc:
+                return f"ERROR: {exc}"
+
+        version_text = run_cli([resolved, "--version"], timeout_sec=6.0)
+        login_text = run_cli([resolved, "login", "status"], timeout_sec=8.0)
+        mcp_text = run_cli([resolved, "mcp", "list"], timeout_sec=8.0)
+
+        login_ok = "logged in" in login_text.lower()
+        computer_use_ok = self._has_enabled_computer_use_mcp(mcp_text)
+
+        status_bits = [f"v={version_text or 'unknown'}"]
+        status_bits.append("로그인됨" if login_ok else "로그인 필요")
+        status_bits.append("computer-use 준비됨" if computer_use_ok else "computer-use 미감지")
+        summary = "Codex " + " · ".join(status_bits)
+        level = "ok" if (login_ok and computer_use_ok) else ("warn" if login_ok else "error")
+        self._set_codex_status_text(summary, level=level)
+
+        if show_dialog:
+            body = (
+                f"실행 파일: {resolved}\n"
+                f"버전: {version_text or '확인 실패'}\n"
+                f"로그인: {login_text or '확인 실패'}\n"
+                f"computer-use: {'enabled' if computer_use_ok else 'not found/disabled'}"
+            )
+            if login_ok and computer_use_ok:
+                show_info(self, "Codex 상태 정상", body)
+            else:
+                show_warning(self, "Codex 상태 점검 필요", body)
+
+        return {
+            "available": True,
+            "login_ok": login_ok,
+            "computer_use_ok": computer_use_ok,
+            "version": version_text,
+            "resolved_path": resolved,
+        }
+
+    def _get_active_setup_step_id(self) -> str:
+        """Get current step id in setup assistant."""
+        if self._setup_running and 0 <= self._setup_step_index < len(self._setup_steps):
+            return self._setup_steps[self._setup_step_index]
+        return ""
+
+    def _build_codex_prompt_for_current_step(self) -> str:
+        """Build one step-scoped handoff prompt for Codex computer-use."""
+        step_id = self._get_active_setup_step_id()
+        step_meta = self.SETUP_STEP_DEFS.get(step_id, {})
+        step_title = step_meta.get("title", "수동 설정 지원")
+        scope = str(self._setup_scope or "all")
+
+        focus_map = {
+            "youtube": "YouTube OAuth 연결",
+            "tiktok": "TikTok OAuth 연결",
+            "instagram": "Instagram 계정 연결",
+            "threads": "Threads 계정 연결",
+            "linktree": "Linktree 프로필 설정",
+            "precheck": "Gemini API 키 확인",
+        }
+        focus_key = "general"
+        for candidate in ("youtube", "tiktok", "instagram", "threads", "linktree", "precheck"):
+            if step_id.startswith(candidate):
+                focus_key = candidate
+                break
+
+        focus_text = focus_map.get(focus_key, "소셜 자동설정")
+        suggested_pages = {
+            "youtube": "https://console.cloud.google.com/ , https://www.youtube.com/",
+            "tiktok": "https://developers.tiktok.com/ , https://www.tiktok.com/login",
+            "instagram": "https://www.instagram.com/accounts/login/ , https://developers.facebook.com/apps/",
+            "threads": "https://www.threads.com/login , https://developers.facebook.com/apps/",
+            "linktree": "https://linktr.ee/admin/links",
+            "precheck": "https://aistudio.google.com/app/apikey",
+            "general": "https://aistudio.google.com/app/apikey , https://www.youtube.com/ , https://developers.tiktok.com/ , https://linktr.ee/admin/links",
+        }
+        pages = suggested_pages.get(focus_key, suggested_pages["general"])
+
+        return (
+            "You are helping configure NewshoppingShorts on macOS using computer-use.\n"
+            f"Current setup scope: {scope}\n"
+            f"Current step: {step_title} ({step_id or 'manual'})\n"
+            f"Primary focus: {focus_text}\n\n"
+            "Rules:\n"
+            "1) You handle all navigation, page transitions, form fill, and non-sensitive clicks.\n"
+            "2) Ask the human only for login, 2FA, CAPTCHA, legal consent, API-key issuance, or payment decisions.\n"
+            "3) After human-only actions complete, continue automatically from the current page.\n"
+            "4) If you obtain callback URL/code/API key/profile URL, tell the user to copy it. This app auto-reads clipboard.\n"
+            "5) Never perform destructive or irreversible actions.\n\n"
+            f"Start by opening relevant pages: {pages}\n"
+            "Then proceed step-by-step until this current step is done."
+        )
+
+    def _submit_computer_use_bridge_job(self, bridge_url: str, api_key: str, prompt: str) -> Dict[str, Any]:
+        """Submit one computer-use job to a remote bridge server."""
+        user_id = self._extract_logged_in_user_id()
+        login_token = self._extract_logged_in_token()
+        if not login_token:
+            raise ValueError("로그인 토큰이 없어 브리지 요청을 보낼 수 없습니다.")
+        step_id = self._get_active_setup_step_id()
+        payload = {
+            "user_id": user_id,
+            "scope": str(self._setup_scope or "all"),
+            "step_id": step_id,
+            "step_title": self.SETUP_STEP_DEFS.get(step_id, {}).get("title", ""),
+            "prompt": prompt,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {login_token}",
+        }
+        token = str(api_key or "").strip()
+        if token:
+            headers["X-Bridge-API-Key"] = token
+
+        base = str(bridge_url or "").strip().rstrip("/")
+        url = f"{base}/v1/computer-use/jobs"
+        response = requests.post(url, json=payload, headers=headers, timeout=20)
+        try:
+            body = response.json()
+        except Exception:
+            body = {"raw": response.text[:500]}
+
+        return {
+            "ok": 200 <= response.status_code < 300,
+            "status_code": response.status_code,
+            "body": body,
+            "url": url,
+        }
+
+    @staticmethod
+    def _escape_for_applescript(raw_text: str) -> str:
+        """Escape shell command text for AppleScript string literal."""
+        return str(raw_text or "").replace("\\", "\\\\").replace("\"", "\\\"")
+
+    def _launch_codex_for_current_step(self):
+        """Open macOS Terminal and start Codex with a step-scoped computer-use prompt."""
+        from ui.components.custom_dialog import show_info, show_warning, show_error
+
+        if not self._is_paid_user_for_computer_use(force_refresh=True):
+            show_warning(
+                self,
+                "유료 기능",
+                "Computer Use 자동화는 유료 사용자 전용입니다.\n"
+                "무료 사용자는 기존 수동 설정 흐름을 사용해주세요.",
+            )
+            return
+
+        try:
+            cu_settings = get_settings_manager().get_computer_use_settings()
+        except Exception:
+            cu_settings = {"bridge_enabled": False, "bridge_url": "", "bridge_api_key": ""}
+
+        prompt = self._build_codex_prompt_for_current_step()
+
+        bridge_enabled = bool(cu_settings.get("bridge_enabled", False))
+        bridge_url = str(cu_settings.get("bridge_url", "") or "").strip()
+        bridge_api_key = str(cu_settings.get("bridge_api_key", "") or "").strip()
+        if bridge_enabled and bridge_url:
+            try:
+                result = self._submit_computer_use_bridge_job(bridge_url, bridge_api_key, prompt)
+            except Exception as exc:
+                show_error(self, "브리지 요청 실패", f"서버 브리지 호출 중 오류가 발생했습니다.\n{exc}")
+                return
+
+            if not result.get("ok"):
+                show_error(
+                    self,
+                    "브리지 요청 실패",
+                    f"HTTP {result.get('status_code')} 응답입니다.\n"
+                    f"URL: {result.get('url')}\n"
+                    f"응답: {result.get('body')}",
+                )
+                return
+
+            body = result.get("body") or {}
+            job_id = str(body.get("job_id", "") or body.get("id", "") or "").strip()
+            self._append_setup_log(f"Computer Use 브리지 작업 요청 완료: {job_id or 'no-id'}")
+            show_info(
+                self,
+                "브리지 작업 접수",
+                "서버 공용 Computer Use 작업이 접수되었습니다.\n"
+                f"job_id: {job_id or '-'}",
+            )
+            return
+
+        status = self._refresh_codex_cli_status(show_dialog=False)
+        if not status.get("available"):
+            show_warning(self, "Codex 실행 불가", "Codex CLI 실행 파일을 찾지 못했습니다. 경로를 확인하세요.")
+            return
+        if not status.get("login_ok"):
+            show_warning(
+                self,
+                "Codex 로그인 필요",
+                "Codex CLI가 로그인되지 않았습니다.\n터미널에서 `codex login` 후 다시 시도하세요.",
+            )
+            return
+        if not status.get("computer_use_ok"):
+            show_warning(
+                self,
+                "computer-use 미준비",
+                "Codex CLI에서 computer-use MCP가 활성화되지 않았습니다.\n`codex mcp list` 결과를 확인하세요.",
+            )
+            return
+
+        try:
+            cli_settings = get_settings_manager().get_codex_cli_settings()
+        except Exception:
+            cli_settings = {"path": "codex", "model": ""}
+
+        codex_path = str(status.get("resolved_path", "") or "").strip()
+        model_name = str(cli_settings.get("model", "") or "").strip()
+        workspace = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+        args = [codex_path, "--cd", workspace]
+        if model_name:
+            args.extend(["--model", model_name])
+        args.append(prompt)
+        shell_cmd = " ".join(shlex.quote(part) for part in args)
+
+        apple_script_lines = [
+            'tell application "Terminal"',
+            "activate",
+            f'do script "{self._escape_for_applescript(shell_cmd)}"',
+            "end tell",
+        ]
+        osa_args: List[str] = []
+        for line in apple_script_lines:
+            osa_args.extend(["-e", line])
+
+        try:
+            subprocess.run(["osascript", *osa_args], check=True, timeout=8)
+            step_id = self._get_active_setup_step_id()
+            step_title = self.SETUP_STEP_DEFS.get(step_id, {}).get("title", "수동 설정 지원")
+            self._append_setup_log(f"Codex Computer Use 실행: {step_title}")
+            show_info(
+                self,
+                "Codex 실행 완료",
+                "새 터미널에서 Codex가 시작되었습니다.\n"
+                "로그인/2FA/CAPTCHA/API 키 발급만 직접 처리하고, 나머지는 Codex가 진행하도록 맡기세요.",
+            )
+        except Exception as exc:
+            show_error(self, "Codex 실행 실패", f"터미널 실행 중 오류가 발생했습니다.\n{exc}")
 
     def _on_setup_done_clicked(self):
         """Handle '완료했어요' click for waiting-user steps."""
@@ -3059,6 +3623,7 @@ class SettingsTab(QWidget, ThemedMixin):
         super().showEvent(event)
         QTimer.singleShot(0, self.refresh_work_community_stats)
         QTimer.singleShot(0, self._refresh_setup_assistant_status)
+        QTimer.singleShot(0, self._refresh_computer_use_access_ui)
 
     def _apply_theme(self):
         c = self.ds.colors

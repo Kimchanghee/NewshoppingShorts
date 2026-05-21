@@ -172,6 +172,15 @@ class SettingsManager:
         "linktree_api_key": "",
         "linktree_profile_url": "",
         "linktree_auto_publish": False,
+        # Codex CLI bridge settings (for setup assistant computer-use handoff)
+        "codex_cli_enabled": True,
+        "codex_cli_path": "codex",
+        "codex_cli_model": "",
+        # Computer Use access policy / bridge
+        "computer_use_paid_only": True,
+        "computer_use_bridge_enabled": False,
+        "computer_use_bridge_url": "",
+        "computer_use_bridge_api_key": "",
         "cookies_inpock": {},  # Dict to store Inpock Link cookies
         "cookies_1688": {},  # Dict to store 1688 cookies
     }
@@ -676,6 +685,68 @@ class SettingsManager:
             "linktree_connected": bool(self._settings.get("linktree_webhook_url")),
             "inpock_connected": bool(self._settings.get("cookies_inpock")),
         }
+
+    # ============ Codex CLI Bridge Settings ============
+
+    def get_codex_cli_settings(self) -> Dict[str, Any]:
+        """Get Codex CLI bridge settings used by setup assistant."""
+        path = str(self._settings.get("codex_cli_path", "") or "").strip() or "codex"
+        model = str(self._settings.get("codex_cli_model", "") or "").strip()
+        enabled = bool(self._settings.get("codex_cli_enabled", True))
+        return {
+            "enabled": enabled,
+            "path": path,
+            "model": model,
+        }
+
+    def set_codex_cli_settings(
+        self,
+        path: str = "codex",
+        model: str = "",
+        enabled: Optional[bool] = None,
+    ) -> bool:
+        """Save Codex CLI bridge settings for setup assistant."""
+        normalized_path = str(path or "").strip() or "codex"
+        normalized_model = str(model or "").strip()
+        with self._lock:
+            self._settings["codex_cli_path"] = normalized_path
+            self._settings["codex_cli_model"] = normalized_model
+            if enabled is not None:
+                self._settings["codex_cli_enabled"] = bool(enabled)
+        return self._save_settings()
+
+    def get_computer_use_settings(self) -> Dict[str, Any]:
+        """Get computer-use policy and optional server-bridge settings."""
+        bridge_url = str(self._settings.get("computer_use_bridge_url", "") or "").strip()
+        bridge_api_key = self._decrypt_value(str(self._settings.get("computer_use_bridge_api_key", "") or "")).strip()
+        paid_only = bool(self._settings.get("computer_use_paid_only", True))
+        bridge_enabled = bool(self._settings.get("computer_use_bridge_enabled", False))
+        return {
+            "paid_only": paid_only,
+            "bridge_enabled": bridge_enabled,
+            "bridge_url": bridge_url,
+            "bridge_api_key": bridge_api_key,
+        }
+
+    def set_computer_use_settings(
+        self,
+        *,
+        paid_only: Optional[bool] = None,
+        bridge_enabled: Optional[bool] = None,
+        bridge_url: Optional[str] = None,
+        bridge_api_key: Optional[str] = None,
+    ) -> bool:
+        """Save computer-use policy and optional server-bridge settings."""
+        with self._lock:
+            if paid_only is not None:
+                self._settings["computer_use_paid_only"] = bool(paid_only)
+            if bridge_enabled is not None:
+                self._settings["computer_use_bridge_enabled"] = bool(bridge_enabled)
+            if bridge_url is not None:
+                self._settings["computer_use_bridge_url"] = str(bridge_url or "").strip()
+            if bridge_api_key is not None:
+                self._settings["computer_use_bridge_api_key"] = self._encrypt_value(str(bridge_api_key or "").strip())
+        return self._save_settings()
 
     # ============ Upload Prompt Settings ============
 
