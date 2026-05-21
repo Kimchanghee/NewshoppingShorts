@@ -8,6 +8,8 @@ import os
 
 import re
 
+import sys
+
 from datetime import datetime, timedelta
 
 import secrets
@@ -490,34 +492,34 @@ def create_final_video_thread(app):
 
         time.sleep(0.5)  # Windows에서 파일 핸들 해제에 필요한 대기 시간
 
-        # NTFS 권한 설정: Everyone 읽기 권한 추가 (다른 컴퓨터에서도 열 수 있도록)
+        # NTFS 권한 설정 (Windows 전용): Everyone 읽기 권한 추가
+        if sys.platform == "win32":
+            try:
+                subprocess.run(
+                    [
+                        "icacls",
+                        output_path,
+                        "/inheritance:e",
+                        "/grant",
+                        "*S-1-1-0:(R)",  # Everyone
+                        "/grant",
+                        "*S-1-5-32-545:(R)",  # Users group
+                    ],
+                    check=True,
+                    capture_output=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    timeout=30,  # 30 second timeout to prevent hanging
+                )
 
-        try:
-            subprocess.run(
-                [
-                    "icacls",
-                    output_path,
-                    "/inheritance:e",
-                    "/grant",
-                    "*S-1-1-0:(R)",  # Everyone
-                    "/grant",
-                    "*S-1-5-32-545:(R)",  # Users group
-                ],
-                check=True,
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                timeout=30,  # 30 second timeout to prevent hanging
-            )
+                logger.debug("  권한 설정: 읽기 권한 추가 완료")
 
-            logger.debug("  권한 설정: 읽기 권한 추가 완료")
+            except subprocess.TimeoutExpired:
+                logger.warning("  권한 설정 타임아웃 (무시됨)")
 
-        except subprocess.TimeoutExpired:
-            logger.warning("  권한 설정 타임아웃 (무시됨)")
+            except subprocess.SubprocessError as e:
+                logger.warning("  권한 설정 실패 (무시됨): %s", e)
 
-        except subprocess.SubprocessError as e:
-            logger.warning("  권한 설정 실패 (무시됨): %s", e)
-
-            ui_controller.write_error_log(e)
+                ui_controller.write_error_log(e)
 
         try:
             if os.path.exists(combined_audio_path):

@@ -2488,27 +2488,28 @@ def _create_final_video_for_batch(
         gc.collect()
         time.sleep(0.5)  # Windows에서 파일 핸들 해제에 필요한 대기 시간
 
-        # NTFS 권한 설정: Everyone 읽기 권한 추가 (다른 컴퓨터에서도 열 수 있도록)
-        try:
-            subprocess.run(
-                [
-                    "icacls",
-                    output_path,
-                    "/inheritance:e",
-                    "/grant",
-                    "*S-1-1-0:(R)",  # Everyone
-                    "/grant",
-                    "*S-1-5-32-545:(R)",  # Users group
-                ],
-                check=True,
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                timeout=30,
-            )
-            logger.debug("권한 설정: 읽기 권한 추가 완료")
-        except Exception as e:
-            ui_controller.write_error_log(e)
-            logger.debug("  권한 설정 실패 (무시됨): %s", e)
+        # NTFS 권한 설정 (Windows 전용): Everyone 읽기 권한 추가
+        if sys.platform == "win32":
+            try:
+                subprocess.run(
+                    [
+                        "icacls",
+                        output_path,
+                        "/inheritance:e",
+                        "/grant",
+                        "*S-1-1-0:(R)",  # Everyone
+                        "/grant",
+                        "*S-1-5-32-545:(R)",  # Users group
+                    ],
+                    check=True,
+                    capture_output=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    timeout=30,
+                )
+                logger.debug("권한 설정: 읽기 권한 추가 완료")
+            except Exception as e:
+                ui_controller.write_error_log(e)
+                logger.debug("  권한 설정 실패 (무시됨): %s", e)
 
         # ★ 결합 오디오 파일 보존 (삭제 안함) ★
         # try:
