@@ -138,6 +138,21 @@ def _safe_get_url_status(app, url: str, default=None):
         return app.url_status.get(url, default)
 
 
+def _dispatch_ui_callback(app, callback) -> None:
+    """Dispatch a UI callback safely from worker threads."""
+    if callback is None:
+        return
+    signal = getattr(app, "ui_callback_signal", None)
+    if signal is not None:
+        try:
+            signal.emit(callback)
+            return
+        except RuntimeError:
+            # GUI object already destroyed.
+            return
+    QTimer.singleShot(0, callback)
+
+
 def _set_processing_step(app, url: str, step: str):
     """
     현재 처리 중인 단계를 url_status_message에 저장하고 UI 갱신
@@ -157,14 +172,7 @@ def _set_processing_step(app, url: str, step: str):
     # UI 갱신 (메인 스레드에서 실행 - signal 우선, fallback QTimer)
     update_fn = getattr(app, "update_url_listbox", None)
     if update_fn is not None:
-        signal = getattr(app, 'ui_callback_signal', None)
-        if signal is not None:
-            try:
-                signal.emit(update_fn)
-            except RuntimeError:
-                pass
-        else:
-            QTimer.singleShot(0, update_fn)
+        _dispatch_ui_callback(app, update_fn)
 
 
 def _get_mix_job_urls(app, job_key: str) -> List[str]:
@@ -573,9 +581,9 @@ def dynamic_batch_processing_thread(app):
                     update_listbox = getattr(app, "update_url_listbox", None)
                     update_progress = getattr(app, "update_overall_progress_display", None)
                     if update_listbox:
-                        QTimer.singleShot(0, update_listbox)
+                        _dispatch_ui_callback(app, update_listbox)
                     if update_progress:
-                        QTimer.singleShot(0, update_progress)
+                        _dispatch_ui_callback(app, update_progress)
 
                     # 이전 결과 초기화
                     clear_all_previous_results(app)
@@ -628,7 +636,7 @@ def dynamic_batch_processing_thread(app):
                                 # Refresh subscription info display
                                 update_sub_fn = getattr(app, "_update_subscription_info", None)
                                 if update_sub_fn is not None:
-                                    QTimer.singleShot(0, update_sub_fn)
+                                    _dispatch_ui_callback(app, update_sub_fn)
                             else:
                                 logger.warning(
                                     "[작업횟수] 업데이트 실패: %s",
@@ -750,7 +758,7 @@ def dynamic_batch_processing_thread(app):
                     if signal is not None:
                         signal.emit(show_auth_dialog)
                     else:
-                        QTimer.singleShot(0, show_auth_dialog)
+                        _dispatch_ui_callback(app, show_auth_dialog)
 
                     break
 
@@ -948,7 +956,7 @@ def dynamic_batch_processing_thread(app):
                         if signal is not None:
                             signal.emit(show_error_popup)
                         else:
-                            QTimer.singleShot(0, show_error_popup)
+                            _dispatch_ui_callback(app, show_error_popup)
 
                         try:
                             app._auto_save_session()
@@ -967,9 +975,9 @@ def dynamic_batch_processing_thread(app):
             update_listbox = getattr(app, "update_url_listbox", None)
             update_progress = getattr(app, "update_overall_progress_display", None)
             if update_listbox:
-                QTimer.singleShot(0, update_listbox)
+                _dispatch_ui_callback(app, update_listbox)
             if update_progress:
-                QTimer.singleShot(0, update_progress)
+                _dispatch_ui_callback(app, update_progress)
 
             # 간격 대기 - 10초 간격으로 다음 URL 처리
             if app.batch_processing:
@@ -1031,7 +1039,7 @@ def dynamic_batch_processing_thread(app):
                 start_btn.setEnabled(True)
             if stop_btn is not None:
                 stop_btn.setEnabled(False)
-        QTimer.singleShot(0, reset_batch_buttons)
+        _dispatch_ui_callback(app, reset_batch_buttons)
         summary = f"배치 처리 완료: 성공 {successful_count}건, 실패 {failed_count}건"
         if pending_remaining:
             summary += f" (미처리 {len(pending_remaining)}건 대기)"
@@ -1053,7 +1061,7 @@ def dynamic_batch_processing_thread(app):
                 logger.warning("[세션] 저장 실패: %s", session_err)
 
         if processed_urls and all_jobs_finished:
-            QTimer.singleShot(0, lambda: show_success(app, "배치 완료", summary))
+            _dispatch_ui_callback(app, lambda: show_success(app, "배치 완료", summary))
         app.update_status("준비 완료")
 
         # 비용은 각 URL 완료 시마다 출력되므로 여기서는 출력하지 않음
@@ -1232,7 +1240,7 @@ def _process_single_video(app, url, current_number, total_urls):
                 pass
             _safe_set_url_status(app, url, "skipped")
             app.url_status_message[url] = f"길이초과{int(original_video_duration)}초"
-            QTimer.singleShot(0, app.update_url_listbox)
+            _dispatch_ui_callback(app, getattr(app, "update_url_listbox", None))
 
             # 팝업 제거 - 로그만 남기고 다음 영상으로 진행
 
@@ -1252,7 +1260,7 @@ def _process_single_video(app, url, current_number, total_urls):
             )
             _safe_set_url_status(app, url, "skipped")
             app.url_status_message[url] = f"너무짧음{original_video_duration:.0f}초"
-            app.update_url_listbox()
+            _dispatch_ui_callback(app, getattr(app, "update_url_listbox", None))
 
             # 팝업 제거 - 로그만 남기고 다음 영상으로 진행
 
@@ -2657,7 +2665,7 @@ def clear_all_previous_results(app):
     # 9. UI 업데이트는 스레드 안전하게 (PyQt6)
     update_fn = getattr(app, "update_all_progress_displays", None)
     if update_fn is not None:
-        QTimer.singleShot(0, update_fn)
+        _dispatch_ui_callback(app, update_fn)
 
     # UI 탭들 초기화 (PyQt6 QTextEdit/QLabel)
     def reset_ui_texts():
@@ -2686,6 +2694,6 @@ def clear_all_previous_results(app):
         if tts_status_label is not None and hasattr(tts_status_label, "setText"):
             tts_status_label.setText("")
 
-    QTimer.singleShot(0, reset_ui_texts)
+    _dispatch_ui_callback(app, reset_ui_texts)
 
     logger.info("[초기화 완료] 새로운 분석을 시작할 준비가 되었습니다.")
