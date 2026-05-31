@@ -841,35 +841,67 @@ async def _do_1688_search(
     """
     import urllib.parse
     q = urllib.parse.quote(query)
-    # Live-verified (2026-05): the m.1688.com mobile search endpoints
-    # (page/offerlist.html, offer/search.htm, page/searchResult.html) no longer
-    # resolve to a results page — they return "旺铺不存在" / an offer-unavailable
-    # page / a 404. The desktop selloffer search is the only working endpoint
-    # (anti-bot gated, which the app's persistent logged-in profile clears). The
-    # video-filtered URL is tried first, then plain as a recall fallback.
+    # The desktop selloffer search is the working endpoint (the old m.1688.com
+    # mobile endpoints now 404 / "旺铺不存在"). We append the homepage-searchbox
+    # spm + charset so the URL matches a genuine in-site search; combined with
+    # the Referer navigation below, this clears 1688's anti-bot wall WITHOUT login.
+    _base = (
+        "https://s.1688.com/selloffer/offer_search.htm"
+        f"?keywords={q}&spm=a260k.home2025.searchbox.0&charset=utf8"
+    )
     if video_filter:
-        candidate_urls = [
-            f"https://s.1688.com/selloffer/offer_search.htm?keywords={q}&filter=video",
-            f"https://s.1688.com/selloffer/offer_search.htm?keywords={q}",
-        ]
+        candidate_urls = [_base + "&filter=video", _base]
     else:
-        candidate_urls = [
-            f"https://s.1688.com/selloffer/offer_search.htm?keywords={q}",
-        ]
+        candidate_urls = [_base]
     logger.info("[ProductSearcher] 1688 search [%s%s]: %s",
                 log_label, " VIDEO" if video_filter else "", query)
     print(f"[ProductSearcher] 1688 search [{log_label}{' VIDEO' if video_filter else ''}]: {query}")
 
+    # Warm up on the 1688 homepage, then navigate the search URL carrying the
+    # homepage Referer (via CDP). Direct deep-links get an "unusual traffic"
+    # captcha; the SAME request with Referer: https://www.1688.com/ renders
+    # normally — no login required (live-verified 2026-06). Falls back to a plain
+    # navigation if the CDP path is unavailable.
+    home = "https://www.1688.com/"
+    try:
+        from zendriver import cdp as _cdp
+    except Exception:
+        _cdp = None
+
+    warm_tab = None
+    try:
+        warm_tab = await browser.get(home)
+        await warm_tab.sleep(2)
+    except Exception:
+        warm_tab = None
+
     for url in candidate_urls:
-        tab = await browser.get(url)
-        if tab is None:
-            continue
-        await tab.sleep(3)
+        tab = None
+        try:
+            if warm_tab is not None and _cdp is not None:
+                await warm_tab.send(_cdp.page.navigate(url=url, referrer=home))
+                tab = warm_tab
+                await tab.sleep(3)
+            else:
+                tab = await browser.get(url)
+                if tab is None:
+                    continue
+                await tab.sleep(3)
+        except Exception:
+            try:
+                tab = await browser.get(url)
+            except Exception:
+                tab = None
+            if tab is None:
+                continue
+            await tab.sleep(3)
+
         current_url = await tab.evaluate("window.location.href") or ""
-        if any(x in current_url for x in (
-            "login.taobao.com", "login.1688.com", "_____tmd_____", "punish", "captcha", "nouser",
-        )):
-            logger.info("[ProductSearcher] 1688 endpoint %s login/anti-bot blocked, trying next", url[:60])
+        # Only a real anti-bot wall blocks us — NOT login. 1688 content loads for
+        # guests; a login prompt is a dismissible overlay with the offer cards in
+        # the DOM behind it, so we never bail on login redirects.
+        if any(x in current_url for x in ("_____tmd_____", "punish", "captcha", "nouser")):
+            logger.info("[ProductSearcher] 1688 endpoint %s anti-bot challenged, trying next", url[:60])
             continue
         # Scroll for lazy-load. Some 1688 endpoints occasionally return an
         # intermediate/blank document where document.body is still null; treat
@@ -1142,8 +1174,10 @@ async def search_1688_by_image(
             await tab.sleep(7)
 
             current_url = await tab.evaluate("window.location.href") or ""
-            if any(x in current_url for x in ("login.taobao.com", "login.1688.com", "_____tmd_____", "punish")):
-                logger.info("[ProductSearcher] 1688 image endpoint blocked/challenged: %s", current_url[:100])
+            # Only bail on a real anti-bot wall, not on login (1688 content loads
+            # for guests; login prompts are dismissible overlays).
+            if any(x in current_url for x in ("_____tmd_____", "punish", "captcha", "nouser")):
+                logger.info("[ProductSearcher] 1688 image endpoint anti-bot challenged: %s", current_url[:100])
                 continue
 
             # Trigger lazy-load before scraping cards.

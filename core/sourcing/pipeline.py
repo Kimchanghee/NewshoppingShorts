@@ -397,29 +397,17 @@ class SourcingPipeline:
                 coupang_image = "https:" + coupang_image
             print(f"[Pipeline] Coupang image URL: {coupang_image[:100] or '(none)'}")
 
-            # 1688 requires a logged-in session: every guest endpoint is
-            # login/anti-bot walled (verified live AND in this app's own logs,
-            # where 1688 produced 0 sourced videos across hundreds of runs). The
-            # only place a 1688 login is stored is settings.cookies_1688, which
-            # _start_browser bridges into this session. So only run the otherwise
-            # guaranteed-to-fail, time-wasting 1688 phases when we actually hold
-            # those cookies. Override with SSMAKER_FORCE_1688=1 (on) / =0 (off).
-            _force_1688 = os.getenv("SSMAKER_FORCE_1688", "").strip()
-            if _force_1688 == "1":
-                run_1688 = True
-            elif _force_1688 == "0":
-                run_1688 = False
-            else:
-                try:
-                    run_1688 = bool(get_settings_manager().get_1688_cookies())
-                except Exception:
-                    run_1688 = False
+            # 1688 needs NO login (live-verified 2026-06): the searcher warms up
+            # on the 1688 homepage and navigates the search URL with a Referer
+            # that bypasses the anti-bot wall, and guest detail pages carry the
+            # product video. The "login" prompts on 1688 are dismissible overlays
+            # — the offer cards and video stay in the DOM behind them. So we run
+            # 1688 by default. A stored login (cookie bridge) still helps by
+            # removing those prompts, but is optional. Disable per-network with
+            # SSMAKER_DISABLE_1688=1 if an IP keeps getting anti-bot challenged.
+            run_1688 = os.getenv("SSMAKER_DISABLE_1688", "").strip() != "1"
             if not run_1688:
-                logger.info(
-                    "[Pipeline] Skipping 1688 search: no stored 1688 login cookies. "
-                    "1688 guest access is login/anti-bot walled, so running it would "
-                    "only waste navigations. Set SSMAKER_FORCE_1688=1 to override."
-                )
+                logger.info("[Pipeline] 1688 search disabled via SSMAKER_DISABLE_1688=1")
 
             # Track whether any 1688 navigation actually happened. The browser
             # restarts below exist only to recover from 1688-induced CDP tab
