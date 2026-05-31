@@ -31,6 +31,18 @@ from datetime import datetime
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+
+def _configure_stdio() -> None:
+    """Keep Windows CLI runs from crashing on Korean/status output."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configure_stdio()
+
 try:
     from utils.ffmpeg import ensure_ffmpeg_on_path
 
@@ -129,7 +141,10 @@ async def main(coupang_url: str, output_dir: str) -> int:
 
     report = pipeline.get_report()
     report_path = Path(output_dir) / f"report_{datetime.now():%Y%m%d_%H%M%S}.json"
-    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+    report_path.write_text(
+        json.dumps(report, ensure_ascii=False, indent=2, default=str),
+        encoding="utf-8",
+    )
     print(f"[+] 리포트: {report_path}")
 
     if pipeline.product_info:

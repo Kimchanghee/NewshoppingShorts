@@ -33,6 +33,18 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT))
 
+
+def _configure_stdio() -> None:
+    """Keep Windows CLI runs from crashing on Korean/status output."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
+
+_configure_stdio()
+
 # .env 로드 (Gemini key 등)
 try:
     from dotenv import load_dotenv

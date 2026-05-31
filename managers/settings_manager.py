@@ -177,6 +177,9 @@ class SettingsManager:
         "sourcing_ai_provider": "gemini",
         "sourcing_use_gemini_computer_use": True,
         "sourcing_use_codex_computer_use": False,
+        # Sourcing product match policy
+        "sourcing_min_similarity_percent": 90,
+        "sourcing_auto_skip_low_similarity": False,
         "cookies_inpock": {},  # Dict to store Inpock Link cookies
         "cookies_1688": {},  # Dict to store 1688 cookies
     }
@@ -776,6 +779,45 @@ class SettingsManager:
                 self._settings["sourcing_use_gemini_computer_use"] = bool(use_gemini_computer_use)
             # Hard guard requested by product policy/user requirement.
             self._settings["sourcing_use_codex_computer_use"] = False
+        return self._save_settings()
+
+    @staticmethod
+    def _coerce_similarity_percent(value: Any) -> int:
+        try:
+            percent = int(round(float(value)))
+        except (TypeError, ValueError):
+            percent = 90
+        return max(0, min(100, percent))
+
+    def get_sourcing_match_policy(self) -> Dict[str, Any]:
+        """Get strict product-match policy for Mode 3 sourcing automation."""
+        percent = self._coerce_similarity_percent(
+            self._settings.get("sourcing_min_similarity_percent", 90)
+        )
+        return {
+            "min_similarity_percent": percent,
+            "min_similarity_score": percent / 100.0,
+            "auto_skip_low_similarity": bool(
+                self._settings.get("sourcing_auto_skip_low_similarity", False)
+            ),
+        }
+
+    def set_sourcing_match_policy(
+        self,
+        *,
+        min_similarity_percent: Optional[float] = None,
+        auto_skip_low_similarity: Optional[bool] = None,
+    ) -> bool:
+        """Persist strict product-match policy for Mode 3 sourcing automation."""
+        with self._lock:
+            if min_similarity_percent is not None:
+                self._settings["sourcing_min_similarity_percent"] = (
+                    self._coerce_similarity_percent(min_similarity_percent)
+                )
+            if auto_skip_low_similarity is not None:
+                self._settings["sourcing_auto_skip_low_similarity"] = bool(
+                    auto_skip_low_similarity
+                )
         return self._save_settings()
 
     # ============ Upload Prompt Settings ============

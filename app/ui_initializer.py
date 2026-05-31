@@ -171,7 +171,6 @@ class UIInitializer:
 
         # Build pages as cards
         logger.info("[UI] 패널 생성 중... (잠시 기다려주세요)")
-        print("[UI] 패널 생성 중... 잠시 기다려주세요 (Ctrl+C 누르지 마세요)")
         mode_selection_panel = ModeSelectionPanel(stack, gui, theme_manager=self.theme_manager)
         sourcing_panel = SourcingPanel(stack, gui, theme_manager=self.theme_manager)
         url_input_panel = URLInputPanel(stack, gui, theme_manager=self.theme_manager)
@@ -186,7 +185,6 @@ class UIInitializer:
         settings_tab = SettingsTab(stack, gui, theme_manager=self.theme_manager)
         subscription_panel = SubscriptionPanel(stack, gui)
         logger.info("[UI] 모든 패널 생성 완료")
-        print("[UI] [OK] 모든 패널 생성 완료 - 앱을 표시합니다")
 
         pages = [
             ("mode", "모드 선택", "영상 제작 방식을 선택하세요.", mode_selection_panel),

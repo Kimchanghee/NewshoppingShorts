@@ -420,11 +420,28 @@ class YouTubeManager:
                     }:
                         auth_kwargs["prompt"] = "consent select_account"
 
-                    creds = flow.run_local_server(
-                        port=0,
-                        timeout_seconds=timeout_seconds,
-                        **auth_kwargs,
-                    )
+                    try:
+                        creds = flow.run_local_server(
+                            port=0,
+                            timeout_seconds=timeout_seconds,
+                            **auth_kwargs,
+                        )
+                    except Exception as oauth_error:
+                        if "NoneType" in str(oauth_error) and "replace" in str(oauth_error):
+                            self._last_error_message = (
+                                "YouTube OAuth 승인이 완료되지 않았습니다. "
+                                "브라우저에서 Google 계정 승인 후 다시 시도하세요."
+                            )
+                            logger.warning("[YouTube] OAuth approval timed out or was cancelled")
+                            return False
+                        raise
+                    if creds is None:
+                        self._last_error_message = (
+                            "YouTube OAuth 승인이 완료되지 않았습니다. "
+                            "브라우저에서 Google 계정 승인 후 다시 시도하세요."
+                        )
+                        logger.warning("[YouTube] OAuth returned no credentials")
+                        return False
 
                 # Save credentials
                 self._ensure_writable_dir(os.path.dirname(token_path))

@@ -154,6 +154,21 @@ def test_category_guard_car_fan_blocks_non_car_fan():
     assert _passes_category_guard("Portable Mini Hand Fan", terms)
 
 
+def test_category_guard_handheld_fan_blocks_game_console():
+    terms = _category_terms_for_keyword(
+        "Foldable handheld fan, portable USB fan, folding mini personal fan",
+        reference_name="Karf big fan foldable handheld fan",
+        keyword_cn="foldable handheld fan",
+    )
+    assert terms
+    assert "car" not in terms
+    assert _passes_category_guard("Portable Mini Hand Fan USB Rechargeable", terms)
+    assert not _passes_category_guard(
+        "Foldable Retro Handheld Game Console 3000mAh Battery",
+        terms,
+    )
+
+
 def test_reference_constraint_blocks_basin_fixture_for_strainer_intent():
     refs = ["sink strainer holder", "음식물 거름망", "水槽过滤网 架"]
     assert not _passes_reference_constraints(

@@ -6,12 +6,14 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import threading
-from typing import Optional
+from typing import List, Optional
 
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QFrame, QWidget, QCheckBox, QScrollArea, QSizePolicy,
+    QTextEdit, QSpinBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
@@ -165,6 +167,79 @@ class SourcingPanel(QWidget):
         opts_layout.addStretch()
         input_layout.addLayout(opts_layout)
 
+        # Product match guard
+        match_policy = self._load_match_policy()
+        match_header = QHBoxLayout()
+        match_header.setSpacing(ds.spacing.space_2)
+
+        match_label = QLabel("상품 유사도 기준")
+        match_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
+        match_header.addWidget(match_label)
+
+        self.match_threshold_spin = QSpinBox()
+        self.match_threshold_spin.setRange(0, 100)
+        self.match_threshold_spin.setSingleStep(5)
+        self.match_threshold_spin.setSuffix("%")
+        self.match_threshold_spin.setValue(int(match_policy.get("min_similarity_percent", 90)))
+        self.match_threshold_spin.setFixedWidth(84)
+        self.match_threshold_spin.setToolTip("이 기준 미만의 소싱 영상은 자동 업로드와 Linktree 발행을 차단합니다.")
+        self.match_threshold_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border_light')};
+                border-radius: {ds.radius.sm}px;
+                padding: 4px 6px;
+            }}
+            QSpinBox:focus {{
+                border-color: {get_color('primary')};
+            }}
+        """)
+        match_header.addWidget(self.match_threshold_spin)
+
+        self.chk_auto_skip_low_similarity = QCheckBox("기준 미달 시 다음 링크로 자동 이동")
+        self.chk_auto_skip_low_similarity.setChecked(bool(match_policy.get("auto_skip_low_similarity", False)))
+        self.chk_auto_skip_low_similarity.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self.chk_auto_skip_low_similarity.setToolTip("켜면 상품을 못찾았을 때 알림창 대신 아래 다음 링크 목록의 첫 링크로 자동 이동합니다.")
+        match_header.addWidget(self.chk_auto_skip_low_similarity)
+        match_header.addStretch()
+        input_layout.addLayout(match_header)
+
+        match_hint = QLabel("기준을 통과하지 못하면 영상 제작, YouTube 업로드, Linktree 발행을 중지합니다.")
+        match_hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        match_hint.setStyleSheet(f"color: {get_color('text_muted')};")
+        match_hint.setWordWrap(True)
+        input_layout.addWidget(match_hint)
+
+        next_links_label = QLabel("다음 쿠팡 링크 목록")
+        next_links_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
+        input_layout.addWidget(next_links_label)
+
+        self.next_links_input = QTextEdit()
+        self.next_links_input.setPlaceholderText("자동 건너뛰기용 링크를 줄마다 입력하세요.")
+        self.next_links_input.setAcceptRichText(False)
+        self.next_links_input.setMaximumHeight(72)
+        self.next_links_input.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self._next_links_input_style = f"""
+            QTextEdit {{
+                background-color: {get_color('background')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border_light')};
+                border-radius: {ds.radius.sm}px;
+                padding: 6px 8px;
+            }}
+            QTextEdit:focus {{
+                border-color: {get_color('primary')};
+            }}
+        """
+        self.next_links_input.setStyleSheet(self._next_links_input_style)
+        input_layout.addWidget(self.next_links_input)
+        self._sync_next_links_enabled()
+
+        self.match_threshold_spin.valueChanged.connect(self._save_match_policy)
+        self.chk_auto_skip_low_similarity.toggled.connect(self._save_match_policy)
+        self.chk_auto_skip_low_similarity.toggled.connect(lambda _checked: self._sync_next_links_enabled())
+
         # Start button
         self.btn_start = QPushButton("소싱 시작")
         self.btn_start.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
@@ -228,6 +303,132 @@ class SourcingPanel(QWidget):
         main_layout.addWidget(self.results_frame)
         main_layout.addStretch()
 
+    def _load_match_policy(self) -> dict:
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            return get_settings_manager().get_sourcing_match_policy()
+        except Exception as exc:
+            logger.warning("[SourcingPanel] Failed to load match policy: %s", exc)
+            return {
+                "min_similarity_percent": 90,
+                "min_similarity_score": 0.9,
+                "auto_skip_low_similarity": False,
+            }
+
+    def _save_match_policy(self, *_args):
+        if not hasattr(self, "match_threshold_spin"):
+            return
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            get_settings_manager().set_sourcing_match_policy(
+                min_similarity_percent=self.match_threshold_spin.value(),
+                auto_skip_low_similarity=self.chk_auto_skip_low_similarity.isChecked(),
+            )
+        except Exception as exc:
+            logger.warning("[SourcingPanel] Failed to save match policy: %s", exc)
+
+    def _match_threshold_score(self) -> float:
+        if hasattr(self, "match_threshold_spin"):
+            return max(0.0, min(1.0, self.match_threshold_spin.value() / 100.0))
+        return float(self._load_match_policy().get("min_similarity_score", 0.9))
+
+    def _sync_next_links_enabled(self):
+        enabled = bool(
+            hasattr(self, "chk_auto_skip_low_similarity")
+            and self.chk_auto_skip_low_similarity.isChecked()
+        )
+        if hasattr(self, "next_links_input"):
+            self.next_links_input.setEnabled(enabled)
+            if hasattr(self, "_next_links_input_style"):
+                self.next_links_input.setStyleSheet(self._next_links_input_style)
+
+    def _extract_next_links(self) -> List[str]:
+        if not hasattr(self, "next_links_input"):
+            return []
+        raw = self.next_links_input.toPlainText()
+        links = []
+        for token in re.split(r"[\s,]+", raw):
+            url = token.strip()
+            if url and "coupang.com" in url:
+                links.append(url)
+        return links
+
+    def _pop_next_sourcing_url(self) -> Optional[str]:
+        links = self._extract_next_links()
+        if not links:
+            return None
+        next_url = links[0]
+        remaining = links[1:]
+        if hasattr(self, "next_links_input"):
+            self.next_links_input.blockSignals(True)
+            self.next_links_input.setPlainText("\n".join(remaining))
+            self.next_links_input.blockSignals(False)
+        return next_url
+
+    @staticmethod
+    def _format_similarity(score: Optional[float]) -> str:
+        if score is None:
+            return "없음"
+        try:
+            return f"{float(score):.1%}"
+        except (TypeError, ValueError):
+            return "없음"
+
+    def _is_match_gate_failure(self, pipeline) -> bool:
+        return getattr(pipeline, "match_status", "") in {"below_threshold", "not_found"}
+
+    def _handle_match_gate_failure(self, pipeline, report: dict):
+        threshold = getattr(pipeline, "min_similarity_score", self._match_threshold_score())
+        best = getattr(pipeline, "best_similarity_score", None)
+        product_name = ((pipeline.product_info or {}).get("name") or "상품")[:80]
+        reason = getattr(pipeline, "match_error", None) or pipeline.error or "상품을 못찾았습니다."
+        message = (
+            f"상품을 못찾았습니다.\n"
+            f"상품: {product_name}\n"
+            f"기준: {threshold:.0%}\n"
+            f"최고 유사도: {self._format_similarity(best)}\n\n"
+            "자동 업로드와 Linktree 발행을 중지했습니다."
+        )
+
+        if hasattr(self.gui, "state"):
+            self.gui.state.sourcing_result = report
+
+        if self.chk_auto_skip_low_similarity.isChecked():
+            next_url = self._pop_next_sourcing_url()
+            if next_url:
+                self.results_label.setText(
+                    message
+                    + "\n\n자동 건너뛰기: 다음 링크로 이동합니다.\n"
+                    + next_url
+                )
+                self.results_label.setStyleSheet(f"color: {get_color('warning')};")
+                self.url_input.setText(next_url)
+                QTimer.singleShot(800, self._on_start_clicked)
+                return
+
+            self.results_label.setText(
+                message + "\n\n자동 건너뛰기가 켜져 있지만 다음 링크 목록이 비어 있어 중지했습니다."
+            )
+            self.results_label.setStyleSheet(f"color: {get_color('warning')};")
+            try:
+                from ui.components.custom_dialog import show_warning
+
+                show_warning(self, "상품을 못찾았습니다", message + "\n\n다음 링크 목록이 비어 있습니다.")
+            except Exception:
+                pass
+            return
+
+        self.results_label.setText(message + f"\n\n상세: {reason}")
+        self.results_label.setStyleSheet(f"color: {get_color('error')};")
+        try:
+            from ui.components.custom_dialog import show_warning
+
+            show_warning(self, "상품을 못찾았습니다", message)
+        except Exception:
+            pass
+
     def _apply_button_style(self, disabled: bool = False):
         ds = self.ds
         if disabled:
@@ -265,6 +466,8 @@ class SourcingPanel(QWidget):
         if self._running:
             return
 
+        min_similarity_score = self._match_threshold_score()
+        self._save_match_policy()
         self._running = True
         self.btn_start.setEnabled(False)
         self.btn_start.setText("소싱 진행 중...")
@@ -277,10 +480,14 @@ class SourcingPanel(QWidget):
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
         # Run in background thread
-        thread = threading.Thread(target=self._run_pipeline, args=(url,), daemon=True)
+        thread = threading.Thread(
+            target=self._run_pipeline,
+            args=(url, min_similarity_score),
+            daemon=True,
+        )
         thread.start()
 
-    def _run_pipeline(self, coupang_url: str):
+    def _run_pipeline(self, coupang_url: str, min_similarity_score: float):
         """Run sourcing pipeline in background thread with its own event loop."""
         from core.sourcing.pipeline import SourcingPipeline
 
@@ -294,6 +501,8 @@ class SourcingPanel(QWidget):
             output_dir=output_dir,
             on_progress=self._on_pipeline_progress,
             gemini_client=gemini_client,
+            min_similarity_score=min_similarity_score,
+            enforce_min_similarity=True,
         )
         self._pipeline = pipeline
 
@@ -339,6 +548,10 @@ class SourcingPanel(QWidget):
         self._apply_button_style(disabled=False)
 
         report = pipeline.get_report()
+
+        if not success and self._is_match_gate_failure(pipeline):
+            self._handle_match_gate_failure(pipeline, report)
+            return
 
         if success and pipeline.sourced_products:
             # Build results text

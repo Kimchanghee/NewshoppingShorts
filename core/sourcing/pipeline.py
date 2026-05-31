@@ -57,6 +57,8 @@ class SourcingPipeline:
         output_dir: str,
         on_progress: Optional[Callable[[str, str, float], None]] = None,
         gemini_client: Optional[Any] = None,
+        min_similarity_score: Optional[float] = None,
+        enforce_min_similarity: bool = True,
     ):
         """
         Args:
@@ -64,11 +66,18 @@ class SourcingPipeline:
             output_dir: Directory for downloaded videos and report.
             on_progress: Callback(step_id, message, progress_0_to_1).
             gemini_client: Optional Gemini API client for keyword conversion.
+            min_similarity_score: Final marketplace match gate (0.0-1.0).
+            enforce_min_similarity: Block automation when no marketplace
+                product reaches min_similarity_score.
         """
         self.coupang_url = coupang_url
         self.output_dir = output_dir
         self.on_progress = on_progress
         self.gemini_client = gemini_client
+        if min_similarity_score is None:
+            min_similarity_score = self._load_default_min_similarity_score()
+        self.min_similarity_score = self._normalize_similarity_score(min_similarity_score)
+        self.enforce_min_similarity = bool(enforce_min_similarity)
 
         # Results populated during run
         self.product_info: Optional[Dict] = None
@@ -77,6 +86,84 @@ class SourcingPipeline:
         self.sourced_products: List[Dict] = []
         self.description: str = ""
         self.error: Optional[str] = None
+        self.best_similarity_score: Optional[float] = None
+        self.match_status: str = "not_checked"
+        self.match_error: Optional[str] = None
+
+    @staticmethod
+    def _normalize_similarity_score(value: Any) -> float:
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            score = 0.9
+        if score > 1.0:
+            score = score / 100.0
+        return max(0.0, min(1.0, score))
+
+    @classmethod
+    def _load_default_min_similarity_score(cls) -> float:
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            policy = get_settings_manager().get_sourcing_match_policy()
+            return cls._normalize_similarity_score(policy.get("min_similarity_score", 0.9))
+        except Exception:
+            return 0.9
+
+    @staticmethod
+    def _is_marketplace_sourced_item(item: Dict[str, Any]) -> bool:
+        source = str(item.get("source") or "").lower()
+        if not source:
+            source = str((item.get("product") or {}).get("source") or "").lower()
+        return bool(source and source != "coupang_image")
+
+    @staticmethod
+    def _item_similarity(item: Dict[str, Any]) -> Optional[float]:
+        raw = (item.get("product") or {}).get("score")
+        if raw is None:
+            raw = item.get("similarity")
+        try:
+            return float(raw)
+        except (TypeError, ValueError):
+            return None
+
+    def evaluate_similarity_threshold(self, *, mark_unsafe: bool = True) -> bool:
+        """Evaluate the final marketplace match gate and mark unsafe items."""
+        marketplace_items = [
+            item for item in self.sourced_products
+            if self._is_marketplace_sourced_item(item)
+        ]
+        scores = [
+            score for score in (self._item_similarity(item) for item in marketplace_items)
+            if score is not None
+        ]
+        self.best_similarity_score = max(scores) if scores else None
+
+        if not marketplace_items:
+            self.match_status = "not_found"
+            self.match_error = (
+                "상품을 못찾았습니다. 해외 마켓에서 실제 시연 영상이 있는 "
+                "동일 상품을 찾지 못해 자동 업로드를 중지했습니다."
+            )
+            return False
+
+        best = self.best_similarity_score or 0.0
+        if best >= self.min_similarity_score:
+            self.match_status = "matched"
+            self.match_error = None
+            return True
+
+        self.match_status = "below_threshold"
+        self.match_error = (
+            f"상품 유사도 {best:.0%}가 설정 기준 "
+            f"{self.min_similarity_score:.0%}보다 낮아 자동 업로드를 중지했습니다."
+        )
+        if mark_unsafe:
+            for item in marketplace_items:
+                item["auto_publish_safe"] = False
+                item["requires_review"] = True
+                item["fallback_reason"] = item.get("fallback_reason") or "below_similarity_threshold"
+        return False
 
     def _progress(self, step_id: str, message: str, pct: float = 0.0):
         logger.info("[Pipeline] [%s] %s", step_id, message)
@@ -1057,6 +1144,18 @@ class SourcingPipeline:
                 )
                 return False
 
+            match_ok = self.evaluate_similarity_threshold(
+                mark_unsafe=self.enforce_min_similarity
+            )
+            if self.enforce_min_similarity and not match_ok:
+                self.error = self.match_error
+                self._progress(
+                    "video_download",
+                    self.match_error or self.error or "상품 매칭 실패",
+                    1.0,
+                )
+                return False
+
             # ── Step 6: Generate description ──
             self._progress("description_gen", "상품 설명 생성 중...", 0.0)
             self.description = await self._generate_description()
@@ -1166,7 +1265,16 @@ class SourcingPipeline:
                         title[:80],
                     )
                     continue
-                if similarity is not None and similarity < MIN_TRUSTED_VIDEO_SCORE:
+                cache_threshold = MIN_TRUSTED_VIDEO_SCORE
+                if self.enforce_min_similarity:
+                    cache_threshold = max(cache_threshold, self.min_similarity_score)
+                if similarity is None and self.enforce_min_similarity:
+                    logger.info(
+                        "[Pipeline] Skip cached marketplace video (unknown similarity): %s",
+                        title[:80],
+                    )
+                    continue
+                if similarity is not None and similarity < cache_threshold:
                     logger.info(
                         "[Pipeline] Skip cached marketplace video (low similarity=%.3f): %s",
                         similarity,
@@ -1354,5 +1462,11 @@ class SourcingPipeline:
             "sourced_products": items,
             # Backward compatibility for consumers still using the old key.
             "sourcing_results": list(items),
+            "match_threshold": self.min_similarity_score,
+            "min_similarity_score": self.min_similarity_score,
+            "best_similarity": self.best_similarity_score,
+            "match_status": self.match_status,
+            "match_error": self.match_error,
+            "enforce_min_similarity": self.enforce_min_similarity,
             "error": self.error,
         }

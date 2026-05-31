@@ -1570,6 +1570,19 @@ _CATEGORY_GUARDS: Dict[str, List[str]] = {
     "dumbbell": ["dumbbell", "weight", "덤벨", "哑铃"],
     "fitness": ["fitness", "exercise", "운동", "健身"],
 
+    # Personal cooling fans. Keep the guard anchored on fan semantics only:
+    # generic modifiers like "foldable" or "handheld" also match game consoles.
+    "foldable handheld fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "handheld fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "hand fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "portable fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "foldable fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "folding fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "usb fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "personal fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "mini fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+    "fan": ["fan", "cooling", "blower", "airflow", "wind", "\u98ce\u6247", "\u98ce\u673a", "\uc120\ud48d\uae30", "\ud32c"],
+
     # ──── Auto ────
     "car fan": ["car", "vehicle", "dashboard", "12v", "24v", "fan", "cooling", "차량", "자동차", "车载", "汽车", "风扇"],
     "vehicle fan": ["car", "vehicle", "dashboard", "12v", "24v", "fan", "cooling", "차량", "자동차", "车载", "汽车", "风扇"],
