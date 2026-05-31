@@ -186,20 +186,30 @@ class SourcingManager:
     def extract_video_info(self, product_url: str) -> Optional[str]:
         """
         Extract video URL from product detail page.
-        
+
         Args:
             product_url: 1688 Product Detail URL
-            
+
         Returns:
             Video URL or None
         """
+        import re
+        import time as _t
+
         self._init_driver(headless=True)
         self.driver.get(product_url)
-        
-        video_url = None
-        
+
+        # 1688 only injects the video module after the player scrolls into view,
+        # so trigger lazy-load before reading anything.
         try:
-            # Method 1: Look for <video> tag
+            for y in (300, 800, 1400, 0):
+                self.driver.execute_script(f"window.scrollTo(0, {y});")
+                _t.sleep(1)
+        except Exception:
+            pass
+
+        # Method 1: Direct <video> element (skip blob: which can't be downloaded).
+        try:
             from selenium.webdriver.common.by import By
             from selenium.webdriver.support.ui import WebDriverWait
             from selenium.webdriver.support import expected_conditions as EC
@@ -207,23 +217,59 @@ class SourcingManager:
             WebDriverWait(self.driver, 5).until(
                 EC.presence_of_element_located((By.TAG_NAME, "video"))
             )
-            video_tag = self.driver.find_element(By.TAG_NAME, "video")
-            video_url = video_tag.get_attribute("src")
-            
+            for vtag in self.driver.find_elements(By.TAG_NAME, "video"):
+                src = vtag.get_attribute("src") or vtag.get_attribute("currentSrc") or ""
+                if src.startswith("http"):
+                    return src
         except Exception:
-            logger.debug("[Sourcing] Video tag not found immediately, checking page source")
-            
-        # Method 2: Regex search in page source (often in JSON data)
-        if not video_url:
-            import re
-            page_source = self.driver.page_source
-            # Look for typical cloud video URLs (alicdn, etc)
-            # "videoUrl":"https://cloud.video.taobao.com/..."
-            match = re.search(r'"videoUrl":"(https?://[^"]+\.mp4[^"]*)"', page_source)
-            if match:
-                video_url = match.group(1).replace("\\u002F", "/")
-        
-        return video_url
+            logger.debug("[Sourcing] No usable <video> element, scanning page source")
+
+        # Method 2: Scan page source with the full pattern set used by the
+        # zendriver searcher. A single "videoUrl" regex missed most listings
+        # because 1688 stores the mp4 in many shapes (JSON fields, taobao cloud,
+        # alicdn). Unescape common JSON encodings first so the URLs match.
+        page_source = self.driver.page_source or ""
+        html = (
+            page_source.replace("\\u002F", "/").replace("\\/", "/").replace("\\&", "&")
+        )
+        patterns = [
+            r'"videoUrl"\s*:\s*"(https?://[^"]+)"',
+            r'"videoPath"\s*:\s*"(https?://[^"]+)"',
+            r'"video_url"\s*:\s*"(https?://[^"]+)"',
+            r'"playUrl"\s*:\s*"(https?://[^"]+)"',
+            r'"mp4Url"\s*:\s*"(https?://[^"]+)"',
+            r'"contentUrl"\s*:\s*"(https?://[^"]+\.mp4[^"]*)"',
+            r'(https?://cloud\.video\.taobao\.com[^\s"\'<>\\]+)',
+            r'(https?://[a-z0-9.-]*alicdn\.com[^\s"\'<>\\]*?\.mp4[^\s"\'<>\\]*)',
+            r'(https?://[a-z0-9.\-/]*?\.mp4[^\s"\'<>\\]*)',
+        ]
+        candidates: List[str] = []
+        for pat in patterns:
+            for m in re.finditer(pat, html, re.IGNORECASE):
+                u = m.group(1)
+                if u.startswith("//"):
+                    u = "https:" + u
+                if u.startswith("http") and not re.search(
+                    r'\.(jpg|jpeg|png|gif|webp|css|js)(\?|$)', u, re.IGNORECASE
+                ):
+                    candidates.append(u)
+        if not candidates:
+            return None
+
+        # Prefer mp4, then taobao cloud, then alicdn.
+        def _rank(u: str) -> int:
+            score = 0
+            lu = u.lower()
+            if ".mp4" in lu:
+                score += 10
+            if "cloud.video.taobao.com" in lu:
+                score += 5
+            if "alicdn.com" in lu:
+                score += 3
+            return -score
+
+        candidates.sort(key=_rank)
+        return candidates[0]
 
     def download_video(self, video_url: str, output_path: str) -> bool:
         """Download video content to file"""

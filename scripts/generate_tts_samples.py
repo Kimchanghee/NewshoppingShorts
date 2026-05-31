@@ -20,7 +20,7 @@ from utils.secrets_manager import SecretsManager
 VOICE_DIR = os.path.join(PROJECT_ROOT, "resource", "voice_samples")
 os.makedirs(VOICE_DIR, exist_ok=True)
 
-TTS_MODEL = "gemini-2.5-flash-preview-tts"
+TTS_MODEL = "gemini-3.1-flash-tts-preview"
 RATE_LIMIT_WAIT = 12  # seconds between requests to avoid 429
 
 

@@ -5,14 +5,15 @@ Social Media Upload Settings Panel (PyQt6)
 Provides channel connection, per-channel upload prompts (title, description,
 hashtags), and YouTube-specific comment auto-upload settings.
 """
+import re
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog, QLineEdit,
     QStackedWidget
 )
-from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QUrl
+from PyQt6.QtGui import QFont, QDesktopServices
 
 from ui.design_system_v2 import get_design_system
 from ui.components.base_widget import ThemedMixin
@@ -24,6 +25,12 @@ if TYPE_CHECKING:
 
 from utils.logging_config import get_logger
 logger = get_logger(__name__)
+
+TIKTOK_DEVELOPER_URL = "https://developers.tiktok.com/"
+TIKTOK_LOGIN_URL = "https://www.tiktok.com/login"
+INSTAGRAM_LOGIN_URL = "https://www.instagram.com/accounts/login/"
+THREADS_LOGIN_URL = "https://www.threads.com/login"
+META_APPS_URL = "https://developers.facebook.com/apps/"
 
 
 class _YouTubeOAuthWorker(QObject):
@@ -305,7 +312,7 @@ class YouTubeCommentSection(QFrame):
         self.comment_checkbox.stateChanged.connect(self._on_checkbox_changed)
         layout.addWidget(self.comment_checkbox)
 
-        desc = QLabel("체크하면 영상 업로드 후 자동으로 댓글을 작성합니다. (셀프 댓글로 참여도를 높일 수 있습니다.)")
+        desc = QLabel("쿠팡 풀자동 업로드는 상품 설명, 구매 링크, Linktree 링크 댓글을 기본으로 남깁니다. 체크하면 댓글 문구를 직접 조정할 수 있습니다.")
         desc.setWordWrap(True)
         desc.setFont(QFont(ds.typography.font_family_primary, 10))
         desc.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
@@ -548,6 +555,12 @@ class YouTubeUploadSettingsSection(QFrame):
         self._interval_widget.setVisible(enabled)
         if self.gui and hasattr(self.gui, 'state'):
             self.gui.state.youtube_auto_upload = enabled
+        yt_manager = getattr(self.gui, "youtube_manager", None) if self.gui else None
+        if yt_manager and hasattr(yt_manager, "set_upload_enabled"):
+            try:
+                yt_manager.set_upload_enabled(enabled)
+            except Exception as exc:
+                logger.warning("[UploadPanel] YouTube manager sync failed: %s", exc)
 
     def _on_interval_changed(self, value: int):
         interval_minutes = value * 60
@@ -776,11 +789,21 @@ class UploadPanel(QFrame, ThemedMixin):
         self._channel_index["youtube"] = self._channel_stack.count()
         self._channel_stack.addWidget(yt_page)
 
-        # Other platform pages
-        for platform_id in ["tiktok", "instagram", "threads", "x"]:
-            page = self._build_generic_channel_page(platform_id=platform_id, parent=content)
+        # TikTok page (real OAuth flow)
+        tiktok_page = self._build_tiktok_channel_page(parent=content)
+        self._channel_index["tiktok"] = self._channel_stack.count()
+        self._channel_stack.addWidget(tiktok_page)
+
+        # Instagram / Threads pages (computer-use assisted manual connection)
+        for platform_id in ["instagram", "threads"]:
+            page = self._build_manual_social_channel_page(platform_id=platform_id, parent=content)
             self._channel_index[platform_id] = self._channel_stack.count()
             self._channel_stack.addWidget(page)
+
+        # X page (coming soon)
+        x_page = self._build_generic_channel_page(platform_id="x", parent=content)
+        self._channel_index["x"] = self._channel_stack.count()
+        self._channel_stack.addWidget(x_page)
 
         body_layout.addWidget(stack_card, 1)
         content_layout.addWidget(main_body, 1)
@@ -1004,6 +1027,7 @@ class UploadPanel(QFrame, ThemedMixin):
             parent=page,
         )
         connect_section.add_widget(self.youtube_card)
+        connect_section.add_widget(self._create_coupang_verification_card(parent=page))
         layout.addWidget(connect_section)
 
         self._yt_upload_settings = YouTubeUploadSettingsSection(self.gui, parent=page)
@@ -1040,8 +1064,208 @@ class UploadPanel(QFrame, ThemedMixin):
         self._set_youtube_feature_enabled(yt_connected)
         return page
 
+    def _create_coupang_verification_card(self, parent: Optional[QWidget] = None) -> QFrame:
+        """Create Coupang Partners verification helper for the connected channel."""
+        ds = self.ds
+        c = ds.colors
+
+        card = QFrame(parent)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+            }}
+            QFrame QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+
+        title = QLabel("쿠팡 파트너스 인증 신청")
+        title.setFont(QFont(ds.typography.font_family_primary, 11, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {c.text_primary};")
+        layout.addWidget(title)
+
+        description = QLabel(
+            "연결된 YouTube 채널 URL, Linktree Profile, 대가성 문구 체크리스트를 재신청 자료로 생성합니다."
+        )
+        description.setWordWrap(True)
+        description.setFont(QFont(ds.typography.font_family_primary, 10))
+        description.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(description)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        generate_btn = QPushButton("인증 자료 생성")
+        generate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        generate_btn.clicked.connect(self._create_coupang_verification_pack)
+        btn_row.addWidget(generate_btn)
+
+        notice_btn = QPushButton("쿠팡 공지 열기")
+        notice_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        notice_btn.clicked.connect(self._open_coupang_notice_98)
+        btn_row.addWidget(notice_btn)
+
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        return card
+
+    def _build_tiktok_channel_page(self, parent: Optional[QWidget] = None) -> QWidget:
+        """Build TikTok settings page with OAuth connection flow."""
+        c = self.ds.colors
+        tiktok_connected = self.settings.get_social_connection_status("tiktok")
+        account_name = self.settings.get_social_account_name("tiktok")
+
+        page = QWidget(parent)
+        page.setStyleSheet("background-color: transparent; border: none;")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        layout.addWidget(
+            self._create_channel_banner(
+                "tiktok",
+                "틱톡 채널 설정",
+                "OAuth 인증으로 계정을 연결하면 업로드 파이프라인에서 틱톡 채널 상태를 함께 검증합니다.",
+                parent=page,
+            )
+        )
+
+        self._tiktok_state_label = QLabel()
+        self._tiktok_state_label.setWordWrap(True)
+        self._tiktok_state_label.setFont(QFont(self.ds.typography.font_family_primary, 10, QFont.Weight.Medium))
+        self._tiktok_state_label.setStyleSheet(
+            f"color: {c.text_secondary}; background-color: transparent; border: none; padding: 2px 0;"
+        )
+        layout.addWidget(self._tiktok_state_label)
+
+        self.tiktok_card = SocialAuthCard(
+            platform_id="tiktok",
+            is_connected=tiktok_connected,
+            channel_info={"name": account_name or "틱톡 계정"},
+            coming_soon=False,
+            parent=page,
+        )
+        self.tiktok_card.connect_clicked.connect(self._connect_tiktok)
+        self.tiktok_card.disconnect_clicked.connect(self._disconnect_tiktok)
+
+        connect_section = UploadWorkflowSection(
+            "1단계",
+            "채널 연결",
+            "인증 페이지를 열어 권한 승인 후 code를 입력하면 즉시 연결됩니다.",
+            parent=page,
+        )
+        connect_section.add_widget(self.tiktok_card)
+        layout.addWidget(connect_section)
+
+        helper_section = UploadWorkflowSection(
+            "2단계",
+            "컴퓨터 유즈 보조",
+            "로그인/2FA가 필요한 경우 설정 탭의 자동 설정 도우미를 열어 단계별로 진행하세요.",
+            parent=page,
+        )
+        helper_section.add_widget(self._create_setup_assistant_shortcut_card("tiktok", page))
+        layout.addWidget(helper_section)
+
+        prompt_section = UploadWorkflowSection(
+            "3단계",
+            "업로드 프롬프트 설정",
+            "틱톡 업로드용 제목/설명/해시태그 프롬프트를 저장하세요.",
+            parent=page,
+        )
+        prompt_section.add_widget(PromptInputGroup("tiktok", parent=page))
+        layout.addWidget(prompt_section)
+
+        layout.addStretch()
+        self._update_tiktok_state_hint(bool(tiktok_connected))
+        return page
+
+    def _build_manual_social_channel_page(self, platform_id: str, parent: Optional[QWidget] = None) -> QWidget:
+        """Build Instagram/Threads pages with computer-use assisted manual linkage."""
+        cfg = PLATFORM_CONFIG.get(platform_id, {})
+        connected = self.settings.get_social_connection_status(platform_id)
+        account_name = self.settings.get_social_account_name(platform_id)
+
+        page = QWidget(parent)
+        page.setStyleSheet("background-color: transparent; border: none;")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
+
+        layout.addWidget(
+            self._create_channel_banner(
+                platform_id,
+                f"{cfg.get('name', platform_id.title())} 채널 설정",
+                "로그인/승인은 웹에서 진행하고, 계정 식별자를 입력해 연결 상태를 저장합니다.",
+                parent=page,
+            )
+        )
+
+        state_label = QLabel()
+        state_label.setWordWrap(True)
+        state_label.setFont(QFont(self.ds.typography.font_family_primary, 10, QFont.Weight.Medium))
+        state_label.setStyleSheet(
+            f"color: {self.ds.colors.text_secondary}; background-color: transparent; border: none; padding: 2px 0;"
+        )
+        layout.addWidget(state_label)
+        self._manual_state_labels = getattr(self, "_manual_state_labels", {})
+        self._manual_state_labels[platform_id] = state_label
+
+        card = SocialAuthCard(
+            platform_id=platform_id,
+            is_connected=connected,
+            channel_info={"name": account_name or f"{cfg.get('name', platform_id.title())} 계정"},
+            coming_soon=False,
+            parent=page,
+        )
+        if platform_id == "instagram":
+            card.connect_clicked.connect(self._connect_instagram)
+            card.disconnect_clicked.connect(self._disconnect_instagram)
+            self.instagram_card = card
+        elif platform_id == "threads":
+            card.connect_clicked.connect(self._connect_threads)
+            card.disconnect_clicked.connect(self._disconnect_threads)
+            self.threads_card = card
+
+        connect_section = UploadWorkflowSection(
+            "1단계",
+            "채널 연결",
+            "컴퓨터 유즈 보조 창으로 로그인 후 계정명을 확인하고 저장하세요.",
+            parent=page,
+        )
+        connect_section.add_widget(card)
+        layout.addWidget(connect_section)
+
+        helper_section = UploadWorkflowSection(
+            "2단계",
+            "컴퓨터 유즈 보조",
+            "설정 탭 자동 설정 도우미에서 해당 플랫폼 단독 모드로 진행할 수 있습니다.",
+            parent=page,
+        )
+        helper_section.add_widget(self._create_setup_assistant_shortcut_card(platform_id, page))
+        layout.addWidget(helper_section)
+
+        prompt_section = UploadWorkflowSection(
+            "3단계",
+            "업로드 프롬프트 설정",
+            "채널 운영 톤에 맞는 문구를 미리 저장해두세요.",
+            parent=page,
+        )
+        prompt_section.add_widget(PromptInputGroup(platform_id, parent=page))
+        layout.addWidget(prompt_section)
+
+        layout.addStretch()
+        self._update_manual_state_hint(platform_id)
+        return page
+
     def _build_generic_channel_page(self, platform_id: str, parent: Optional[QWidget] = None) -> QWidget:
-        """Build settings page for non-YouTube channels."""
+        """Build fallback page (currently used for X)."""
         config = PLATFORM_CONFIG.get(platform_id, {})
 
         page = QWidget(parent)
@@ -1054,7 +1278,7 @@ class UploadPanel(QFrame, ThemedMixin):
             self._create_channel_banner(
                 platform_id,
                 f"{config.get('name', platform_id.title())} 업로드 설정",
-                "채널 연결 기능은 준비 중입니다. 프롬프트는 미리 작성/저장할 수 있습니다.",
+                "해당 채널 연결 기능은 준비 중입니다.",
                 parent=page,
             )
         )
@@ -1092,11 +1316,14 @@ class UploadPanel(QFrame, ThemedMixin):
             is_active = pid == platform_id
             btn.setChecked(is_active)
             self._apply_channel_tab_style(btn, platform_id=pid, active=is_active)
+        self._refresh_channel_tab_labels()
 
     def _get_channel_status_text(self, platform_id: str) -> str:
         """Get short status text for channel tab."""
         if platform_id == "youtube":
             return "연결됨" if self.settings.get_youtube_connected() else "연결 필요"
+        if platform_id in {"tiktok", "instagram", "threads"}:
+            return "연결됨" if self.settings.get_social_connection_status(platform_id) else "연결 필요"
         if self.settings.get_social_connection_status(platform_id):
             return "연결됨"
         return "준비중"
@@ -1177,7 +1404,284 @@ class UploadPanel(QFrame, ThemedMixin):
                 }}
             """)
 
+    def _create_setup_assistant_shortcut_card(self, platform_id: str, parent: Optional[QWidget] = None) -> QFrame:
+        """Create shortcut card to open Settings auto setup assistant."""
+        ds = self.ds
+        c = ds.colors
+        cfg = PLATFORM_CONFIG.get(platform_id, {})
+
+        card = QFrame(parent)
+        card.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+            }}
+            QFrame QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+
+        title = QLabel(f"{cfg.get('name', platform_id.title())} 설정 도우미 바로가기")
+        title.setFont(QFont(ds.typography.font_family_primary, 11, QFont.Weight.Bold))
+        title.setStyleSheet(f"color: {c.text_primary};")
+        layout.addWidget(title)
+
+        desc = QLabel(
+            "설정 탭의 자동 설정 도우미에서 로그인/승인/code 입력까지 순서대로 안내합니다. "
+            "필요 시 웹페이지를 자동으로 열고 상태를 검증합니다."
+        )
+        desc.setWordWrap(True)
+        desc.setFont(QFont(ds.typography.font_family_primary, 10))
+        desc.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(desc)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        open_settings_btn = QPushButton("설정 탭 열기")
+        open_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_settings_btn.clicked.connect(lambda: self._open_settings_assistant(platform_id))
+        btn_row.addWidget(open_settings_btn)
+
+        computer_use_btn = QPushButton("로그인 페이지 열기")
+        computer_use_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        computer_use_btn.clicked.connect(lambda: self._open_platform_login_pages(platform_id))
+        btn_row.addWidget(computer_use_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+        return card
+
+    def _open_settings_assistant(self, scope: str):
+        """Navigate to settings tab and focus/start setup assistant."""
+        if self.gui and hasattr(self.gui, "_on_step_selected"):
+            try:
+                self.gui._on_step_selected("settings")
+            except Exception:
+                pass
+
+        settings_tab = getattr(self.gui, "settings_tab", None) if self.gui else None
+        if settings_tab is None:
+            return
+
+        try:
+            if hasattr(settings_tab, "scroll_area") and hasattr(settings_tab, "setup_assistant_section"):
+                settings_tab.scroll_area.ensureWidgetVisible(settings_tab.setup_assistant_section, 40, 40)
+        except Exception:
+            pass
+
+        scope_map = {"instagram": "instagram", "threads": "threads", "tiktok": "tiktok"}
+        mapped_scope = scope_map.get(scope, scope)
+        if hasattr(settings_tab, "_start_setup_assistant"):
+            try:
+                settings_tab._start_setup_assistant(mapped_scope)
+            except Exception:
+                pass
+
+    def _open_platform_login_pages(self, platform_id: str):
+        """Open login/developer pages relevant to the platform."""
+        if platform_id == "tiktok":
+            QDesktopServices.openUrl(QUrl(TIKTOK_LOGIN_URL))
+            QDesktopServices.openUrl(QUrl(TIKTOK_DEVELOPER_URL))
+            return
+        if platform_id == "instagram":
+            QDesktopServices.openUrl(QUrl(INSTAGRAM_LOGIN_URL))
+            QDesktopServices.openUrl(QUrl(META_APPS_URL))
+            return
+        if platform_id == "threads":
+            QDesktopServices.openUrl(QUrl(THREADS_LOGIN_URL))
+            QDesktopServices.openUrl(QUrl(META_APPS_URL))
+
+    @staticmethod
+    def _normalize_social_account(raw_text: str) -> str:
+        """Normalize username input from handle or URL."""
+        value = str(raw_text or "").strip()
+        if not value:
+            return ""
+        value = value.replace("\\", "/").strip()
+        value = re.sub(r"^https?://", "", value, flags=re.IGNORECASE)
+        value = re.sub(r"^www\.", "", value, flags=re.IGNORECASE)
+        if "/" in value:
+            segments = [seg for seg in value.split("/") if seg]
+            if segments:
+                value = segments[-1]
+        value = value.split("?", 1)[0].split("#", 1)[0].strip()
+        if value.startswith("@"):
+            value = value[1:]
+        value = value.strip()
+        if not value:
+            return ""
+
+        blocked_tokens = {
+            "accounts", "login", "logout", "auth", "oauth", "signup", "register",
+            "explore", "reels", "reel", "home", "about", "privacy", "terms",
+            "developers", "developer", "apps", "app",
+        }
+        if value.lower() in blocked_tokens:
+            return ""
+
+        if not re.fullmatch(r"[A-Za-z0-9._]{1,64}", value):
+            return ""
+        return value
+
+    @staticmethod
+    def _extract_oauth_code(raw_value: str) -> str:
+        """Extract OAuth code from callback URL text or plain code."""
+        text = str(raw_value or "").strip()
+        if not text:
+            return ""
+        match = re.search(r"(?:[?&#]|^)code=([^&#\s]+)", text)
+        if match:
+            return match.group(1).strip()
+        return text
+
+    def _update_tiktok_state_hint(self, connected: bool):
+        """Update TikTok helper text."""
+        if not hasattr(self, "_tiktok_state_label"):
+            return
+        c = self.ds.colors
+        if connected:
+            account_name = self.settings.get_social_account_name("tiktok") or "틱톡 계정"
+            self._tiktok_state_label.setText(f"현재 상태: 채널 연결 완료 ({account_name})")
+            self._tiktok_state_label.setStyleSheet(
+                f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
+            )
+            return
+        self._tiktok_state_label.setText("현재 상태: 채널 미연결. OAuth 인증 후 code를 입력해 연결하세요.")
+        self._tiktok_state_label.setStyleSheet(
+            f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
+        )
+
+    def _update_manual_state_hint(self, platform_id: str):
+        """Update manual platform helper text for Instagram/Threads."""
+        labels = getattr(self, "_manual_state_labels", {})
+        label = labels.get(platform_id)
+        if label is None:
+            return
+
+        cfg = PLATFORM_CONFIG.get(platform_id, {})
+        name = cfg.get("name", platform_id.title())
+        connected = self.settings.get_social_connection_status(platform_id)
+        account_name = self.settings.get_social_account_name(platform_id)
+        c = self.ds.colors
+        if connected:
+            label.setText(f"현재 상태: 연결 완료 ({account_name or name})")
+            label.setStyleSheet(
+                f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
+            )
+            return
+        label.setText("현재 상태: 미연결. 로그인 후 계정명을 입력해 연결 상태를 저장하세요.")
+        label.setStyleSheet(
+            f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
+        )
+
+    def _apply_social_connected_state(self, platform_id: str, account_name: str):
+        """Persist non-YouTube social connection and sync cards/state."""
+        normalized_name = self._normalize_social_account(account_name) or str(account_name or "").strip()
+        self.settings.set_social_connection_status(platform_id, True, account_name=normalized_name)
+
+        if self.gui and hasattr(self.gui, "state"):
+            try:
+                setattr(self.gui.state, f"{platform_id}_connected", True)
+            except Exception:
+                pass
+
+        if platform_id == "tiktok" and hasattr(self, "tiktok_card"):
+            self.tiktok_card.set_connected(True, {"name": normalized_name or "틱톡 계정"})
+            self._update_tiktok_state_hint(True)
+        elif platform_id == "instagram" and hasattr(self, "instagram_card"):
+            self.instagram_card.set_connected(True, {"name": normalized_name or "instagram"})
+            self._update_manual_state_hint("instagram")
+        elif platform_id == "threads" and hasattr(self, "threads_card"):
+            self.threads_card.set_connected(True, {"name": normalized_name or "threads"})
+            self._update_manual_state_hint("threads")
+
+        self._refresh_channel_tab_labels()
+
+    def _perform_tiktok_code_exchange(self, raw_code: str) -> tuple[bool, str]:
+        """Run TikTok OAuth code exchange and persist connection state."""
+        manager = self._get_tiktok_manager()
+        if manager is None:
+            return False, "TikTok 매니저를 초기화하지 못했습니다."
+
+        auth_code = self._extract_oauth_code(raw_code)
+        if not auth_code:
+            return False, "TikTok 인증 후 callback URL의 code 값을 입력해주세요."
+
+        try:
+            ok = bool(manager.exchange_code_for_token(auth_code))
+        except Exception as exc:
+            logger.warning("[UploadPanel] TikTok code exchange failed: %s", exc)
+            ok = False
+        if not ok:
+            return False, "code 교환에 실패했습니다. 새 code로 다시 시도해주세요."
+
+        channel = manager.get_channel_info() if hasattr(manager, "get_channel_info") else None
+        account_name = (
+            str(getattr(channel, "display_name", "") or "")
+            or str(getattr(channel, "username", "") or "")
+            or "TikTok 계정"
+        )
+        self._apply_social_connected_state("tiktok", account_name)
+        return True, account_name
+
+    def _perform_manual_social_connect(self, platform_id: str, raw_account: str) -> tuple[bool, str]:
+        """Persist Instagram/Threads manual account connection."""
+        account = self._normalize_social_account(raw_account)
+        if not account:
+            cfg = PLATFORM_CONFIG.get(platform_id, {})
+            platform_name = cfg.get("name", platform_id.title())
+            return False, f"{platform_name} 계정명을 입력해주세요."
+
+        self._apply_social_connected_state(platform_id, account)
+        return True, account
+
     # ─── YouTube connection handlers ─────────────────────────────
+
+    def _open_coupang_notice_98(self):
+        """Open Coupang Partners notice #98."""
+        QDesktopServices.openUrl(QUrl("https://partners.coupang.com/#announcements/98"))
+
+    def _create_coupang_verification_pack(self):
+        """Create Coupang Partners channel verification checklist."""
+        from ui.components.custom_dialog import show_error, show_info
+
+        try:
+            yt_manager = getattr(self.gui, "youtube_manager", None) if self.gui else None
+            if yt_manager is None:
+                from managers.youtube_manager import get_youtube_manager
+                yt_manager = get_youtube_manager()
+
+            linktree_url = ""
+            try:
+                linktree_settings = self.settings.get_linktree_settings()
+                linktree_url = str(linktree_settings.get("profile_url", "") or "").strip()
+            except Exception as exc:
+                logger.debug("[UploadPanel] Linktree profile lookup skipped: %s", exc)
+            if not linktree_url:
+                try:
+                    from managers.linktree_manager import get_linktree_manager
+                    linktree_url = get_linktree_manager().get_profile_url()
+                except Exception as exc:
+                    logger.debug("[UploadPanel] Linktree default lookup skipped: %s", exc)
+
+            guide_path = yt_manager.write_coupang_partners_submission_guide(
+                linktree_url=linktree_url
+            )
+            show_info(
+                self,
+                "인증 자료 생성 완료",
+                "쿠팡 파트너스 채널 인증 재신청 체크리스트를 생성했습니다.\n\n"
+                f"{guide_path}\n\n"
+                "YouTube 채널 URL과 대가성 문구가 보이는 스크린샷을 함께 등록하세요.",
+            )
+        except Exception as exc:
+            logger.error("[UploadPanel] Coupang verification guide failed: %s", exc)
+            show_error(self, "인증 자료 생성 실패", str(exc))
 
     def _connect_youtube(self, platform_id: str):
         """Connect YouTube channel via OAuth."""
@@ -1219,6 +1723,16 @@ class UploadPanel(QFrame, ThemedMixin):
         inst.setFont(QFont(ds.typography.font_family_primary, 11))
         inst.setStyleSheet(f"color: {c.text_secondary};")
         layout.addWidget(inst)
+
+        guide_link = QLabel(
+            '<a href="https://shoppingshorts.store/notice/youtube-google-cloud-oauth-screenshots" '
+            'style="color: #3B82F6; text-decoration: none;">Google Cloud 실제 캡쳐 OAuth 가이드 보기 →</a>'
+        )
+        guide_link.setOpenExternalLinks(True)
+        guide_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        guide_link.setFont(QFont(ds.typography.font_family_primary, 10))
+        guide_link.setStyleSheet("border: none; background: transparent;")
+        layout.addWidget(guide_link)
 
         file_info = QLabel("선택된 파일: 없음")
         file_info.setWordWrap(True)
@@ -1420,6 +1934,291 @@ class UploadPanel(QFrame, ThemedMixin):
 
         show_info(self, "연결 해제", "유튜브 채널 연결이 해제되었습니다.")
 
+    def _get_tiktok_manager(self):
+        """Resolve TikTok manager instance."""
+        manager = getattr(self.gui, "tiktok_manager", None) if self.gui else None
+        if manager is not None:
+            return manager
+        try:
+            from managers.tiktok_manager import get_tiktok_manager
+            manager = get_tiktok_manager(gui=self.gui)
+            if self.gui is not None and not getattr(self.gui, "tiktok_manager", None):
+                self.gui.tiktok_manager = manager
+            return manager
+        except Exception as exc:
+            logger.warning("[UploadPanel] Failed to resolve TikTok manager: %s", exc)
+            return None
+
+    def _connect_tiktok(self, platform_id: str):
+        """Connect TikTok channel via OAuth URL + code exchange."""
+        from ui.components.custom_dialog import show_error, show_info
+        from PyQt6.QtWidgets import QDialog
+
+        manager = self._get_tiktok_manager()
+        if manager is None:
+            show_error(self, "연결 실패", "TikTok 매니저를 초기화하지 못했습니다.")
+            return
+
+        auth_url = str(manager.get_auth_url(state="upload_panel_tiktok") or "").strip()
+        if not auth_url:
+            show_error(
+                self,
+                "OAuth 설정 필요",
+                "TikTok OAuth URL을 생성하지 못했습니다.\nTIKTOK_CLIENT_KEY/SECRET/REDIRECT_URI를 확인해주세요.",
+            )
+            return
+
+        ds = self.ds
+        c = ds.colors
+        dialog = QDialog(self)
+        dialog.setWindowTitle("TikTok 채널 연결")
+        dialog.setFixedSize(560, 320)
+        dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
+
+        inst = QLabel(
+            "1) 인증 페이지 열기를 눌러 TikTok 로그인/승인을 완료하세요.\n"
+            "2) 리디렉션 URL의 code 값을 아래 입력칸에 붙여넣고 연결을 누르세요."
+        )
+        inst.setWordWrap(True)
+        inst.setFont(QFont(ds.typography.font_family_primary, 11))
+        inst.setStyleSheet(f"color: {c.text_secondary};")
+        layout.addWidget(inst)
+
+        auth_info = QLabel(auth_url)
+        auth_info.setWordWrap(True)
+        auth_info.setFont(QFont(ds.typography.font_family_primary, 9))
+        auth_info.setStyleSheet(f"color: {c.text_muted}; border: 1px solid {c.border_light}; padding: 8px;")
+        layout.addWidget(auth_info)
+
+        code_input = QLineEdit()
+        code_input.setPlaceholderText("code 또는 callback URL 전체 입력")
+        code_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 10px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {c.primary}; }}
+        """)
+        layout.addWidget(code_input)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+
+        open_btn = QPushButton("인증 페이지 열기")
+        open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(auth_url)))
+        btn_row.addWidget(open_btn)
+
+        open_dev_btn = QPushButton("개발자 콘솔")
+        open_dev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_dev_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(TIKTOK_DEVELOPER_URL)))
+        btn_row.addWidget(open_dev_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        action_row = QHBoxLayout()
+        action_row.addStretch()
+
+        connect_btn = QPushButton("연결")
+        connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        connect_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: white;
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 18px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{ background-color: {c.primary_hover}; }}
+        """)
+
+        cancel_btn = QPushButton("취소")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        def do_connect():
+            ok, result = self._perform_tiktok_code_exchange(code_input.text())
+            if not ok:
+                show_error(dialog, "연결 실패", result)
+                return
+            account_name = result
+            dialog.accept()
+            show_info(self, "연결 성공", f"TikTok 계정 '{account_name}' 연결이 완료되었습니다.")
+
+        connect_btn.clicked.connect(do_connect)
+        action_row.addWidget(connect_btn)
+        action_row.addWidget(cancel_btn)
+        layout.addLayout(action_row)
+        dialog.exec()
+
+    def _disconnect_tiktok(self, platform_id: str):
+        """Disconnect TikTok channel."""
+        from ui.components.custom_dialog import show_question, show_info
+
+        if not show_question(self, "연결 해제", "틱톡 채널 연결을 해제하시겠습니까?"):
+            return
+
+        self.settings.set_social_connection_status("tiktok", False)
+        if self.gui and hasattr(self.gui, "state"):
+            self.gui.state.tiktok_connected = False
+
+        manager = self._get_tiktok_manager()
+        if manager and hasattr(manager, "disconnect_channel"):
+            try:
+                manager.disconnect_channel()
+            except Exception:
+                pass
+
+        if hasattr(self, "tiktok_card"):
+            self.tiktok_card.set_connected(False)
+        self._update_tiktok_state_hint(False)
+        self._refresh_channel_tab_labels()
+        show_info(self, "연결 해제", "틱톡 채널 연결이 해제되었습니다.")
+
+    def _connect_manual_social(self, platform_id: str):
+        """Connect Instagram/Threads via manual account verification dialog."""
+        from ui.components.custom_dialog import show_error, show_info
+        from PyQt6.QtWidgets import QDialog
+
+        cfg = PLATFORM_CONFIG.get(platform_id, {})
+        platform_name = cfg.get("name", platform_id.title())
+        login_url = INSTAGRAM_LOGIN_URL if platform_id == "instagram" else THREADS_LOGIN_URL
+
+        ds = self.ds
+        c = ds.colors
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"{platform_name} 채널 연결")
+        dialog.setFixedSize(540, 300)
+        dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
+
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
+
+        inst = QLabel(
+            "1) 로그인 페이지 열기를 눌러 웹에서 로그인/승인을 완료하세요.\n"
+            "2) 계정명(username) 또는 프로필 URL을 입력하고 연결을 누르세요.\n"
+            "3) 더 자세한 단계는 설정 탭 자동 설정 도우미를 사용하세요."
+        )
+        inst.setWordWrap(True)
+        inst.setFont(QFont(ds.typography.font_family_primary, 11))
+        inst.setStyleSheet(f"color: {c.text_secondary};")
+        layout.addWidget(inst)
+
+        account_input = QLineEdit()
+        account_input.setPlaceholderText(f"{platform_name} 계정명 또는 프로필 URL")
+        account_input.setText(self.settings.get_social_account_name(platform_id))
+        account_input.setStyleSheet(f"""
+            QLineEdit {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 10px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {c.primary}; }}
+        """)
+        layout.addWidget(account_input)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        open_login_btn = QPushButton("로그인 페이지 열기")
+        open_login_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_login_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(login_url)))
+        btn_row.addWidget(open_login_btn)
+
+        open_meta_btn = QPushButton("Meta App 콘솔")
+        open_meta_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_meta_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(META_APPS_URL)))
+        btn_row.addWidget(open_meta_btn)
+
+        open_settings_btn = QPushButton("설정 도우미 열기")
+        open_settings_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        open_settings_btn.clicked.connect(lambda: self._open_settings_assistant(platform_id))
+        btn_row.addWidget(open_settings_btn)
+        btn_row.addStretch()
+        layout.addLayout(btn_row)
+
+        action_row = QHBoxLayout()
+        action_row.addStretch()
+        connect_btn = QPushButton("연결")
+        connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        connect_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: white;
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 18px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{ background-color: {c.primary_hover}; }}
+        """)
+        cancel_btn = QPushButton("취소")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.clicked.connect(dialog.reject)
+
+        def do_connect():
+            ok, result = self._perform_manual_social_connect(platform_id, account_input.text())
+            if not ok:
+                show_error(dialog, "입력 필요", result)
+                return
+            account = result
+            account_input.setText(account)
+            dialog.accept()
+            show_info(self, "연결 완료", f"{platform_name} 계정 '{account}' 연결 상태를 저장했습니다.")
+
+        connect_btn.clicked.connect(do_connect)
+        action_row.addWidget(connect_btn)
+        action_row.addWidget(cancel_btn)
+        layout.addLayout(action_row)
+        dialog.exec()
+
+    def _disconnect_manual_social(self, platform_id: str):
+        """Disconnect Instagram/Threads manual connection state."""
+        from ui.components.custom_dialog import show_question, show_info
+
+        cfg = PLATFORM_CONFIG.get(platform_id, {})
+        platform_name = cfg.get("name", platform_id.title())
+        if not show_question(self, "연결 해제", f"{platform_name} 연결 상태를 해제하시겠습니까?"):
+            return
+
+        self.settings.set_social_connection_status(platform_id, False)
+        if self.gui and hasattr(self.gui, "state"):
+            try:
+                setattr(self.gui.state, f"{platform_id}_connected", False)
+            except Exception:
+                pass
+
+        if platform_id == "instagram" and hasattr(self, "instagram_card"):
+            self.instagram_card.set_connected(False)
+        elif platform_id == "threads" and hasattr(self, "threads_card"):
+            self.threads_card.set_connected(False)
+        self._update_manual_state_hint(platform_id)
+        self._refresh_channel_tab_labels()
+        show_info(self, "연결 해제", f"{platform_name} 연결 상태가 해제되었습니다.")
+
+    def _connect_instagram(self, platform_id: str):
+        self._connect_manual_social("instagram")
+
+    def _disconnect_instagram(self, platform_id: str):
+        self._disconnect_manual_social("instagram")
+
+    def _connect_threads(self, platform_id: str):
+        self._connect_manual_social("threads")
+
+    def _disconnect_threads(self, platform_id: str):
+        self._disconnect_manual_social("threads")
+
     def _apply_theme(self):
         c = self.ds.colors
         self.setStyleSheet(f"""
@@ -1444,6 +2243,37 @@ class UploadPanel(QFrame, ThemedMixin):
             self.youtube_card.set_connected(True, {"name": channel.get("channel_name", "")})
         else:
             self.youtube_card.set_connected(False)
-        self._refresh_channel_tab_labels()
         self._set_youtube_feature_enabled(yt_connected)
+
+        tiktok_connected = self.settings.get_social_connection_status("tiktok")
+        if not tiktok_connected:
+            manager = self._get_tiktok_manager()
+            if manager and hasattr(manager, "is_connected"):
+                try:
+                    if bool(manager.is_connected()):
+                        channel = manager.get_channel_info() if hasattr(manager, "get_channel_info") else None
+                        account_name = (
+                            str(getattr(channel, "display_name", "") or "")
+                            or str(getattr(channel, "username", "") or "")
+                            or "TikTok 계정"
+                        )
+                        self.settings.set_social_connection_status("tiktok", True, account_name=account_name)
+                        tiktok_connected = True
+                except Exception:
+                    pass
+        if hasattr(self, "tiktok_card"):
+            self.tiktok_card.set_connected(True, {"name": self.settings.get_social_account_name("tiktok")}) if tiktok_connected else self.tiktok_card.set_connected(False)
+        self._update_tiktok_state_hint(tiktok_connected)
+
+        instagram_connected = self.settings.get_social_connection_status("instagram")
+        if hasattr(self, "instagram_card"):
+            self.instagram_card.set_connected(True, {"name": self.settings.get_social_account_name("instagram")}) if instagram_connected else self.instagram_card.set_connected(False)
+        self._update_manual_state_hint("instagram")
+
+        threads_connected = self.settings.get_social_connection_status("threads")
+        if hasattr(self, "threads_card"):
+            self.threads_card.set_connected(True, {"name": self.settings.get_social_account_name("threads")}) if threads_connected else self.threads_card.set_connected(False)
+        self._update_manual_state_hint("threads")
+
+        self._refresh_channel_tab_labels()
         self._set_active_channel(getattr(self, "_active_channel", "youtube"))

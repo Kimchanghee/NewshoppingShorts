@@ -28,7 +28,7 @@ class BillingKey(Base):
     """
     __tablename__ = "billing_keys"
     __table_args__ = (
-        UniqueConstraint('user_id', 'enc_bill', name='uq_user_enc_bill'),
+        UniqueConstraint('user_id', 'enc_bill_hash', name='uq_user_enc_bill_hash'),
     )
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
@@ -39,6 +39,10 @@ class BillingKey(Base):
     # PayApp 암호화 빌링키 (encrypted billing key from PayApp)
     # Encrypted at app layer (Fernet) before DB storage.
     enc_bill = Column(String(1024), nullable=False)
+
+    # Stable SHA-256 hash of the raw PayApp encBill token.
+    # This allows duplicate protection without indexing encrypted secret material.
+    enc_bill_hash = Column(String(64), nullable=False, index=True)
 
     # 마스킹된 카드번호 (e.g. "4518****")
     card_no_masked = Column(String(20), nullable=True)

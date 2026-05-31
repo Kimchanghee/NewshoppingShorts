@@ -61,13 +61,12 @@ def _load_api_keys() -> Dict[str, str]:
 
 GEMINI_API_KEYS = _load_api_keys()
 
-# Gemini - Available models (2026)
-# gemini-2.0-flash: Fast multimodal, production-ready
-# gemini-2.5-flash-preview-tts: Low-latency TTS
-# gemini-2.5-pro-preview-tts: High-quality TTS
-GEMINI_VIDEO_MODEL = "gemini-2.0-flash"  # Fast multimodal for video analysis
-GEMINI_TEXT_MODEL = "gemini-2.0-flash"  # Fast text generation
-GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts"  # TTS with 30 HD voices
+# Gemini - Default models (verified on 2026-05-20)
+# Text/Video: Gemini 3.5 Flash (stable, current flagship speed model)
+# TTS: Gemini 3.1 Flash TTS (preview)
+GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "gemini-3.5-flash")
+GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash")
+GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")
 GEMINI_THINKING_LEVEL = "low"
 GEMINI_MEDIA_RESOLUTION = "media_resolution_low"
 GEMINI_TEMPERATURE = 1.0

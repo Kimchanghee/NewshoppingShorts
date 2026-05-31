@@ -9,8 +9,13 @@ import re
 from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 
-from ui.components.custom_dialog import show_info, show_warning, show_error, show_question
-from ui.theme_manager import get_theme_manager
+from ui.components.custom_dialog import (
+    show_info,
+    show_warning,
+    show_error,
+    show_question,
+    show_success,
+)
 from core.api import ApiKeyManager
 from utils.logging_config import get_logger
 from utils.secrets_manager import SecretsManager
@@ -27,8 +32,25 @@ GEMINI_API_KEY_PATTERN = re.compile(r"^AIza[A-Za-z0-9_-]{35,96}$")
 class APIHandler:
     """Handles API key load/save logic (UI-light PyQt6 variant)."""
 
+    _MAX_GEMINI_KEYS = getattr(ApiKeyManager.APIKeyManager, "MAX_KEYS", 8)
+    _LEGACY_SECRET_NAMES = ("gemini",)
+
     def __init__(self, app: "VideoAnalyzerGUI"):
         self.app = app
+
+    @classmethod
+    def _iter_gemini_secret_names(cls):
+        for idx in range(1, cls._MAX_GEMINI_KEYS + 1):
+            yield f"gemini_api_{idx}"
+
+    def _refresh_api_key_manager(self) -> None:
+        self.app.api_key_manager = ApiKeyManager.APIKeyManager(use_secrets_manager=True)
+
+    def _delete_secret_key_best_effort(self, secret_name: str) -> None:
+        try:
+            SecretsManager.delete_api_key(secret_name)
+        except Exception as e:
+            logger.debug("[API Handler] Secret 삭제 실패 (%s): %s", secret_name, e)
 
     # ------------------- loading / migration -------------------
     def load_saved_api_keys(self):
@@ -116,31 +138,55 @@ class APIHandler:
             return
 
         stored = 0
+        store_errors = []
         for name, value in new_keys.items():
             try:
                 if SecretsManager.store_api_key(f"gemini_{name}", value):
                     stored += 1
+                else:
+                    store_errors.append(name)
             except Exception as e:
                 logger.error(f"[API Handler] {name} 저장 실패: {e}")
+                store_errors.append(name)
 
-        if stored == 0:
-            show_error(self.app, "저장 실패", "SecretsManager에 저장하지 못했습니다.")
+        if stored != len(new_keys):
+            failed_text = ", ".join(store_errors) if store_errors else "unknown"
+            show_error(
+                self.app,
+                "저장 실패",
+                "일부 API 키를 저장하지 못했습니다.\n"
+                "다시 시도해주세요.\n"
+                f"실패 키: {failed_text}",
+            )
             return
 
+        # Remove stale key slots from previous saves.
+        target_secret_names = {f"gemini_{name}" for name in new_keys.keys()}
+        for secret_name in self._iter_gemini_secret_names():
+            if secret_name not in target_secret_names:
+                self._delete_secret_key_best_effort(secret_name)
+        for legacy_name in self._LEGACY_SECRET_NAMES:
+            self._delete_secret_key_best_effort(legacy_name)
+
         config.GEMINI_API_KEYS = new_keys
-        self.app.api_key_manager = ApiKeyManager.APIKeyManager(use_secrets_manager=True)
-        show_success = getattr(__import__("ui.components.custom_dialog", fromlist=["show_success"]), "show_success")
+        self._refresh_api_key_manager()
         show_success(self.app, "저장 완료", f"{stored}개의 API 키가 저장되었습니다.")
 
     def clear_all_api_keys(self, window=None):
         if show_question(self.app, "확인", "모든 API 키를 삭제하시겠습니까?"):
+            for secret_name in self._iter_gemini_secret_names():
+                self._delete_secret_key_best_effort(secret_name)
+            for legacy_name in self._LEGACY_SECRET_NAMES:
+                self._delete_secret_key_best_effort(legacy_name)
             config.GEMINI_API_KEYS = {}
             self.app.api_key_entries = []
+            self._refresh_api_key_manager()
             show_info(self.app, "완료", "모든 API 키가 삭제되었습니다.")
 
     def save_api_keys_to_file(self) -> bool:
         try:
             stored_count = 0
+            active_secret_names = set()
             for key_name, key_value in config.GEMINI_API_KEYS.items():
                 if not key_value:
                     continue
@@ -148,7 +194,14 @@ class APIHandler:
                 secret_key_name = f"gemini_api_{idx}"
                 if SecretsManager.store_api_key(secret_key_name, key_value):
                     stored_count += 1
+                    active_secret_names.add(secret_key_name)
             if stored_count > 0:
+                for secret_name in self._iter_gemini_secret_names():
+                    if secret_name not in active_secret_names:
+                        self._delete_secret_key_best_effort(secret_name)
+                for legacy_name in self._LEGACY_SECRET_NAMES:
+                    self._delete_secret_key_best_effort(legacy_name)
+                self._refresh_api_key_manager()
                 logger.info(f"[API Handler] {stored_count}개 API 키 저장 완료")
                 return True
             logger.warning("[API Handler] 저장할 API 키가 없습니다.")

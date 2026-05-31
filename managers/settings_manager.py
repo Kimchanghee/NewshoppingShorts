@@ -21,11 +21,13 @@ class SettingsManager:
         "youtube": {
             "title_prompt": (
                 "유튜브 쇼핑 쇼츠 제목 1개를 작성해주세요. "
+                "쿠팡 파트너스 링크가 포함되는 영상은 제목 첫 부분에 반드시 [광고]를 표시해주세요. "
                 "핵심 키워드 1~2개를 자연스럽게 포함하고, 제품의 핵심 효익/차별점이 3초 안에 이해되도록 짧고 명확하게 써주세요. "
                 "과장/오해 유도/낚시성 표현은 금지하고, 실제 영상 내용과 정확히 일치하게 작성해주세요."
             ),
             "description_prompt": (
                 "유튜브 쇼츠 설명을 작성해주세요. "
+                "쿠팡 파트너스 링크가 포함되면 첫 줄에 '이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.'를 정확히 넣어주세요. "
                 "첫 1~2문장에 영상 핵심 요약과 구매/탐색 CTA를 배치하고, 뒤에는 제품 특징/사용 상황/추천 포인트를 짧게 정리해주세요. "
                 "각 영상마다 중복 없는 고유 문구로 작성하고, 제목과 설명의 핵심 키워드를 일관되게 맞춰 검색 노출을 높여주세요. "
                 "설명은 사람이 읽기 쉽게 줄바꿈/불릿을 활용해주세요."
@@ -97,18 +99,12 @@ class SettingsManager:
 
 
     DEFAULT_YOUTUBE_COMMENT_PROMPT = (
-        "유튜브 고정 댓글용 상품 안내문 1개를 작성해주세요.\n"
-        "[형식]\n"
-        "1) 한 줄 요약: 이 영상에서 소개한 핵심 포인트\n"
-        "2) 상품 정보: 상품명/모델명, 주요 옵션(색상·사이즈), 추천 대상\n"
-        "3) 구매 정보: 구매 링크, 가격 변동 가능 안내, 쿠폰/할인 유무(확인 필요 시 '수시 변동')\n"
-        "4) 신뢰 문구: 직접 확인한 사실만 안내하고 과장 표현 금지\n"
-        "5) 참여 유도: 궁금한 점 댓글 요청 + 재고/가격 업데이트 시 고정댓글 수정 안내\n\n"
-        "[작성 원칙]\n"
-        "- 5~8줄, 짧고 가독성 높게\n"
-        "- 이모지는 0~2개만 사용\n"
-        "- 스팸처럼 보이는 반복 문구 금지\n"
-        "- 제휴 링크일 경우 '제휴 수수료를 받을 수 있음' 문구를 자연스럽게 포함"
+        "영상에서 소개한 상품 안내입니다.\n"
+        "상품: {상품설명}\n"
+        "구매 링크: {구매링크}\n"
+        "원상품 링크: {원상품링크}\n"
+        "링크 모음: {linktree_link}\n"
+        "궁금한 점은 댓글로 남겨주세요."
     )
 
     DEFAULT_SETTINGS = {
@@ -142,18 +138,22 @@ class SettingsManager:
         "youtube_comment_manual_product_link": "",
         # COMING SOON 플랫폼
         "tiktok_connected": False,
+        "tiktok_account_name": "",
         "tiktok_title_prompt": "",
         "tiktok_description_prompt": "",
         "tiktok_hashtag_prompt": "",
         "instagram_connected": False,
+        "instagram_account_name": "",
         "instagram_title_prompt": "",
         "instagram_description_prompt": "",
         "instagram_hashtag_prompt": "",
         "threads_connected": False,
+        "threads_account_name": "",
         "threads_title_prompt": "",
         "threads_description_prompt": "",
         "threads_hashtag_prompt": "",
         "x_connected": False,
+        "x_account_name": "",
         "x_title_prompt": "",
         "x_description_prompt": "",
         "x_hashtag_prompt": "",
@@ -164,6 +164,19 @@ class SettingsManager:
         "linktree_api_key": "",
         "linktree_profile_url": "",
         "linktree_auto_publish": False,
+        # Codex CLI bridge settings (for setup assistant computer-use handoff)
+        "codex_cli_enabled": True,
+        "codex_cli_path": "codex",
+        "codex_cli_model": "",
+        # Computer Use access policy / bridge
+        "computer_use_paid_only": True,
+        "computer_use_bridge_enabled": False,
+        "computer_use_bridge_url": "",
+        "computer_use_bridge_api_key": "",
+        # Sourcing AI policy
+        "sourcing_ai_provider": "gemini",
+        "sourcing_use_gemini_computer_use": True,
+        "sourcing_use_codex_computer_use": False,
         "cookies_inpock": {},  # Dict to store Inpock Link cookies
         "cookies_1688": {},  # Dict to store 1688 cookies
     }
@@ -628,6 +641,31 @@ class SettingsManager:
         key = f"{platform}_connected"
         return self._settings.get(key, False)
 
+    def set_social_connection_status(self, platform: str, connected: bool, account_name: str = "") -> bool:
+        """Save connection status for non-YouTube social platforms."""
+        normalized = str(platform or "").strip().lower()
+        if normalized == "youtube":
+            return self.set_youtube_connected(bool(connected), channel_name=str(account_name or "").strip())
+
+        if normalized not in {"tiktok", "instagram", "threads", "x"}:
+            logger.warning("[SettingsManager] Unsupported social platform: %s", platform)
+            return False
+
+        with self._lock:
+            self._settings[f"{normalized}_connected"] = bool(connected)
+            if account_name:
+                self._settings[f"{normalized}_account_name"] = str(account_name).strip()
+            elif not connected:
+                self._settings[f"{normalized}_account_name"] = ""
+        return self._save_settings()
+
+    def get_social_account_name(self, platform: str) -> str:
+        """Get stored account display name/identifier for a social platform."""
+        normalized = str(platform or "").strip().lower()
+        if normalized == "youtube":
+            return str(self._settings.get("youtube_channel_name", "") or "").strip()
+        return str(self._settings.get(f"{normalized}_account_name", "") or "").strip()
+
     def get_upload_settings(self) -> Dict[str, Any]:
         """Get all upload-related settings"""
         return {
@@ -643,6 +681,102 @@ class SettingsManager:
             "linktree_connected": bool(self._settings.get("linktree_webhook_url")),
             "inpock_connected": bool(self._settings.get("cookies_inpock")),
         }
+
+    # ============ Codex CLI Bridge Settings ============
+
+    def get_codex_cli_settings(self) -> Dict[str, Any]:
+        """Get Codex CLI bridge settings used by setup assistant."""
+        path = str(self._settings.get("codex_cli_path", "") or "").strip() or "codex"
+        model = str(self._settings.get("codex_cli_model", "") or "").strip()
+        enabled = bool(self._settings.get("codex_cli_enabled", True))
+        return {
+            "enabled": enabled,
+            "path": path,
+            "model": model,
+        }
+
+    def set_codex_cli_settings(
+        self,
+        path: str = "codex",
+        model: str = "",
+        enabled: Optional[bool] = None,
+    ) -> bool:
+        """Save Codex CLI bridge settings for setup assistant."""
+        normalized_path = str(path or "").strip() or "codex"
+        normalized_model = str(model or "").strip()
+        with self._lock:
+            self._settings["codex_cli_path"] = normalized_path
+            self._settings["codex_cli_model"] = normalized_model
+            if enabled is not None:
+                self._settings["codex_cli_enabled"] = bool(enabled)
+        return self._save_settings()
+
+    def get_computer_use_settings(self) -> Dict[str, Any]:
+        """Get computer-use policy and optional server-bridge settings."""
+        bridge_url = str(self._settings.get("computer_use_bridge_url", "") or "").strip()
+        bridge_api_key = self._decrypt_value(str(self._settings.get("computer_use_bridge_api_key", "") or "")).strip()
+        paid_only = bool(self._settings.get("computer_use_paid_only", True))
+        bridge_enabled = bool(self._settings.get("computer_use_bridge_enabled", False))
+        return {
+            "paid_only": paid_only,
+            "bridge_enabled": bridge_enabled,
+            "bridge_url": bridge_url,
+            "bridge_api_key": bridge_api_key,
+        }
+
+    def set_computer_use_settings(
+        self,
+        *,
+        paid_only: Optional[bool] = None,
+        bridge_enabled: Optional[bool] = None,
+        bridge_url: Optional[str] = None,
+        bridge_api_key: Optional[str] = None,
+    ) -> bool:
+        """Save computer-use policy and optional server-bridge settings."""
+        with self._lock:
+            if paid_only is not None:
+                self._settings["computer_use_paid_only"] = bool(paid_only)
+            if bridge_enabled is not None:
+                self._settings["computer_use_bridge_enabled"] = bool(bridge_enabled)
+            if bridge_url is not None:
+                self._settings["computer_use_bridge_url"] = str(bridge_url or "").strip()
+            if bridge_api_key is not None:
+                self._settings["computer_use_bridge_api_key"] = self._encrypt_value(str(bridge_api_key or "").strip())
+        return self._save_settings()
+
+    def get_sourcing_ai_policy(self) -> Dict[str, Any]:
+        """
+        Get sourcing AI provider policy.
+
+        Product sourcing automation is fixed to Gemini guidance path and
+        explicitly excludes Codex computer-use execution.
+        """
+        provider = str(self._settings.get("sourcing_ai_provider", "gemini") or "gemini").strip().lower()
+        if provider != "gemini":
+            provider = "gemini"
+        return {
+            "provider": provider,
+            "use_gemini_computer_use": bool(self._settings.get("sourcing_use_gemini_computer_use", True)),
+            "use_codex_computer_use": False,
+        }
+
+    def set_sourcing_ai_policy(
+        self,
+        *,
+        use_gemini_computer_use: Optional[bool] = None,
+    ) -> bool:
+        """
+        Persist sourcing AI policy.
+
+        Codex computer-use is forcibly disabled for product sourcing.
+        """
+        with self._lock:
+            self._settings["sourcing_ai_provider"] = "gemini"
+            if use_gemini_computer_use is not None:
+                self._settings["sourcing_use_gemini_computer_use"] = bool(use_gemini_computer_use)
+            # Hard guard requested by product policy/user requirement.
+            self._settings["sourcing_use_codex_computer_use"] = False
+        return self._save_settings()
 
     # ============ Upload Prompt Settings ============
 

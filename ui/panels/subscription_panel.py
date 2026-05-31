@@ -1,4 +1,6 @@
-﻿"""
+from __future__ import annotations
+
+"""
 Modern Subscription Panel - SaaS-style pricing page design
 
 Features:
@@ -10,7 +12,8 @@ Features:
 """
 
 import webbrowser
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
     QPushButton, QFrame, QProgressBar,
@@ -51,12 +54,41 @@ PAYAPP_METHOD_INFOS = {
     "tpay": "토스페이 로그인/인증은 새 창에서 진행됩니다.",
 }
 
+try:
+    PROMOTION_TIMEZONE = ZoneInfo("Asia/Seoul")
+except Exception:
+    PROMOTION_TIMEZONE = timezone(timedelta(hours=9))
+
+PROMOTION_START_KST = datetime(2026, 4, 30, 0, 0, 0, tzinfo=PROMOTION_TIMEZONE)
+PROMOTION_END_EXCLUSIVE_KST = datetime(2026, 5, 15, 0, 0, 0, tzinfo=PROMOTION_TIMEZONE)
+PROMOTION_PERIOD_LABEL = "2026.04.30 - 2026.05.14"
+PROMOTION_BONUS_TEXT = "신규 가입 후 구독 확정 시 1개월 추가 제공"
+
+
+def get_local_promotion_status() -> str:
+    now_kst = datetime.now(timezone.utc).astimezone(PROMOTION_TIMEZONE)
+    if now_kst < PROMOTION_START_KST:
+        return "upcoming"
+    if now_kst < PROMOTION_END_EXCLUSIVE_KST:
+        return "active"
+    return "closed"
+
+
+def build_promotion_banner_text(promotion: dict | None = None) -> str:
+    status = (promotion or {}).get("status") or get_local_promotion_status()
+    period = (promotion or {}).get("period_label") or PROMOTION_PERIOD_LABEL
+    if status == "active":
+        return f"이벤트 진행중 · {period} · {PROMOTION_BONUS_TEXT}"
+    if status == "closed":
+        return f"이벤트 마감 · {period} · 신규 구독 추가 1개월 혜택 종료"
+    return f"이벤트 예정 · {period} · {PROMOTION_BONUS_TEXT}"
+
 # Plan definitions with features
 def format_price_korean(amount: int) -> str:
     """
     Format price in Korean style with 만원 units
     Examples:
-        190000 -> "19만원"
+        149000 -> "149,000원"
         161500 -> "161,500원"
         133000 -> "133,000원"
         50000 -> "5만원"
@@ -77,6 +109,28 @@ def format_price_korean(amount: int) -> str:
 
 
 from utils.auth_helpers import parse_utc_datetime, extract_user_id as _extract_user_id_util
+
+
+def format_kst_datetime(value: str | None) -> str:
+    dt = parse_utc_datetime(value)
+    if dt is None:
+        return "-"
+    return dt.astimezone(PROMOTION_TIMEZONE).strftime("%Y-%m-%d %H:%M:%S")
+
+
+def format_remaining_duration(expires_at_str: str | None) -> str:
+    expires_dt = parse_utc_datetime(expires_at_str)
+    if expires_dt is None:
+        return "-"
+    total_seconds = int((expires_dt - datetime.now(timezone.utc)).total_seconds())
+    if total_seconds <= 0:
+        return "만료"
+    days, rem = divmod(total_seconds, 86400)
+    hours, rem = divmod(rem, 3600)
+    minutes, seconds = divmod(rem, 60)
+    if days > 0:
+        return f"{days}일 {hours}시간 {minutes}분 {seconds}초"
+    return f"{hours}시간 {minutes}분 {seconds}초"
 
 
 PLANS = {
@@ -102,11 +156,74 @@ PLANS = {
         "color": "#9A9A9A",
         "popular": False,
     },
+    "test_3days": {
+        "id": "test_3days",
+        "name": "테스트 3일",
+        "price": 5000,
+        "price_text": format_price_korean(5000),
+        "period": "3일",
+        "months": 0,
+        "description": "실결제 흐름 확인용 3일 테스트 플랜",
+        "features": [
+            "3일간 무제한 영상 생성",
+            "모든 음성 프로필 사용",
+            "AI 콘텐츠 분석",
+            "커스텀 자막 스타일",
+            "1080p 해상도",
+            "실제 PayApp 결제 테스트",
+        ],
+        "not_included": [],
+        "color": "#1B8A5A",
+        "popular": True,
+        "badge": "결제 테스트",
+    },
+    "test_7days": {
+        "id": "test_7days",
+        "name": "1주 테스트 상품",
+        "price": 49000,
+        "price_text": format_price_korean(49000),
+        "period": "7일",
+        "months": 0,
+        "description": "일주일 동안 모든 기능을 확인하는 테스트 상품",
+        "features": [
+            "7일간 무제한 영상 생성",
+            "모든 음성 프로필 사용",
+            "AI 콘텐츠 분석",
+            "커스텀 자막 스타일",
+            "1080p 해상도",
+            "실제 PayApp 결제 테스트",
+        ],
+        "not_included": [],
+        "color": "#1B8A5A",
+        "popular": True,
+        "badge": "1주 테스트",
+    },
+    "pro": {
+        "id": "pro",
+        "name": "구독중",
+        "price": 0,
+        "price_text": "구독중",
+        "period": "",
+        "months": 0,
+        "description": "무제한 영상 생성 + 모든 기능 해제",
+        "features": [
+            "무제한 영상 생성",
+            "모든 음성 프로필 사용",
+            "AI 콘텐츠 분석",
+            "커스텀 자막 스타일",
+            "1080p 해상도",
+            "우선 처리",
+        ],
+        "not_included": [],
+        "color": "#E31639",
+        "popular": False,
+        "badge": "구독중",
+    },
     "pro_1month": {
         "id": "pro_1month",
         "name": "프로 1개월",
-        "price": 190000,
-        "price_text": format_price_korean(190000),
+        "price": 149000,
+        "price_text": format_price_korean(149000),
         "period": "월",
         "months": 1,
         "description": "무제한 영상 생성 + 모든 기능 해제",
@@ -125,12 +242,12 @@ PLANS = {
     },
     "pro_6months": {
         "id": "pro_6months",
-        "price": 969000,
+        "price": 759900,
         "name": "프로 6개월",
-        "price_text": format_price_korean(161500),  # Show per-month price
-        "price_per_month": 161500,
-        "original_price_per_month": 190000,
-        "original_price": 1140000,
+        "price_text": format_price_korean(126650),  # Show per-month price
+        "price_per_month": 126650,
+        "original_price_per_month": 149000,
+        "original_price": 894000,
         "discount_percent": 15,
         "period": "6개월",
         "months": 6,
@@ -151,11 +268,11 @@ PLANS = {
     "pro_12months": {
         "id": "pro_12months",
         "name": "프로 12개월",
-        "price": 1596000,
-        "price_text": format_price_korean(133000),  # Show per-month price
-        "price_per_month": 133000,
-        "original_price_per_month": 190000,
-        "original_price": 2280000,
+        "price": 1251600,
+        "price_text": format_price_korean(104300),  # Show per-month price
+        "price_per_month": 104300,
+        "original_price_per_month": 149000,
+        "original_price": 1788000,
         "discount_percent": 30,
         "period": "12개월",
         "months": 12,
@@ -175,10 +292,6 @@ PLANS = {
         "badge": "최고 할인",
     },
 }
-
-# Legacy support: map "pro" to "pro_1month"
-PLANS["pro"] = PLANS["pro_1month"]
-
 
 class PlanCard(QFrame):
     """Modern plan card component"""
@@ -497,6 +610,7 @@ class CurrentPlanCard(QFrame):
         self.current_plan = "trial"  # Default
         self.usage_used = 0
         self.usage_total = 2
+        self._expires_at_str = None
         self._build_ui()
         
     def _build_ui(self):
@@ -573,6 +687,18 @@ class CurrentPlanCard(QFrame):
         self.usage_cumulative = QLabel("누적 작업 수: 0회")
         self.usage_cumulative.setObjectName("usage_cumulative")
         layout.addWidget(self.usage_cumulative)
+
+        self.payment_time_label = QLabel("결제일시: -")
+        self.payment_time_label.setObjectName("subscription_meta")
+        layout.addWidget(self.payment_time_label)
+
+        self.remaining_time_label = QLabel("남은 구독시간: -")
+        self.remaining_time_label.setObjectName("subscription_meta")
+        layout.addWidget(self.remaining_time_label)
+
+        self._remaining_timer = QTimer(self)
+        self._remaining_timer.timeout.connect(self._update_remaining_time_label)
+        self._remaining_timer.start(1000)
         
         layout.addSpacing(ds.spacing.space_4)
         
@@ -594,45 +720,45 @@ class CurrentPlanCard(QFrame):
         
         self._apply_styles()
         
-    def update_plan(self, plan_id: str, used: int = 0, total: int = 2, expires_at_str: str = None):
+    def update_plan(
+        self,
+        plan_id: str,
+        used: int = 0,
+        total: int = 2,
+        expires_at_str: str = None,
+        last_payment_at_str: str = None,
+    ):
         """Update current plan display
 
         Args:
             plan_id: Plan identifier (e.g., "pro_1month", "pro_6months", "trial")
             used: Number of works used
             total: Total work count (-1 for unlimited)
-            expires_at_str: ISO format expiry date string for dynamic plan detection
+            expires_at_str: ISO format expiry date string for remaining-time display
         """
-        self.current_plan = plan_id
         self.usage_used = used
         self.usage_total = total
+        self._expires_at_str = expires_at_str
         try:
             used_num = max(int(used), 0)
         except (TypeError, ValueError):
             used_num = 0
 
-        # Try to determine specific plan from expiry date if generic "pro" is passed
-        if plan_id == "pro" and expires_at_str:
-            expires_dt = parse_utc_datetime(expires_at_str)
-            if expires_dt is not None:
-                now = datetime.now(timezone.utc)
-                days_remaining = (expires_dt - now).days
-
-                # Determine plan based on days remaining (with some tolerance)
-                if days_remaining >= 335:  # ~11 months (12개월 plan)
-                    plan_id = "pro_12months"
-                elif days_remaining >= 155:  # ~5 months (6개월 plan)
-                    plan_id = "pro_6months"
-                elif days_remaining >= 15:  # ~1 month (1개월 plan)
-                    plan_id = "pro_1month"
-                # else: keep as "pro"
-
-        plan_data = PLANS.get(plan_id, PLANS["trial"])
+        # The paid plan must come from the payment session's plan_id. Never infer a
+        # plan from the remaining expiry, because promotions and repairs can change
+        # the expiry without changing the purchased product.
+        display_plan_id = plan_id if plan_id in PLANS else ("pro" if total < 0 else "trial")
+        self.current_plan = display_plan_id
+        plan_data = PLANS.get(display_plan_id, PLANS["trial"])
 
         self.status_badge.setText(plan_data["name"])
         self.plan_name.setText(plan_data["name"])
 
-        is_unlimited = (total < 0) or str(plan_id).startswith("pro")
+        is_unlimited = (
+            (total < 0)
+            or str(display_plan_id).startswith("pro")
+            or str(display_plan_id).startswith("test_")
+        )
         if is_unlimited:
             self.usage_text.setText("무제한")
             self.progress_bar.setMaximum(1)
@@ -645,9 +771,15 @@ class CurrentPlanCard(QFrame):
             remaining = max(total - used_num, 0)
             self.usage_hint.setText(f"남은 영상 생성 횟수: {remaining}회")
         self.usage_cumulative.setText(f"누적 작업 수: {used_num}회")
+
+        if last_payment_at_str:
+            self.payment_time_label.setText(f"결제일시: {format_kst_datetime(last_payment_at_str)}")
+        else:
+            self.payment_time_label.setText("결제일시: -")
+        self._update_remaining_time_label()
         
         # Update badge color
-        if plan_id == "trial":
+        if display_plan_id == "trial":
             self.status_badge.setStyleSheet(f"""
                 #status_badge {{
                     background-color: {ds.colors.surface_variant};
@@ -670,6 +802,14 @@ class CurrentPlanCard(QFrame):
                     font-weight: {ds.typography.weight_bold};
                 }}
             """)
+
+    def _update_remaining_time_label(self):
+        if self._expires_at_str:
+            remaining = format_remaining_duration(self._expires_at_str)
+            expires_at = format_kst_datetime(self._expires_at_str)
+            self.remaining_time_label.setText(f"남은 구독시간: {remaining} · 만료일시: {expires_at}")
+        else:
+            self.remaining_time_label.setText("남은 구독시간: -")
     
     def _apply_styles(self):
         self.setStyleSheet(f"""
@@ -716,6 +856,11 @@ class CurrentPlanCard(QFrame):
                 color: {ds.colors.text_primary};
                 font-size: {ds.typography.size_sm}px;
                 font-weight: {ds.typography.weight_semibold};
+            }}
+
+            #subscription_meta {{
+                color: {ds.colors.text_secondary};
+                font-size: {ds.typography.size_sm}px;
             }}
             
             #usage_progress {{
@@ -1181,7 +1326,7 @@ class SubscriptionPanel(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_status)
         self.selected_plan = None
-        self._default_plan_id = "pro_1month"
+        self._default_plan_id = "test_7days"
         self.ds = get_design_system()
         
         self._build_ui()
@@ -1229,6 +1374,11 @@ class SubscriptionPanel(QWidget):
         subtitle = QLabel("숏폼 메이커의 모든 기능을 해제하세요")
         subtitle.setObjectName("page_subtitle")
         main_layout.addWidget(subtitle)
+
+        self.promotion_banner = QLabel(build_promotion_banner_text())
+        self.promotion_banner.setObjectName("promotion_banner")
+        self.promotion_banner.setWordWrap(True)
+        main_layout.addWidget(self.promotion_banner)
         
         main_layout.addSpacing(ds.spacing.space_4)
         
@@ -1255,7 +1405,7 @@ class SubscriptionPanel(QWidget):
         
         # Create plan cards for all pro tiers
         self.plan_cards = []
-        pro_plan_ids = ["pro_1month", "pro_6months", "pro_12months"]
+        pro_plan_ids = ["test_7days", "pro_1month", "pro_6months", "pro_12months"]
         for plan_id in pro_plan_ids:
             if plan_id in PLANS:
                 plan_data = PLANS[plan_id]
@@ -1328,7 +1478,21 @@ class SubscriptionPanel(QWidget):
             #inquiry_button:pressed {{
                 background-color: #CA8A04;
             }}
+
+            #promotion_banner {{
+                background-color: #FFF7ED;
+                color: #9A3412;
+                border: 1px solid #FDBA74;
+                border-radius: {ds.radius.md}px;
+                padding: {ds.spacing.space_3}px {ds.spacing.space_4}px;
+                font-size: {ds.typography.size_sm}px;
+                font-weight: {ds.typography.weight_semibold};
+            }}
         """)
+
+    def _update_promotion_banner(self, promotion: dict | None = None):
+        if hasattr(self, "promotion_banner"):
+            self.promotion_banner.setText(build_promotion_banner_text(promotion))
         
     def _show_plans(self):
         """Show plan selection"""
@@ -1612,11 +1776,16 @@ class SubscriptionPanel(QWidget):
             from caller import rest
             status = rest.getSubscriptionStatus(user_id)
             if status.get("success", True):
+                self._update_promotion_banner(status.get("promotion"))
                 work_count = status.get("work_count", -1)
                 work_used = status.get("work_used", 0)
 
                 # Check if subscription is actually active
-                expires_at_str = status.get("subscription_expires_at") or status.get("data", {}).get("subscription_expires_at")
+                data_payload = status.get("data", {}) if isinstance(status.get("data", {}), dict) else {}
+                expires_at_str = status.get("subscription_expires_at") or data_payload.get("subscription_expires_at")
+                server_plan_id = status.get("plan_id") or data_payload.get("plan_id")
+                display_plan_id = server_plan_id if server_plan_id in PLANS else "pro"
+                last_payment_at_str = status.get("last_payment_at") or data_payload.get("last_payment_at")
                 expires_dt = parse_utc_datetime(expires_at_str)
                 is_active_subscription = bool(
                     expires_dt and expires_dt > datetime.now(timezone.utc)
@@ -1625,7 +1794,13 @@ class SubscriptionPanel(QWidget):
                 is_pro = (work_count == -1) and is_active_subscription
 
                 if is_pro:
-                    self.current_plan_card.update_plan("pro", used=work_used, total=-1, expires_at_str=expires_at_str)
+                    self.current_plan_card.update_plan(
+                        display_plan_id,
+                        used=work_used,
+                        total=-1,
+                        expires_at_str=expires_at_str,
+                        last_payment_at_str=last_payment_at_str,
+                    )
                 else:
                     remaining = max(work_count - work_used, 0)
                     self.current_plan_card.update_plan("trial", used=work_used, total=work_count, expires_at_str=None)
@@ -1653,11 +1828,16 @@ class SubscriptionPanel(QWidget):
             status = rest.getSubscriptionStatus(user_id)
 
             if status.get("success", True):
+                self._update_promotion_banner(status.get("promotion"))
                 work_count = status.get("work_count", -1)
                 work_used = status.get("work_used", 0)
 
                 # Check if subscription is actually active
-                expires_at_str = status.get("subscription_expires_at") or status.get("data", {}).get("subscription_expires_at")
+                data_payload = status.get("data", {}) if isinstance(status.get("data", {}), dict) else {}
+                expires_at_str = status.get("subscription_expires_at") or data_payload.get("subscription_expires_at")
+                server_plan_id = status.get("plan_id") or data_payload.get("plan_id")
+                display_plan_id = server_plan_id if server_plan_id in PLANS else "pro"
+                last_payment_at_str = status.get("last_payment_at") or data_payload.get("last_payment_at")
                 expires_dt = parse_utc_datetime(expires_at_str)
                 is_active_subscription = bool(
                     expires_dt and expires_dt > datetime.now(timezone.utc)
@@ -1666,8 +1846,16 @@ class SubscriptionPanel(QWidget):
                 is_pro = (work_count == -1) and is_active_subscription
 
                 if is_pro:
-                    self.current_plan_card.update_plan("pro", used=work_used, total=-1, expires_at_str=expires_at_str)
-                    logger.info(f"[Subscription] Refreshed: PRO account (expires_at={expires_at_str})")
+                    self.current_plan_card.update_plan(
+                        display_plan_id,
+                        used=work_used,
+                        total=-1,
+                        expires_at_str=expires_at_str,
+                        last_payment_at_str=last_payment_at_str,
+                    )
+                    logger.info(
+                        f"[Subscription] Refreshed: {display_plan_id} account (expires_at={expires_at_str})"
+                    )
                 else:
                     remaining = max(work_count - work_used, 0)
                     self.current_plan_card.update_plan("trial", used=work_used, total=work_count, expires_at_str=None)
@@ -1701,5 +1889,3 @@ class SubscriptionPanel(QWidget):
         super().showEvent(event)
         # Refresh subscription status when panel is shown
         QTimer.singleShot(100, self.refresh_from_server)
-
-

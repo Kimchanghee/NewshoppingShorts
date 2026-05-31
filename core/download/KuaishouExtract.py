@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, urljoin, urlparse
 import requests
 
 from utils.logging_config import get_logger
+from utils.ffmpeg import ensure_ffmpeg_on_path
 
 logger = get_logger(__name__)
 
@@ -332,6 +333,9 @@ def _download_with_yt_dlp(url: str, output_dir: str) -> str:
         "retries": 3,
         "http_headers": dict(_DEFAULT_HEADERS),
     }
+    ffmpeg_exe = ensure_ffmpeg_on_path()
+    if ffmpeg_exe:
+        ydl_opts["ffmpeg_location"] = ffmpeg_exe
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
         info = ydl.extract_info(url, download=True)

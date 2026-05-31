@@ -5,13 +5,31 @@ This module orchestrates the entire Mode 3 flow.
 """
 from __future__ import annotations
 
+import asyncio
 import os
+import json
 import time
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+MIN_TRUSTED_VIDEO_SCORE = float(os.getenv("SSMAKER_MIN_TRUSTED_VIDEO_SCORE", "0.10"))
+# Default behavior: keep real marketplace videos once downloaded.
+# Set SSMAKER_REPLACE_LOW_CONFIDENCE_WITH_IMAGE=1 to restore strict replacement.
+REPLACE_LOW_CONFIDENCE_WITH_IMAGE = (
+    os.getenv("SSMAKER_REPLACE_LOW_CONFIDENCE_WITH_IMAGE", "0").strip() == "1"
+)
+MARKETPLACE_VIDEO_INITIAL_MAX_TRY_WITH_IMAGE = 3
+MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE = 12
+MARKETPLACE_SEARCH_STAGE_TIMEOUT = int(
+    os.getenv("SSMAKER_MARKETPLACE_SEARCH_STAGE_TIMEOUT", "90")
+)
+MARKETPLACE_VIDEO_SCAN_TIMEOUT = int(
+    os.getenv("SSMAKER_MARKETPLACE_VIDEO_SCAN_TIMEOUT", "240")
+)
 
 
 class SourcingPipeline:
@@ -69,14 +87,206 @@ class SourcingPipeline:
                 pass
 
     async def _start_browser(self):
-        """Start zendriver browser with error handling."""
+        """Start zendriver browser with error handling.
+
+        Tries common Chrome / Chromium / Edge locations on macOS, Linux, and
+        Windows so the pipeline works on machines where the browser isn't on
+        PATH (which is the default on macOS).
+        """
+        import os
+        import re
+        import sys
+        import tempfile
         import zendriver as zd
+
+        # Probe known browser binaries by platform.
+        candidates: list[str] = []
+        if sys.platform == "darwin":
+            candidates = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta",
+                "/Applications/Google Chrome Dev.app/Contents/MacOS/Google Chrome Dev",
+                "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium",
+                "/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge",
+                "/Applications/Brave Browser.app/Contents/MacOS/Brave Browser",
+                "/Applications/Arc.app/Contents/MacOS/Arc",
+            ]
+        elif sys.platform.startswith("linux"):
+            candidates = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/snap/bin/chromium",
+            ]
+        elif sys.platform.startswith("win"):
+            candidates = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+            ]
+
+        executable = next((p for p in candidates if os.path.isfile(p)), None)
+        if executable:
+            logger.info("[Pipeline] Using browser: %s", executable)
+
+        # Persist profile across runs so login/session state survives
+        # (important for 1688/taobao anti-bot and login-gated flows).
+        default_profile = os.path.join(str(Path.home()), ".ssmaker", "zendriver_profile")
+        user_data = os.getenv("SSMAKER_ZENDRIVER_PROFILE", default_profile)
+        os.makedirs(user_data, exist_ok=True)
+
+        # Chrome crash/forced-kill can leave stale singleton artifacts.
+        # If the profile is currently used by a live Chrome process, switch to
+        # a temporary profile for this run instead of hard-failing browser boot.
+        lock_path = os.path.join(user_data, "SingletonLock")
+        lock_pid: Optional[int] = None
+        profile_in_use = False
+        if os.path.lexists(lock_path):
+            try:
+                lock_target = os.readlink(lock_path)
+                m = re.search(r"-(\d+)$", lock_target)
+                if m:
+                    lock_pid = int(m.group(1))
+            except OSError:
+                pass
+
+            if lock_pid is not None:
+                try:
+                    os.kill(lock_pid, 0)
+                    profile_in_use = True
+                except OSError:
+                    profile_in_use = False
+
+            if profile_in_use:
+                temp_profile = tempfile.mkdtemp(prefix="ssmaker_zendriver_profile_")
+                logger.warning(
+                    "[Pipeline] Profile locked by live Chrome pid=%s; "
+                    "using temp profile: %s",
+                    lock_pid,
+                    temp_profile,
+                )
+                user_data = temp_profile
+            else:
+                for singleton_name in ("SingletonLock", "SingletonCookie", "SingletonSocket"):
+                    singleton_path = os.path.join(user_data, singleton_name)
+                    try:
+                        if os.path.lexists(singleton_path):
+                            os.remove(singleton_path)
+                    except OSError:
+                        pass
+
+        kwargs: dict = {
+            "headless": False,
+            "sandbox": False,                        # macOS user install + already-running Chrome → sandbox init flakes
+            "user_data_dir": user_data,              # isolated profile
+            "browser_args": [
+                "--window-size=1400,900",
+                "--disable-blink-features=AutomationControlled",
+                "--no-first-run",
+                "--no-default-browser-check",
+                # Force English UI/Accept-Language at the Chrome process level
+                # so AliExpress doesn't auto-redirect to ko.aliexpress.com.
+                "--lang=en-US",
+                "--accept-lang=en-US,en;q=0.9",
+            ],
+            "browser_connection_timeout": 1.5,       # default 0.25s is too short for cold launches
+            "browser_connection_max_tries": 30,      # default 10 → up to 45s instead of 2.5s
+        }
+        if executable:
+            kwargs["browser_executable_path"] = executable
+
+        async def _start_with_geo_cookies():
+            """Start zendriver and seed AliExpress geo-routing cookies BEFORE
+            any navigation, so the very first request to aliexpress.com gets
+            served the US storefront (which keeps the seller video player)
+            instead of getting redirected to ko.aliexpress.com.
+
+            The cookie shape was reverse-engineered from how AliExpress's own
+            "ship-to" picker writes the storefront preference.
+            """
+            br = await zd.start(**kwargs)
+            try:
+                # Open ANY aliexpress page first so the cookie domain is valid.
+                tab = await br.get("https://www.aliexpress.com/about/blank.html")
+                await tab.sleep(2)
+                await tab.evaluate("""
+                    (() => {
+                        const set = (k, v) => {
+                            // Try every plausible apex domain — AliExpress
+                            // shares some cookies across .com / .us / ko.com.
+                            for (const d of ['.aliexpress.com', '.aliexpress.us', 'aliexpress.com']) {
+                                try {
+                                    document.cookie = k + '=' + v +
+                                        '; domain=' + d +
+                                        '; path=/; max-age=86400';
+                                } catch(e) {}
+                            }
+                        };
+                        // site=usa locks the storefront, region=US the geo,
+                        // c_tp=USD the currency, x_alimid is a noise field
+                        // AliExpress also writes — empty value works fine.
+                        set('aep_usuc_f', 'site=usa&region=US&c_tp=USD&b_locale=en_US&x_alimid=');
+                        set('intl_locale', 'en_US');
+                        set('xman_us_f', 'x_l=0&x_locale=en_US&site=usa');
+                        set('xman_t', '');
+                        set('aep_common_f', '1');
+                        // Block the gateway-adapt redirect that strips video
+                        set('aep_history_currency', 'USD');
+                    })()
+                """)
+            except Exception as e:
+                logger.warning("[Pipeline] geo-cookie seed failed: %s", e)
+
+            # Bridge any stored 1688 login cookies into THIS zendriver session.
+            # Root cause of 1688 producing 0 sourced videos in practice: the
+            # manual 1688 login saves cookies into settings for the *Selenium*
+            # SourcingManager only (managers/sourcing_manager.py), and this
+            # zendriver pipeline never loaded them — so search_1688 always hit
+            # the login wall. Best-effort: any failure is non-fatal and simply
+            # leaves 1688 behaving as before.
+            try:
+                from managers.settings_manager import get_settings_manager
+                from zendriver import cdp as _cdp
+
+                try:
+                    cookies_1688 = get_settings_manager().get_1688_cookies() or {}
+                except Exception:
+                    cookies_1688 = {}
+                if cookies_1688:
+                    params = [
+                        _cdp.network.CookieParam(
+                            name=str(name),
+                            value=str(value),
+                            domain=".1688.com",
+                            path="/",
+                        )
+                        for name, value in cookies_1688.items()
+                        if name
+                    ]
+                    if params:
+                        await br.cookies.set_all(params)
+                        logger.info(
+                            "[Pipeline] Seeded %d stored 1688 cookie(s) into zendriver session",
+                            len(params),
+                        )
+            except Exception as e:
+                logger.warning("[Pipeline] 1688 cookie bridge failed (non-fatal): %s", e)
+            return br
+
         try:
-            browser = await zd.start(headless=False, browser_args=["--window-size=1400,900"])
-            return browser
+            return await _start_with_geo_cookies()
         except Exception as e:
             logger.error("[Pipeline] Browser start failed: %s", e)
-            return None
+            # Retry once in headless mode — bypasses any window-server collision.
+            kwargs["headless"] = True
+            try:
+                logger.info("[Pipeline] Retrying browser launch in headless mode")
+                return await _start_with_geo_cookies()
+            except Exception as ee:
+                logger.error("[Pipeline] Headless retry also failed: %s", ee)
+                return None
 
     async def run_sourcing(self) -> bool:
         """
@@ -86,10 +296,19 @@ class SourcingPipeline:
         """
         from core.sourcing.coupang_scraper import scrape_product
         from core.sourcing.keyword_converter import convert_keywords_gemini
+        from core.sourcing.gemini_computer_use import (
+            build_gemini_computer_use_queries,
+        )
+        from managers.settings_manager import get_settings_manager
         from core.sourcing.product_searcher import (
             search_aliexpress,
             search_1688,
+            search_aliexpress_quick,
+            search_1688_quick,
+            search_1688_by_image,
+            search_aliexpress_by_image,
             find_products_with_video,
+            _category_terms_for_keyword,
         )
 
         os.makedirs(self.output_dir, exist_ok=True)
@@ -136,62 +355,706 @@ class SourcingPipeline:
             self.keywords = await convert_keywords_gemini(
                 self.product_info["name"], self.gemini_client
             )
-            if not self.keywords or not self.keywords.get("chinese") or not self.keywords.get("english"):
-                self.error = "키워드 변환에 실패했습니다."
+            cn_kw = (self.keywords or {}).get("chinese", "").strip()
+            en_kw = (self.keywords or {}).get("english", "").strip()
+            if not cn_kw and not en_kw:
+                # Both empty → cannot search either marketplace. Most common cause:
+                # no Gemini client configured AND no rule-based / Latin tokens in the title.
+                self.error = (
+                    "키워드 변환에 실패했습니다. Gemini API 키를 설정하거나 "
+                    "상품명에 영문/규격이 포함된 다른 쿠팡 링크를 사용해주세요."
+                )
                 self._progress("keyword_convert", self.error, 1.0)
                 return False
             self._progress(
                 "keyword_convert",
-                f"CN: {self.keywords['chinese'][:30]} / EN: {self.keywords['english'][:30]}",
+                f"CN: {cn_kw[:30] or '(없음)'} / EN: {en_kw[:30] or '(없음)'}",
                 1.0,
             )
 
             # ── Step 4: Overseas search ──
             self._progress("overseas_search", "해외 상품 검색 중...", 0.0)
-
-            # 1688 (skip if login required)
-            candidates_1688 = await search_1688(
-                browser, self.keywords["chinese"], self.product_info["name"]
+            sourcing_ai_policy = {
+                "provider": "gemini",
+                "use_gemini_computer_use": True,
+                "use_codex_computer_use": False,
+            }
+            try:
+                sourcing_ai_policy = get_settings_manager().get_sourcing_ai_policy()
+            except Exception:
+                pass
+            logger.info(
+                "[Pipeline] Product sourcing AI route: provider=%s, gemini_cu=%s, codex_cu=%s",
+                sourcing_ai_policy.get("provider", "gemini"),
+                bool(sourcing_ai_policy.get("use_gemini_computer_use", True)),
+                bool(sourcing_ai_policy.get("use_codex_computer_use", False)),
             )
-            self._progress("overseas_search", f"1688: {len(candidates_1688)}개 발견", 0.3)
 
-            # AliExpress
-            candidates_ali = await search_aliexpress(
-                browser, self.keywords["english"],
-                self.product_info["name"], self.keywords["chinese"]
+            # Coupang product image (used for image-first search)
+            coupang_image = (self.product_info or {}).get("image") or ""
+            # Normalize protocol-relative URLs (//image.coupangcdn.com/... → https://...)
+            if coupang_image.startswith("//"):
+                coupang_image = "https:" + coupang_image
+            print(f"[Pipeline] Coupang image URL: {coupang_image[:100] or '(none)'}")
+
+            # 1688 requires a logged-in session: every guest endpoint is
+            # login/anti-bot walled (verified live AND in this app's own logs,
+            # where 1688 produced 0 sourced videos across hundreds of runs). The
+            # only place a 1688 login is stored is settings.cookies_1688, which
+            # _start_browser bridges into this session. So only run the otherwise
+            # guaranteed-to-fail, time-wasting 1688 phases when we actually hold
+            # those cookies. Override with SSMAKER_FORCE_1688=1 (on) / =0 (off).
+            _force_1688 = os.getenv("SSMAKER_FORCE_1688", "").strip()
+            if _force_1688 == "1":
+                run_1688 = True
+            elif _force_1688 == "0":
+                run_1688 = False
+            else:
+                try:
+                    run_1688 = bool(get_settings_manager().get_1688_cookies())
+                except Exception:
+                    run_1688 = False
+            if not run_1688:
+                logger.info(
+                    "[Pipeline] Skipping 1688 search: no stored 1688 login cookies. "
+                    "1688 guest access is login/anti-bot walled, so running it would "
+                    "only waste navigations. Set SSMAKER_FORCE_1688=1 to override."
+                )
+
+            # Track whether any 1688 navigation actually happened. The browser
+            # restarts below exist only to recover from 1688-induced CDP tab
+            # corruption, so when 1688 never navigated we can safely skip the
+            # (expensive) cold Chrome relaunch.
+            ran_1688_nav = False
+
+            # 1688 image-first search
+            candidates_1688_img: List[Dict] = []
+            if coupang_image.startswith("http") and run_1688:
+                ran_1688_nav = True
+                self._progress("overseas_search", "1688 이미지 검색(우선) 중...", 0.08)
+                try:
+                    candidates_1688_img = await asyncio.wait_for(
+                        search_1688_by_image(
+                            browser,
+                            coupang_image,
+                            self.product_info["name"],
+                            cn_kw,
+                            en_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] 1688 image-first search timeout (%ss)",
+                        MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except Exception as e:
+                    logger.warning("[Pipeline] 1688 image-first search failed: %s", e)
+
+            # AliExpress image-first search: prioritize visual match before text keyword matching.
+            candidates_ali_img: List[Dict] = []
+            if coupang_image.startswith("http"):
+                self._progress("overseas_search", "AliExpress 이미지 검색(우선) 중...", 0.15)
+                try:
+                    candidates_ali_img = await asyncio.wait_for(
+                        search_aliexpress_by_image(
+                            browser, coupang_image,
+                            self.product_info["name"], en_kw, cn_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] AliExpress image-first search timeout (%ss)",
+                        MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except Exception as e:
+                    logger.warning("[Pipeline] Image-first search failed: %s", e)
+
+            # 1688 keyword search (augmentation for image-first mode)
+            candidates_1688_text: List[Dict] = []
+            should_run_1688_text = len(candidates_1688_img) < 12
+            if should_run_1688_text and cn_kw and run_1688:
+                ran_1688_nav = True
+                try:
+                    candidates_1688_text = await asyncio.wait_for(
+                        search_1688(
+                            browser, cn_kw, self.product_info["name"]
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] 1688 text search timeout (%ss)",
+                        MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                    quick_timeout = max(
+                        30, min(60, MARKETPLACE_SEARCH_STAGE_TIMEOUT)
+                    )
+                    try:
+                        candidates_1688_text = await asyncio.wait_for(
+                            search_1688_quick(
+                                browser,
+                                cn_kw,
+                                self.product_info["name"],
+                                en_kw,
+                            ),
+                            timeout=quick_timeout,
+                        )
+                        logger.info(
+                            "[Pipeline] 1688 quick fallback returned %d candidates after timeout",
+                            len(candidates_1688_text),
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[Pipeline] 1688 quick fallback timeout (%ss)",
+                            quick_timeout,
+                        )
+                    except Exception as e:
+                        logger.warning("[Pipeline] 1688 quick fallback failed: %s", e)
+            elif not cn_kw:
+                logger.info("[Pipeline] Skipping 1688 text search: no Chinese keyword")
+
+            # Merge with image-search priority (image candidates first).
+            candidates_1688: List[Dict] = []
+            seen_1688_ids = set()
+            for pool in (candidates_1688_img, candidates_1688_text):
+                for c in pool:
+                    cid = c.get("id")
+                    if cid and cid in seen_1688_ids:
+                        continue
+                    if cid:
+                        seen_1688_ids.add(cid)
+                    candidates_1688.append(c)
+
+            self._progress(
+                "overseas_search",
+                f"1688: {len(candidates_1688)}개 발견 (이미지 {len(candidates_1688_img)} + 텍스트 {len(candidates_1688_text)})",
+                0.3,
             )
-            self._progress("overseas_search", f"AliExpress: {len(candidates_ali)}개 발견", 0.7)
+
+            # 1688 login/challenge redirects can poison the current CDP tab
+            # state (frequent InvalidStateError in zendriver). Recreate the
+            # browser session before AliExpress search to keep candidate
+            # extraction stable — but only if 1688 actually navigated this run,
+            # since an unused 1688 phase can't have corrupted the CDP state.
+            if ran_1688_nav:
+                try:
+                    logger.info("[Pipeline] Reinitializing browser session before AliExpress search")
+                    await browser.stop()
+                except Exception:
+                    pass
+                browser = await self._start_browser()
+                if browser is None:
+                    self.error = "AliExpress 검색용 브라우저를 시작할 수 없습니다."
+                    self._progress("overseas_search", self.error, 0.7)
+                    return False
+                ran_1688_nav = False
+            else:
+                logger.info("[Pipeline] Skipping pre-AliExpress browser restart (no 1688 navigation)")
+
+            # AliExpress (English keyword required)
+            candidates_ali_text: List[Dict] = []
+            # Image-first mode still runs text search to widen coverage when
+            # image candidates are too few.
+            should_run_ali_text = len(candidates_ali_img) < 12
+            if should_run_ali_text and en_kw:
+                try:
+                    candidates_ali_text = await asyncio.wait_for(
+                        search_aliexpress(
+                            browser, en_kw,
+                            self.product_info["name"], cn_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] AliExpress text search timeout (%ss)",
+                        MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                    quick_timeout = max(
+                        30, min(60, MARKETPLACE_SEARCH_STAGE_TIMEOUT)
+                    )
+                    try:
+                        candidates_ali_text = await asyncio.wait_for(
+                            search_aliexpress_quick(
+                                browser,
+                                en_kw,
+                                self.product_info["name"],
+                                cn_kw,
+                            ),
+                            timeout=quick_timeout,
+                        )
+                        logger.info(
+                            "[Pipeline] AliExpress quick fallback returned %d candidates after timeout",
+                            len(candidates_ali_text),
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[Pipeline] AliExpress quick fallback timeout (%ss)",
+                            quick_timeout,
+                        )
+                    except Exception as e:
+                        logger.warning("[Pipeline] AliExpress quick fallback failed: %s", e)
+            elif not en_kw:
+                logger.info("[Pipeline] Skipping AliExpress text search: no English keyword")
+
+            # Merge with image-search priority (image candidates first).
+            candidates_ali: List[Dict] = []
+            seen_ali_ids = set()
+            for pool in (candidates_ali_img, candidates_ali_text):
+                for c in pool:
+                    cid = c.get("id")
+                    if cid and cid in seen_ali_ids:
+                        continue
+                    if cid:
+                        seen_ali_ids.add(cid)
+                    candidates_ali.append(c)
+
+            self._progress(
+                "overseas_search",
+                f"AliExpress: {len(candidates_ali)}개 발견 (이미지 {len(candidates_ali_img)} + 텍스트 {len(candidates_ali_text)})",
+                0.7,
+            )
+
+            # Gemini computer-use style search augmentation:
+            # when candidate volume is low, ask Gemini for alternate marketplace
+            # query packs and run additional browser searches.
+            if (
+                bool(sourcing_ai_policy.get("use_gemini_computer_use", True))
+                and len(candidates_1688) + len(candidates_ali) < 14
+            ):
+                self._progress(
+                    "overseas_search",
+                    "Gemini 보강 검색 중... (Codex 미사용)",
+                    0.78,
+                )
+                try:
+                    query_plan = await build_gemini_computer_use_queries(
+                        gemini_client=self.gemini_client,
+                        product_name=self.product_info["name"],
+                        keyword_cn=cn_kw,
+                        keyword_en=en_kw,
+                        max_queries_each=4,
+                    )
+                    gem_ali_queries = query_plan.get("aliexpress", [])
+                    gem_1688_queries = query_plan.get("1688", [])
+                    logger.info(
+                        "[Pipeline] Gemini fallback query plan: ali=%s / 1688=%s",
+                        gem_ali_queries,
+                        gem_1688_queries,
+                    )
+
+                    # 1688 additional scans (query-by-query, dedup by id).
+                    if gem_1688_queries and run_1688:
+                        ran_1688_nav = True
+                        existing_1688_ids = {c.get("id") for c in candidates_1688 if c.get("id")}
+                        for q in gem_1688_queries:
+                            try:
+                                extra = await asyncio.wait_for(
+                                    search_1688_quick(
+                                        browser,
+                                        q,
+                                        self.product_info["name"],
+                                        en_kw,
+                                    ),
+                                    timeout=max(20, min(40, MARKETPLACE_SEARCH_STAGE_TIMEOUT)),
+                                )
+                            except Exception:
+                                continue
+                            for c in extra:
+                                cid = c.get("id")
+                                if cid and cid in existing_1688_ids:
+                                    continue
+                                if cid:
+                                    existing_1688_ids.add(cid)
+                                candidates_1688.append(c)
+
+                    # AliExpress additional scans (query-by-query, dedup by id).
+                    if gem_ali_queries:
+                        existing_ali_ids = {c.get("id") for c in candidates_ali if c.get("id")}
+                        for q in gem_ali_queries:
+                            try:
+                                extra = await asyncio.wait_for(
+                                    search_aliexpress_quick(
+                                        browser,
+                                        q,
+                                        self.product_info["name"],
+                                        cn_kw,
+                                    ),
+                                    timeout=max(20, min(40, MARKETPLACE_SEARCH_STAGE_TIMEOUT)),
+                                )
+                            except Exception:
+                                continue
+                            for c in extra:
+                                cid = c.get("id")
+                                if cid and cid in existing_ali_ids:
+                                    continue
+                                if cid:
+                                    existing_ali_ids.add(cid)
+                                candidates_ali.append(c)
+
+                    self._progress(
+                        "overseas_search",
+                        f"Gemini 보강 완료: 1688 {len(candidates_1688)}개 / AliExpress {len(candidates_ali)}개",
+                        0.82,
+                    )
+                except Exception as gem_search_err:
+                    logger.warning("[Pipeline] Gemini augmentation failed: %s", gem_search_err)
+
+            # Recreate browser once more before final AliExpress fallback and
+            # video scan stage. 1688 quick searches above can leave webdriver
+            # targets in an invalid state — only restart if a 1688 augmentation
+            # scan actually ran since the last restart.
+            if ran_1688_nav:
+                try:
+                    logger.info("[Pipeline] Reinitializing browser session before final AliExpress fallback")
+                    await browser.stop()
+                except Exception:
+                    pass
+                browser = await self._start_browser()
+                if browser is None:
+                    self.error = "최종 검색용 브라우저를 시작할 수 없습니다."
+                    self._progress("overseas_search", self.error, 1.0)
+                    return False
+                ran_1688_nav = False
+            else:
+                logger.info("[Pipeline] Skipping pre-final-fallback browser restart (no 1688 navigation since last restart)")
+
+            # Image-based search FALLBACK — when text search yields very few
+            # candidates the Coupang product image is a much stronger query
+            # because it bypasses translation/synonym variance entirely. We
+            # merge image-search candidates into the text-search pool so the
+            # find_products_with_video stage gets to pick from the union.
+            if (
+                len(candidates_1688) + len(candidates_ali) < 8
+                and coupang_image.startswith("http")
+            ):
+                msg = "[Pipeline] Few candidates — adding image-search fallback"
+                print(msg)
+                logger.info(msg)
+                try:
+                    img_candidates = await asyncio.wait_for(
+                        search_aliexpress_by_image(
+                            browser, coupang_image,
+                            self.product_info["name"], en_kw, cn_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                    if img_candidates:
+                        # Merge by ID — don't double-count items already in pool
+                        existing_ids = {c.get("id") for c in candidates_ali}
+                        for ic in img_candidates:
+                            if ic.get("id") and ic["id"] not in existing_ids:
+                                candidates_ali.append(ic)
+                        self._progress(
+                            "overseas_search",
+                            f"이미지검색 추가: AliExpress {len(candidates_ali)}개",
+                            0.85,
+                        )
+                except Exception as e:
+                    logger.warning("[Pipeline] Image search fallback failed: %s", e)
 
             if not candidates_1688 and not candidates_ali:
-                self.error = "해외 상품을 찾지 못했습니다."
-                self._progress("overseas_search", self.error, 1.0)
-                return False
-
-            self._progress("overseas_search", "검색 완료", 1.0)
+                msg = "후보 0개 — 검색을 종료하고 폴백 단계로 진행합니다."
+                logger.warning("[Pipeline] %s", msg)
+                self._progress("overseas_search", msg, 1.0)
+            else:
+                self._progress("overseas_search", "검색 완료", 1.0)
 
             # ── Step 5: Find products with video + download ──
             self._progress("video_download", "영상 있는 상품 탐색 중...", 0.0)
 
+            # Build category guard from English keyword — rejects wrong-category
+            # candidates before we even try them, lifting matching accuracy.
+            # Pass reference_name + cn_kw so the guard can fall back to a
+            # domain-level catch-all when no specific dictionary entry matches.
+            category_terms = _category_terms_for_keyword(
+                en_kw,
+                reference_name=self.product_info["name"],
+                keyword_cn=cn_kw,
+            )
+            # References passed to the overlap safety net during the relaxed
+            # 0.0-threshold fallback. We compose them once here so they're
+            # available to every find_products_with_video call below.
+            overlap_refs = [
+                self.product_info["name"],
+                en_kw,
+                cn_kw,
+            ]
+            # Use print() so the .command tee captures these alongside the
+            # progress bar lines; logger.info goes to a file the batch script
+            # doesn't always tail.
+            if category_terms:
+                msg = f"[Pipeline] Category guard active ({len(category_terms)} terms): {', '.join(category_terms[:6])}..."
+                print(msg)
+                logger.info(msg)
+            else:
+                msg = "[Pipeline] No category guard — relying on score + overlap safety net"
+                print(msg)
+                logger.info(msg)
+
             need_from_ali = 2 if not candidates_1688 else 1
             need_from_1688 = 2 - need_from_ali
 
-            # 1688
-            if need_from_1688 > 0 and candidates_1688:
-                found_1688 = await find_products_with_video(
-                    browser, candidates_1688, self.output_dir, "1688", count=need_from_1688
+            # AliExpress first: 1688 login/challenge redirects can destabilize
+            # the live browser CDP session, so we collect AliExpress videos
+            # before touching 1688 detail scans.
+            found_ali: List[Dict] = []
+            if candidates_ali:
+                ali_max_try = (
+                    MARKETPLACE_VIDEO_INITIAL_MAX_TRY_WITH_IMAGE
+                    if coupang_image.startswith("http")
+                    else 15
                 )
+                try:
+                    found_ali = await asyncio.wait_for(
+                        find_products_with_video(
+                            browser, candidates_ali, self.output_dir, "aliexpress",
+                            count=need_from_ali,
+                            max_try=ali_max_try,
+                            category_terms=category_terms,
+                            overlap_references=overlap_refs,
+                        ),
+                        timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] AliExpress video scan timeout (%ss)",
+                        MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                    )
+                    found_ali = []
+                self.sourced_products.extend(found_ali)
+                # If quick scan missed everything, keep scanning deeper candidates
+                # before giving up to image fallback.
+                if (
+                    not found_ali
+                    and coupang_image.startswith("http")
+                    and len(candidates_ali) > ali_max_try
+                    and need_from_ali > 0
+                ):
+                    self._progress(
+                        "video_download",
+                        "초기 후보에서 영상 미발견 — AliExpress 추가 후보 탐색 중...",
+                        0.58,
+                    )
+                    try:
+                        found_ali_extra = await asyncio.wait_for(
+                            find_products_with_video(
+                                browser,
+                                candidates_ali[ali_max_try:],
+                                self.output_dir,
+                                "aliexpress",
+                                count=need_from_ali,
+                                max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                category_terms=category_terms,
+                                overlap_references=overlap_refs,
+                            ),
+                            timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                        )
+                    except asyncio.TimeoutError:
+                        logger.warning(
+                            "[Pipeline] AliExpress expanded scan timeout (%ss)",
+                            MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                        )
+                        found_ali_extra = []
+                    self.sourced_products.extend(found_ali_extra)
+                    found_ali.extend(found_ali_extra)
+
+            # 1688 second (fills remaining quota when AliExpress didn't fill enough)
+            if len(found_ali) < need_from_ali:
+                need_from_1688 += (need_from_ali - len(found_ali))
+            if need_from_1688 > 0 and candidates_1688:
+                try:
+                    found_1688 = await asyncio.wait_for(
+                        find_products_with_video(
+                            browser, candidates_1688, self.output_dir, "1688",
+                            count=need_from_1688, category_terms=category_terms,
+                            overlap_references=overlap_refs,
+                        ),
+                        timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[Pipeline] 1688 video scan timeout (%ss)",
+                        MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                    )
+                    found_1688 = []
                 self.sourced_products.extend(found_1688)
-                if len(found_1688) < need_from_1688:
-                    need_from_ali += (need_from_1688 - len(found_1688))
 
             self._progress("video_download", f"1688: {sum(1 for p in self.sourced_products if p['source']=='1688')}개", 0.4)
 
-            # AliExpress
-            if candidates_ali:
-                found_ali = await find_products_with_video(
-                    browser, candidates_ali, self.output_dir, "aliexpress", count=need_from_ali
+            # FINAL fallback: if we have candidates but extracted 0 videos,
+            # the text-search candidates simply don't carry videos. Try
+            # image-based search — it surfaces a different candidate set,
+            # often heavily visual demo-driven sellers who DO ship videos.
+            if (
+                not self.sourced_products
+                and coupang_image.startswith("http")
+                and not any(c.get("image_search") for c in candidates_ali)
+            ):
+                msg = "[Pipeline] 0 videos from text search — last-resort image search"
+                print(msg)
+                logger.info(msg)
+                try:
+                    img_candidates = await asyncio.wait_for(
+                        search_aliexpress_by_image(
+                            browser, coupang_image,
+                            self.product_info["name"], en_kw, cn_kw,
+                        ),
+                        timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
+                    )
+                    if img_candidates:
+                        try:
+                            found_img = await asyncio.wait_for(
+                                find_products_with_video(
+                                    browser, img_candidates, self.output_dir,
+                                    "aliexpress", count=2, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                    min_score=0.0,
+                                    category_terms=category_terms,
+                                    overlap_references=overlap_refs,
+                                ),
+                                timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[Pipeline] Image-search fallback video scan timeout (%ss)",
+                                MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                            )
+                            found_img = []
+                        self.sourced_products.extend(found_img)
+                        msg2 = f"[Pipeline] Image-search fallback yielded {len(found_img)} video(s)"
+                        print(msg2)
+                        logger.info(msg2)
+                except Exception as e:
+                    logger.warning("[Pipeline] Last-resort image search failed: %s", e)
+
+            # If live marketplace search cannot extract a fresh video, reuse a
+            # previously sourced safe marketplace video for the same Coupang
+            # product/link before falling back to a static product-image video.
+            if not self.sourced_products:
+                cached = self._find_cached_marketplace_video()
+                if cached:
+                    self._progress(
+                        "video_download",
+                        "실시간 영상 없음 — 이전 안전 자동 산출 영상 재사용",
+                        0.88,
+                    )
+                    self.sourced_products.append(cached)
+
+            # If nothing matched at the strict threshold, retry progressively looser.
+            # Korean Coupang title vs Korean AliExpress title often scores < 0.05
+            # because the marketplace gives translated/romanized titles, so we
+            # fall through to threshold 0 (any candidate that has video) before
+            # giving up. For products with a valid Coupang image, the exact
+            # image-video fallback above will normally stop before this point.
+            if not self.sourced_products and (candidates_ali or candidates_1688):
+                for relaxed in (0.05, 0.0):
+                    if self.sourced_products:
+                        break
+                    logger.warning(
+                        "[Pipeline] No matches at previous threshold; retrying min_score=%.2f",
+                        relaxed,
+                    )
+                    self._progress(
+                        "video_download",
+                        f"유사 후보 부족 — 검색 조건 완화 ({relaxed:.2f}) 재시도",
+                        0.7,
+                    )
+                    if candidates_ali:
+                        try:
+                            found_ali_loose = await asyncio.wait_for(
+                                find_products_with_video(
+                                    browser, candidates_ali, self.output_dir, "aliexpress",
+                                    count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                    category_terms=category_terms,
+                                    overlap_references=overlap_refs,
+                                ),
+                                timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[Pipeline] AliExpress relaxed scan timeout (%ss, min_score=%.2f)",
+                                MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                                relaxed,
+                            )
+                            found_ali_loose = []
+                        self.sourced_products.extend(found_ali_loose)
+
+                    # 1688 also benefits from threshold relaxation. Without this
+                    # branch, products that only surfaced 1688 candidates never
+                    # got a relaxed retry and silently failed (Korean Coupang vs
+                    # Chinese 1688 titles routinely score < 0.15).
+                    if not self.sourced_products and candidates_1688:
+                        try:
+                            found_1688_loose = await asyncio.wait_for(
+                                find_products_with_video(
+                                    browser, candidates_1688, self.output_dir, "1688",
+                                    count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                    category_terms=category_terms,
+                                    overlap_references=overlap_refs,
+                                ),
+                                timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[Pipeline] 1688 relaxed scan timeout (%ss, min_score=%.2f)",
+                                MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                                relaxed,
+                            )
+                            found_1688_loose = []
+                        self.sourced_products.extend(found_1688_loose)
+
+            # Final exact-product fallback: only after strict + relaxed
+            # marketplace scans are exhausted.
+            if not self.sourced_products and coupang_image.startswith("http"):
+                self._progress(
+                    "video_download",
+                    "상품 영상 없음 — 쿠팡 상품 이미지로 대체 영상 생성 중...",
+                    0.9,
                 )
-                self.sourced_products.extend(found_ali)
+                fallback = await self._create_product_image_video(coupang_image)
+                if fallback:
+                    self.sourced_products.append(fallback)
+
+            # Optional strict replacement mode:
+            # if marketplace videos are too low-confidence, replace with exact
+            # product-image fallback. Disabled by default to avoid blocking
+            # auto-upload when valid marketplace videos were found.
+            if (
+                REPLACE_LOW_CONFIDENCE_WITH_IMAGE
+                and self.sourced_products
+                and coupang_image.startswith("http")
+            ):
+                best_score = max(
+                    float((p.get("product") or {}).get("score") or 0.0)
+                    for p in self.sourced_products
+                )
+                if best_score < MIN_TRUSTED_VIDEO_SCORE:
+                    self._progress(
+                        "video_download",
+                        "후보 영상 유사도 낮음 — 쿠팡 상품 이미지 영상으로 대체 중...",
+                        0.9,
+                    )
+                    fallback = await self._create_product_image_video(coupang_image)
+                    if fallback:
+                        logger.info(
+                            "[Pipeline] Replaced low-confidence videos (best=%.3f) with product image fallback",
+                            best_score,
+                        )
+                        self.sourced_products = [fallback]
+            elif self.sourced_products:
+                best_score = max(
+                    float((p.get("product") or {}).get("score") or 0.0)
+                    for p in self.sourced_products
+                )
+                if best_score < MIN_TRUSTED_VIDEO_SCORE:
+                    logger.warning(
+                        "[Pipeline] Keeping low-confidence marketplace videos (best=%.3f, threshold=%.3f) "
+                        "because strict replacement is disabled",
+                        best_score,
+                        MIN_TRUSTED_VIDEO_SCORE,
+                    )
 
             self._progress(
                 "video_download",
@@ -200,7 +1063,10 @@ class SourcingPipeline:
             )
 
             if not self.sourced_products:
-                self.error = "영상이 있는 상품을 찾지 못했습니다."
+                self.error = (
+                    "영상이 있는 상품을 찾지 못했습니다. "
+                    "더 구체적인 쿠팡 상품 URL을 시도해주세요."
+                )
                 return False
 
             # ── Step 6: Generate description ──
@@ -228,14 +1094,15 @@ class SourcingPipeline:
 
         if self.gemini_client:
             try:
+                from core.sourcing.keyword_converter import generate_content_text
+
                 prompt = (
                     f"다음 상품에 대한 짧은 마케팅 설명을 한국어로 작성해줘 (2-3문장).\n"
                     f"상품명: {name}\n"
                     f"가격: {price or '미정'}\n"
                     f"SNS 숏폼 영상용 설명이야. 이모지 포함, 구매 유도 문구 넣어줘."
                 )
-                response = await self.gemini_client.generate_content_async(prompt)
-                desc = response.text.strip()
+                desc = await generate_content_text(self.gemini_client, prompt)
                 if desc:
                     return desc
             except Exception as e:
@@ -247,6 +1114,228 @@ class SourcingPipeline:
             desc += f" 단돈 {price}원!"
         desc += " 링크 클릭해서 최저가로 구매하세요!"
         return desc
+
+    async def _create_product_image_video(self, image_url: str) -> Optional[Dict[str, Any]]:
+        """Create a short vertical MP4 from the real Coupang product image."""
+        return await self._run_blocking_image_video_create(image_url)
+
+    def _find_cached_marketplace_video(self) -> Optional[Dict[str, Any]]:
+        """Find a previous safe marketplace video for the same Coupang target."""
+        try:
+            from core.sourcing.product_searcher import _looks_b2b_candidate_title
+        except Exception:
+            _looks_b2b_candidate_title = None
+
+        current_name = ((self.product_info or {}).get("name") or "").strip()
+        current_url = (self.coupang_url or "").strip()
+        output = Path(self.output_dir).expanduser()
+        if not output.exists():
+            return None
+
+        reports = sorted(
+            output.glob("report_*.json"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+
+        def _same_target(report: Dict[str, Any]) -> bool:
+            report_url = str(report.get("coupang_url") or "").strip()
+            report_name = str((report.get("product_info") or {}).get("name") or "").strip()
+            return bool(
+                (current_url and report_url == current_url)
+                or (current_name and report_name and report_name == current_name)
+            )
+
+        for report_path in reports:
+            try:
+                report = json.loads(report_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not _same_target(report):
+                continue
+            for item in report.get("sourced_products") or report.get("sourcing_results") or []:
+                source = str(item.get("source") or "").lower()
+                video_file = str(item.get("video_file") or "")
+                title = str(item.get("title") or "")
+                raw_similarity = item.get("similarity", item.get("score"))
+                similarity: Optional[float] = None
+                if raw_similarity is not None:
+                    try:
+                        similarity = float(raw_similarity)
+                    except (TypeError, ValueError):
+                        similarity = None
+                if (
+                    source == "coupang_image"
+                    or item.get("requires_review") is True
+                    or item.get("auto_publish_safe") is False
+                    or not video_file
+                    or not os.path.exists(video_file)
+                ):
+                    continue
+                if _looks_b2b_candidate_title and _looks_b2b_candidate_title(title):
+                    logger.info(
+                        "[Pipeline] Skip cached marketplace video (b2b-like title): %s",
+                        title[:80],
+                    )
+                    continue
+                if similarity is not None and similarity < MIN_TRUSTED_VIDEO_SCORE:
+                    logger.info(
+                        "[Pipeline] Skip cached marketplace video (low similarity=%.3f): %s",
+                        similarity,
+                        title[:80],
+                    )
+                    continue
+
+                size_mb = item.get("video_size_mb")
+                if size_mb is None:
+                    try:
+                        size_mb = round(os.path.getsize(video_file) / (1024 * 1024), 1)
+                    except OSError:
+                        size_mb = 0
+
+                logger.info(
+                    "[Pipeline] Reusing cached marketplace video from %s: %s",
+                    report_path,
+                    video_file,
+                )
+                product = {
+                    "title": title or current_name,
+                    "url": item.get("url") or current_url,
+                    "score": similarity if similarity is not None else 1.0,
+                    "source": item.get("source") or source,
+                    "cached_from_report": str(report_path),
+                }
+                return {
+                    "source": item.get("source") or source,
+                    "product": product,
+                    "video_url": item.get("url") or "",
+                    "video_file": video_file,
+                    "size_mb": size_mb,
+                    "fallback_reason": "cached_marketplace_video",
+                    "auto_publish_safe": True,
+                    "requires_review": False,
+                }
+        return None
+
+    async def _run_blocking_image_video_create(self, image_url: str) -> Optional[Dict[str, Any]]:
+        import asyncio
+
+        return await asyncio.to_thread(self._create_product_image_video_sync, image_url)
+
+    def _create_product_image_video_sync(self, image_url: str) -> Optional[Dict[str, Any]]:
+        """Blocking implementation for the product-image fallback video."""
+        import tempfile
+        import hashlib
+        from io import BytesIO
+
+        import cv2
+        import numpy as np
+        import requests
+        from PIL import Image, ImageEnhance, ImageFilter, ImageOps
+
+        try:
+            if image_url.startswith("//"):
+                image_url = "https:" + image_url
+            headers = {
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124 Safari/537.36"
+                ),
+                "Referer": "https://www.coupang.com/",
+            }
+            response = requests.get(image_url, headers=headers, timeout=20)
+            response.raise_for_status()
+            image = Image.open(BytesIO(response.content)).convert("RGB")
+
+            width, height = 720, 1280
+            fps, duration = 24, 8
+            frame_count = fps * duration
+
+            bg = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)
+            bg = bg.filter(ImageFilter.GaussianBlur(radius=26))
+            bg = ImageEnhance.Brightness(bg).enhance(0.62)
+
+            fg_base = image.copy()
+            fg_base.thumbnail((620, 620), Image.Resampling.LANCZOS)
+
+            os.makedirs(self.output_dir, exist_ok=True)
+            name = (self.product_info or {}).get("name", "")
+            digest = hashlib.sha1(
+                f"{self.coupang_url}|{name}|{image_url}".encode("utf-8")
+            ).hexdigest()[:10]
+            stamp = time.strftime("%Y%m%d_%H%M%S")
+            output_path = os.path.join(
+                self.output_dir,
+                f"sourcing_coupang_image_{stamp}_{digest}_video.mp4",
+            )
+            tmp_fd, tmp_path = tempfile.mkstemp(suffix=".mp4", dir=self.output_dir)
+            os.close(tmp_fd)
+
+            writer = cv2.VideoWriter(
+                tmp_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                fps,
+                (width, height),
+            )
+            if not writer.isOpened():
+                raise RuntimeError("OpenCV VideoWriter를 열 수 없습니다.")
+
+            for frame_idx in range(frame_count):
+                t = frame_idx / max(1, frame_count - 1)
+                zoom = 1.0 + 0.045 * t
+                fg_size = (
+                    max(1, int(fg_base.width * zoom)),
+                    max(1, int(fg_base.height * zoom)),
+                )
+                fg = fg_base.resize(fg_size, Image.Resampling.LANCZOS)
+
+                frame = bg.copy()
+                shadow = Image.new("RGBA", (fg.width + 36, fg.height + 36), (0, 0, 0, 0))
+                shadow_box = Image.new("RGBA", (fg.width, fg.height), (0, 0, 0, 145))
+                shadow.paste(shadow_box, (18, 18))
+                shadow = shadow.filter(ImageFilter.GaussianBlur(radius=18))
+
+                x = (width - fg.width) // 2
+                y = int(height * 0.36) - fg.height // 2
+                frame.paste(shadow.convert("RGB"), (x - 18, y - 18), shadow)
+                frame.paste(fg, (x, y))
+
+                arr = cv2.cvtColor(np.array(frame), cv2.COLOR_RGB2BGR)
+                writer.write(arr)
+
+            writer.release()
+            os.replace(tmp_path, output_path)
+            size_mb = round(os.path.getsize(output_path) / (1024 * 1024), 1)
+
+            product = {
+                "id": "coupang-image-fallback",
+                "title": (self.product_info or {}).get("name", "쿠팡 상품 이미지 영상"),
+                "price": (self.product_info or {}).get("price"),
+                "image": image_url,
+                "url": self.coupang_url,
+                "score": 1.0,
+                "source": "coupang_image",
+                "fallback_reason": "no_marketplace_video",
+            }
+            logger.info("[Pipeline] Product image fallback video created: %s", output_path)
+            return {
+                "source": "coupang_image",
+                "product": product,
+                "video_url": image_url,
+                "video_file": output_path,
+                "size_mb": size_mb,
+                "fallback_reason": "no_marketplace_video",
+                "auto_publish_safe": False,
+                "requires_review": True,
+            }
+        except Exception as exc:
+            logger.warning("[Pipeline] Product image fallback failed: %s", exc)
+            try:
+                if "tmp_path" in locals() and os.path.exists(tmp_path):
+                    os.remove(tmp_path)
+            except OSError:
+                pass
+            return None
 
     def get_video_paths(self) -> List[str]:
         """Return list of downloaded video file paths."""
@@ -262,6 +1351,9 @@ class SourcingPipeline:
                 "similarity": p["product"].get("score"),
                 "video_file": p["video_file"],
                 "video_size_mb": p["size_mb"],
+                "fallback_reason": p.get("fallback_reason") or p["product"].get("fallback_reason"),
+                "auto_publish_safe": bool(p.get("auto_publish_safe", p["source"] != "coupang_image")),
+                "requires_review": bool(p.get("requires_review", p["source"] == "coupang_image")),
             }
             for p in self.sourced_products
         ]

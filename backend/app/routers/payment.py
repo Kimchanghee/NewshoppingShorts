@@ -9,6 +9,8 @@ Security:
 - User authentication required for mock endpoints
 - PayApp webhook validates linkkey/linkval
 """
+from __future__ import annotations
+
 import logging
 import os
 import secrets
@@ -29,6 +31,15 @@ import re
 from app.database import get_db
 from app.utils.ip_utils import get_client_ip
 from app.utils.subscription_utils import calculate_subscription_expiry, _ensure_aware
+from app.utils.promotion import get_new_subscriber_promotion_days
+from app.utils.payment_plans import (
+    PLAN_DAYS,
+    PLAN_NAMES,
+    PLAN_PRICES,
+    PROMOTION_EXCLUDED_PLAN_IDS,
+    get_sellable_plan_price,
+    should_extend_from_current_expiry,
+)
 from app.utils.jwt_handler import decode_access_token
 from app.utils.billing_crypto import (
     decrypt_billing_key,
@@ -65,36 +76,6 @@ limiter = Limiter(key_func=get_client_ip)
 
 router = APIRouter(prefix="/payments", tags=["payment"])
 
-# Plan pricing (KRW)
-PLAN_PRICES = {
-    "trial": 0,
-    "pro_1month": 190000,
-    "pro_6months": 969000,
-    "pro_12months": 1596000,
-}
-
-# Plan durations (days)
-PLAN_DAYS = {
-    "pro_1month": 30,
-    "pro_6months": 180,
-    "pro_12months": 365,
-}
-
-# Plan display names (?뚮옖 ?쒖떆 ?대쫫)
-PLAN_NAMES = {
-    "pro_1month": "?꾨줈 援щ룆 (1媛쒖썡)",
-    "pro_6months": "?꾨줈 援щ룆 (6媛쒖썡)",
-    "pro_12months": "?꾨줈 援щ룆 (12媛쒖썡)",
-}
-
-# ?ъ슜?먮떦 理쒕? 移대뱶 ?깅줉 ??(Maximum cards per user)
-# Normalize display names used for external payment fields.
-PLAN_NAMES = {
-    "pro_1month": "프로 1개월",
-    "pro_6months": "프로 6개월",
-    "pro_12months": "프로 12개월",
-}
-
 MAX_CARDS_PER_USER = 5
 
 # PayApp Configuration (from environment)
@@ -104,6 +85,10 @@ PAYAPP_USERID = os.getenv("PAYAPP_USERID", "")
 PAYAPP_LINKKEY = os.getenv("PAYAPP_LINKKEY", "")
 PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
 PAYAPP_SHOPNAME = os.getenv("PAYAPP_SHOPNAME", "NewshoppingShorts")
+DEFAULT_PAYMENT_API_BASE_URL = os.getenv(
+    "DEFAULT_PAYMENT_API_BASE_URL",
+    "https://13-124-7-65.nip.io",
+).strip().rstrip("/")
 _PAYAPP_API_URL_RAW = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
 _PAYAPP_WEBHOOK_ALLOWED_IPS_RAW = os.getenv("PAYAPP_WEBHOOK_ALLOWED_IPS", "")
 PAYAPP_WEBHOOK_ALLOWED_IPS = tuple(
@@ -123,6 +108,10 @@ else:
 # Keep this superset to avoid missing legitimate cancellation callbacks.
 _PAYAPP_SUCCESS_STATE = "4"
 _PAYAPP_CANCEL_STATES = frozenset({"8", "9", "16", "31", "32", "64"})
+
+
+def _build_payapp_good_name(plan_id: str) -> str:
+    return PLAN_NAMES.get(plan_id, "프로 구독")
 
 _TERMINAL_PAYMENT_STATUSES = frozenset(
     {
@@ -243,25 +232,43 @@ def _force_masked_card_number(value: str | None, fallback_mask: str) -> str:
     return fallback_mask
 
 
+def _calc_enc_bill_hash(enc_bill: str) -> str:
+    """Stable SHA-256 hash for the raw PayApp encBill token."""
+    return hashlib.sha256(enc_bill.encode("utf-8")).hexdigest()
+
+
 def _resolve_payment_base_url(request: Request) -> str:
     """
     Resolve public backend base URL used in feedbackurl.
 
     Security:
-    - Production requires explicit PAYMENT_API_BASE_URL.
+    - PAYMENT_API_BASE_URL is preferred when configured.
+    - Production falls back to the verified public API URL so PayApp checkout
+      does not break when an older deployment misses the env var.
     - Dynamic host-based fallback is allowed only for local development.
     """
-    configured = os.getenv("PAYMENT_API_BASE_URL", "").strip().rstrip("/")
-    if configured:
-        parsed = _urlparse(configured)
+    def _validate_base_url(raw_url: str, source: str) -> str:
+        base_url = (raw_url or "").strip().rstrip("/")
+        if not base_url:
+            return ""
+        parsed = _urlparse(base_url)
         if not parsed.scheme or not parsed.hostname:
-            raise RuntimeError("Invalid PAYMENT_API_BASE_URL")
+            raise RuntimeError(f"Invalid {source}")
         if parsed.scheme != "https" and parsed.hostname not in ("localhost", "127.0.0.1"):
-            raise RuntimeError("PAYMENT_API_BASE_URL must use HTTPS")
+            raise RuntimeError(f"{source} must use HTTPS")
+        return base_url
+
+    configured = _validate_base_url(os.getenv("PAYMENT_API_BASE_URL", ""), "PAYMENT_API_BASE_URL")
+    if configured:
         return configured
 
     if os.getenv("ENVIRONMENT", "development").lower() == "production":
-        raise RuntimeError("PAYMENT_API_BASE_URL must be configured in production")
+        public_base = _validate_base_url(
+            os.getenv("PUBLIC_BASE_URL", "") or DEFAULT_PAYMENT_API_BASE_URL,
+            "DEFAULT_PAYMENT_API_BASE_URL",
+        )
+        if public_base:
+            return public_base
 
     dynamic_base = str(request.base_url).rstrip("/")
     parsed_dynamic = _urlparse(dynamic_base)
@@ -390,7 +397,7 @@ async def create_payment(
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
 
     # Get plan price and validate
-    amount = PLAN_PRICES.get(data.plan_id)
+    amount = get_sellable_plan_price(data.plan_id)
     if amount is None:
         raise HTTPException(status_code=400, detail=f"Invalid plan_id: {data.plan_id}")
 
@@ -696,12 +703,32 @@ def _activate_subscription(db: Session, user_id: str, plan_id: str) -> None:
             logger.error(f"[Payment] Unknown plan_id for activation: user={user_id}, plan={plan_id}")
             return
 
-        # Calculate new expiry date, extending from current expiry if it exists
-        current_expiry = user.subscription_expires_at
-        new_expiry = calculate_subscription_expiry(plan_days, current_expiry)
-
         # Track free-to-paid conversion
-        was_free = user.user_type != UserType.SUBSCRIBER
+        user_type = getattr(user, "user_type", None)
+        user_type_value = (
+            user_type.value
+            if hasattr(user_type, "value")
+            else (str(user_type) if user_type is not None else "trial")
+        )
+        was_free = user_type_value == "trial"
+        promotion_extra_days = (
+            0
+            if plan_id in PROMOTION_EXCLUDED_PLAN_IDS
+            else get_new_subscriber_promotion_days(
+                getattr(user, "created_at", None),
+                was_free=was_free,
+            )
+        )
+        total_plan_days = plan_days + promotion_extra_days
+
+        # Calculate new expiry date. Trial/free accounts can have their own
+        # validity date; paid entitlement must not extend from that trial date.
+        current_expiry = (
+            user.subscription_expires_at
+            if should_extend_from_current_expiry(plan_id, was_free)
+            else None
+        )
+        new_expiry = calculate_subscription_expiry(total_plan_days, current_expiry)
         
         user.user_type = UserType.SUBSCRIBER
         user.subscription_expires_at = new_expiry
@@ -715,12 +742,14 @@ def _activate_subscription(db: Session, user_id: str, plan_id: str) -> None:
         if was_free:
             logger.info(
                 f"[Payment] FREE->PAID conversion: user={user_id}, plan={plan_id}, "
-                f"days={plan_days}, expires_at={new_expiry}"
+                f"days={total_plan_days}, promotion_extra_days={promotion_extra_days}, "
+                f"expires_at={new_expiry}"
             )
         else:
             logger.info(
                 f"[Payment] Subscription renewed: user={user_id}, plan={plan_id}, "
-                f"days={plan_days}, expires_at={new_expiry}"
+                f"days={total_plan_days}, promotion_extra_days={promotion_extra_days}, "
+                f"expires_at={new_expiry}"
             )
     except Exception as e:
         db.rollback()
@@ -865,8 +894,8 @@ async def create_payapp_payment(
         logger.error(f"[PayApp] Invalid feedback URL configuration: {e}")
         return PayAppCreateResponse(success=False, message="Payment server configuration error.")
 
-    plan_price = PLAN_PRICES.get(data.plan_id)
-    if plan_price is None or plan_price <= 0:
+    plan_price = get_sellable_plan_price(data.plan_id)
+    if plan_price is None:
         return PayAppCreateResponse(success=False, message=f"Invalid plan_id: {data.plan_id}")
 
     existing_pending = _find_existing_pending_payment(db, user_id, data.plan_id)
@@ -877,7 +906,7 @@ async def create_payapp_payment(
             message="Pending payment already exists. Complete or cancel it before creating a new one.",
         )
 
-    good_name = PLAN_NAMES.get(data.plan_id, "Pro subscription")
+    good_name = _build_payapp_good_name(data.plan_id)
     local_payment_id = secrets.token_urlsafe(32)
     expires_at = datetime.now(timezone.utc) + timedelta(minutes=30)
 
@@ -1551,16 +1580,42 @@ async def register_card(
             except RuntimeError as e:
                 logger.error(f"[PayApp Card] Billing key encryption failed: {e}")
                 return {"success": False, "message": "결제 보안 설정 오류로 카드 등록에 실패했습니다."}
+            enc_bill_hash = _calc_enc_bill_hash(enc_bill)
             card_no_masked = _force_masked_card_number(
                 result.get("cardno", ""),
                 masked_card,
             )
             card_name = result.get("cardname", "")
+            existing_card = (
+                db.query(BillingKey)
+                .filter(
+                    BillingKey.user_id == user_id,
+                    BillingKey.enc_bill_hash == enc_bill_hash,
+                )
+                .first()
+            )
+            if existing_card:
+                if not existing_card.is_active:
+                    existing_card.is_active = True
+                    existing_card.card_no_masked = card_no_masked
+                    existing_card.card_name = card_name
+                    existing_card.enc_bill = encrypted_enc_bill
+                    db.commit()
+                    db.refresh(existing_card)
+                logger.info("[PayApp Card] Duplicate billing key reused: user=%s", user_id)
+                return {
+                    "success": True,
+                    "card_id": existing_card.id,
+                    "card_no_masked": existing_card.card_no_masked,
+                    "card_name": existing_card.card_name,
+                    "message": "이미 등록된 카드입니다.",
+                }
 
             # DB??鍮뚮쭅?????(Save billing key to DB)
             billing_key = BillingKey(
                 user_id=user_id,
                 enc_bill=encrypted_enc_bill,
+                enc_bill_hash=enc_bill_hash,
                 card_no_masked=card_no_masked,
                 card_name=card_name,
                 is_active=True,
@@ -1664,16 +1719,17 @@ async def pay_with_card(
     payapp_enc_bill = _decrypt_enc_bill_or_raise(billing_key.enc_bill)
     if not is_encrypted(billing_key.enc_bill) and has_encryption_key():
         try:
-            billing_key.enc_bill = encrypt_billing_key(billing_key.enc_bill)
+            billing_key.enc_bill = encrypt_billing_key(payapp_enc_bill)
+            billing_key.enc_bill_hash = _calc_enc_bill_hash(payapp_enc_bill)
             db.commit()
         except Exception as e:
             db.rollback()
             logger.warning(f"[PayApp Card] Legacy billing key re-encryption skipped: {e}")
 
     # ?뚮옖 媛寃?議고쉶 (Get plan price)
-    plan_price = PLAN_PRICES.get(data.plan_id)
-    if plan_price is None or plan_price <= 0:
-        return {"success": False, "message": f"?좏슚?섏? ?딆? ?뚮옖?낅땲?? {data.plan_id}"}
+    plan_price = get_sellable_plan_price(data.plan_id)
+    if plan_price is None:
+        return {"success": False, "message": f"유효하지 않은 플랜입니다: {data.plan_id}"}
 
     existing_pending = _find_existing_pending_payment(db, user_id, data.plan_id)
     if existing_pending:
@@ -1683,7 +1739,7 @@ async def pay_with_card(
             "message": "Pending payment already exists. Complete or cancel it before retrying.",
         }
 
-    good_name = f"?쇳븨?륂뤌硫붿씠而?{PLAN_NAMES.get(data.plan_id, '?꾨줈 援щ룆')}"
+    good_name = _build_payapp_good_name(data.plan_id)
 
     # 濡쒖뺄 寃곗젣 ?몄뀡 ?앹꽦 (Create local payment session)
     local_payment_id = secrets.token_urlsafe(32)
@@ -1852,7 +1908,8 @@ async def delete_card(
     payapp_enc_bill = _decrypt_enc_bill_or_raise(billing_key.enc_bill)
     if not is_encrypted(billing_key.enc_bill) and has_encryption_key():
         try:
-            billing_key.enc_bill = encrypt_billing_key(billing_key.enc_bill)
+            billing_key.enc_bill = encrypt_billing_key(payapp_enc_bill)
+            billing_key.enc_bill_hash = _calc_enc_bill_hash(payapp_enc_bill)
             db.commit()
         except Exception as e:
             db.rollback()
@@ -1960,11 +2017,11 @@ async def create_subscription(
         return {"success": False, "message": "寃곗젣 ?ㅼ젙???꾨즺?섏? ?딆븯?듬땲??"}
 
     # ?뚮옖 媛寃?議고쉶 (Get plan price)
-    plan_price = PLAN_PRICES.get(data.plan_id)
-    if plan_price is None or plan_price <= 0:
-        return {"success": False, "message": f"?좏슚?섏? ?딆? ?뚮옖?낅땲?? {data.plan_id}"}
+    plan_price = get_sellable_plan_price(data.plan_id)
+    if plan_price is None:
+        return {"success": False, "message": f"유효하지 않은 플랜입니다: {data.plan_id}"}
 
-    good_name = f"?쇳븨?륂뤌硫붿씠而?{PLAN_NAMES.get(data.plan_id, '?꾨줈 援щ룆')}"
+    good_name = _build_payapp_good_name(data.plan_id)
 
     # 留뚮즺??湲곕낯媛? 1????(Default expire date: 1 year from now)
     expire_date = data.expire_date

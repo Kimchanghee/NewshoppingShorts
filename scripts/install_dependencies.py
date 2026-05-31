@@ -3,6 +3,8 @@
 시스템에 맞는 패키지를 자동으로 설치합니다.
 """
 
+from __future__ import annotations
+
 import os
 import sys
 import platform

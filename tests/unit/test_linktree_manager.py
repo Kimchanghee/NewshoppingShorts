@@ -1,4 +1,4 @@
-from managers.linktree_manager import LinktreeManager
+from managers.linktree_manager import COUPANG_AFFILIATE_DISCLOSURE, LinktreeManager
 
 
 class _DummySettings:
@@ -112,8 +112,9 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
 
     assert ok is True
     assert captured["url"] == "https://link.coupang.com/a/abc"
-    assert captured["title"].startswith("[1] test")
+    assert captured["title"].startswith("[001] test")
     assert len(captured["title"]) <= LinktreeManager.MAX_PRODUCT_TITLE_LENGTH
+    assert captured["description"] == COUPANG_AFFILIATE_DISCLOSURE
     assert captured["source_url"] == "https://www.coupang.com/vp/products/1"
     assert captured["extra"]["channel"] == "shopping_shorts_maker"
 
@@ -128,3 +129,9 @@ def test_concise_product_title_is_limited_to_15_chars():
 
 def test_concise_product_title_has_fallback():
     assert LinktreeManager._build_concise_product_title("") == "추천상품"
+
+
+def test_profile_url_uses_default_when_not_configured():
+    manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "", "auto_publish": False})
+
+    assert manager.get_profile_url() == "https://linktr.ee/studio.idol"

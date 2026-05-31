@@ -9,6 +9,7 @@ Auto Updater Module
 import os
 import sys
 import json
+import re
 import time
 import shutil
 import hashlib
@@ -37,6 +38,10 @@ _DEFAULT_UPDATE_BASE_URL = (
 UPDATE_CHECK_URL = os.getenv(
     "UPDATE_CHECK_URL",
     f"{_DEFAULT_UPDATE_BASE_URL}/app/version",
+)
+GITHUB_RELEASE_API_URL = os.getenv(
+    "GITHUB_RELEASE_API_URL",
+    "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases/latest",
 )
 
 # Allowed domains for update downloads (security: prevent redirect to malicious hosts)
@@ -208,6 +213,105 @@ class UpdateChecker:
         self.timeout = timeout
         self.current_version = get_current_version()
         self._update_info: Optional[Dict[str, Any]] = None
+
+    @staticmethod
+    def _extract_sha256(text: str) -> str:
+        match = re.search(r"\b([a-fA-F0-9]{64})\b", str(text or ""))
+        return match.group(1).lower() if match else ""
+
+    def _query_github_latest_release(self) -> Optional[Dict[str, Any]]:
+        if not GITHUB_RELEASE_API_URL:
+            return None
+        try:
+            response = requests.get(
+                GITHUB_RELEASE_API_URL,
+                timeout=self.timeout,
+                headers={
+                    "Accept": "application/vnd.github+json",
+                    "User-Agent": f"SSMaker/{self.current_version}",
+                },
+            )
+            if response.status_code != 200:
+                logger.warning("GitHub release fallback returned HTTP %s", response.status_code)
+                return None
+
+            data = response.json()
+            latest_version = str(data.get("tag_name", "")).strip().lstrip("vV")
+            if not latest_version:
+                return None
+
+            result = {
+                "update_available": False,
+                "current_version": self.current_version,
+                "latest_version": latest_version,
+                "download_url": None,
+                "release_notes": data.get("body", ""),
+                "is_mandatory": False,
+                "error": None,
+            }
+            if compare_versions(self.current_version, latest_version) >= 0:
+                return result
+
+            assets = data.get("assets", []) or []
+            preferred_name = f"ssmaker_setup_v{latest_version}.exe"
+            installer_asset = next(
+                (
+                    asset
+                    for asset in assets
+                    if str(asset.get("name", "")).lower() == preferred_name
+                ),
+                None,
+            )
+            if installer_asset is None:
+                installer_asset = next(
+                    (
+                        asset
+                        for asset in assets
+                        if str(asset.get("name", "")).lower().endswith(".exe")
+                    ),
+                    None,
+                )
+            if installer_asset is None:
+                result["error"] = "Missing installer asset in GitHub release"
+                return result
+
+            download_url = installer_asset.get("browser_download_url")
+            digest = str(installer_asset.get("digest", "")).strip()
+            file_hash = digest.split(":", 1)[1].strip() if digest.lower().startswith("sha256:") else ""
+            if not file_hash:
+                file_hash = self._extract_sha256(data.get("body", ""))
+
+            result["download_url"] = download_url
+            result["file_hash"] = file_hash
+            if download_url and file_hash:
+                result["update_available"] = True
+            else:
+                result["error"] = "GitHub release metadata is incomplete"
+            return result
+        except Exception as e:
+            logger.warning("GitHub release fallback failed: %s", e)
+            return None
+
+    def _prefer_github_if_newer(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        github_result = self._query_github_latest_release()
+        if not github_result:
+            return result
+
+        current_latest = str(result.get("latest_version") or "0.0.0")
+        github_latest = str(github_result.get("latest_version") or "0.0.0")
+        try:
+            github_is_newer = compare_versions(current_latest, github_latest) < 0
+        except Exception:
+            github_is_newer = current_latest < github_latest
+
+        if github_result.get("update_available") and (
+            not result.get("update_available") or github_is_newer
+        ):
+            return github_result
+        if github_is_newer and not result.get("update_available"):
+            result["latest_version"] = github_latest
+            result["release_notes"] = github_result.get("release_notes")
+        return result
         
     def check_for_updates(self) -> Dict[str, Any]:
         """
@@ -294,6 +398,7 @@ class UpdateChecker:
             result["error"] = f"?????녿뒗 ?ㅻ쪟: {str(e)[:50]}"
             logger.exception(f"Update check error: {e}")
         
+        result = self._prefer_github_if_newer(result)
         self._update_info = result
         return result
     

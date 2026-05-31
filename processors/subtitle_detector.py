@@ -5,6 +5,7 @@ This module handles OCR-based Chinese subtitle detection with GPU/NumPy accelera
 Integrates HybridSubtitleDetector for optimized OCR calls (40% reduction).
 """
 
+import gc
 import os
 from typing import Any, Dict, List, Optional, Iterable
 
@@ -427,7 +428,6 @@ class SubtitleDetector:
             return None
         finally:
             # Clean up memory: force garbage collection
-            # 硫붾え由??뺣━: 紐낆떆??媛鍮꾩? 而щ젆??            import gc
             gc.collect()
             # Memory cleanup completed silently
 
@@ -2085,4 +2085,3 @@ class SubtitleDetector:
                     cap.release()
                 except Exception:
                     pass
-

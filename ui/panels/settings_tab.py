@@ -3,11 +3,21 @@ Settings tab implementation (PyQt6).
 Provides API key management, output folder settings, theme settings, and app info.
 Uses design system v2 for consistent styling.
 """
+from __future__ import annotations
+
 import os
 import re
+import shlex
+import shutil
+import subprocess
+import sys
+import time
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+import requests
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QLineEdit, QPushButton, QScrollArea, QFileDialog, QCheckBox
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QLineEdit, QPushButton, QScrollArea, QFileDialog, QCheckBox, QTextEdit
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
@@ -19,10 +29,18 @@ from core.api.ApiKeyManager import APIKeyManager
 from managers.settings_manager import get_settings_manager
 from managers.coupang_manager import get_coupang_manager
 from managers.linktree_manager import get_linktree_manager
+from managers.tiktok_manager import get_tiktok_manager
 import config
 
 # Gemini API 키 패턴 검증
 GEMINI_API_KEY_PATTERN = re.compile(r"^AIza[A-Za-z0-9_-]{35,96}$")
+LINKTREE_SIGNUP_URL = "https://linktr.ee/register"
+LINKTREE_ADMIN_URL = "https://linktr.ee/admin/links"
+TIKTOK_LOGIN_URL = "https://www.tiktok.com/login"
+INSTAGRAM_LOGIN_URL = "https://www.instagram.com/accounts/login/"
+THREADS_LOGIN_URL = "https://www.threads.com/login"
+META_APPS_URL = "https://developers.facebook.com/apps/"
+SETUP_NOTICE_BASE_URL = "https://shoppingshorts.store/notice"
 logger = get_logger(__name__)
 
 
@@ -88,14 +106,48 @@ class SettingsSection(QFrame):
 
 class SettingsTab(QWidget, ThemedMixin):
     """Settings page with API keys, output folder, theme, and app info"""
+    SETUP_STEP_DEFS: Dict[str, Dict[str, str]] = {
+        "precheck": {"title": "사전 점검", "actor": "auto"},
+        "youtube_prepare": {"title": "YouTube OAuth 준비", "actor": "auto"},
+        "youtube_user_auth": {"title": "YouTube 로그인/동의", "actor": "user"},
+        "youtube_verify": {"title": "YouTube 연결 검증", "actor": "auto"},
+        "tiktok_prepare": {"title": "TikTok OAuth 준비", "actor": "auto"},
+        "tiktok_user_auth": {"title": "TikTok 로그인/승인", "actor": "user"},
+        "tiktok_code_exchange": {"title": "TikTok 코드 교환", "actor": "auto"},
+        "tiktok_verify": {"title": "TikTok 연결 검증", "actor": "auto"},
+        "instagram_user_setup": {"title": "Instagram 연결 정보 입력", "actor": "user"},
+        "instagram_verify": {"title": "Instagram 연결 검증", "actor": "auto"},
+        "threads_user_setup": {"title": "Threads 연결 정보 입력", "actor": "user"},
+        "threads_verify": {"title": "Threads 연결 검증", "actor": "auto"},
+        "linktree_user_setup": {"title": "Linktree 로그인/주소 입력", "actor": "user"},
+        "linktree_save_verify": {"title": "Linktree 저장/검증", "actor": "auto"},
+        "final_verify": {"title": "최종 연결 테스트", "actor": "auto"},
+    }
     
     def __init__(self, parent=None, gui=None, theme_manager=None):
         super().__init__(parent)
         self.gui = gui
         self.ds = get_design_system()
         self.__init_themed__(theme_manager)
+        self._setup_running = False
+        self._setup_scope = "all"
+        self._setup_steps: List[str] = []
+        self._setup_step_index = -1
+        self._setup_waiting_user = False
+        self._setup_action_callback: Optional[Callable[[], None]] = None
+        self._setup_rows: Dict[str, Dict[str, QLabel]] = {}
+        self._setup_last_tiktok_auth_url = ""
+        self._setup_clipboard_last_text = ""
+        self._setup_clipboard_auto_enabled = True
+        self._setup_clipboard_timer = QTimer(self)
+        self._setup_clipboard_timer.setInterval(1200)
+        self._setup_clipboard_timer.timeout.connect(self._poll_setup_clipboard)
+        self._codex_status_summary = "Codex 상태: 미확인"
+        self._computer_use_paid_cache_value = False
+        self._computer_use_paid_cache_ts = 0.0
         self._create_widgets()
         self._apply_theme()
+        self._setup_clipboard_timer.start()
         QTimer.singleShot(0, self.refresh_work_community_stats)
     
     def _create_widgets(self):
@@ -249,6 +301,9 @@ class SettingsTab(QWidget, ThemedMixin):
         )
 
         content_layout.addWidget(self.work_community_section)
+
+        # =================== SECTION: Guided Setup Assistant ===================
+        self._build_setup_assistant_section(content_layout)
         
         # =================== SECTION: API Key Management ===================
         self.api_section = SettingsSection("API 키 설정 (최대 8개)")
@@ -423,42 +478,17 @@ class SettingsTab(QWidget, ThemedMixin):
         self._update_key_count()
         
         # =================== SECTION: Coupang + Linktree Automation ===================
-        self.link_automation_section = SettingsSection("쿠팡/링크트리 자동 링크 (테스트)")
+        self.link_automation_section = SettingsSection("링크트리 연결 (선택)")
 
         automation_intro = QLabel(
-            "영상 생성 후 쿠팡 딥링크를 만들고, 원하면 Linktree로 자동 업로드(웹훅 방식)까지 연결합니다."
+            "쿠팡 단축 링크를 직접 쓰면 아래 공개 주소만 저장하면 됩니다. "
+            "API와 Webhook은 자동화가 필요할 때만 열어 설정하세요."
         )
         automation_intro.setWordWrap(True)
         automation_intro.setStyleSheet(
             f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
         )
         self.link_automation_section.content_layout.addWidget(automation_intro)
-
-        linktree_guide = QLabel(
-            "Linktree 일반 쓰기 API는 공개 범위가 제한적이라, 테스트는 Webhook URL + API Key 연동을 권장합니다."
-        )
-        linktree_guide.setWordWrap(True)
-        linktree_guide.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
-        )
-        self.link_automation_section.content_layout.addWidget(linktree_guide)
-
-        linktree_docs_link = QLabel(
-            '<a href="https://docs.linktr.ee/" style="color: #3B82F6; text-decoration: none;">Linktree 개발 문서 보기</a>'
-        )
-        linktree_docs_link.setOpenExternalLinks(True)
-        linktree_docs_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
-        self.link_automation_section.content_layout.addWidget(linktree_docs_link)
-
-        integration_steps = QLabel(
-            "연동 순서: 1) Webhook URL 발급(Make/Zapier/Cloudflare Worker 등) 2) API Key 발급 "
-            "3) 아래 값 저장 4) 테스트 업로드 버튼으로 검증"
-        )
-        integration_steps.setWordWrap(True)
-        integration_steps.setStyleSheet(
-            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 11px;"
-        )
-        self.link_automation_section.content_layout.addWidget(integration_steps)
 
         automation_input_style = f"""
             QLineEdit {{
@@ -474,78 +504,219 @@ class SettingsTab(QWidget, ThemedMixin):
             }}
         """
 
+        automation_button_style = f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                padding: 8px 12px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {c.surface};
+            }}
+        """
+        automation_primary_button_style = f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: {c.text_on_primary};
+                padding: 8px 14px;
+                border: 1px solid {c.primary};
+                border-radius: {ds.radius.sm}px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background-color: {c.primary_hover};
+                border-color: {c.primary_hover};
+            }}
+        """
+
+        self.linktree_profile_input = QLineEdit()
+        self.linktree_profile_input.setPlaceholderText("Linktree 공개 주소 예) https://linktr.ee/myshop")
+        self.linktree_profile_input.setToolTip("YouTube 설명과 검수 화면에서 사용할 Linktree 공개 프로필 주소입니다.")
+        self.linktree_profile_input.setStyleSheet(automation_input_style)
+        self.linktree_profile_input.textChanged.connect(self._update_link_automation_status)
+        self.link_automation_section.add_row("공개 주소", self.linktree_profile_input)
+
+        quick_btn_container = QWidget()
+        quick_btn_container.setStyleSheet("background: transparent; border: none;")
+        quick_btn_layout = QHBoxLayout(quick_btn_container)
+        quick_btn_layout.setContentsMargins(0, 0, 0, 0)
+        quick_btn_layout.setSpacing(8)
+
+        self.linktree_save_btn = QPushButton("저장")
+        self.linktree_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_save_btn.setStyleSheet(automation_primary_button_style)
+        self.linktree_save_btn.clicked.connect(self._save_linktree_settings)
+        quick_btn_layout.addWidget(self.linktree_save_btn)
+        quick_btn_layout.addStretch()
+        self.link_automation_section.add_row("Linktree", quick_btn_container)
+
+        setup_notice_links = QLabel(
+            f'<a href="{SETUP_NOTICE_BASE_URL}/linktree-signup-link-setup" style="color: #3B82F6; text-decoration: none;">Linktree 세팅 가이드</a>'
+        )
+        setup_notice_links.setWordWrap(True)
+        setup_notice_links.setOpenExternalLinks(True)
+        setup_notice_links.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        setup_notice_links.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px;"
+        )
+        self.link_automation_section.content_layout.addWidget(setup_notice_links)
+
+        self.link_advanced_toggle = QCheckBox("고급 자동화 설정 보기")
+        self.link_advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.link_advanced_toggle.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        self.link_advanced_toggle.toggled.connect(self._set_link_advanced_visible)
+        self.link_automation_section.content_layout.addWidget(self.link_advanced_toggle)
+
+        self.link_advanced_container = QFrame()
+        self.link_advanced_container.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+        """)
+        link_advanced_layout = QVBoxLayout(self.link_advanced_container)
+        link_advanced_layout.setContentsMargins(14, 12, 14, 12)
+        link_advanced_layout.setSpacing(10)
+
+        advanced_note = QLabel(
+            "원본 coupang.com 링크를 자동 딥링크로 바꾸거나 Linktree 카드까지 자동 발행할 때만 필요합니다."
+        )
+        advanced_note.setWordWrap(True)
+        advanced_note.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        link_advanced_layout.addWidget(advanced_note)
+
+        def add_advanced_row(label_text: str, widget: QWidget):
+            row = QHBoxLayout()
+            row.setSpacing(ds.spacing.space_4)
+
+            label = QLabel(label_text)
+            label.setFont(QFont(ds.typography.font_family_primary, 12))
+            label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+            label.setMinimumWidth(120)
+            row.addWidget(label)
+
+            widget.setStyleSheet(widget.styleSheet() + " border: none;")
+            row.addWidget(widget, stretch=1)
+            link_advanced_layout.addLayout(row)
+
+        shortcut_btn_container = QWidget()
+        shortcut_btn_container.setStyleSheet("background: transparent; border: none;")
+        shortcut_btn_layout = QHBoxLayout(shortcut_btn_container)
+        shortcut_btn_layout.setContentsMargins(0, 0, 0, 0)
+        shortcut_btn_layout.setSpacing(8)
+
+        self.linktree_profile_open_btn = QPushButton("공개 페이지 열기")
+        self.linktree_profile_open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_profile_open_btn.setStyleSheet(automation_button_style)
+        self.linktree_profile_open_btn.clicked.connect(self._open_linktree_profile)
+        shortcut_btn_layout.addWidget(self.linktree_profile_open_btn)
+
+        self.linktree_admin_btn = QPushButton("관리자 열기")
+        self.linktree_admin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_admin_btn.setStyleSheet(automation_button_style)
+        self.linktree_admin_btn.clicked.connect(self._open_linktree_admin)
+        shortcut_btn_layout.addWidget(self.linktree_admin_btn)
+
+        self.linktree_signup_btn = QPushButton("가입/로그인")
+        self.linktree_signup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_signup_btn.setStyleSheet(automation_button_style)
+        self.linktree_signup_btn.clicked.connect(self._open_linktree_signup)
+        shortcut_btn_layout.addWidget(self.linktree_signup_btn)
+        shortcut_btn_layout.addStretch()
+        add_advanced_row("Linktree 바로가기", shortcut_btn_container)
+
         self.coupang_access_input = QLineEdit()
-        self.coupang_access_input.setPlaceholderText("Coupang Access Key")
+        self.coupang_access_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Access Key")
         self.coupang_access_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.coupang_access_input.setStyleSheet(automation_input_style)
-        self.link_automation_section.add_row("Coupang Access", self.coupang_access_input)
+        self.coupang_access_input.textChanged.connect(self._update_link_automation_status)
+        add_advanced_row("Coupang Access", self.coupang_access_input)
 
         self.coupang_secret_input = QLineEdit()
-        self.coupang_secret_input.setPlaceholderText("Coupang Secret Key")
+        self.coupang_secret_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Secret Key")
         self.coupang_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.coupang_secret_input.setStyleSheet(automation_input_style)
-        self.link_automation_section.add_row("Coupang Secret", self.coupang_secret_input)
+        self.coupang_secret_input.textChanged.connect(self._update_link_automation_status)
+        add_advanced_row("Coupang Secret", self.coupang_secret_input)
 
         coupang_btn_container = QWidget()
+        coupang_btn_container.setStyleSheet("background: transparent; border: none;")
         coupang_btn_layout = QHBoxLayout(coupang_btn_container)
         coupang_btn_layout.setContentsMargins(0, 0, 0, 0)
         coupang_btn_layout.setSpacing(8)
 
         self.coupang_save_btn = QPushButton("쿠팡 키 저장")
         self.coupang_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coupang_save_btn.setStyleSheet(automation_button_style)
         self.coupang_save_btn.clicked.connect(self._save_coupang_settings)
         coupang_btn_layout.addWidget(self.coupang_save_btn)
 
         self.coupang_test_btn = QPushButton("쿠팡 연결 테스트")
         self.coupang_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coupang_test_btn.setStyleSheet(automation_button_style)
         self.coupang_test_btn.clicked.connect(self._test_coupang_connection)
         coupang_btn_layout.addWidget(self.coupang_test_btn)
         coupang_btn_layout.addStretch()
-        self.link_automation_section.add_row("Coupang 액션", coupang_btn_container)
+        add_advanced_row("Coupang", coupang_btn_container)
 
         self.linktree_webhook_input = QLineEdit()
-        self.linktree_webhook_input.setPlaceholderText("Webhook URL (https://...)")
+        self.linktree_webhook_input.setPlaceholderText("선택: 자동 발행용 Webhook URL (https://...)")
+        self.linktree_webhook_input.setToolTip("Linktree 카드를 프로그램이 자동으로 추가하려면 Webhook URL이 필요합니다.")
         self.linktree_webhook_input.setStyleSheet(automation_input_style)
-        self.link_automation_section.add_row("Linktree Webhook", self.linktree_webhook_input)
+        self.linktree_webhook_input.textChanged.connect(self._update_link_automation_status)
+        add_advanced_row("Webhook URL", self.linktree_webhook_input)
 
         self.linktree_api_key_input = QLineEdit()
-        self.linktree_api_key_input.setPlaceholderText("Webhook/API Key (optional)")
+        self.linktree_api_key_input.setPlaceholderText("선택: Webhook 인증 키")
         self.linktree_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.linktree_api_key_input.setStyleSheet(automation_input_style)
-        self.link_automation_section.add_row("Linktree API Key", self.linktree_api_key_input)
-
-        self.linktree_profile_input = QLineEdit()
-        self.linktree_profile_input.setPlaceholderText("Linktree profile URL (optional)")
-        self.linktree_profile_input.setStyleSheet(automation_input_style)
-        self.link_automation_section.add_row("Linktree Profile", self.linktree_profile_input)
+        add_advanced_row("Webhook 인증 키", self.linktree_api_key_input)
 
         checkbox_container = QWidget()
+        checkbox_container.setStyleSheet("background: transparent; border: none;")
         checkbox_layout = QHBoxLayout(checkbox_container)
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
         self.linktree_auto_checkbox = QCheckBox("쿠팡 링크 생성 시 Linktree 자동 업로드")
+        self.linktree_auto_checkbox.setToolTip("Webhook URL이 있어야 실제 자동 업로드가 됩니다.")
         self.linktree_auto_checkbox.setStyleSheet(
             f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
         )
+        self.linktree_auto_checkbox.stateChanged.connect(self._update_link_automation_status)
         checkbox_layout.addWidget(self.linktree_auto_checkbox)
         checkbox_layout.addStretch()
-        self.link_automation_section.add_row("자동 업로드", checkbox_container)
+        add_advanced_row("자동 업로드", checkbox_container)
 
         linktree_btn_container = QWidget()
+        linktree_btn_container.setStyleSheet("background: transparent; border: none;")
         linktree_btn_layout = QHBoxLayout(linktree_btn_container)
         linktree_btn_layout.setContentsMargins(0, 0, 0, 0)
         linktree_btn_layout.setSpacing(8)
 
-        self.linktree_save_btn = QPushButton("링크트리 설정 저장")
-        self.linktree_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.linktree_save_btn.clicked.connect(self._save_linktree_settings)
-        linktree_btn_layout.addWidget(self.linktree_save_btn)
-
         self.linktree_test_btn = QPushButton("테스트 업로드")
         self.linktree_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_test_btn.setStyleSheet(automation_button_style)
         self.linktree_test_btn.clicked.connect(self._test_linktree_publish)
         linktree_btn_layout.addWidget(self.linktree_test_btn)
         linktree_btn_layout.addStretch()
-        self.link_automation_section.add_row("Linktree 액션", linktree_btn_container)
+        add_advanced_row("Linktree", linktree_btn_container)
+
+        linktree_docs_link = QLabel(
+            '<a href="https://docs.linktr.ee/" style="color: #3B82F6; text-decoration: none;">Linktree 개발 문서 보기</a>'
+        )
+        linktree_docs_link.setOpenExternalLinks(True)
+        linktree_docs_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
+        link_advanced_layout.addWidget(linktree_docs_link)
+
+        self.link_automation_section.content_layout.addWidget(self.link_advanced_container)
+        self._set_link_advanced_visible(False)
 
         self.link_automation_status = QLabel("상태: 미설정")
         self.link_automation_status.setStyleSheet(
@@ -686,6 +857,2257 @@ class SettingsTab(QWidget, ThemedMixin):
         else:
             from ui.components.custom_dialog import show_warning
             show_warning(self, "알림", "저장 폴더가 설정되지 않았거나 존재하지 않습니다.")
+
+    def _build_setup_assistant_section(self, content_layout: QVBoxLayout):
+        """Build guided setup assistant section inside Settings."""
+        ds = self.ds
+        c = ds.colors
+
+        self.setup_assistant_section = SettingsSection("자동 설정 도우미")
+
+        intro = QLabel(
+            "초기 사용자용 반자동 설정 흐름입니다. 자동 단계는 앱이 수행하고, "
+            "로그인/2FA/동의 화면은 필요한 순간에만 직접 진행한 뒤 '완료했어요'를 눌러 다음으로 넘어갑니다."
+        )
+        intro.setWordWrap(True)
+        intro.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.setup_assistant_section.content_layout.addWidget(intro)
+
+        # 1) Connection chips
+        chip_wrap = QWidget()
+        chip_wrap.setStyleSheet("background: transparent; border: none;")
+        chip_row = QHBoxLayout(chip_wrap)
+        chip_row.setContentsMargins(0, 0, 0, 0)
+        chip_row.setSpacing(8)
+
+        self.setup_chip_gemini = QLabel()
+        self.setup_chip_youtube = QLabel()
+        self.setup_chip_tiktok = QLabel()
+        self.setup_chip_instagram = QLabel()
+        self.setup_chip_threads = QLabel()
+        self.setup_chip_linktree = QLabel()
+        for chip in (
+            self.setup_chip_gemini,
+            self.setup_chip_youtube,
+            self.setup_chip_tiktok,
+            self.setup_chip_instagram,
+            self.setup_chip_threads,
+            self.setup_chip_linktree,
+        ):
+            chip.setStyleSheet(
+                f"padding: 5px 10px; border-radius: {ds.radius.full}px; "
+                f"border: 1px solid {c.border_light}; background: {c.surface_variant}; color: {c.text_primary};"
+            )
+            chip_row.addWidget(chip)
+        chip_row.addStretch()
+        self.setup_assistant_section.add_row("연결 상태", chip_wrap)
+
+        # 2) Start buttons
+        start_wrap = QWidget()
+        start_wrap.setStyleSheet("background: transparent; border: none;")
+        start_row = QHBoxLayout(start_wrap)
+        start_row.setContentsMargins(0, 0, 0, 0)
+        start_row.setSpacing(8)
+
+        self.setup_start_all_btn = QPushButton("원클릭 설정 시작")
+        self.setup_start_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_start_all_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: {c.text_on_primary};
+                border: 1px solid {c.primary};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background-color: {c.primary_hover};
+                border-color: {c.primary_hover};
+            }}
+        """)
+        self.setup_start_all_btn.clicked.connect(lambda: self._start_setup_assistant("all"))
+        start_row.addWidget(self.setup_start_all_btn)
+
+        self.setup_start_youtube_btn = QPushButton("YouTube만 설정")
+        self.setup_start_youtube_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_start_youtube_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 12px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {c.surface}; }}
+        """)
+        self.setup_start_youtube_btn.clicked.connect(lambda: self._start_setup_assistant("youtube"))
+        start_row.addWidget(self.setup_start_youtube_btn)
+
+        self.setup_start_social_btn = QPushButton("소셜4종 설정")
+        self.setup_start_social_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_start_social_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_start_social_btn.clicked.connect(lambda: self._start_setup_assistant("social4"))
+        start_row.addWidget(self.setup_start_social_btn)
+
+        self.setup_start_tiktok_btn = QPushButton("TikTok만")
+        self.setup_start_tiktok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_start_tiktok_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_start_tiktok_btn.clicked.connect(lambda: self._start_setup_assistant("tiktok"))
+        start_row.addWidget(self.setup_start_tiktok_btn)
+
+        self.setup_start_instagram_btn = QPushButton("Instagram만")
+        self.setup_start_instagram_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_start_instagram_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_start_instagram_btn.clicked.connect(lambda: self._start_setup_assistant("instagram"))
+        start_row.addWidget(self.setup_start_instagram_btn)
+
+        self.setup_start_threads_btn = QPushButton("Threads만")
+        self.setup_start_threads_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_start_threads_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_start_threads_btn.clicked.connect(lambda: self._start_setup_assistant("threads"))
+        start_row.addWidget(self.setup_start_threads_btn)
+
+        self.setup_start_linktree_btn = QPushButton("Linktree만")
+        self.setup_start_linktree_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_start_linktree_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_start_linktree_btn.clicked.connect(lambda: self._start_setup_assistant("linktree"))
+        start_row.addWidget(self.setup_start_linktree_btn)
+        start_row.addStretch()
+        self.setup_assistant_section.add_row("도우미 실행", start_wrap)
+
+        # 2-1) OAuth/code/manual identity input helpers
+        setup_input_wrap = QFrame()
+        setup_input_wrap.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+            QLineEdit {{
+                background-color: {c.surface};
+                color: {c.text_primary};
+                padding: 8px 10px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{
+                border: 1px solid {c.primary};
+            }}
+        """)
+        setup_input_layout = QVBoxLayout(setup_input_wrap)
+        setup_input_layout.setContentsMargins(12, 10, 12, 10)
+        setup_input_layout.setSpacing(8)
+
+        tiktok_input_row = QHBoxLayout()
+        tiktok_input_row.setSpacing(8)
+        self.setup_tiktok_code_input = QLineEdit()
+        self.setup_tiktok_code_input.setPlaceholderText("TikTok OAuth 완료 후 리디렉션 URL의 code 값")
+        self.setup_tiktok_code_input.setToolTip("예: http://localhost:8080/callback?code=... 에서 code 값만 붙여넣기")
+        tiktok_input_row.addWidget(self.setup_tiktok_code_input, stretch=1)
+        self.setup_open_tiktok_auth_btn = QPushButton("TikTok 인증 페이지 열기")
+        self.setup_open_tiktok_auth_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_open_tiktok_auth_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_open_tiktok_auth_btn.clicked.connect(self._assistant_open_tiktok_auth)
+        tiktok_input_row.addWidget(self.setup_open_tiktok_auth_btn)
+        setup_input_layout.addLayout(tiktok_input_row)
+
+        insta_input_row = QHBoxLayout()
+        insta_input_row.setSpacing(8)
+        self.setup_instagram_handle_input = QLineEdit()
+        self.setup_instagram_handle_input.setPlaceholderText("Instagram 계정 (@없이 username 또는 프로필 URL)")
+        insta_input_row.addWidget(self.setup_instagram_handle_input, stretch=1)
+        self.setup_open_instagram_btn = QPushButton("Instagram 열기")
+        self.setup_open_instagram_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_open_instagram_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_open_instagram_btn.clicked.connect(self._assistant_open_instagram_setup)
+        insta_input_row.addWidget(self.setup_open_instagram_btn)
+        setup_input_layout.addLayout(insta_input_row)
+
+        threads_input_row = QHBoxLayout()
+        threads_input_row.setSpacing(8)
+        self.setup_threads_handle_input = QLineEdit()
+        self.setup_threads_handle_input.setPlaceholderText("Threads 계정 (@없이 username 또는 프로필 URL)")
+        threads_input_row.addWidget(self.setup_threads_handle_input, stretch=1)
+        self.setup_open_threads_btn = QPushButton("Threads 열기")
+        self.setup_open_threads_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_open_threads_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_open_threads_btn.clicked.connect(self._assistant_open_threads_setup)
+        threads_input_row.addWidget(self.setup_open_threads_btn)
+        setup_input_layout.addLayout(threads_input_row)
+
+        helper_row = QHBoxLayout()
+        helper_row.setSpacing(8)
+        self.setup_open_meta_console_btn = QPushButton("Meta App 콘솔 열기")
+        self.setup_open_meta_console_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_open_meta_console_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_open_meta_console_btn.clicked.connect(lambda: self._open_external_url(META_APPS_URL))
+        helper_row.addWidget(self.setup_open_meta_console_btn)
+
+        self.setup_open_computer_use_guide_btn = QPushButton("Computer Use 가이드 열기")
+        self.setup_open_computer_use_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_open_computer_use_guide_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_open_computer_use_guide_btn.clicked.connect(self._assistant_open_computer_use_guide)
+        helper_row.addWidget(self.setup_open_computer_use_guide_btn)
+        helper_row.addStretch()
+        setup_input_layout.addLayout(helper_row)
+
+        codex_config_row = QHBoxLayout()
+        codex_config_row.setSpacing(8)
+        self.setup_codex_path_input = QLineEdit()
+        self.setup_codex_path_input.setPlaceholderText("Codex CLI 경로 (기본: codex)")
+        self.setup_codex_path_input.setToolTip("예: codex 또는 /usr/local/bin/codex")
+        codex_config_row.addWidget(self.setup_codex_path_input, stretch=1)
+        self.setup_codex_model_input = QLineEdit()
+        self.setup_codex_model_input.setPlaceholderText("모델 (선택, 비우면 기본)")
+        self.setup_codex_model_input.setToolTip("예: gpt-5.4, gpt-5.5")
+        codex_config_row.addWidget(self.setup_codex_model_input, stretch=1)
+        self.setup_codex_save_btn = QPushButton("Codex 설정 저장")
+        self.setup_codex_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_codex_save_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_codex_save_btn.clicked.connect(self._save_codex_cli_settings)
+        codex_config_row.addWidget(self.setup_codex_save_btn)
+        setup_input_layout.addLayout(codex_config_row)
+
+        computer_use_policy_row = QHBoxLayout()
+        computer_use_policy_row.setSpacing(8)
+        self.setup_computer_use_paid_only_checkbox = QCheckBox("Computer Use 유료 전용")
+        self.setup_computer_use_paid_only_checkbox.setChecked(True)
+        self.setup_computer_use_paid_only_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_computer_use_paid_only_checkbox.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        computer_use_policy_row.addWidget(self.setup_computer_use_paid_only_checkbox)
+
+        self.setup_computer_use_bridge_checkbox = QCheckBox("공용 서버 브리지 사용")
+        self.setup_computer_use_bridge_checkbox.setChecked(False)
+        self.setup_computer_use_bridge_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_computer_use_bridge_checkbox.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        computer_use_policy_row.addWidget(self.setup_computer_use_bridge_checkbox)
+        computer_use_policy_row.addStretch()
+        setup_input_layout.addLayout(computer_use_policy_row)
+
+        bridge_row = QHBoxLayout()
+        bridge_row.setSpacing(8)
+        self.setup_computer_use_bridge_url_input = QLineEdit()
+        self.setup_computer_use_bridge_url_input.setPlaceholderText("공용 브리지 URL (예: https://api.yourserver.com)")
+        self.setup_computer_use_bridge_url_input.setToolTip("유료 사용자 Computer Use 요청을 서버로 위임할 때 사용합니다.")
+        bridge_row.addWidget(self.setup_computer_use_bridge_url_input, stretch=1)
+        self.setup_computer_use_bridge_key_input = QLineEdit()
+        self.setup_computer_use_bridge_key_input.setPlaceholderText("브리지 API 키 (선택)")
+        self.setup_computer_use_bridge_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        bridge_row.addWidget(self.setup_computer_use_bridge_key_input, stretch=1)
+        setup_input_layout.addLayout(bridge_row)
+
+        codex_row = QHBoxLayout()
+        codex_row.setSpacing(8)
+        self.setup_codex_check_btn = QPushButton("Codex 상태 점검")
+        self.setup_codex_check_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_codex_check_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_codex_check_btn.clicked.connect(lambda: self._refresh_codex_cli_status(show_dialog=True))
+        codex_row.addWidget(self.setup_codex_check_btn)
+
+        self.setup_codex_launch_btn = QPushButton("현재 단계 Codex 실행")
+        self.setup_codex_launch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_codex_launch_btn.setStyleSheet(self.setup_start_all_btn.styleSheet())
+        self.setup_codex_launch_btn.clicked.connect(self._launch_codex_for_current_step)
+        codex_row.addWidget(self.setup_codex_launch_btn)
+
+        self.setup_codex_status = QLabel(self._codex_status_summary)
+        self.setup_codex_status.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        codex_row.addWidget(self.setup_codex_status, stretch=1)
+        setup_input_layout.addLayout(codex_row)
+
+        clipboard_row = QHBoxLayout()
+        clipboard_row.setSpacing(8)
+
+        self.setup_clipboard_auto_checkbox = QCheckBox("클립보드 자동감지")
+        self.setup_clipboard_auto_checkbox.setChecked(True)
+        self.setup_clipboard_auto_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_clipboard_auto_checkbox.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        self.setup_clipboard_auto_checkbox.stateChanged.connect(self._on_setup_clipboard_auto_toggled)
+        clipboard_row.addWidget(self.setup_clipboard_auto_checkbox)
+
+        self.setup_clipboard_apply_btn = QPushButton("클립보드 즉시 반영")
+        self.setup_clipboard_apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_clipboard_apply_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_clipboard_apply_btn.clicked.connect(self._on_setup_clipboard_apply_clicked)
+        clipboard_row.addWidget(self.setup_clipboard_apply_btn)
+
+        self.setup_clipboard_status = QLabel("대기 중")
+        self.setup_clipboard_status.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+        )
+        clipboard_row.addWidget(self.setup_clipboard_status, stretch=1)
+        setup_input_layout.addLayout(clipboard_row)
+
+        self.setup_assistant_section.add_row("소셜 인증 입력", setup_input_wrap)
+        self._load_codex_cli_settings()
+
+        # 3) Timeline
+        timeline_wrap = QFrame()
+        timeline_wrap.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+        """)
+        timeline_layout = QVBoxLayout(timeline_wrap)
+        timeline_layout.setContentsMargins(12, 10, 12, 10)
+        timeline_layout.setSpacing(6)
+
+        self._setup_rows = {}
+        for step_id in self.SETUP_STEP_DEFS:
+            row_widget = QWidget()
+            row_widget.setStyleSheet("background: transparent; border: none;")
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(8)
+
+            title_label = QLabel(self.SETUP_STEP_DEFS[step_id]["title"])
+            title_label.setStyleSheet(f"color: {c.text_primary}; border: none; background: transparent;")
+            row_layout.addWidget(title_label, stretch=1)
+
+            actor = self.SETUP_STEP_DEFS[step_id]["actor"]
+            actor_label = QLabel("자동" if actor == "auto" else "사용자")
+            actor_label.setStyleSheet(
+                f"padding: 2px 8px; border-radius: {ds.radius.full}px; "
+                f"border: 1px solid {c.border_light}; color: {c.text_secondary}; background: {c.surface};"
+            )
+            row_layout.addWidget(actor_label)
+
+            state_label = QLabel("대기")
+            state_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
+            row_layout.addWidget(state_label)
+
+            timeline_layout.addWidget(row_widget)
+            self._setup_rows[step_id] = {"title": title_label, "state": state_label}
+
+        self.setup_assistant_section.add_row("진행 타임라인", timeline_wrap)
+
+        # 4) Current action panel
+        action_wrap = QFrame()
+        action_wrap.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.base}px;
+            }}
+        """)
+        action_layout = QVBoxLayout(action_wrap)
+        action_layout.setContentsMargins(12, 10, 12, 10)
+        action_layout.setSpacing(8)
+
+        self.setup_current_title = QLabel("대기 중")
+        self.setup_current_title.setStyleSheet(
+            f"color: {c.text_primary}; border: none; background: transparent; font-weight: 700;"
+        )
+        action_layout.addWidget(self.setup_current_title)
+
+        self.setup_current_desc = QLabel("도우미를 시작하면 단계별로 필요한 작업을 안내합니다.")
+        self.setup_current_desc.setWordWrap(True)
+        self.setup_current_desc.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent;"
+        )
+        action_layout.addWidget(self.setup_current_desc)
+
+        action_btn_row = QHBoxLayout()
+        action_btn_row.setSpacing(8)
+
+        self.setup_action_btn = QPushButton("작업 열기")
+        self.setup_action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_action_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_action_btn.clicked.connect(self._on_setup_action_clicked)
+        action_btn_row.addWidget(self.setup_action_btn)
+
+        self.setup_done_btn = QPushButton("완료했어요")
+        self.setup_done_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_done_btn.setStyleSheet(self.setup_start_all_btn.styleSheet())
+        self.setup_done_btn.clicked.connect(self._on_setup_done_clicked)
+        action_btn_row.addWidget(self.setup_done_btn)
+
+        self.setup_retry_btn = QPushButton("재검증")
+        self.setup_retry_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_retry_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
+        self.setup_retry_btn.clicked.connect(self._on_setup_retry_clicked)
+        action_btn_row.addWidget(self.setup_retry_btn)
+
+        self.setup_stop_btn = QPushButton("중단")
+        self.setup_stop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_stop_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {c.error};
+                border: 1px solid {c.error};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 12px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{
+                background-color: {c.error};
+                color: white;
+            }}
+        """)
+        self.setup_stop_btn.clicked.connect(self._stop_setup_assistant)
+        action_btn_row.addWidget(self.setup_stop_btn)
+        action_btn_row.addStretch()
+        action_layout.addLayout(action_btn_row)
+
+        self.setup_assistant_section.add_row("현재 해야 할 일", action_wrap)
+
+        # 5) Live logs
+        self.setup_log = QTextEdit()
+        self.setup_log.setReadOnly(True)
+        self.setup_log.setMinimumHeight(120)
+        self.setup_log.setMaximumHeight(180)
+        self.setup_log.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px;
+                font-size: 11px;
+            }}
+        """)
+        self.setup_assistant_section.add_row("실시간 로그", self.setup_log)
+
+        content_layout.addWidget(self.setup_assistant_section)
+        self._reset_setup_timeline()
+        self._refresh_setup_assistant_status()
+        self._set_setup_current_action(
+            title="대기 중",
+            description="도우미를 시작하면 자동/사용자 단계를 순서대로 진행합니다.",
+            action_text="",
+            action_callback=None,
+            show_done=False,
+        )
+
+    def _reset_setup_timeline(self):
+        """Reset all setup timeline rows to pending state."""
+        for step_id in self._setup_rows:
+            self._set_setup_row_state(step_id, "pending")
+
+    def _set_setup_row_state(self, step_id: str, state: str, detail: str = ""):
+        """Render one setup timeline row state."""
+        row = self._setup_rows.get(step_id)
+        if not row:
+            return
+
+        c = self.ds.colors
+        state_label = row["state"]
+        title_label = row["title"]
+
+        if state == "running":
+            title_label.setStyleSheet(
+                f"color: {c.primary}; border: none; background: transparent; font-weight: 700;"
+            )
+            state_label.setStyleSheet(f"color: {c.primary}; border: none; background: transparent;")
+            state_label.setText("진행 중")
+            return
+        if state == "done":
+            title_label.setStyleSheet(
+                f"color: {c.success}; border: none; background: transparent; font-weight: 600;"
+            )
+            state_label.setStyleSheet(f"color: {c.success}; border: none; background: transparent;")
+            state_label.setText("완료")
+            return
+        if state == "waiting":
+            title_label.setStyleSheet(
+                f"color: {c.warning}; border: none; background: transparent; font-weight: 600;"
+            )
+            state_label.setStyleSheet(f"color: {c.warning}; border: none; background: transparent;")
+            state_label.setText(detail or "사용자 확인")
+            return
+        if state == "error":
+            title_label.setStyleSheet(
+                f"color: {c.error}; border: none; background: transparent; font-weight: 600;"
+            )
+            state_label.setStyleSheet(f"color: {c.error}; border: none; background: transparent;")
+            state_label.setText(detail or "오류")
+            return
+        if state == "skipped":
+            title_label.setStyleSheet(
+                f"color: {c.text_muted}; border: none; background: transparent;"
+            )
+            state_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
+            state_label.setText("건너뜀")
+            return
+
+        # pending/default
+        title_label.setStyleSheet(
+            f"color: {c.text_primary}; border: none; background: transparent;"
+        )
+        state_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
+        state_label.setText("대기")
+
+    def _append_setup_log(self, message: str):
+        """Append one setup log line."""
+        if not hasattr(self, "setup_log"):
+            return
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.setup_log.append(f"[{ts}] {message}")
+        self.setup_log.verticalScrollBar().setValue(self.setup_log.verticalScrollBar().maximum())
+
+    def _set_setup_current_action(
+        self,
+        title: str,
+        description: str,
+        action_text: str,
+        action_callback: Optional[Callable[[], None]],
+        show_done: bool,
+    ):
+        """Update current-action card content and buttons."""
+        self.setup_current_title.setText(title)
+        desc = str(description or "").strip()
+        if show_done:
+            desc += "\n\n팁: code/프로필 URL/API 키를 복사하면 클립보드 자동감지로 입력됩니다."
+        self.setup_current_desc.setText(desc)
+        self._setup_action_callback = action_callback
+
+        has_action = bool(action_text and action_callback)
+        self.setup_action_btn.setVisible(has_action)
+        self.setup_action_btn.setEnabled(has_action)
+        if has_action:
+            self.setup_action_btn.setText(action_text)
+
+        self.setup_done_btn.setVisible(bool(show_done))
+        self.setup_done_btn.setEnabled(bool(show_done))
+
+        running = bool(self._setup_running)
+        self.setup_retry_btn.setVisible(running)
+        self.setup_stop_btn.setVisible(running)
+
+    def _on_setup_action_clicked(self):
+        """Handle dynamic action button click."""
+        if self._setup_action_callback:
+            try:
+                self._setup_action_callback()
+            except Exception as exc:
+                logger.warning("[SetupAssistant] action callback failed: %s", exc)
+                self._append_setup_log(f"작업 실행 오류: {exc}")
+
+    def _on_setup_clipboard_auto_toggled(self, state: int):
+        """Enable/disable clipboard auto detection while setup assistant runs."""
+        self._setup_clipboard_auto_enabled = bool(state)
+        if self._setup_clipboard_auto_enabled:
+            self._update_setup_clipboard_status("자동감지 활성화", level="ok")
+        else:
+            self._update_setup_clipboard_status("자동감지 비활성화", level="warn")
+
+    def _on_setup_clipboard_apply_clicked(self):
+        """Apply current clipboard text to setup fields immediately."""
+        try:
+            text = str(QApplication.clipboard().text() or "").strip()
+        except Exception:
+            text = ""
+        if not text:
+            self._update_setup_clipboard_status("클립보드가 비어 있습니다", level="warn")
+            return
+        consumed = self._apply_clipboard_payload(text, auto_confirm=True)
+        if not consumed:
+            self._update_setup_clipboard_status("인식 가능한 값이 없습니다", level="warn")
+
+    def _poll_setup_clipboard(self):
+        """Background clipboard poller for setup assistant autofill."""
+        if not self._setup_clipboard_auto_enabled:
+            return
+        if not self._setup_running or not self._setup_waiting_user:
+            return
+        try:
+            text = str(QApplication.clipboard().text() or "").strip()
+        except Exception:
+            return
+        if not text or text == self._setup_clipboard_last_text:
+            return
+        self._setup_clipboard_last_text = text
+        self._apply_clipboard_payload(text, auto_confirm=True)
+
+    def _update_setup_clipboard_status(self, message: str, level: str = "info"):
+        """Render clipboard helper status text."""
+        if not hasattr(self, "setup_clipboard_status"):
+            return
+        c = self.ds.colors
+        if level == "ok":
+            color = c.success
+        elif level == "warn":
+            color = c.warning
+        elif level == "error":
+            color = c.error
+        else:
+            color = c.text_muted
+        self.setup_clipboard_status.setStyleSheet(
+            f"color: {color}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.setup_clipboard_status.setText(str(message or "").strip())
+
+    @staticmethod
+    def _extract_gemini_key_from_text(raw_text: str) -> str:
+        """Extract one Gemini API key token from arbitrary text."""
+        text = str(raw_text or "")
+        match = re.search(r"AIza[A-Za-z0-9_-]{35,96}", text)
+        if not match:
+            return ""
+        key = match.group(0).strip()
+        return key if GEMINI_API_KEY_PATTERN.match(key) else ""
+
+    @staticmethod
+    def _extract_first_http_url(raw_text: str) -> str:
+        """Extract first http(s) URL from arbitrary text."""
+        text = str(raw_text or "")
+        match = re.search(r"https?://[^\s\"'<>]+", text, flags=re.IGNORECASE)
+        if not match:
+            return ""
+        url = match.group(0).rstrip(".,);]")
+        return url.strip()
+
+    @staticmethod
+    def _extract_linktree_url_from_text(raw_text: str) -> str:
+        """Extract Linktree profile URL from text."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+        explicit = re.search(r"https?://(?:www\.)?linktr\.ee/[^\s\"'<>?#]+", text, flags=re.IGNORECASE)
+        if explicit:
+            return explicit.group(0).rstrip(".,);]").strip()
+        shorthand = re.search(r"(?:www\.)?linktr\.ee/[^\s\"'<>?#]+", text, flags=re.IGNORECASE)
+        if shorthand:
+            return ("https://" + shorthand.group(0).rstrip(".,);]").strip()).strip()
+        return ""
+
+    def _extract_social_handle_from_text(self, raw_text: str, platform: str) -> str:
+        """Extract social account handle from URL/text."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+        lower = text.lower()
+        if platform == "instagram" and "instagram.com" in lower:
+            match = re.search(r"https?://(?:www\.)?instagram\.com/([^/?#\s]+)", text, flags=re.IGNORECASE)
+            if match:
+                return self._normalize_social_account_input(match.group(1))
+        if platform == "threads" and ("threads.net" in lower or "threads.com" in lower):
+            match = re.search(r"https?://(?:www\.)?threads\.(?:net|com)/@?([^/?#\s]+)", text, flags=re.IGNORECASE)
+            if match:
+                return self._normalize_social_account_input(match.group(1))
+        if "\n" in text or "\t" in text or " " in text:
+            url = self._extract_first_http_url(text)
+            if url:
+                return self._normalize_social_account_input(url)
+            return ""
+        return self._normalize_social_account_input(text)
+
+    def _extract_oauth_code_candidate_from_text(self, raw_text: str) -> str:
+        """Extract OAuth code from clipboard text with safety checks."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return ""
+        code = self._extract_oauth_code(text)
+        if not code:
+            return ""
+        if re.search(r"(?:[?&#]|^)code=", text, flags=re.IGNORECASE):
+            return code
+        if re.search(r"\s", code):
+            return ""
+        if re.fullmatch(r"[A-Za-z0-9._~%-]{8,512}", code):
+            return code
+        return ""
+
+    def _store_gemini_key_silent(self, key_value: str) -> bool:
+        """Store one Gemini API key without modal dialogs."""
+        key = str(key_value or "").strip()
+        if not GEMINI_API_KEY_PATTERN.match(key):
+            return False
+
+        max_keys = len(self.api_key_inputs) if hasattr(self, "api_key_inputs") else 8
+        existing: List[str] = []
+        for i in range(1, max_keys + 1):
+            value = str(SecretsManager.get_api_key(f"gemini_api_{i}") or "").strip()
+            if value and GEMINI_API_KEY_PATTERN.match(value) and value not in existing:
+                existing.append(value)
+
+        for inp in getattr(self, "api_key_inputs", []):
+            value = str(inp.text() or "").strip()
+            if value and GEMINI_API_KEY_PATTERN.match(value) and value not in existing:
+                existing.append(value)
+
+        if key not in existing:
+            existing.append(key)
+        keys = existing[:max_keys]
+
+        for idx, saved_key in enumerate(keys, start=1):
+            if not SecretsManager.store_api_key(f"gemini_api_{idx}", saved_key):
+                return False
+            loaded = str(SecretsManager.get_api_key(f"gemini_api_{idx}") or "").strip()
+            if loaded != saved_key:
+                return False
+        for idx in range(len(keys) + 1, max_keys + 1):
+            SecretsManager.delete_api_key(f"gemini_api_{idx}")
+
+        for inp in getattr(self, "api_key_inputs", []):
+            inp.clear()
+        for i, saved_key in enumerate(keys):
+            if i < len(self.api_key_inputs):
+                self.api_key_inputs[i].setText(saved_key)
+
+        config.GEMINI_API_KEYS = {f"api_{i + 1}": saved_key for i, saved_key in enumerate(keys)}
+        if self.gui and hasattr(self.gui, "api_key_manager"):
+            self.gui.api_key_manager = APIKeyManager(use_secrets_manager=True)
+            if hasattr(self.gui, "init_client"):
+                try:
+                    self.gui.init_client()
+                except Exception:
+                    pass
+        self._update_key_count()
+        self._refresh_setup_assistant_status()
+        return True
+
+    def _apply_clipboard_payload(self, raw_text: str, auto_confirm: bool = False) -> bool:
+        """Apply clipboard text to relevant setup inputs and optionally auto-confirm."""
+        text = str(raw_text or "").strip()
+        if not text:
+            return False
+
+        step_id = ""
+        if self._setup_running and 0 <= self._setup_step_index < len(self._setup_steps):
+            step_id = self._setup_steps[self._setup_step_index]
+
+        consumed = False
+        summary = ""
+
+        # 1) Gemini key
+        if step_id in ("", "precheck"):
+            gemini_key = self._extract_gemini_key_from_text(text)
+            if gemini_key and self._store_gemini_key_silent(gemini_key):
+                consumed = True
+                summary = "Gemini API 키 자동 반영"
+
+        # 2) TikTok OAuth code
+        if not consumed and step_id in ("", "tiktok_user_auth", "tiktok_code_exchange", "tiktok_verify"):
+            auth_code = self._extract_oauth_code_candidate_from_text(text)
+            if auth_code:
+                self.setup_tiktok_code_input.setText(auth_code)
+                consumed = True
+                summary = "TikTok code 자동 입력"
+
+        # 3) Instagram handle
+        if not consumed and step_id in ("", "instagram_user_setup", "instagram_verify"):
+            handle = self._extract_social_handle_from_text(text, "instagram")
+            if handle:
+                self.setup_instagram_handle_input.setText(handle)
+                consumed = True
+                summary = f"Instagram 계정 자동 입력 (@{handle})"
+
+        # 4) Threads handle
+        if not consumed and step_id in ("", "threads_user_setup", "threads_verify"):
+            handle = self._extract_social_handle_from_text(text, "threads")
+            if handle:
+                self.setup_threads_handle_input.setText(handle)
+                consumed = True
+                summary = f"Threads 계정 자동 입력 (@{handle})"
+
+        # 5) Linktree profile
+        if not consumed and step_id in ("", "linktree_user_setup", "linktree_save_verify"):
+            linktree_url = self._extract_linktree_url_from_text(text)
+            if linktree_url:
+                normalized = self._normalize_http_url(linktree_url)
+                if self._is_valid_http_url(normalized):
+                    self.linktree_profile_input.setText(normalized)
+                    consumed = True
+                    summary = "Linktree 공개 주소 자동 입력"
+
+        if not consumed:
+            return False
+
+        self._append_setup_log(f"클립보드 자동 반영: {summary}")
+        self._update_setup_clipboard_status(summary, level="ok")
+
+        if auto_confirm and self._setup_running and self._setup_waiting_user:
+            QTimer.singleShot(10, self._on_setup_done_clicked)
+        return True
+
+    def _get_saved_gemini_key_count(self) -> int:
+        """Return number of saved Gemini keys in secure store."""
+        count = 0
+        for i in range(1, 9):
+            value = SecretsManager.get_api_key(f"gemini_api_{i}")
+            if value and str(value).strip():
+                count += 1
+        if count == 0:
+            legacy = SecretsManager.get_api_key("gemini")
+            if legacy and str(legacy).strip():
+                count = 1
+        return count
+
+    def _is_youtube_connected(self) -> bool:
+        """Resolve YouTube connection state from shared settings/manager."""
+        settings = get_settings_manager()
+        if settings.get_youtube_connected():
+            return True
+
+        yt_manager = getattr(self.gui, "youtube_manager", None) if self.gui else None
+        if yt_manager and hasattr(yt_manager, "is_connected"):
+            try:
+                if bool(yt_manager.is_connected()):
+                    info = yt_manager.get_channel_info() or {}
+                    settings.set_youtube_connected(
+                        True,
+                        str(info.get("id", "")),
+                        str(info.get("title") or info.get("channel_name") or ""),
+                    )
+                    return True
+            except Exception:
+                pass
+        return False
+
+    def _get_tiktok_manager(self):
+        """Resolve TikTok manager instance from GUI or singleton."""
+        manager = getattr(self.gui, "tiktok_manager", None) if self.gui else None
+        if manager is not None:
+            return manager
+        try:
+            manager = get_tiktok_manager(gui=self.gui)
+            if self.gui is not None and not getattr(self.gui, "tiktok_manager", None):
+                self.gui.tiktok_manager = manager
+            return manager
+        except Exception as exc:
+            logger.warning("[SetupAssistant] TikTok manager unavailable: %s", exc)
+            return None
+
+    def _is_tiktok_connected(self) -> bool:
+        """Resolve TikTok connection state from settings/manager."""
+        settings = get_settings_manager()
+        if settings.get_social_connection_status("tiktok"):
+            return True
+
+        manager = self._get_tiktok_manager()
+        if manager and hasattr(manager, "is_connected"):
+            try:
+                if bool(manager.is_connected()):
+                    account_name = ""
+                    if hasattr(manager, "get_channel_info"):
+                        ch = manager.get_channel_info()
+                        account_name = (
+                            str(getattr(ch, "display_name", "") or "")
+                            or str(getattr(ch, "username", "") or "")
+                            or "TikTok 계정"
+                        )
+                    settings.set_social_connection_status("tiktok", True, account_name=account_name)
+                    return True
+            except Exception:
+                pass
+        return False
+
+    @staticmethod
+    def _normalize_social_account_input(raw_text: str) -> str:
+        """Normalize username/account input from plain handle or profile URL."""
+        value = str(raw_text or "").strip()
+        if not value:
+            return ""
+        value = value.replace("\\", "/").strip()
+        value = re.sub(r"^https?://", "", value, flags=re.IGNORECASE)
+        value = re.sub(r"^www\.", "", value, flags=re.IGNORECASE)
+        if "/" in value:
+            parts = [segment for segment in value.split("/") if segment]
+            if parts:
+                value = parts[-1]
+        value = value.split("?", 1)[0].split("#", 1)[0].strip()
+        if value.startswith("@"):
+            value = value[1:]
+        if "/" in value:
+            value = value.split("/", 1)[0]
+        value = value.strip()
+        if not value:
+            return ""
+
+        blocked_tokens = {
+            "accounts", "login", "logout", "auth", "oauth", "signup", "register",
+            "explore", "reels", "reel", "home", "about", "privacy", "terms",
+            "developers", "developer", "apps", "app",
+        }
+        if value.lower() in blocked_tokens:
+            return ""
+
+        if not re.fullmatch(r"[A-Za-z0-9._]{1,64}", value):
+            return ""
+        return value
+
+    def _is_instagram_connected(self) -> bool:
+        return bool(get_settings_manager().get_social_connection_status("instagram"))
+
+    def _is_threads_connected(self) -> bool:
+        return bool(get_settings_manager().get_social_connection_status("threads"))
+
+    def _set_manual_social_connected(self, platform: str, account_name: str) -> bool:
+        """Persist manual social account connection and sync GUI state if available."""
+        settings = get_settings_manager()
+        saved = settings.set_social_connection_status(platform, True, account_name=account_name)
+        if saved and self.gui and hasattr(self.gui, "state"):
+            try:
+                setattr(self.gui.state, f"{platform}_connected", True)
+            except Exception:
+                pass
+        return saved
+
+    @staticmethod
+    def _normalize_http_url(raw_url: str) -> str:
+        value = str(raw_url or "").strip()
+        if not value:
+            return ""
+        if not value.lower().startswith(("http://", "https://")):
+            value = "https://" + value
+        return value
+
+    @staticmethod
+    def _is_valid_http_url(url: str) -> bool:
+        return bool(re.match(r"^https?://[^\s/$.?#].[^\s]*$", str(url or "").strip(), re.IGNORECASE))
+
+    def _is_linktree_profile_ready(self) -> bool:
+        """Check whether a valid Linktree public profile URL is provided."""
+        if not hasattr(self, "linktree_profile_input"):
+            return False
+        profile = self._normalize_http_url(self.linktree_profile_input.text())
+        return self._is_valid_http_url(profile)
+
+    def _refresh_setup_connection_chips(self):
+        """Refresh top status chips in setup assistant."""
+        c = self.ds.colors
+
+        def set_chip(chip: QLabel, title: str, ok: bool, detail: str = "", warn: bool = False):
+            if ok:
+                detail_suffix = f" ({detail})" if detail else ""
+                chip.setText(f"{title} · 연결됨{detail_suffix}")
+                chip.setStyleSheet(
+                    f"padding: 5px 10px; border-radius: {self.ds.radius.full}px; "
+                    f"border: 1px solid {c.success}; background: {c.success}22; color: {c.success}; font-weight: 600;"
+                )
+                return
+            if warn:
+                chip.setText(f"{title} · 점검 필요{(' (' + detail + ')') if detail else ''}")
+                chip.setStyleSheet(
+                    f"padding: 5px 10px; border-radius: {self.ds.radius.full}px; "
+                    f"border: 1px solid {c.warning}; background: {c.warning}22; color: {c.warning}; font-weight: 600;"
+                )
+                return
+            chip.setText(f"{title} · 미연결")
+            chip.setStyleSheet(
+                f"padding: 5px 10px; border-radius: {self.ds.radius.full}px; "
+                f"border: 1px solid {c.border_light}; background: {c.surface_variant}; color: {c.text_muted};"
+            )
+
+        gemini_count = self._get_saved_gemini_key_count()
+        set_chip(self.setup_chip_gemini, "Gemini", gemini_count > 0, detail=f"{gemini_count}개")
+
+        settings = get_settings_manager()
+
+        yt_connected = self._is_youtube_connected()
+        yt_name = settings.get_youtube_channel_info().get("channel_name", "")
+        set_chip(self.setup_chip_youtube, "YouTube", yt_connected, detail=str(yt_name or ""))
+
+        tiktok_connected = self._is_tiktok_connected()
+        tiktok_name = settings.get_social_account_name("tiktok")
+        set_chip(self.setup_chip_tiktok, "TikTok", tiktok_connected, detail=tiktok_name)
+
+        instagram_connected = self._is_instagram_connected()
+        instagram_name = settings.get_social_account_name("instagram")
+        set_chip(self.setup_chip_instagram, "Instagram", instagram_connected, detail=instagram_name)
+
+        threads_connected = self._is_threads_connected()
+        threads_name = settings.get_social_account_name("threads")
+        set_chip(self.setup_chip_threads, "Threads", threads_connected, detail=threads_name)
+
+        linktree_profile_ready = self._is_linktree_profile_ready()
+        linktree_auto_enabled = bool(getattr(self, "linktree_auto_checkbox", None) and self.linktree_auto_checkbox.isChecked())
+        linktree_webhook_ready = bool(getattr(self, "linktree_webhook_input", None) and self.linktree_webhook_input.text().strip())
+        linktree_warn = linktree_auto_enabled and not linktree_webhook_ready
+        set_chip(
+            self.setup_chip_linktree,
+            "Linktree",
+            linktree_profile_ready,
+            detail="Webhook 필요" if linktree_warn else "",
+            warn=linktree_warn and linktree_profile_ready,
+        )
+
+    def _refresh_setup_assistant_status(self):
+        """Public refresh point after settings changes."""
+        if not hasattr(self, "setup_chip_gemini"):
+            return
+        self._refresh_setup_connection_chips()
+        QTimer.singleShot(0, self._refresh_computer_use_access_ui)
+
+    def _build_setup_steps(self, scope: str) -> List[str]:
+        """Return step sequence by setup scope."""
+        youtube_steps = ["youtube_prepare", "youtube_user_auth", "youtube_verify"]
+        tiktok_steps = ["tiktok_prepare", "tiktok_user_auth", "tiktok_code_exchange", "tiktok_verify"]
+        instagram_steps = ["instagram_user_setup", "instagram_verify"]
+        threads_steps = ["threads_user_setup", "threads_verify"]
+        linktree_steps = ["linktree_user_setup", "linktree_save_verify"]
+
+        if scope == "youtube":
+            return ["precheck", *youtube_steps, "final_verify"]
+        if scope == "tiktok":
+            return ["precheck", *tiktok_steps, "final_verify"]
+        if scope == "instagram":
+            return ["precheck", *instagram_steps, "final_verify"]
+        if scope == "threads":
+            return ["precheck", *threads_steps, "final_verify"]
+        if scope == "social4":
+            return ["precheck", *youtube_steps, *tiktok_steps, *instagram_steps, *threads_steps, "final_verify"]
+        if scope == "linktree":
+            return ["precheck", *linktree_steps, "final_verify"]
+        return [
+            "precheck",
+            *youtube_steps,
+            *tiktok_steps,
+            *instagram_steps,
+            *threads_steps,
+            *linktree_steps,
+            "final_verify",
+        ]
+
+    def _start_setup_assistant(self, scope: str):
+        """Start guided setup assistant flow."""
+        if self._setup_running:
+            return
+        self._setup_running = True
+        self._setup_clipboard_last_text = ""
+        self._setup_scope = scope
+        self._setup_steps = self._build_setup_steps(scope)
+        self._setup_step_index = 0
+        self._setup_waiting_user = False
+
+        self._reset_setup_timeline()
+        for step_id in self._setup_rows:
+            if step_id not in self._setup_steps:
+                self._set_setup_row_state(step_id, "skipped")
+
+        self._append_setup_log(f"도우미 시작: scope={scope}")
+        self._set_setup_current_action(
+            title="도우미 실행 중",
+            description="단계 준비 중입니다...",
+            action_text="",
+            action_callback=None,
+            show_done=False,
+        )
+        self._update_setup_clipboard_status("대기 중", level="info")
+        QTimer.singleShot(10, self._run_setup_step)
+
+    def _stop_setup_assistant(self):
+        """Stop guided setup assistant."""
+        if not self._setup_running:
+            return
+        self._setup_running = False
+        self._setup_waiting_user = False
+        self._append_setup_log("도우미 중단")
+        self._set_setup_current_action(
+            title="중단됨",
+            description="사용자가 도우미를 중단했습니다. 다시 시작 버튼으로 재개할 수 있습니다.",
+            action_text="",
+            action_callback=None,
+            show_done=False,
+        )
+        self.setup_retry_btn.setVisible(False)
+        self.setup_stop_btn.setVisible(False)
+        self._update_setup_clipboard_status("도우미 중단됨", level="warn")
+
+    def _run_setup_step(self):
+        """Execute current setup step."""
+        if not self._setup_running:
+            return
+        if self._setup_step_index >= len(self._setup_steps):
+            self._setup_running = False
+            self._setup_waiting_user = False
+            self._refresh_setup_assistant_status()
+            self._set_setup_current_action(
+                title="설정 완료",
+                description="도우미 흐름이 끝났습니다. 연결 상태 칩과 타임라인을 확인하세요.",
+                action_text="",
+                action_callback=None,
+                show_done=False,
+            )
+            self.setup_retry_btn.setVisible(False)
+            self.setup_stop_btn.setVisible(False)
+            self._append_setup_log("도우미 완료")
+            self._update_setup_clipboard_status("도우미 완료", level="ok")
+            return
+
+        step_id = self._setup_steps[self._setup_step_index]
+        self._setup_waiting_user = False
+        self._set_setup_row_state(step_id, "running")
+        self._append_setup_log(f"단계 시작: {self.SETUP_STEP_DEFS[step_id]['title']}")
+        self._set_setup_current_action(
+            title=f"{self.SETUP_STEP_DEFS[step_id]['title']} 진행 중",
+            description="자동 점검/처리 중입니다. 잠시만 기다려주세요.",
+            action_text="",
+            action_callback=None,
+            show_done=False,
+        )
+
+        if step_id == "precheck":
+            gemini_count = self._get_saved_gemini_key_count()
+            if gemini_count > 0:
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log(f"사전 점검 통과: Gemini 키 {gemini_count}개")
+                self._advance_setup_step()
+                return
+
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "Gemini 키 필요")
+            self._set_setup_current_action(
+                title="Gemini API 키 입력 필요",
+                description=(
+                    "API 키가 저장되어 있지 않습니다. 아래 버튼으로 API 키 섹션으로 이동해 키를 저장한 뒤 "
+                    "'완료했어요'를 눌러주세요."
+                ),
+                action_text="API 키 섹션으로 이동",
+                action_callback=self.focus_api_key_setup,
+                show_done=True,
+            )
+            return
+
+        if step_id == "youtube_prepare":
+            self._refresh_setup_assistant_status()
+            self._set_setup_row_state(step_id, "done")
+            self._append_setup_log("YouTube OAuth 준비 완료")
+            self._advance_setup_step()
+            return
+
+        if step_id == "youtube_user_auth":
+            if self._is_youtube_connected():
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("YouTube가 이미 연결되어 있어 사용자 인증 단계를 건너뜁니다.")
+                self._advance_setup_step()
+                return
+
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "사용자 인증 필요")
+            self._set_setup_current_action(
+                title="YouTube 로그인/동의 진행",
+                description=(
+                    "OAuth 연결 창을 열어 client_secrets.json 선택 → Google 로그인/2FA/동의를 완료해주세요. "
+                    "완료 후 이 화면에서 '완료했어요'를 눌러 검증합니다."
+                ),
+                action_text="YouTube OAuth 창 열기",
+                action_callback=self._assistant_open_youtube_oauth,
+                show_done=True,
+            )
+            return
+
+        if step_id == "youtube_verify":
+            if self._is_youtube_connected():
+                self._refresh_setup_assistant_status()
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("YouTube 연결 검증 성공")
+                self._advance_setup_step()
+                return
+
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "연결 확인 필요")
+            self._set_setup_current_action(
+                title="YouTube 연결이 아직 완료되지 않았습니다",
+                description=(
+                    "OAuth 연결이 확인되지 않았습니다. 인증 창을 다시 열어 승인 절차를 마친 뒤 "
+                    "'완료했어요'를 눌러주세요."
+                ),
+                action_text="YouTube OAuth 창 다시 열기",
+                action_callback=self._assistant_open_youtube_oauth,
+                show_done=True,
+            )
+            return
+
+        if step_id == "tiktok_prepare":
+            manager = self._get_tiktok_manager()
+            if manager is None:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "waiting", "매니저 초기화 필요")
+                self._set_setup_current_action(
+                    title="TikTok 매니저 초기화 필요",
+                    description=(
+                        "TikTok 매니저를 불러오지 못했습니다. 앱을 재실행한 뒤 다시 시도하거나 "
+                        "환경변수(TIKTOK_CLIENT_KEY/SECRET/REDIRECT_URI)를 점검하세요."
+                    ),
+                    action_text="Computer Use 가이드 열기",
+                    action_callback=self._assistant_open_computer_use_guide,
+                    show_done=True,
+                )
+                return
+
+            auth_url = ""
+            try:
+                auth_url = manager.get_auth_url(state=f"setup_{int(datetime.now().timestamp())}")
+            except Exception as exc:
+                logger.warning("[SetupAssistant] TikTok auth url generation failed: %s", exc)
+                auth_url = ""
+
+            self._setup_last_tiktok_auth_url = str(auth_url or "").strip()
+            if not self._setup_last_tiktok_auth_url:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "waiting", "OAuth 설정값 필요")
+                self._set_setup_current_action(
+                    title="TikTok OAuth 설정 필요",
+                    description=(
+                        "TikTok OAuth URL을 만들지 못했습니다. TIKTOK_CLIENT_KEY, TIKTOK_CLIENT_SECRET, "
+                        "TIKTOK_REDIRECT_URI 설정 후 '완료했어요'를 눌러주세요."
+                    ),
+                    action_text="Meta/TikTok 개발 콘솔 열기",
+                    action_callback=lambda: self._open_external_url("https://developers.tiktok.com/"),
+                    show_done=True,
+                )
+                return
+
+            self._set_setup_row_state(step_id, "done")
+            self._append_setup_log("TikTok OAuth 준비 완료")
+            self._advance_setup_step()
+            return
+
+        if step_id == "tiktok_user_auth":
+            if self._is_tiktok_connected():
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("TikTok이 이미 연결되어 있어 인증 단계를 건너뜁니다.")
+                self._advance_setup_step()
+                return
+
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "사용자 인증 필요")
+            self._set_setup_current_action(
+                title="TikTok 로그인/승인 진행",
+                description=(
+                    "인증 페이지를 열어 TikTok 로그인 및 권한 승인을 완료하세요. "
+                    "완료 후 리디렉션 URL의 code 값을 아래 입력칸에 붙여넣고 '완료했어요'를 누르세요."
+                ),
+                action_text="TikTok 인증 페이지 열기",
+                action_callback=self._assistant_open_tiktok_auth,
+                show_done=True,
+            )
+            return
+
+        if step_id == "tiktok_code_exchange":
+            if self._is_tiktok_connected():
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("TikTok 코드 교환을 생략합니다(이미 연결됨).")
+                self._advance_setup_step()
+                return
+
+            auth_code = self._extract_oauth_code(
+                self.setup_tiktok_code_input.text() if hasattr(self, "setup_tiktok_code_input") else ""
+            )
+            if not auth_code:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "waiting", "OAuth code 필요")
+                self._set_setup_current_action(
+                    title="TikTok OAuth code 입력 필요",
+                    description=(
+                        "TikTok 인증 후 리디렉션 URL에서 code 값을 복사해 붙여넣어야 합니다. "
+                        "값 입력 후 '완료했어요'를 눌러 코드 교환을 진행하세요."
+                    ),
+                    action_text="입력칸으로 이동",
+                    action_callback=lambda: self.setup_tiktok_code_input.setFocus(Qt.FocusReason.OtherFocusReason),
+                    show_done=True,
+                )
+                return
+
+            manager = self._get_tiktok_manager()
+            if manager is None:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "error", "매니저 없음")
+                self._set_setup_current_action(
+                    title="TikTok 매니저 없음",
+                    description="TikTok 코드 교환을 수행할 매니저를 찾지 못했습니다. 재검증을 눌러 재시도하세요.",
+                    action_text="",
+                    action_callback=None,
+                    show_done=False,
+                )
+                return
+
+            exchanged = False
+            try:
+                exchanged = bool(manager.exchange_code_for_token(auth_code))
+            except Exception as exc:
+                logger.warning("[SetupAssistant] TikTok code exchange failed: %s", exc)
+                exchanged = False
+
+            if not exchanged:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "waiting", "코드 교환 실패")
+                self._set_setup_current_action(
+                    title="TikTok 코드 교환 실패",
+                    description=(
+                        "코드가 만료되었거나 OAuth 설정이 맞지 않습니다. 인증 페이지를 다시 열어 새 code를 발급받은 뒤 "
+                        "입력해 주세요."
+                    ),
+                    action_text="TikTok 인증 다시 열기",
+                    action_callback=self._assistant_open_tiktok_auth,
+                    show_done=True,
+                )
+                return
+
+            channel = manager.get_channel_info() if hasattr(manager, "get_channel_info") else None
+            account_name = (
+                str(getattr(channel, "display_name", "") or "")
+                or str(getattr(channel, "username", "") or "")
+                or "TikTok 계정"
+            )
+            self._set_manual_social_connected("tiktok", account_name)
+            self._refresh_setup_assistant_status()
+            self._set_setup_row_state(step_id, "done")
+            self._append_setup_log("TikTok 코드 교환 성공")
+            self._advance_setup_step()
+            return
+
+        if step_id == "tiktok_verify":
+            if self._is_tiktok_connected():
+                self._refresh_setup_assistant_status()
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("TikTok 연결 검증 성공")
+                self._advance_setup_step()
+                return
+
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "연결 확인 필요")
+            self._set_setup_current_action(
+                title="TikTok 연결이 아직 확인되지 않았습니다",
+                description="코드 교환이 완료되어야 합니다. 새 code로 다시 시도한 뒤 '완료했어요'를 눌러주세요.",
+                action_text="TikTok 인증 다시 열기",
+                action_callback=self._assistant_open_tiktok_auth,
+                show_done=True,
+            )
+            return
+
+        if step_id == "instagram_user_setup":
+            if self._is_instagram_connected():
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("Instagram이 이미 연결되어 있습니다.")
+                self._advance_setup_step()
+                return
+
+            instagram_handle = self._normalize_social_account_input(
+                self.setup_instagram_handle_input.text() if hasattr(self, "setup_instagram_handle_input") else ""
+            )
+            if instagram_handle:
+                self.setup_instagram_handle_input.setText(instagram_handle)
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log(f"Instagram 계정 입력 확인: @{instagram_handle}")
+                self._advance_setup_step()
+                return
+
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "계정명 입력 필요")
+            self._set_setup_current_action(
+                title="Instagram 계정 정보 입력",
+                description=(
+                    "Instagram 로그인/승인을 완료한 뒤 아래 입력칸에 계정명(또는 프로필 URL)을 입력하고 "
+                    "'완료했어요'를 눌러주세요."
+                ),
+                action_text="Instagram 열기",
+                action_callback=self._assistant_open_instagram_setup,
+                show_done=True,
+            )
+            return
+
+        if step_id == "instagram_verify":
+            if self._is_instagram_connected():
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("Instagram 연결 검증 성공")
+                self._advance_setup_step()
+                return
+
+            instagram_handle = self._normalize_social_account_input(
+                self.setup_instagram_handle_input.text() if hasattr(self, "setup_instagram_handle_input") else ""
+            )
+            if not instagram_handle:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "waiting", "계정명 확인 필요")
+                self._set_setup_current_action(
+                    title="Instagram 계정명 확인 필요",
+                    description="Instagram 계정명을 입력해 주세요. 예: my_shop_account",
+                    action_text="입력칸으로 이동",
+                    action_callback=lambda: self.setup_instagram_handle_input.setFocus(Qt.FocusReason.OtherFocusReason),
+                    show_done=True,
+                )
+                return
+
+            self.setup_instagram_handle_input.setText(instagram_handle)
+            self._set_manual_social_connected("instagram", instagram_handle)
+            self._refresh_setup_assistant_status()
+            self._set_setup_row_state(step_id, "done")
+            self._append_setup_log(f"Instagram 연결 검증 완료: @{instagram_handle}")
+            self._advance_setup_step()
+            return
+
+        if step_id == "threads_user_setup":
+            if self._is_threads_connected():
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("Threads가 이미 연결되어 있습니다.")
+                self._advance_setup_step()
+                return
+
+            threads_handle = self._normalize_social_account_input(
+                self.setup_threads_handle_input.text() if hasattr(self, "setup_threads_handle_input") else ""
+            )
+            if threads_handle:
+                self.setup_threads_handle_input.setText(threads_handle)
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log(f"Threads 계정 입력 확인: @{threads_handle}")
+                self._advance_setup_step()
+                return
+
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "계정명 입력 필요")
+            self._set_setup_current_action(
+                title="Threads 계정 정보 입력",
+                description=(
+                    "Threads 로그인/승인을 완료한 뒤 아래 입력칸에 계정명(또는 프로필 URL)을 입력하고 "
+                    "'완료했어요'를 눌러주세요."
+                ),
+                action_text="Threads 열기",
+                action_callback=self._assistant_open_threads_setup,
+                show_done=True,
+            )
+            return
+
+        if step_id == "threads_verify":
+            if self._is_threads_connected():
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("Threads 연결 검증 성공")
+                self._advance_setup_step()
+                return
+
+            threads_handle = self._normalize_social_account_input(
+                self.setup_threads_handle_input.text() if hasattr(self, "setup_threads_handle_input") else ""
+            )
+            if not threads_handle:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "waiting", "계정명 확인 필요")
+                self._set_setup_current_action(
+                    title="Threads 계정명 확인 필요",
+                    description="Threads 계정명을 입력해 주세요. 예: my_shop_account",
+                    action_text="입력칸으로 이동",
+                    action_callback=lambda: self.setup_threads_handle_input.setFocus(Qt.FocusReason.OtherFocusReason),
+                    show_done=True,
+                )
+                return
+
+            self.setup_threads_handle_input.setText(threads_handle)
+            self._set_manual_social_connected("threads", threads_handle)
+            self._refresh_setup_assistant_status()
+            self._set_setup_row_state(step_id, "done")
+            self._append_setup_log(f"Threads 연결 검증 완료: @{threads_handle}")
+            self._advance_setup_step()
+            return
+
+        if step_id == "linktree_user_setup":
+            if self._is_linktree_profile_ready():
+                self._set_setup_row_state(step_id, "done")
+                self._append_setup_log("Linktree 공개 주소가 이미 입력되어 있습니다.")
+                self._advance_setup_step()
+                return
+
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "공개 주소 필요")
+            self._set_setup_current_action(
+                title="Linktree 공개 주소 입력",
+                description=(
+                    "Linktree 로그인 후 공개 프로필 주소(예: https://linktr.ee/myshop)를 입력하고 "
+                    "'완료했어요'를 눌러주세요."
+                ),
+                action_text="Linktree 관리자 열기",
+                action_callback=self._assistant_open_linktree_admin,
+                show_done=True,
+            )
+            return
+
+        if step_id == "linktree_save_verify":
+            profile_url = self._normalize_http_url(self.linktree_profile_input.text())
+            if not self._is_valid_http_url(profile_url):
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "waiting", "주소 형식 확인 필요")
+                self._set_setup_current_action(
+                    title="Linktree 공개 주소 형식 확인",
+                    description="Linktree 공개 주소를 http(s) 형식으로 입력한 뒤 '완료했어요'를 눌러주세요.",
+                    action_text="Linktree 입력칸으로 이동",
+                    action_callback=lambda: self.linktree_profile_input.setFocus(Qt.FocusReason.OtherFocusReason),
+                    show_done=True,
+                )
+                return
+
+            self.linktree_profile_input.setText(profile_url)
+            settings = get_settings_manager()
+            saved = settings.set_linktree_settings(
+                webhook_url=self.linktree_webhook_input.text().strip(),
+                api_key=self.linktree_api_key_input.text().strip(),
+                profile_url=profile_url,
+                auto_publish=self.linktree_auto_checkbox.isChecked(),
+            )
+            if not saved:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "error", "저장 실패")
+                self._set_setup_current_action(
+                    title="Linktree 저장 실패",
+                    description="설정 저장 중 오류가 발생했습니다. '재검증'으로 다시 시도해주세요.",
+                    action_text="",
+                    action_callback=None,
+                    show_done=False,
+                )
+                return
+
+            self._load_link_automation_settings()
+            self._refresh_setup_assistant_status()
+            self._set_setup_row_state(step_id, "done")
+            self._append_setup_log("Linktree 설정 저장/검증 완료")
+            self._advance_setup_step()
+            return
+
+        if step_id == "final_verify":
+            self._refresh_setup_assistant_status()
+            missing: List[str] = []
+            if self._get_saved_gemini_key_count() <= 0:
+                missing.append("Gemini API 키")
+
+            scope = str(self._setup_scope or "")
+            need_youtube = scope in ("all", "social4", "youtube")
+            need_tiktok = scope in ("all", "social4", "tiktok")
+            need_instagram = scope in ("all", "social4", "instagram")
+            need_threads = scope in ("all", "social4", "threads")
+            need_linktree = scope in ("all", "linktree")
+
+            if need_youtube and not self._is_youtube_connected():
+                missing.append("YouTube 연결")
+            if need_tiktok and not self._is_tiktok_connected():
+                missing.append("TikTok 연결")
+            if need_instagram and not self._is_instagram_connected():
+                missing.append("Instagram 연결")
+            if need_threads and not self._is_threads_connected():
+                missing.append("Threads 연결")
+            if need_linktree and not self._is_linktree_profile_ready():
+                missing.append("Linktree 공개 주소")
+
+            if missing:
+                self._setup_waiting_user = True
+                self._set_setup_row_state(step_id, "waiting", "추가 설정 필요")
+                self._set_setup_current_action(
+                    title="최종 점검 미완료",
+                    description="다음 항목이 필요합니다: " + ", ".join(missing) + ". 수정 후 '완료했어요'를 눌러주세요.",
+                    action_text="설정 상태 새로고침",
+                    action_callback=self._refresh_setup_assistant_status,
+                    show_done=True,
+                )
+                self._append_setup_log("최종 점검 대기: " + ", ".join(missing))
+                return
+
+            self._set_setup_row_state(step_id, "done")
+            self._append_setup_log("최종 연결 테스트 성공")
+            self._advance_setup_step()
+            return
+
+    def _advance_setup_step(self):
+        """Move to next setup step."""
+        if not self._setup_running:
+            return
+        self._setup_step_index += 1
+        QTimer.singleShot(40, self._run_setup_step)
+
+    def _assistant_open_youtube_oauth(self):
+        """Open existing YouTube OAuth dialog flow from upload panel."""
+        self._append_setup_log("YouTube OAuth 창을 엽니다.")
+        upload_panel = getattr(self.gui, "upload_panel", None) if self.gui else None
+        if upload_panel and hasattr(upload_panel, "_show_youtube_json_connect"):
+            try:
+                upload_panel._show_youtube_json_connect()
+            except Exception as exc:
+                logger.warning("[SetupAssistant] Failed to open YouTube OAuth dialog: %s", exc)
+                self._append_setup_log(f"YouTube OAuth 창 실행 실패: {exc}")
+                return
+            self._refresh_setup_assistant_status()
+            self._append_setup_log("YouTube OAuth 창이 닫혔습니다. 연결 상태를 다시 확인하세요.")
+            return
+
+        # Fallback: open guide page
+        self._append_setup_log("업로드 패널을 찾지 못해 OAuth 가이드 페이지를 엽니다.")
+        self._open_external_url(f"{SETUP_NOTICE_BASE_URL}/youtube-google-cloud-oauth-screenshots")
+
+    def _assistant_open_linktree_admin(self):
+        """Open Linktree admin page and focus profile input."""
+        self._open_linktree_admin()
+        self.linktree_profile_input.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._append_setup_log("Linktree 관리자 페이지를 열었습니다.")
+
+    @staticmethod
+    def _extract_oauth_code(raw_value: str) -> str:
+        """Extract OAuth code from raw code or callback URL text."""
+        text = str(raw_value or "").strip()
+        if not text:
+            return ""
+        match = re.search(r"(?:[?&#]|^)code=([^&#\s]+)", text)
+        if match:
+            return match.group(1).strip()
+        return text
+
+    def _assistant_open_tiktok_auth(self):
+        """Open TikTok OAuth/login page and guide user to paste code."""
+        manager = self._get_tiktok_manager()
+        auth_url = str(self._setup_last_tiktok_auth_url or "").strip()
+        if not auth_url and manager is not None:
+            try:
+                auth_url = str(manager.get_auth_url(state=f"setup_{int(datetime.now().timestamp())}") or "").strip()
+            except Exception as exc:
+                logger.warning("[SetupAssistant] Failed to regenerate TikTok auth url: %s", exc)
+
+        if auth_url:
+            self._setup_last_tiktok_auth_url = auth_url
+            self._append_setup_log("TikTok OAuth 인증 페이지를 엽니다.")
+            self._open_external_url(auth_url)
+            self.setup_tiktok_code_input.setFocus(Qt.FocusReason.OtherFocusReason)
+            return
+
+        self._append_setup_log("TikTok OAuth URL 생성 실패 - 로그인/개발자 페이지를 엽니다.")
+        self._open_external_url(TIKTOK_LOGIN_URL)
+        self._open_external_url("https://developers.tiktok.com/")
+
+    def _assistant_open_instagram_setup(self):
+        """Open Instagram + Meta app pages for manual setup."""
+        self._open_external_url(INSTAGRAM_LOGIN_URL)
+        self._open_external_url(META_APPS_URL)
+        self.setup_instagram_handle_input.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._append_setup_log("Instagram/Meta 설정 페이지를 열었습니다.")
+
+    def _assistant_open_threads_setup(self):
+        """Open Threads + Meta app pages for manual setup."""
+        self._open_external_url(THREADS_LOGIN_URL)
+        self._open_external_url(META_APPS_URL)
+        self.setup_threads_handle_input.setFocus(Qt.FocusReason.OtherFocusReason)
+        self._append_setup_log("Threads/Meta 설정 페이지를 열었습니다.")
+
+    def _assistant_open_computer_use_guide(self):
+        """Show computer-use setup guidance and open notice page."""
+        from ui.components.custom_dialog import show_info
+
+        show_info(
+            self,
+            "Computer Use 설정 가이드",
+            "권장 순서:\n"
+            "1) Codex 상태 점검 후 '현재 단계 Codex 실행'\n"
+            "2) 로그인/2FA/CAPTCHA/동의만 직접 처리\n"
+            "3) code/프로필 URL/API 키는 복사 (클립보드 자동반영)\n"
+            "4) 각 단계에서 '완료했어요'로 검증 진행",
+        )
+        self._open_external_url(f"{SETUP_NOTICE_BASE_URL}/computer-use-social-setup")
+        self._append_setup_log("Computer Use 설정 가이드를 열었습니다.")
+
+    def _load_codex_cli_settings(self):
+        """Load saved Codex CLI bridge settings and refresh status label."""
+        try:
+            mgr = get_settings_manager()
+            settings = mgr.get_codex_cli_settings()
+            cu_settings = mgr.get_computer_use_settings()
+        except Exception:
+            settings = {"path": "codex", "model": "", "enabled": True}
+            cu_settings = {"paid_only": True, "bridge_enabled": False, "bridge_url": "", "bridge_api_key": ""}
+
+        if hasattr(self, "setup_codex_path_input"):
+            self.setup_codex_path_input.setText(str(settings.get("path", "codex") or "codex"))
+        if hasattr(self, "setup_codex_model_input"):
+            self.setup_codex_model_input.setText(str(settings.get("model", "") or ""))
+        if hasattr(self, "setup_computer_use_paid_only_checkbox"):
+            self.setup_computer_use_paid_only_checkbox.setChecked(bool(cu_settings.get("paid_only", True)))
+        if hasattr(self, "setup_computer_use_bridge_checkbox"):
+            self.setup_computer_use_bridge_checkbox.setChecked(bool(cu_settings.get("bridge_enabled", False)))
+        if hasattr(self, "setup_computer_use_bridge_url_input"):
+            self.setup_computer_use_bridge_url_input.setText(str(cu_settings.get("bridge_url", "") or ""))
+        if hasattr(self, "setup_computer_use_bridge_key_input"):
+            self.setup_computer_use_bridge_key_input.setText(str(cu_settings.get("bridge_api_key", "") or ""))
+
+        QTimer.singleShot(120, self._refresh_computer_use_access_ui)
+
+    def _save_codex_cli_settings(self):
+        """Persist Codex CLI bridge settings."""
+        from ui.components.custom_dialog import show_info, show_error
+
+        path_value = "codex"
+        model_value = ""
+        if hasattr(self, "setup_codex_path_input"):
+            path_value = str(self.setup_codex_path_input.text() or "").strip() or "codex"
+            self.setup_codex_path_input.setText(path_value)
+        if hasattr(self, "setup_codex_model_input"):
+            model_value = str(self.setup_codex_model_input.text() or "").strip()
+            self.setup_codex_model_input.setText(model_value)
+
+        bridge_url = ""
+        bridge_api_key = ""
+        paid_only = True
+        bridge_enabled = False
+        if hasattr(self, "setup_computer_use_bridge_url_input"):
+            bridge_url = str(self.setup_computer_use_bridge_url_input.text() or "").strip()
+            self.setup_computer_use_bridge_url_input.setText(bridge_url)
+        if hasattr(self, "setup_computer_use_bridge_key_input"):
+            bridge_api_key = str(self.setup_computer_use_bridge_key_input.text() or "").strip()
+            self.setup_computer_use_bridge_key_input.setText(bridge_api_key)
+        if hasattr(self, "setup_computer_use_paid_only_checkbox"):
+            paid_only = bool(self.setup_computer_use_paid_only_checkbox.isChecked())
+        if hasattr(self, "setup_computer_use_bridge_checkbox"):
+            bridge_enabled = bool(self.setup_computer_use_bridge_checkbox.isChecked())
+
+        try:
+            mgr = get_settings_manager()
+            ok = mgr.set_codex_cli_settings(path=path_value, model=model_value)
+            if not ok:
+                show_error(self, "저장 실패", "Codex CLI 설정을 저장하지 못했습니다.")
+                return
+            ok_policy = mgr.set_computer_use_settings(
+                paid_only=paid_only,
+                bridge_enabled=bridge_enabled,
+                bridge_url=bridge_url,
+                bridge_api_key=bridge_api_key,
+            )
+            if not ok_policy:
+                show_error(self, "저장 실패", "Computer Use 정책 설정을 저장하지 못했습니다.")
+                return
+            self._append_setup_log(f"Codex 설정 저장: path={path_value}, model={model_value or 'default'}")
+            self._refresh_computer_use_access_ui()
+            show_info(self, "저장 완료", "Codex CLI 설정을 저장했습니다.")
+        except Exception as exc:
+            show_error(self, "저장 실패", f"Codex CLI 설정 저장 중 오류가 발생했습니다.\n{exc}")
+
+    @staticmethod
+    def _resolve_codex_binary(configured_path: str) -> str:
+        """Resolve codex executable path from a configured value."""
+        candidate = str(configured_path or "").strip() or "codex"
+        if os.path.sep in candidate or (os.path.altsep and os.path.altsep in candidate):
+            if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+                return candidate
+            return ""
+        resolved = shutil.which(candidate)
+        return str(resolved or "").strip()
+
+    @staticmethod
+    def _has_enabled_computer_use_mcp(mcp_list_output: str) -> bool:
+        """Check whether codex mcp list output indicates enabled computer-use server."""
+        text = str(mcp_list_output or "")
+        for raw_line in text.splitlines():
+            line = raw_line.strip().lower()
+            if not line or "computer-use" not in line:
+                continue
+            if "enabled" in line:
+                return True
+        return False
+
+    def _set_codex_status_text(self, text: str, level: str = "info"):
+        """Render Codex status helper label."""
+        self._codex_status_summary = str(text or "").strip() or "Codex 상태: 미확인"
+        if not hasattr(self, "setup_codex_status"):
+            return
+        c = self.ds.colors
+        if level == "ok":
+            color = c.success
+        elif level == "warn":
+            color = c.warning
+        elif level == "error":
+            color = c.error
+        else:
+            color = c.text_muted
+        self.setup_codex_status.setStyleSheet(
+            f"color: {color}; border: none; background: transparent; font-size: 11px;"
+        )
+        self.setup_codex_status.setText(self._codex_status_summary)
+
+    def _extract_logged_in_user_id(self) -> str:
+        """Extract current user id from gui login payload."""
+        if not self.gui:
+            return ""
+        try:
+            from utils.auth_helpers import extract_user_id
+
+            user_id = extract_user_id(getattr(self.gui, "login_data", None))
+            return str(user_id or "").strip()
+        except Exception:
+            return ""
+
+    def _extract_logged_in_token(self) -> str:
+        """Extract current login JWT token from gui payload."""
+        if not self.gui:
+            return ""
+        try:
+            login_data = getattr(self.gui, "login_data", None)
+            if not isinstance(login_data, dict):
+                return ""
+            data = login_data.get("data", {})
+            if not isinstance(data, dict):
+                return ""
+            token = str(data.get("token") or "").strip()
+            return token
+        except Exception:
+            return ""
+
+    def _is_computer_use_paid_only(self) -> bool:
+        """Return whether computer-use feature is restricted to paid users."""
+        try:
+            cu = get_settings_manager().get_computer_use_settings()
+            return bool(cu.get("paid_only", True))
+        except Exception:
+            return True
+
+    def _is_paid_user_for_computer_use(self, force_refresh: bool = False) -> bool:
+        """Resolve paid entitlement for computer-use gating."""
+        if not self._is_computer_use_paid_only():
+            return True
+
+        now = time.time()
+        if (not force_refresh) and (now - self._computer_use_paid_cache_ts < 60):
+            return bool(self._computer_use_paid_cache_value)
+
+        paid = False
+        user_id = self._extract_logged_in_user_id()
+        if user_id:
+            try:
+                from caller import rest
+
+                sub_status = rest.getSubscriptionStatus(user_id)
+                has_expiry = bool(sub_status.get("subscription_expires_at"))
+                is_unlimited = sub_status.get("work_count") == -1
+                is_trial_flag = sub_status.get("is_trial")
+                paid = has_expiry or is_unlimited or (is_trial_flag is False)
+            except Exception:
+                paid = False
+
+        self._computer_use_paid_cache_value = bool(paid)
+        self._computer_use_paid_cache_ts = now
+        return bool(paid)
+
+    def _refresh_computer_use_access_ui(self):
+        """Update computer-use access controls by subscription policy/state."""
+        paid_only = self._is_computer_use_paid_only()
+        is_paid = self._is_paid_user_for_computer_use(force_refresh=False)
+        allowed = (not paid_only) or is_paid
+
+        if hasattr(self, "setup_codex_launch_btn"):
+            self.setup_codex_launch_btn.setEnabled(bool(allowed))
+            self.setup_codex_launch_btn.setToolTip(
+                "" if allowed else "유료계정 전용 기능입니다. 무료계정은 수동 설정을 사용하세요."
+            )
+        if hasattr(self, "setup_codex_check_btn"):
+            self.setup_codex_check_btn.setEnabled(bool(allowed))
+            self.setup_codex_check_btn.setToolTip(
+                "" if allowed else "유료계정 전용 기능입니다. 무료계정은 수동 설정을 사용하세요."
+            )
+
+        if not allowed and paid_only:
+            self._set_codex_status_text("Computer Use: 유료계정 전용", level="warn")
+            return
+
+        self._refresh_codex_cli_status(show_dialog=False)
+
+    def _refresh_codex_cli_status(self, show_dialog: bool = False) -> Dict[str, Any]:
+        """Run Codex CLI health checks: binary, login, and computer-use MCP."""
+        from ui.components.custom_dialog import show_info, show_warning
+
+        try:
+            settings = get_settings_manager().get_codex_cli_settings()
+        except Exception:
+            settings = {"path": "codex", "model": "", "enabled": True}
+
+        configured_path = str(settings.get("path", "codex") or "codex")
+        resolved = self._resolve_codex_binary(configured_path)
+        if not resolved:
+            summary = f"Codex 없음: {configured_path}"
+            self._set_codex_status_text(summary, level="error")
+            if show_dialog:
+                show_warning(
+                    self,
+                    "Codex 실행 파일 없음",
+                    "Codex CLI를 찾지 못했습니다.\n"
+                    "설정값을 확인하세요.\n"
+                    f"- 입력 경로: {configured_path}",
+                )
+            return {
+                "available": False,
+                "login_ok": False,
+                "computer_use_ok": False,
+                "version": "",
+                "resolved_path": "",
+            }
+
+        def run_cli(args: List[str], timeout_sec: float = 6.0) -> str:
+            try:
+                completed = subprocess.run(
+                    args,
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout_sec,
+                    cwd=os.path.expanduser("~"),
+                )
+                return (completed.stdout or completed.stderr or "").strip()
+            except Exception as exc:
+                return f"ERROR: {exc}"
+
+        version_text = run_cli([resolved, "--version"], timeout_sec=6.0)
+        login_text = run_cli([resolved, "login", "status"], timeout_sec=8.0)
+        mcp_text = run_cli([resolved, "mcp", "list"], timeout_sec=8.0)
+
+        login_ok = "logged in" in login_text.lower()
+        computer_use_ok = self._has_enabled_computer_use_mcp(mcp_text)
+
+        status_bits = [f"v={version_text or 'unknown'}"]
+        status_bits.append("로그인됨" if login_ok else "로그인 필요")
+        status_bits.append("computer-use 준비됨" if computer_use_ok else "computer-use 미감지")
+        summary = "Codex " + " · ".join(status_bits)
+        level = "ok" if (login_ok and computer_use_ok) else ("warn" if login_ok else "error")
+        self._set_codex_status_text(summary, level=level)
+
+        if show_dialog:
+            body = (
+                f"실행 파일: {resolved}\n"
+                f"버전: {version_text or '확인 실패'}\n"
+                f"로그인: {login_text or '확인 실패'}\n"
+                f"computer-use: {'enabled' if computer_use_ok else 'not found/disabled'}"
+            )
+            if login_ok and computer_use_ok:
+                show_info(self, "Codex 상태 정상", body)
+            else:
+                show_warning(self, "Codex 상태 점검 필요", body)
+
+        return {
+            "available": True,
+            "login_ok": login_ok,
+            "computer_use_ok": computer_use_ok,
+            "version": version_text,
+            "resolved_path": resolved,
+        }
+
+    def _get_active_setup_step_id(self) -> str:
+        """Get current step id in setup assistant."""
+        if self._setup_running and 0 <= self._setup_step_index < len(self._setup_steps):
+            return self._setup_steps[self._setup_step_index]
+        return ""
+
+    def _build_codex_prompt_for_current_step(self) -> str:
+        """Build one step-scoped handoff prompt for Codex computer-use."""
+        step_id = self._get_active_setup_step_id()
+        step_meta = self.SETUP_STEP_DEFS.get(step_id, {})
+        step_title = step_meta.get("title", "수동 설정 지원")
+        scope = str(self._setup_scope or "all")
+
+        focus_map = {
+            "youtube": "YouTube OAuth 연결",
+            "tiktok": "TikTok OAuth 연결",
+            "instagram": "Instagram 계정 연결",
+            "threads": "Threads 계정 연결",
+            "linktree": "Linktree 프로필 설정",
+            "precheck": "Gemini API 키 확인",
+        }
+        focus_key = "general"
+        for candidate in ("youtube", "tiktok", "instagram", "threads", "linktree", "precheck"):
+            if step_id.startswith(candidate):
+                focus_key = candidate
+                break
+
+        focus_text = focus_map.get(focus_key, "소셜 자동설정")
+        suggested_pages = {
+            "youtube": "https://console.cloud.google.com/ , https://www.youtube.com/",
+            "tiktok": "https://developers.tiktok.com/ , https://www.tiktok.com/login",
+            "instagram": "https://www.instagram.com/accounts/login/ , https://developers.facebook.com/apps/",
+            "threads": "https://www.threads.com/login , https://developers.facebook.com/apps/",
+            "linktree": "https://linktr.ee/admin/links",
+            "precheck": "https://aistudio.google.com/app/apikey",
+            "general": "https://aistudio.google.com/app/apikey , https://www.youtube.com/ , https://developers.tiktok.com/ , https://linktr.ee/admin/links",
+        }
+        pages = suggested_pages.get(focus_key, suggested_pages["general"])
+        if os.name == "nt":
+            host_os = "Windows"
+        elif sys.platform == "darwin":
+            host_os = "macOS"
+        else:
+            host_os = "Linux"
+
+        return (
+            f"You are helping configure NewshoppingShorts on {host_os} using computer-use.\n"
+            f"Current setup scope: {scope}\n"
+            f"Current step: {step_title} ({step_id or 'manual'})\n"
+            f"Primary focus: {focus_text}\n\n"
+            "Rules:\n"
+            "1) You handle all navigation, page transitions, form fill, and non-sensitive clicks.\n"
+            "2) Ask the human only for login, 2FA, CAPTCHA, legal consent, API-key issuance, or payment decisions.\n"
+            "3) After human-only actions complete, continue automatically from the current page.\n"
+            "4) If you obtain callback URL/code/API key/profile URL, tell the user to copy it. This app auto-reads clipboard.\n"
+            "5) Never perform destructive or irreversible actions.\n\n"
+            f"Start by opening relevant pages: {pages}\n"
+            "Then proceed step-by-step until this current step is done."
+        )
+
+    def _submit_computer_use_bridge_job(self, bridge_url: str, api_key: str, prompt: str) -> Dict[str, Any]:
+        """Submit one computer-use job to a remote bridge server."""
+        user_id = self._extract_logged_in_user_id()
+        login_token = self._extract_logged_in_token()
+        if not login_token:
+            raise ValueError("로그인 토큰이 없어 브리지 요청을 보낼 수 없습니다.")
+        step_id = self._get_active_setup_step_id()
+        payload = {
+            "user_id": user_id,
+            "scope": str(self._setup_scope or "all"),
+            "step_id": step_id,
+            "step_title": self.SETUP_STEP_DEFS.get(step_id, {}).get("title", ""),
+            "prompt": prompt,
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {login_token}",
+        }
+        token = str(api_key or "").strip()
+        if token:
+            headers["X-Bridge-API-Key"] = token
+
+        base = str(bridge_url or "").strip().rstrip("/")
+        url = f"{base}/v1/computer-use/jobs"
+        response = requests.post(url, json=payload, headers=headers, timeout=20)
+        try:
+            body = response.json()
+        except Exception:
+            body = {"raw": response.text[:500]}
+
+        return {
+            "ok": 200 <= response.status_code < 300,
+            "status_code": response.status_code,
+            "body": body,
+            "url": url,
+        }
+
+    @staticmethod
+    def _escape_for_applescript(raw_text: str) -> str:
+        """Escape shell command text for AppleScript string literal."""
+        return str(raw_text or "").replace("\\", "\\\\").replace("\"", "\\\"")
+
+    def _launch_codex_terminal_process(self, args: List[str], workspace: str) -> None:
+        """
+        Launch Codex in a new terminal window according to host OS.
+
+        - Windows: new cmd console (/k keeps session open)
+        - macOS: Terminal via AppleScript
+        - Linux/other: best-effort x-terminal-emulator fallback
+        """
+        if os.name == "nt":
+            windows_cmd = subprocess.list2cmdline(args)
+            creation_flags = int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            subprocess.Popen(
+                ["cmd.exe", "/k", windows_cmd],
+                cwd=workspace,
+                creationflags=creation_flags,
+            )
+            return
+
+        posix_cmd = " ".join(shlex.quote(part) for part in args)
+        if sys.platform == "darwin":
+            apple_script_lines = [
+                'tell application "Terminal"',
+                "activate",
+                f'do script "{self._escape_for_applescript(posix_cmd)}"',
+                "end tell",
+            ]
+            osa_args: List[str] = []
+            for line in apple_script_lines:
+                osa_args.extend(["-e", line])
+            subprocess.run(["osascript", *osa_args], check=True, timeout=8)
+            return
+
+        subprocess.Popen(
+            ["x-terminal-emulator", "-e", "bash", "-lc", posix_cmd],
+            cwd=workspace,
+        )
+
+    def _launch_codex_for_current_step(self):
+        """Open a new terminal and start Codex with a step-scoped computer-use prompt."""
+        from ui.components.custom_dialog import show_info, show_warning, show_error
+
+        if not self._is_paid_user_for_computer_use(force_refresh=True):
+            show_warning(
+                self,
+                "유료 기능",
+                "Computer Use 자동화는 유료 사용자 전용입니다.\n"
+                "무료 사용자는 기존 수동 설정 흐름을 사용해주세요.",
+            )
+            return
+
+        try:
+            cu_settings = get_settings_manager().get_computer_use_settings()
+        except Exception:
+            cu_settings = {"bridge_enabled": False, "bridge_url": "", "bridge_api_key": ""}
+
+        prompt = self._build_codex_prompt_for_current_step()
+
+        bridge_enabled = bool(cu_settings.get("bridge_enabled", False))
+        bridge_url = str(cu_settings.get("bridge_url", "") or "").strip()
+        bridge_api_key = str(cu_settings.get("bridge_api_key", "") or "").strip()
+        if bridge_enabled and bridge_url:
+            try:
+                result = self._submit_computer_use_bridge_job(bridge_url, bridge_api_key, prompt)
+            except Exception as exc:
+                show_error(self, "브리지 요청 실패", f"서버 브리지 호출 중 오류가 발생했습니다.\n{exc}")
+                return
+
+            if not result.get("ok"):
+                show_error(
+                    self,
+                    "브리지 요청 실패",
+                    f"HTTP {result.get('status_code')} 응답입니다.\n"
+                    f"URL: {result.get('url')}\n"
+                    f"응답: {result.get('body')}",
+                )
+                return
+
+            body = result.get("body") or {}
+            job_id = str(body.get("job_id", "") or body.get("id", "") or "").strip()
+            self._append_setup_log(f"Computer Use 브리지 작업 요청 완료: {job_id or 'no-id'}")
+            show_info(
+                self,
+                "브리지 작업 접수",
+                "서버 공용 Computer Use 작업이 접수되었습니다.\n"
+                f"job_id: {job_id or '-'}",
+            )
+            return
+
+        status = self._refresh_codex_cli_status(show_dialog=False)
+        if not status.get("available"):
+            show_warning(self, "Codex 실행 불가", "Codex CLI 실행 파일을 찾지 못했습니다. 경로를 확인하세요.")
+            return
+        if not status.get("login_ok"):
+            show_warning(
+                self,
+                "Codex 로그인 필요",
+                "Codex CLI가 로그인되지 않았습니다.\n터미널에서 `codex login` 후 다시 시도하세요.",
+            )
+            return
+        if not status.get("computer_use_ok"):
+            show_warning(
+                self,
+                "computer-use 미준비",
+                "Codex CLI에서 computer-use MCP가 활성화되지 않았습니다.\n`codex mcp list` 결과를 확인하세요.",
+            )
+            return
+
+        try:
+            cli_settings = get_settings_manager().get_codex_cli_settings()
+        except Exception:
+            cli_settings = {"path": "codex", "model": ""}
+
+        codex_path = str(status.get("resolved_path", "") or "").strip()
+        model_name = str(cli_settings.get("model", "") or "").strip()
+        workspace = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+        args = [codex_path, "--cd", workspace]
+        if model_name:
+            args.extend(["--model", model_name])
+        args.append(prompt)
+
+        try:
+            self._launch_codex_terminal_process(args=args, workspace=workspace)
+            step_id = self._get_active_setup_step_id()
+            step_title = self.SETUP_STEP_DEFS.get(step_id, {}).get("title", "수동 설정 지원")
+            self._append_setup_log(f"Codex Computer Use 실행: {step_title}")
+            show_info(
+                self,
+                "Codex 실행 완료",
+                "새 터미널에서 Codex가 시작되었습니다.\n"
+                "로그인/2FA/CAPTCHA/API 키 발급만 직접 처리하고, 나머지는 Codex가 진행하도록 맡기세요.",
+            )
+        except Exception as exc:
+            show_error(self, "Codex 실행 실패", f"터미널 실행 중 오류가 발생했습니다.\n{exc}")
+
+    def _on_setup_done_clicked(self):
+        """Handle '완료했어요' click for waiting-user steps."""
+        from ui.components.custom_dialog import show_warning
+
+        if not self._setup_running or not self._setup_waiting_user:
+            return
+        if self._setup_step_index < 0 or self._setup_step_index >= len(self._setup_steps):
+            return
+        step_id = self._setup_steps[self._setup_step_index]
+        rerun_current_step = False
+
+        if step_id == "precheck":
+            if self._get_saved_gemini_key_count() <= 0:
+                show_warning(self, "API 키 필요", "Gemini API 키를 최소 1개 저장한 뒤 다시 눌러주세요.")
+                return
+        elif step_id in ("youtube_user_auth", "youtube_verify"):
+            if not self._is_youtube_connected():
+                show_warning(self, "YouTube 미연결", "아직 YouTube 연결이 확인되지 않았습니다. OAuth 인증을 완료해주세요.")
+                return
+            rerun_current_step = step_id == "youtube_verify"
+        elif step_id == "tiktok_prepare":
+            rerun_current_step = True
+        elif step_id == "tiktok_user_auth":
+            raw_code = self.setup_tiktok_code_input.text() if hasattr(self, "setup_tiktok_code_input") else ""
+            if not self._extract_oauth_code(raw_code):
+                show_warning(self, "TikTok code 필요", "TikTok 인증 후 callback URL의 code 값을 입력해주세요.")
+                return
+        elif step_id == "tiktok_code_exchange":
+            raw_code = self.setup_tiktok_code_input.text() if hasattr(self, "setup_tiktok_code_input") else ""
+            auth_code = self._extract_oauth_code(raw_code)
+            if not auth_code:
+                show_warning(self, "TikTok code 필요", "TikTok 인증 후 callback URL의 code 값을 입력해주세요.")
+                return
+            self.setup_tiktok_code_input.setText(auth_code)
+            rerun_current_step = True
+        elif step_id == "tiktok_verify":
+            if not self._is_tiktok_connected():
+                show_warning(self, "TikTok 미연결", "아직 TikTok 연결이 확인되지 않았습니다. code 교환을 완료해주세요.")
+                return
+            rerun_current_step = True
+        elif step_id in ("instagram_user_setup", "instagram_verify"):
+            handle = self._normalize_social_account_input(
+                self.setup_instagram_handle_input.text() if hasattr(self, "setup_instagram_handle_input") else ""
+            )
+            if not handle:
+                show_warning(self, "Instagram 계정 확인", "Instagram 계정명(또는 프로필 URL)을 입력해주세요.")
+                return
+            self.setup_instagram_handle_input.setText(handle)
+            rerun_current_step = step_id == "instagram_verify"
+        elif step_id in ("threads_user_setup", "threads_verify"):
+            handle = self._normalize_social_account_input(
+                self.setup_threads_handle_input.text() if hasattr(self, "setup_threads_handle_input") else ""
+            )
+            if not handle:
+                show_warning(self, "Threads 계정 확인", "Threads 계정명(또는 프로필 URL)을 입력해주세요.")
+                return
+            self.setup_threads_handle_input.setText(handle)
+            rerun_current_step = step_id == "threads_verify"
+        elif step_id == "linktree_user_setup":
+            profile_url = self._normalize_http_url(self.linktree_profile_input.text())
+            if not self._is_valid_http_url(profile_url):
+                show_warning(self, "Linktree 주소 확인", "올바른 Linktree 공개 주소를 입력해주세요.")
+                return
+            self.linktree_profile_input.setText(profile_url)
+        elif step_id == "linktree_save_verify":
+            profile_url = self._normalize_http_url(self.linktree_profile_input.text())
+            if not self._is_valid_http_url(profile_url):
+                show_warning(self, "Linktree 주소 확인", "올바른 Linktree 공개 주소를 입력해주세요.")
+                return
+            self.linktree_profile_input.setText(profile_url)
+            rerun_current_step = True
+        elif step_id == "final_verify":
+            rerun_current_step = True
+
+        self._setup_waiting_user = False
+        if rerun_current_step:
+            self._append_setup_log(f"사용자 확인 완료: {self.SETUP_STEP_DEFS[step_id]['title']} (재검증)")
+            self._run_setup_step()
+            return
+
+        self._set_setup_row_state(step_id, "done")
+        self._append_setup_log(f"사용자 단계 완료 확인: {self.SETUP_STEP_DEFS[step_id]['title']}")
+        self._advance_setup_step()
+
+    def _on_setup_retry_clicked(self):
+        """Retry current setup step."""
+        if not self._setup_running:
+            return
+        self._append_setup_log("현재 단계를 재검증합니다.")
+        self._run_setup_step()
     
     def _load_link_automation_settings(self):
         """Load Coupang/Linktree automation settings into UI controls."""
@@ -700,20 +3122,82 @@ class SettingsTab(QWidget, ThemedMixin):
             self.linktree_api_key_input.setText(linktree.get("api_key", ""))
             self.linktree_profile_input.setText(linktree.get("profile_url", ""))
             self.linktree_auto_checkbox.setChecked(bool(linktree.get("auto_publish", False)))
+
+            if hasattr(self, "setup_instagram_handle_input"):
+                saved_instagram = settings.get_social_account_name("instagram")
+                if saved_instagram and not self.setup_instagram_handle_input.text().strip():
+                    self.setup_instagram_handle_input.setText(saved_instagram)
+            if hasattr(self, "setup_threads_handle_input"):
+                saved_threads = settings.get_social_account_name("threads")
+                if saved_threads and not self.setup_threads_handle_input.text().strip():
+                    self.setup_threads_handle_input.setText(saved_threads)
+
+            has_advanced_settings = any([
+                coupang.get("access_key"),
+                coupang.get("secret_key"),
+                linktree.get("webhook_url"),
+                linktree.get("api_key"),
+                linktree.get("auto_publish", False),
+            ])
+            self._set_link_advanced_visible(has_advanced_settings)
             self._update_link_automation_status()
+            self._refresh_setup_assistant_status()
         except Exception as exc:
             logger.warning("[Settings] Failed to load link automation settings: %s", exc)
+
+    def _set_link_advanced_visible(self, visible: bool):
+        """Show or hide optional Coupang/Webhook fields."""
+        if hasattr(self, "link_advanced_container"):
+            self.link_advanced_container.setVisible(bool(visible))
+
+        if hasattr(self, "link_advanced_toggle") and self.link_advanced_toggle.isChecked() != bool(visible):
+            self.link_advanced_toggle.blockSignals(True)
+            self.link_advanced_toggle.setChecked(bool(visible))
+            self.link_advanced_toggle.blockSignals(False)
 
     def _update_link_automation_status(self):
         """Refresh status label for Coupang/Linktree setup."""
         coupang_ready = bool(self.coupang_access_input.text().strip() and self.coupang_secret_input.text().strip())
-        linktree_ready = bool(self.linktree_webhook_input.text().strip())
+        linktree_profile_ready = bool(self.linktree_profile_input.text().strip())
+        linktree_auto_ready = bool(self.linktree_webhook_input.text().strip())
         auto_enabled = bool(self.linktree_auto_checkbox.isChecked())
-        self.link_automation_status.setText(
-            f"상태: Coupang={'설정됨' if coupang_ready else '미설정'} / "
-            f"Linktree={'설정됨' if linktree_ready else '미설정'} / "
-            f"Auto={'ON' if auto_enabled else 'OFF'}"
-        )
+
+        status_parts = ["공개 주소 저장됨" if linktree_profile_ready else "공개 주소 미설정"]
+        if coupang_ready:
+            status_parts.append("쿠팡 자동 딥링크 준비")
+        if auto_enabled:
+            status_parts.append("Linktree 자동 발행 준비" if linktree_auto_ready else "자동 발행은 Webhook 필요")
+        elif linktree_auto_ready:
+            status_parts.append("Webhook 저장됨")
+
+        self.link_automation_status.setText("상태: " + " · ".join(status_parts))
+        if hasattr(self, "setup_chip_gemini"):
+            self._refresh_setup_assistant_status()
+
+    def _open_external_url(self, url: str):
+        """Open a setup URL in the user's default browser."""
+        QDesktopServices.openUrl(QUrl(url))
+
+    def _open_linktree_signup(self):
+        self._open_external_url(LINKTREE_SIGNUP_URL)
+
+    def _open_linktree_admin(self):
+        self._open_external_url(LINKTREE_ADMIN_URL)
+
+    def _open_linktree_profile(self):
+        from ui.components.custom_dialog import show_warning
+
+        profile_url = self.linktree_profile_input.text().strip()
+        if not profile_url:
+            show_warning(
+                self,
+                "Linktree Profile 필요",
+                "먼저 Linktree 공개 주소를 입력해 주세요.\n예: https://linktr.ee/myshop",
+            )
+            return
+        if not profile_url.lower().startswith(("http://", "https://")):
+            profile_url = "https://" + profile_url
+        self._open_external_url(profile_url)
 
     def _save_coupang_settings(self):
         """Persist Coupang API keys."""
@@ -722,7 +3206,13 @@ class SettingsTab(QWidget, ThemedMixin):
         access_key = self.coupang_access_input.text().strip()
         secret_key = self.coupang_secret_input.text().strip()
         if not access_key or not secret_key:
-            show_warning(self, "입력 확인", "Coupang Access Key와 Secret Key를 모두 입력해 주세요.")
+            show_warning(
+                self,
+                "입력 확인",
+                "쿠팡 API Key는 필수 항목이 아닙니다.\n"
+                "원본 coupang.com 링크를 자동으로 파트너스 딥링크로 바꾸고 싶을 때만 "
+                "Coupang Access Key와 Secret Key를 모두 입력해 주세요.",
+            )
             return
 
         try:
@@ -731,6 +3221,7 @@ class SettingsTab(QWidget, ThemedMixin):
                 show_error(self, "저장 실패", "쿠팡 API 키를 저장하지 못했습니다.")
                 return
             self._update_link_automation_status()
+            self._refresh_setup_assistant_status()
             show_info(self, "저장 완료", "쿠팡 API 키를 저장했습니다.")
         except Exception as exc:
             logger.error("[Settings] Failed to save Coupang settings: %s", exc)
@@ -743,12 +3234,13 @@ class SettingsTab(QWidget, ThemedMixin):
         access_key = self.coupang_access_input.text().strip()
         secret_key = self.coupang_secret_input.text().strip()
         if not access_key or not secret_key:
-            show_warning(self, "입력 확인", "먼저 쿠팡 API 키를 입력하세요.")
+            show_warning(self, "입력 확인", "자동 딥링크 기능을 테스트하려면 쿠팡 API 키 2개를 모두 입력하세요.")
             return
 
         # Save latest input before running test.
         get_settings_manager().set_coupang_keys(access_key, secret_key)
         self._update_link_automation_status()
+        self._refresh_setup_assistant_status()
 
         try:
             manager = getattr(self.gui, "coupang_manager", None) if self.gui else None
@@ -780,6 +3272,15 @@ class SettingsTab(QWidget, ThemedMixin):
             show_warning(self, "입력 확인", "Linktree Profile URL은 http:// 또는 https:// 형식이어야 합니다.")
             return
 
+        if auto_publish and not webhook_url:
+            show_warning(
+                self,
+                "Webhook 필요",
+                "Linktree 자동 업로드를 켜려면 Webhook URL이 필요합니다.\n"
+                "처음이라면 자동 업로드 체크를 끄고 Profile URL만 먼저 저장해도 됩니다.",
+            )
+            return
+
         try:
             saved = get_settings_manager().set_linktree_settings(
                 webhook_url=webhook_url,
@@ -791,6 +3292,7 @@ class SettingsTab(QWidget, ThemedMixin):
                 show_error(self, "저장 실패", "링크트리 설정을 저장하지 못했습니다.")
                 return
             self._update_link_automation_status()
+            self._refresh_setup_assistant_status()
             show_info(self, "저장 완료", "링크트리 설정을 저장했습니다.")
         except Exception as exc:
             logger.error("[Settings] Failed to save Linktree settings: %s", exc)
@@ -802,7 +3304,12 @@ class SettingsTab(QWidget, ThemedMixin):
 
         webhook_url = self.linktree_webhook_input.text().strip()
         if not webhook_url:
-            show_warning(self, "입력 확인", "먼저 Linktree Webhook URL을 입력하세요.")
+            show_warning(
+                self,
+                "Webhook 필요",
+                "테스트 업로드는 Webhook URL이 있어야 보낼 수 있습니다.\n"
+                "처음 사용자는 위의 'Linktree 가입/로그인'과 '관리자 열기'로 수동 카드 추가부터 확인하세요.",
+            )
             return
 
         # Save latest input before running test.
@@ -813,6 +3320,7 @@ class SettingsTab(QWidget, ThemedMixin):
             auto_publish=self.linktree_auto_checkbox.isChecked(),
         )
         self._update_link_automation_status()
+        self._refresh_setup_assistant_status()
 
         try:
             manager = getattr(self.gui, "linktree_manager", None) if self.gui else None
@@ -926,6 +3434,7 @@ class SettingsTab(QWidget, ThemedMixin):
                 if key_value and i <= len(self.api_key_inputs):
                     self.api_key_inputs[i - 1].setText(key_value.strip())
             self._update_key_count()
+            self._refresh_setup_assistant_status()
         except Exception as e:
             from utils.logging_config import get_logger
             logger = get_logger(__name__)
@@ -1052,6 +3561,7 @@ class SettingsTab(QWidget, ThemedMixin):
                 self.gui.init_client()
 
         self._update_key_count()
+        self._refresh_setup_assistant_status()
 
         if saved_count > 0:
             show_info(self, "저장 완료", f"총 {saved_count}개의 API 키가 순서대로 정렬되어 저장되었습니다.")
@@ -1082,6 +3592,7 @@ class SettingsTab(QWidget, ThemedMixin):
         config.GEMINI_API_KEYS = {}
 
         self._update_key_count()
+        self._refresh_setup_assistant_status()
         show_info(self, "삭제 완료", "모든 API 키가 삭제되었습니다.")
     
     @staticmethod
@@ -1144,6 +3655,8 @@ class SettingsTab(QWidget, ThemedMixin):
     def showEvent(self, event):
         super().showEvent(event)
         QTimer.singleShot(0, self.refresh_work_community_stats)
+        QTimer.singleShot(0, self._refresh_setup_assistant_status)
+        QTimer.singleShot(0, self._refresh_computer_use_access_ui)
 
     def _apply_theme(self):
         c = self.ds.colors

@@ -5,6 +5,8 @@ Payment Error Tracker
 
 결제 실패/오류를 기록하고 사용자별 통계를 관리합니다.
 """
+from __future__ import annotations
+
 import json
 import logging
 from datetime import datetime, timezone

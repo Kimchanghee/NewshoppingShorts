@@ -235,7 +235,6 @@ class SubtitleProcessor:
             self.gui.update_progress_state(
                 "subtitle", "error", 0, "중국어 자막 처리 중 오류가 발생했어요."
             )
-            self.gui.update_step_progress("subtitle", 0)
             return video
 
     def apply_opencv_blur_enhanced(self, video, subtitle_positions, w, h):

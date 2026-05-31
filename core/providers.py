@@ -79,15 +79,59 @@ class VertexGeminiProvider:
         """Call Gemini API."""
         if not self.gemini_client:
             return None
-        try:
-            resp = self.gemini_client.models.generate_content(
-                model=config.GEMINI_TEXT_MODEL,
-                contents=prompt
+
+        def _model_chain() -> list[str]:
+            chain: list[str] = []
+
+            def _add(name: str):
+                n = (name or "").strip()
+                if n and n not in chain:
+                    chain.append(n)
+
+            _add(getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.5-flash"))
+            for env_name in os.getenv("GEMINI_TEXT_MODEL_FALLBACKS", "").split(","):
+                _add(env_name)
+            _add("gemini-3.5-flash")
+            _add("gemini-3.1-pro-preview")
+            _add("gemini-2.5-pro")
+            _add("gemini-2.5-flash")
+            return chain
+
+        def _is_model_not_found_error(exc: Exception) -> bool:
+            msg = str(exc).lower()
+            return (
+                ("404" in msg and "not_found" in msg)
+                or "model not found" in msg
+                or "no longer available to new users" in msg
             )
-            return getattr(resp, "text", None)
-        except Exception as e:
-            logger.error(f"[Provider] Gemini call failed: {e}")
-            return None
+
+        last_error: Optional[Exception] = None
+        primary = getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.5-flash")
+        candidates = _model_chain()
+
+        for idx, model_name in enumerate(candidates, start=1):
+            try:
+                resp = self.gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                )
+                text = getattr(resp, "text", None)
+                if text and model_name != primary:
+                    logger.info("[Provider] Gemini model fallback: %s -> %s", primary, model_name)
+                return text
+            except Exception as e:
+                last_error = e
+                if idx < len(candidates) and _is_model_not_found_error(e):
+                    logger.warning(
+                        "[Provider] Model unavailable (%s), trying fallback model",
+                        model_name,
+                    )
+                    continue
+                break
+
+        if last_error:
+            logger.error(f"[Provider] Gemini call failed: {last_error}")
+        return None
 
     def generate_text(self, prompt: str) -> str:
         """Generate text using Gemini API."""
@@ -97,4 +141,3 @@ class VertexGeminiProvider:
         if text:
             return text
         return "Gemini API 호출에 실패했습니다. 잠시 후 다시 시도해주세요."
-

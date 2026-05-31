@@ -1,0 +1,259 @@
+# -*- coding: utf-8 -*-
+"""
+쿠팡 풀 자동화 — YouTube 업로드 단독 실행 스크립트.
+
+전제:
+  - ~/.ssmaker/.ssmaker_credentials/youtube/client_secrets.json 이 존재 (Cloud Console에서 발급한 Desktop OAuth client)
+  - ~/.ssmaker/sourcing_output/ 에 업로드할 영상 파일이 있음
+
+수행:
+  1. YouTubeManager.connect_channel() 호출 → 첫 실행 시 브라우저 열려 OAuth 동의 후 토큰 자동 저장 (~/.ssmaker/youtube_token.json)
+  2. add_to_upload_queue() 로 큐에 영상 등록 (제목/설명/태그 자동 SEO 생성)
+  3. _upload_video() 직접 호출로 즉시 업로드 (스레드 루프 안 거침)
+  4. 업로드 완료 후 https://youtu.be/{video_id} 출력
+
+사용:
+    cd ~/Documents/github/NewshoppingShorts
+    source .venv/bin/activate
+    python run_youtube_upload.py
+또는 영상 파일 경로 명시:
+    python run_youtube_upload.py /Users/aicompany/.ssmaker/sourcing_output/sourcing_aliexpress_2_video.mp4
+또는 쿠팡 URL까지 명시:
+    python run_youtube_upload.py /path/to/video.mp4 "https://link.coupang.com/a/..."
+또는 공개 범위까지 명시:
+    python run_youtube_upload.py /path/to/video.mp4 "https://link.coupang.com/a/..." public
+"""
+from __future__ import annotations
+
+import json
+import os
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(ROOT))
+
+# .env 로드 (Gemini key 등)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env")
+except ImportError:
+    pass
+
+
+COUPANG_URL = "https://www.coupang.com/vp/products/9423373566?itemId=28009663306"
+DEFAULT_VIDEO = os.path.expanduser("~/.ssmaker/sourcing_output/sourcing_aliexpress_2_video.mp4")
+PRODUCT_INFO = "쿠팡에서 발견한 추천 상품! 가성비 좋은 인기템 소개합니다."
+COUPANG_AFFILIATE_DISCLOSURE = (
+    "이 게시물은 쿠팡 파트너스 활동의 일환으로, "
+    "이에 따른 일정액의 수수료를 제공받습니다."
+)
+
+
+def _load_context(video_path: str, coupang_url: str = "") -> dict:
+    """Best-effort metadata from the newest sourcing report for this video."""
+    out_dir = Path(os.path.expanduser("~/.ssmaker/sourcing_output"))
+    video_abs = os.path.abspath(os.path.expanduser(video_path))
+    reports = sorted(out_dir.glob("report_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+
+    def _context_from_report(data: dict) -> dict:
+        product = data.get("product_info") or {}
+        matched_item = {}
+        for item in data.get("sourced_products") or data.get("sourcing_results") or []:
+            if os.path.abspath(str(item.get("video_file", ""))) == video_abs:
+                matched_item = item
+                break
+        return {
+            "coupang_url": data.get("deep_link") or coupang_url or data.get("coupang_url") or COUPANG_URL,
+            "source_url": data.get("coupang_url") or coupang_url or COUPANG_URL,
+            "product_name": product.get("name") or "",
+            "description": data.get("description") or "",
+            "source": str(matched_item.get("source") or ""),
+            "auto_publish_safe": matched_item.get("auto_publish_safe"),
+            "requires_review": matched_item.get("requires_review"),
+        }
+
+    for report_path in reports:
+        try:
+            data = json.loads(report_path.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        items = data.get("sourced_products") or data.get("sourcing_results") or []
+        if any(os.path.abspath(str(item.get("video_file", ""))) == video_abs for item in items):
+            return _context_from_report(data)
+
+    if coupang_url:
+        for report_path in reports:
+            try:
+                data = json.loads(report_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if data.get("coupang_url") == coupang_url:
+                return _context_from_report(data)
+
+    return {
+        "coupang_url": coupang_url or COUPANG_URL,
+        "source_url": coupang_url or COUPANG_URL,
+        "product_name": "",
+        "description": "",
+        "source": "",
+        "auto_publish_safe": None,
+        "requires_review": None,
+    }
+
+
+def _is_review_only_fallback(video_path: str, context: dict) -> bool:
+    source = str(context.get("source") or "").lower()
+    auto_publish_safe = context.get("auto_publish_safe")
+    requires_review = context.get("requires_review")
+    basename = os.path.basename(str(video_path))
+    return (
+        source == "coupang_image"
+        or basename.startswith("sourcing_coupang_image")
+        or auto_publish_safe is False
+        or requires_review is True
+    )
+
+
+def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> int:
+    if not os.path.exists(video_path):
+        print(f"[!] 영상 파일이 없습니다: {video_path}")
+        return 1
+
+    privacy = (privacy or "unlisted").strip().lower()
+    if privacy not in {"private", "unlisted", "public"}:
+        print(f"[!] 공개 범위가 올바르지 않습니다: {privacy} (private/unlisted/public)")
+        return 1
+
+    context = _load_context(video_path, coupang_url)
+    product_name = context.get("product_name") or PRODUCT_INFO
+    purchase_url = context.get("coupang_url") or coupang_url or COUPANG_URL
+    source_url = context.get("source_url") or purchase_url
+
+    if (
+        privacy == "public"
+        and _is_review_only_fallback(video_path, context)
+        and os.environ.get("ALLOW_COUPANG_IMAGE_PUBLIC_UPLOAD") != "1"
+    ):
+        print("[!] 공개 업로드 차단: 쿠팡 상품 이미지 폴백 영상은 검수 필요 소스입니다.")
+        print("    실제 상품 시연 영상이 잡히지 않은 상태라 쇼츠 품질 기준을 통과하지 못합니다.")
+        print("    정말 공개 업로드가 필요하면 ALLOW_COUPANG_IMAGE_PUBLIC_UPLOAD=1 을 설정하세요.")
+        return 6
+
+    print("=" * 70)
+    print("[+] YouTube 업로드 시작")
+    print(f"[+] 영상: {video_path} ({os.path.getsize(video_path)/1024/1024:.1f} MB)")
+    print(f"[+] 상품: {product_name[:80]}")
+    print(f"[+] 링크: {purchase_url}")
+    print("=" * 70)
+
+    from managers.youtube_manager import get_youtube_manager, YOUTUBE_API_AVAILABLE
+
+    if not YOUTUBE_API_AVAILABLE:
+        print("[!] google-api-python-client / google-auth-oauthlib 미설치. requirements.txt 확인.")
+        return 2
+
+    yt = get_youtube_manager()
+    if os.environ.get("YOUTUBE_FORCE_RECONNECT", "").lower() in {"1", "true", "yes"}:
+        print("[*] YOUTUBE_FORCE_RECONNECT=1 — 저장된 YouTube 토큰을 끊고 다시 인증합니다.")
+        yt.disconnect_channel()
+
+    # 1) 채널 연결 (첫 실행 시 브라우저 OAuth 동의 창 자동으로 열림)
+    print("[1/3] YouTube 채널 OAuth 연결 중... (첫 실행이면 브라우저가 열립니다)")
+    if not yt.connect_channel(oauth_timeout_seconds=300):
+        print(f"[!] 채널 연결 실패: {yt.get_last_error()}")
+        return 3
+    info = yt.get_channel_info()
+    print(f"[+] 연결됨: {info.get('channel_name', '')} (ID={info.get('id', '')})")
+    print(f"    구독자: {info.get('subscriber_count', '0')}, 영상: {info.get('video_count', '0')}")
+
+    expected_channel_id = os.environ.get("EXPECTED_YOUTUBE_CHANNEL_ID", "").strip()
+    expected_channel_name = os.environ.get("EXPECTED_YOUTUBE_CHANNEL_NAME", "").strip()
+    if expected_channel_id and info.get("id") != expected_channel_id:
+        print("[!] 업로드 중단: 연결된 YouTube 채널 ID가 기대값과 다릅니다.")
+        print(f"    현재: {info.get('channel_name', '')} ({info.get('id', '')})")
+        print(f"    기대: {expected_channel_name or '(name not set)'} ({expected_channel_id})")
+        return 7
+    if expected_channel_name and info.get("channel_name") != expected_channel_name:
+        print("[!] 업로드 중단: 연결된 YouTube 채널명이 기대값과 다릅니다.")
+        print(f"    현재: {info.get('channel_name', '')} ({info.get('id', '')})")
+        print(f"    기대: {expected_channel_name} ({expected_channel_id or 'id not set'})")
+        return 7
+
+    # 2) 기본은 unlisted, 승인 증빙처럼 공개 페이지가 필요할 때만 public 지정
+    yt._upload_settings.default_privacy = privacy
+    yt._upload_settings.made_for_kids = False
+    yt._upload_settings.auto_title = True
+    yt._upload_settings.auto_description = True
+    yt._upload_settings.auto_hashtags = True
+
+    try:
+        from managers.linktree_manager import DEFAULT_LINKTREE_PROFILE_URL, get_linktree_manager
+        linktree_url = get_linktree_manager().get_profile_url() or DEFAULT_LINKTREE_PROFILE_URL
+    except Exception:
+        linktree_url = "https://linktr.ee/studio.idol"
+
+    # 3) 큐에 추가 (제목/설명/태그 자동 SEO)
+    short_name = product_name[:42] if product_name else "쿠팡 추천 상품"
+    title = f"[광고] 꿀템 발견! {short_name} #shorts"
+    desc_lines = [
+        COUPANG_AFFILIATE_DISCLOSURE,
+        "",
+        f"오늘의 쇼핑 추천: {product_name}",
+        "",
+        "🛒 상품 보기:",
+        purchase_url,
+        "",
+        "🔗 모든 상품 모음:",
+        linktree_url,
+        "",
+        "─" * 20,
+        "실사용에 가까운 쇼핑 정보와 자동화된 상품 소개 영상을 제공합니다.",
+    ]
+    description = "\n".join(desc_lines)
+    tags = ["쇼핑", "추천", "꿀템", "쿠팡", "쇼츠", "shorts", "자동화", "automation"]
+
+    item = {
+        "video_path": video_path,
+        "title": title,
+        "description": description,
+        "tags": tags,
+        "product_info": product_name,
+        "source_url": source_url,
+        "coupang_deep_link": purchase_url,
+        "linktree_url": linktree_url,
+    }
+    print(f"[2/3] 업로드 아이템 준비됨: {title}")
+
+    # 4) 아이템 즉시 업로드 (자동 업로드 스레드/큐와 경쟁하지 않음)
+    print(f"[3/3] 업로드 진행 중... (대용량이면 시간 걸립니다)")
+
+    success = yt._upload_video(item)
+    if not success:
+        print("[!] 업로드 실패. ~/.ssmaker/logs/ssmaker.log 확인.")
+        return 5
+
+    video_url = item.get("video_url") or (
+        "https://youtu.be/" + item["video_id"] if item.get("video_id") else ""
+    )
+
+    print("=" * 70)
+    print("[✓] YouTube 업로드 완료!")
+    if video_url:
+        print(f"    영상: {video_url}")
+    print("    채널: https://www.youtube.com/channel/" + (info.get("id") or ""))
+    print(f"    공개설정: {privacy}")
+    try:
+        guide_path = yt.write_coupang_partners_submission_guide(linktree_url=linktree_url)
+        print(f"    쿠팡 재신청 체크리스트: {guide_path}")
+    except Exception as guide_error:
+        print(f"    쿠팡 재신청 체크리스트 생성 실패: {guide_error}")
+    print("=" * 70)
+    return 0
+
+
+if __name__ == "__main__":
+    video = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_VIDEO
+    url = sys.argv[2] if len(sys.argv) > 2 else ""
+    privacy = sys.argv[3] if len(sys.argv) > 3 else os.environ.get("YOUTUBE_PRIVACY", "unlisted")
+    sys.exit(main(video, url, privacy))

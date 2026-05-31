@@ -293,6 +293,43 @@ class TestAuthentication:
         )
         assert response.status_code == 403
 
+    def test_version_check_uses_github_fallback_when_server_metadata_is_stale(self, client, monkeypatch):
+        """Version check should not be pinned to stale persisted metadata."""
+        from app import main
+
+        monkeypatch.setattr(
+            main,
+            "APP_VERSION_INFO",
+            {
+                "version": "1.4.39",
+                "min_required_version": "1.0.0",
+                "download_url": "https://github.com/example/old.exe",
+                "release_notes": "old",
+                "is_mandatory": False,
+                "file_hash": "1" * 64,
+            },
+        )
+        monkeypatch.setattr(
+            main,
+            "_fetch_github_release_version_info",
+            lambda: {
+                "version": "1.4.43",
+                "download_url": "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v1.4.43/SSMaker_Setup_v1.4.43.exe",
+                "release_notes": "new",
+                "is_mandatory": False,
+                "file_hash": "a" * 64,
+                "update_channel": "stable",
+            },
+        )
+
+        response = client.get("/app/version/check?current_version=1.4.42")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["update_available"] is True
+        assert payload["latest_version"] == "1.4.43"
+        assert payload["file_hash"] == "a" * 64
+
 
 # ===== 6. SSRF Prevention =====
 
@@ -411,6 +448,98 @@ class TestSensitiveFieldSet:
 
 
 class TestPayAppContract:
+    def test_test_payment_plan_is_configured(self):
+        from app.routers.payment import (
+            PLAN_DAYS,
+            PLAN_NAMES,
+            PLAN_PRICES,
+            PROMOTION_EXCLUDED_PLAN_IDS,
+            get_sellable_plan_price,
+        )
+
+        assert PLAN_PRICES["test_3days"] == 5000
+        assert PLAN_DAYS["test_3days"] == 3
+        assert PLAN_NAMES["test_3days"] == "테스트 3일"
+        assert PLAN_PRICES["test_7days"] == 49000
+        assert PLAN_DAYS["test_7days"] == 7
+        assert PLAN_NAMES["test_7days"] == "1주 테스트 상품"
+        assert PLAN_PRICES["pro_1month"] == 149000
+        assert "test_3days" in PROMOTION_EXCLUDED_PLAN_IDS
+        assert "test_7days" in PROMOTION_EXCLUDED_PLAN_IDS
+        assert get_sellable_plan_price("test_3days") is None
+        assert get_sellable_plan_price("test_7days") == 49000
+
+    def test_payment_base_url_falls_back_to_public_api_in_production(self, monkeypatch):
+        from types import SimpleNamespace
+        from app.routers.payment import _resolve_payment_base_url
+
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.delenv("PAYMENT_API_BASE_URL", raising=False)
+        monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
+
+        request = SimpleNamespace(base_url="http://untrusted.example.test/")
+        assert _resolve_payment_base_url(request) == "https://13-124-7-65.nip.io"
+
+    def test_payment_base_url_prefers_configured_url(self, monkeypatch):
+        from types import SimpleNamespace
+        from app.routers.payment import _resolve_payment_base_url
+
+        monkeypatch.setenv("ENVIRONMENT", "production")
+        monkeypatch.setenv("PAYMENT_API_BASE_URL", "https://payments.example.com/")
+
+        request = SimpleNamespace(base_url="http://untrusted.example.test/")
+        assert _resolve_payment_base_url(request) == "https://payments.example.com"
+
+    def test_test_plan_activation_ignores_trial_expiry(self, monkeypatch):
+        from datetime import datetime, timedelta, timezone
+        from types import SimpleNamespace
+
+        from app.models.user import UserType
+        from app.routers import payment
+
+        now = datetime.now(timezone.utc)
+        trial_expiry = now + timedelta(days=365)
+        user = SimpleNamespace(
+            id=7,
+            user_type=UserType.TRIAL,
+            subscription_expires_at=trial_expiry,
+            created_at=now,
+            work_count=5,
+            work_used=2,
+        )
+
+        class FakeQuery:
+            def filter(self, *_args, **_kwargs):
+                return self
+
+            def first(self):
+                return user
+
+        class FakeDB:
+            def __init__(self):
+                self.committed = False
+
+            def query(self, _model):
+                return FakeQuery()
+
+            def commit(self):
+                self.committed = True
+
+            def rollback(self):
+                pass
+
+        monkeypatch.setattr(payment, "update_user_payment_stats", lambda *_args, **_kwargs: None)
+
+        db = FakeDB()
+        payment._activate_subscription(db, "7", "test_3days")
+
+        assert db.committed is True
+        assert user.user_type == UserType.SUBSCRIBER
+        assert user.work_count == -1
+        assert user.work_used == 0
+        assert user.subscription_expires_at < trial_expiry
+        assert timedelta(days=2, hours=23) <= (user.subscription_expires_at - now) <= timedelta(days=3, minutes=1)
+
     def test_payapp_cancel_states_cover_documented_values(self):
         from app.routers.payment import _PAYAPP_CANCEL_STATES
 

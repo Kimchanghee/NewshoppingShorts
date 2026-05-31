@@ -81,6 +81,37 @@ class Settings(BaseSettings):
     # If set, /app/version/update requires a matching X-Update-Signature header.
     APP_VERSION_UPDATE_HMAC_KEY: str = ""
 
+    # Optional bridge key for centralized Computer Use job intake endpoint.
+    # If empty, bridge endpoint accepts authenticated paid users without this header.
+    COMPUTER_USE_BRIDGE_API_KEY: str = ""
+
+    @field_validator("COMPUTER_USE_BRIDGE_API_KEY")
+    @classmethod
+    def validate_computer_use_bridge_api_key(cls, v):
+        """Normalize bridge API key value."""
+        return v
+
+    # Centralized Computer Use worker settings
+    COMPUTER_USE_WORKER_ENABLED: bool = False
+    COMPUTER_USE_WORKER_POLL_SECONDS: int = 3
+    COMPUTER_USE_WORKER_TIMEOUT_SECONDS: int = 900
+    COMPUTER_USE_WORKER_OUTPUT_LIMIT_CHARS: int = 4000
+    COMPUTER_USE_WORKER_CLI_PATH: str = "codex"
+    COMPUTER_USE_WORKER_MODEL: str = ""
+    COMPUTER_USE_WORKER_WORKDIR: str = ""
+
+    @field_validator(
+        "COMPUTER_USE_WORKER_POLL_SECONDS",
+        "COMPUTER_USE_WORKER_TIMEOUT_SECONDS",
+        "COMPUTER_USE_WORKER_OUTPUT_LIMIT_CHARS",
+    )
+    @classmethod
+    def validate_computer_use_worker_positive_ints(cls, v):
+        value = int(v or 0)
+        if value <= 0:
+            raise ValueError("Computer Use worker numeric settings must be > 0")
+        return value
+
     # Billing key encryption (Fernet key)
     # Generate with: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
     BILLING_KEY_ENCRYPTION_KEY: str = ""

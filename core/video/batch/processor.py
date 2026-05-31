@@ -56,6 +56,68 @@ def _extract_product_name(url: str) -> str:
     return "쇼핑 추천 아이템"
 
 
+def _normalize_local_video_path(url: str) -> str:
+    """Return a comparable absolute path for local:// queue entries."""
+    raw = str(url or "")
+    if raw.startswith("local://"):
+        raw = raw[len("local://"):]
+    if not raw:
+        return ""
+    try:
+        return os.path.abspath(os.path.expanduser(raw))
+    except Exception:
+        return raw
+
+
+def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
+    """Recover original Coupang metadata for a sourced local:// video."""
+    result = {}
+    try:
+        state = getattr(app, "state", None)
+        if state is not None:
+            result = getattr(state, "sourcing_result", None) or {}
+        if not result:
+            panel = getattr(app, "sourcing_panel", None)
+            if panel is not None and hasattr(panel, "get_sourcing_result"):
+                result = panel.get_sourcing_result() or {}
+    except Exception:
+        result = {}
+
+    if not isinstance(result, dict):
+        return {}
+
+    local_path = _normalize_local_video_path(url)
+    matched_item = {}
+    for key in ("sourced_products", "sourcing_results"):
+        for item in result.get(key, []) or []:
+            video_file = _normalize_local_video_path(item.get("video_file", ""))
+            if local_path and video_file and local_path == video_file:
+                matched_item = item
+                break
+        if matched_item:
+            break
+
+    product_info = result.get("product_info") or {}
+    original_url = str(result.get("coupang_url") or "").strip()
+    deep_link = str(result.get("deep_link") or "").strip()
+    product_name = str(product_info.get("name") or "").strip()
+    description = str(result.get("description") or "").strip()
+
+    if not matched_item and not product_name and not original_url:
+        return {}
+
+    return {
+        "product_name": product_name,
+        "product_info": product_name or description,
+        "source_url": original_url,
+        "coupang_deep_link": deep_link,
+        "matched_title": str(matched_item.get("title") or "").strip(),
+        "source": str(matched_item.get("source") or "").strip(),
+        "auto_publish_safe": matched_item.get("auto_publish_safe"),
+        "requires_review": matched_item.get("requires_review"),
+    }
+
+
 def _safe_set_url_status(app, url: str, status: str):
     """스레드 안전하게 url_status 설정"""
     lock = getattr(app, "url_status_lock", None)
@@ -74,6 +136,21 @@ def _safe_get_url_status(app, url: str, default=None):
             return app.url_status.get(url, default)
     else:
         return app.url_status.get(url, default)
+
+
+def _dispatch_ui_callback(app, callback) -> None:
+    """Dispatch a UI callback safely from worker threads."""
+    if callback is None:
+        return
+    signal = getattr(app, "ui_callback_signal", None)
+    if signal is not None:
+        try:
+            signal.emit(callback)
+            return
+        except RuntimeError:
+            # GUI object already destroyed.
+            return
+    QTimer.singleShot(0, callback)
 
 
 def _set_processing_step(app, url: str, step: str):
@@ -95,14 +172,7 @@ def _set_processing_step(app, url: str, step: str):
     # UI 갱신 (메인 스레드에서 실행 - signal 우선, fallback QTimer)
     update_fn = getattr(app, "update_url_listbox", None)
     if update_fn is not None:
-        signal = getattr(app, 'ui_callback_signal', None)
-        if signal is not None:
-            try:
-                signal.emit(update_fn)
-            except RuntimeError:
-                pass
-        else:
-            QTimer.singleShot(0, update_fn)
+        _dispatch_ui_callback(app, update_fn)
 
 
 def _get_mix_job_urls(app, job_key: str) -> List[str]:
@@ -511,9 +581,9 @@ def dynamic_batch_processing_thread(app):
                     update_listbox = getattr(app, "update_url_listbox", None)
                     update_progress = getattr(app, "update_overall_progress_display", None)
                     if update_listbox:
-                        QTimer.singleShot(0, update_listbox)
+                        _dispatch_ui_callback(app, update_listbox)
                     if update_progress:
-                        QTimer.singleShot(0, update_progress)
+                        _dispatch_ui_callback(app, update_progress)
 
                     # 이전 결과 초기화
                     clear_all_previous_results(app)
@@ -566,7 +636,7 @@ def dynamic_batch_processing_thread(app):
                                 # Refresh subscription info display
                                 update_sub_fn = getattr(app, "_update_subscription_info", None)
                                 if update_sub_fn is not None:
-                                    QTimer.singleShot(0, update_sub_fn)
+                                    _dispatch_ui_callback(app, update_sub_fn)
                             else:
                                 logger.warning(
                                     "[작업횟수] 업데이트 실패: %s",
@@ -688,7 +758,7 @@ def dynamic_batch_processing_thread(app):
                     if signal is not None:
                         signal.emit(show_auth_dialog)
                     else:
-                        QTimer.singleShot(0, show_auth_dialog)
+                        _dispatch_ui_callback(app, show_auth_dialog)
 
                     break
 
@@ -886,7 +956,7 @@ def dynamic_batch_processing_thread(app):
                         if signal is not None:
                             signal.emit(show_error_popup)
                         else:
-                            QTimer.singleShot(0, show_error_popup)
+                            _dispatch_ui_callback(app, show_error_popup)
 
                         try:
                             app._auto_save_session()
@@ -905,9 +975,9 @@ def dynamic_batch_processing_thread(app):
             update_listbox = getattr(app, "update_url_listbox", None)
             update_progress = getattr(app, "update_overall_progress_display", None)
             if update_listbox:
-                QTimer.singleShot(0, update_listbox)
+                _dispatch_ui_callback(app, update_listbox)
             if update_progress:
-                QTimer.singleShot(0, update_progress)
+                _dispatch_ui_callback(app, update_progress)
 
             # 간격 대기 - 10초 간격으로 다음 URL 처리
             if app.batch_processing:
@@ -969,7 +1039,7 @@ def dynamic_batch_processing_thread(app):
                 start_btn.setEnabled(True)
             if stop_btn is not None:
                 stop_btn.setEnabled(False)
-        QTimer.singleShot(0, reset_batch_buttons)
+        _dispatch_ui_callback(app, reset_batch_buttons)
         summary = f"배치 처리 완료: 성공 {successful_count}건, 실패 {failed_count}건"
         if pending_remaining:
             summary += f" (미처리 {len(pending_remaining)}건 대기)"
@@ -991,7 +1061,7 @@ def dynamic_batch_processing_thread(app):
                 logger.warning("[세션] 저장 실패: %s", session_err)
 
         if processed_urls and all_jobs_finished:
-            QTimer.singleShot(0, lambda: show_success(app, "배치 완료", summary))
+            _dispatch_ui_callback(app, lambda: show_success(app, "배치 완료", summary))
         app.update_status("준비 완료")
 
         # 비용은 각 URL 완료 시마다 출력되므로 여기서는 출력하지 않음
@@ -1170,7 +1240,7 @@ def _process_single_video(app, url, current_number, total_urls):
                 pass
             _safe_set_url_status(app, url, "skipped")
             app.url_status_message[url] = f"길이초과{int(original_video_duration)}초"
-            QTimer.singleShot(0, app.update_url_listbox)
+            _dispatch_ui_callback(app, getattr(app, "update_url_listbox", None))
 
             # 팝업 제거 - 로그만 남기고 다음 영상으로 진행
 
@@ -1190,7 +1260,7 @@ def _process_single_video(app, url, current_number, total_urls):
             )
             _safe_set_url_status(app, url, "skipped")
             app.url_status_message[url] = f"너무짧음{original_video_duration:.0f}초"
-            app.update_url_listbox()
+            _dispatch_ui_callback(app, getattr(app, "update_url_listbox", None))
 
             # 팝업 제거 - 로그만 남기고 다음 영상으로 진행
 
@@ -1465,14 +1535,23 @@ def _process_single_video(app, url, current_number, total_urls):
 
                         if final_video_path and os.path.exists(final_video_path):
                             # Common Data
-                            product_name = _extract_product_name(url) or "쇼핑 추천 아이템"
+                            sourcing_context = _resolve_sourcing_context(app, url)
+                            original_source_url = (
+                                sourcing_context.get("source_url")
+                                or (url if "coupang.com" in str(url).lower() else "")
+                            )
+                            product_name = (
+                                sourcing_context.get("product_name")
+                                or _extract_product_name(original_source_url or url)
+                                or "쇼핑 추천 아이템"
+                            )
                             
                             # Use analysis result for richer info if available
                             product_info = ""
                             if hasattr(app, "analysis_result") and isinstance(app.analysis_result, dict):
                                 product_info = app.analysis_result.get("summary") or ""
                             if not product_info:
-                                product_info = product_name
+                                product_info = sourcing_context.get("product_info") or product_name
 
                             # SEO Generation (using YouTube Manager helpers)
                             yt_manager = getattr(app, "youtube_manager", None)
@@ -1486,42 +1565,83 @@ def _process_single_video(app, url, current_number, total_urls):
                                 video_tags = yt_manager.generate_seo_hashtags(product_info)
                             
                             # 2. Coupang Partners Link Generation
-                            coupang_link = ""
+                            coupang_link = sourcing_context.get("coupang_deep_link") or ""
                             coupang_manager = getattr(app, "coupang_manager", None)
-                            if coupang_manager and coupang_manager.is_connected():
+                            if not coupang_link and coupang_manager and coupang_manager.is_connected():
                                 # Only try if it looks like a product URL (simple check)
-                                if "coupang.com" in url or "1688.com" in url or "taobao" in url:
+                                link_source = original_source_url or url
+                                if "coupang.com" in link_source or "1688.com" in link_source or "taobao" in link_source:
                                     # For 1688/Taobao, we might need a matching Coupang product.
                                     # For now, if the input URL is Coupang, we generate a deep link.
                                     # If it's 1688, we might not have a direct mapping yet unless sourcing manager found one.
                                     # Assuming direct coupang link generation for now if URL is compatible.
-                                    if "coupang.com" in url:
-                                        coupang_link = coupang_manager.generate_deep_link(url)
+                                    if "coupang.com" in link_source:
+                                        coupang_link = coupang_manager.generate_deep_link(link_source)
                                         if coupang_link:
                                             logger.info(f"[Automation] Coupang link generated: {coupang_link}")
-                                            video_desc += f"\n\n🚀 쿠팡 최저가 구매: {coupang_link}"
-                                            
-                                            # Update Inpock if link generated
-                                            inpock_mgr = getattr(app, "inpock_manager", None)
-                                            if inpock_mgr and inpock_mgr.is_connected():
-                                                success = inpock_mgr.add_link(
-                                                    title=product_name[:30], 
-                                                    url=coupang_link
+                            if not coupang_link and "coupang.com" in str(original_source_url).lower():
+                                coupang_link = original_source_url
+
+                            linktree_url = ""
+                            try:
+                                linktree_manager = getattr(app, "linktree_manager", None)
+                                if linktree_manager is None:
+                                    from managers.linktree_manager import get_linktree_manager
+                                    linktree_manager = get_linktree_manager()
+                                if linktree_manager and hasattr(linktree_manager, "get_profile_url"):
+                                    linktree_url = linktree_manager.get_profile_url()
+                            except Exception as linktree_err:
+                                logger.debug("[Automation] Linktree profile lookup skipped: %s", linktree_err)
+
+                            if coupang_link:
+                                video_desc += f"\n\n🛒 쿠팡 상품 보기: {coupang_link}"
+
+                                # Update Inpock if link generated/configured.
+                                inpock_mgr = getattr(app, "inpock_manager", None)
+                                if inpock_mgr:
+                                    try:
+                                        is_inpock_connected = False
+                                        if hasattr(inpock_mgr, "is_connected") and callable(inpock_mgr.is_connected):
+                                            is_inpock_connected = bool(inpock_mgr.is_connected())
+                                        elif hasattr(inpock_mgr, "settings"):
+                                            get_cookies = getattr(inpock_mgr.settings, "get_inpock_cookies", None)
+                                            if callable(get_cookies):
+                                                is_inpock_connected = bool(get_cookies())
+
+                                        if is_inpock_connected and hasattr(inpock_mgr, "add_link"):
+                                            success = bool(
+                                                inpock_mgr.add_link(
+                                                    title=product_name[:30],
+                                                    url=coupang_link,
                                                 )
-                                                if success:
-                                                    logger.info("[Automation] Added to Inpock Link")
-                                                    video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..." # Placeholder or actual profile URL if known
+                                            )
+                                            if success:
+                                                logger.info("[Automation] Added to Inpock Link")
+                                                video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..."
+                                    except Exception as inpock_err:
+                                        # Inpock 연동 실패가 YouTube 업로드 큐 추가를 막지 않도록 분리 처리
+                                        logger.warning("[Automation] Inpock link update skipped: %s", inpock_err)
 
                             # 3. Add to YouTube Upload Queue
-                            if yt_manager and yt_manager.get_upload_settings().enabled:
+                            review_only_source = (
+                                str(sourcing_context.get("source") or "").lower() == "coupang_image"
+                                or sourcing_context.get("auto_publish_safe") is False
+                                or sourcing_context.get("requires_review") is True
+                            )
+                            if yt_manager and yt_manager.get_upload_settings().enabled and review_only_source:
+                                logger.warning(
+                                    "[Automation] YouTube auto-upload skipped: sourced video requires review"
+                                )
+                            elif yt_manager and yt_manager.get_upload_settings().enabled:
                                 yt_manager.add_to_upload_queue(
                                     video_path=final_video_path,
                                     title=video_title,
                                     description=video_desc,
                                     tags=video_tags,
                                     product_info=product_info,
-                                    source_url=url,
+                                    source_url=original_source_url or url,
                                     coupang_deep_link=coupang_link,
+                                    linktree_url=linktree_url,
                                 )
                                 logger.info("[Automation] Added to YouTube upload queue")
                                 try:
@@ -2376,27 +2496,28 @@ def _create_final_video_for_batch(
         gc.collect()
         time.sleep(0.5)  # Windows에서 파일 핸들 해제에 필요한 대기 시간
 
-        # NTFS 권한 설정: Everyone 읽기 권한 추가 (다른 컴퓨터에서도 열 수 있도록)
-        try:
-            subprocess.run(
-                [
-                    "icacls",
-                    output_path,
-                    "/inheritance:e",
-                    "/grant",
-                    "*S-1-1-0:(R)",  # Everyone
-                    "/grant",
-                    "*S-1-5-32-545:(R)",  # Users group
-                ],
-                check=True,
-                capture_output=True,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-                timeout=30,
-            )
-            logger.debug("권한 설정: 읽기 권한 추가 완료")
-        except Exception as e:
-            ui_controller.write_error_log(e)
-            logger.debug("  권한 설정 실패 (무시됨): %s", e)
+        # NTFS 권한 설정 (Windows 전용): Everyone 읽기 권한 추가
+        if sys.platform == "win32":
+            try:
+                subprocess.run(
+                    [
+                        "icacls",
+                        output_path,
+                        "/inheritance:e",
+                        "/grant",
+                        "*S-1-1-0:(R)",  # Everyone
+                        "/grant",
+                        "*S-1-5-32-545:(R)",  # Users group
+                    ],
+                    check=True,
+                    capture_output=True,
+                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+                    timeout=30,
+                )
+                logger.debug("권한 설정: 읽기 권한 추가 완료")
+            except Exception as e:
+                ui_controller.write_error_log(e)
+                logger.debug("  권한 설정 실패 (무시됨): %s", e)
 
         # ★ 결합 오디오 파일 보존 (삭제 안함) ★
         # try:
@@ -2544,7 +2665,7 @@ def clear_all_previous_results(app):
     # 9. UI 업데이트는 스레드 안전하게 (PyQt6)
     update_fn = getattr(app, "update_all_progress_displays", None)
     if update_fn is not None:
-        QTimer.singleShot(0, update_fn)
+        _dispatch_ui_callback(app, update_fn)
 
     # UI 탭들 초기화 (PyQt6 QTextEdit/QLabel)
     def reset_ui_texts():
@@ -2573,6 +2694,6 @@ def clear_all_previous_results(app):
         if tts_status_label is not None and hasattr(tts_status_label, "setText"):
             tts_status_label.setText("")
 
-    QTimer.singleShot(0, reset_ui_texts)
+    _dispatch_ui_callback(app, reset_ui_texts)
 
     logger.info("[초기화 완료] 새로운 분석을 시작할 준비가 되었습니다.")

@@ -7,12 +7,14 @@ from sqlalchemy import func, update
 from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
+from app.models.payment_session import PaymentSession, PaymentStatus
 from app.utils.password import verify_password, get_dummy_hash, hash_password
 from app.utils.subscription_utils import (
     is_subscription_active,
     get_trial_cycle_start,
     is_new_trial_cycle,
 )
+from app.utils.payment_plans import PLAN_NAMES
 from app.config.constants import FREE_TRIAL_WORK_COUNT
 from app.utils.jwt_handler import create_access_token, decode_access_token
 from app.configuration import get_settings
@@ -91,6 +93,25 @@ def _normalize_datetime_for_reference(
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc).astimezone(reference_now.tzinfo)
     return dt.astimezone(reference_now.tzinfo)
+
+
+def _latest_successful_payment(db: Session, user_id: int) -> PaymentSession | None:
+    """Return the newest succeeded payment session for plan display."""
+    return (
+        db.query(PaymentSession)
+        .filter(
+            PaymentSession.user_id == str(user_id),
+            PaymentSession.status == PaymentStatus.SUCCEEDED,
+        )
+        .order_by(PaymentSession.updated_at.desc(), PaymentSession.created_at.desc())
+        .first()
+    )
+
+
+def _payment_completed_at(payment: PaymentSession | None) -> datetime | None:
+    if payment is None:
+        return None
+    return payment.updated_at or payment.created_at
 
 
 def _is_session_stale(
@@ -297,6 +318,11 @@ class AuthService:
             f"Login successful: user_id={user.id}, ip_hash={_hash_ip(ip_address)}, login_count={user.login_count}"
         )
 
+        latest_payment = _latest_successful_payment(self.db, user.id)
+        latest_payment_at = _payment_completed_at(latest_payment)
+        latest_plan_id = latest_payment.plan_id if latest_payment else None
+        latest_plan_name = PLAN_NAMES.get(latest_plan_id) if latest_plan_id else None
+
         # Backward compatible response with subscription info
         return {
             "status": True,
@@ -310,6 +336,11 @@ class AuthService:
                     else None,
                     "work_count": getattr(user, "work_count", -1),
                     "work_used": getattr(user, "work_used", 0),
+                    "plan_id": latest_plan_id,
+                    "plan_name": latest_plan_name,
+                    "last_payment_at": latest_payment_at.isoformat()
+                    if latest_payment_at
+                    else None,
                     "last_login_at": user.last_login_at.isoformat()
                     if user.last_login_at
                     else None,

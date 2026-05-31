@@ -6,6 +6,9 @@ import hashlib
 import hmac
 import json
 import asyncio
+import time
+import urllib.error
+import urllib.request
 from uuid import uuid4
 from fastapi import FastAPI, Request, Header, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
@@ -18,12 +21,13 @@ from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
 from app.errors import AppError
-from app.routers import auth, registration, admin, subscription, payment, logs
+from app.routers import auth, registration, admin, subscription, payment, logs, computer_use
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
 from app.database import init_db
-from app.utils.billing_crypto import validate_billing_crypto_startup
+from app.utils.billing_crypto import decrypt_billing_key, validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
+from app.scheduler.computer_use_worker import run_computer_use_worker_loop
 
 # 濡쒓퉭 ?ㅼ젙 - 紐⑤뱺 濡쒓렇瑜??곕??먯뿉 異쒕젰
 logging.basicConfig(
@@ -41,6 +45,8 @@ settings = get_settings()
 _SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _auth_cleanup_stop_event: Optional[asyncio.Event] = None
 _auth_cleanup_task: Optional[asyncio.Task] = None
+_computer_use_worker_stop_event: Optional[asyncio.Event] = None
+_computer_use_worker_task: Optional[asyncio.Task] = None
 
 # Disable docs and OpenAPI schema in production
 _is_prod = settings.ENVIRONMENT == "production"
@@ -59,6 +65,79 @@ app = FastAPI(
 
 from sqlalchemy import text
 from app.database import engine
+
+
+def _calc_billing_key_hash(enc_bill: str) -> str:
+    return hashlib.sha256(enc_bill.encode("utf-8")).hexdigest()
+
+
+def _ensure_billing_key_hash_index(conn) -> None:
+    """Backfill billing key hashes and add the duplicate-protection index."""
+    try:
+        rows = conn.execute(
+            text(
+                """
+                SELECT id, enc_bill
+                FROM `billing_keys`
+                WHERE enc_bill_hash IS NULL OR enc_bill_hash = ''
+                """
+            )
+        ).fetchall()
+    except Exception as e:
+        logger.debug("billing_keys hash backfill skipped: %s", e)
+        return
+
+    for row in rows:
+        try:
+            raw_enc_bill = decrypt_billing_key(row[1])
+            conn.execute(
+                text("UPDATE `billing_keys` SET enc_bill_hash = :hash WHERE id = :id"),
+                {"hash": _calc_billing_key_hash(raw_enc_bill), "id": row[0]},
+            )
+        except Exception as e:
+            logger.warning("billing_keys hash backfill skipped for id=%s: %s", row[0], e)
+
+    try:
+        missing_count = conn.execute(
+            text(
+                """
+                SELECT COUNT(*)
+                FROM `billing_keys`
+                WHERE enc_bill_hash IS NULL OR enc_bill_hash = ''
+                """
+            )
+        ).scalar() or 0
+    except Exception:
+        missing_count = 1
+
+    if missing_count:
+        logger.warning("billing_keys hash index skipped because %s rows are not backfilled", missing_count)
+        return
+
+    try:
+        conn.execute(text("ALTER TABLE `billing_keys` DROP INDEX `uq_user_enc_bill`"))
+    except Exception as e:
+        msg = str(e).lower()
+        if "1091" not in msg and "can't drop" not in msg and "check that column/key exists" not in msg:
+            logger.debug("Old billing key index drop skipped: %s", e)
+
+    try:
+        conn.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX `uq_user_enc_bill_hash`
+                ON `billing_keys` (`user_id`, `enc_bill_hash`)
+                """
+            )
+        )
+        logger.info("billing_keys hash unique index ensured.")
+    except Exception as e:
+        msg = str(e).lower()
+        if "1061" in msg or "duplicate key name" in msg or "already exists" in msg:
+            logger.debug("billing_keys hash unique index already exists.")
+        else:
+            logger.warning("billing_keys hash unique index creation skipped: %s", e)
+
 
 def run_auto_migration():
     """Directly attempt to add missing columns and ignore if already exists (1060)"""
@@ -82,7 +161,11 @@ def run_auto_migration():
                 "registration_requests": [
                     ("email", "VARCHAR(255) NULL"),
                     ("ym_news_opt_in", "BOOLEAN DEFAULT FALSE"),
-                ]
+                ],
+                "billing_keys": [
+                    # SHA-256 hex of enc_bill for duplicate checks without indexing encrypted secret material.
+                    ("enc_bill_hash", "CHAR(64) NOT NULL DEFAULT ''"),
+                ],
             }
             
             # Ensure user_logs table exists
@@ -121,6 +204,8 @@ def run_auto_migration():
                         else:
                             # Log other errors but try to proceed
                             logger.warning(f"Migration warning for {table}.{col}: {e}")
+
+            _ensure_billing_key_hash_index(conn)
                             
     except Exception as e:
         logger.error(f"Migration critical error: {e}", exc_info=True)
@@ -153,6 +238,17 @@ async def startup_event():
         if _auth_cleanup_task is None or _auth_cleanup_task.done():
             _auth_cleanup_stop_event.clear()
             _auth_cleanup_task = asyncio.create_task(run_auth_cleanup_loop(_auth_cleanup_stop_event))
+        # 6. Optional centralized Computer Use worker loop.
+        if bool(settings.COMPUTER_USE_WORKER_ENABLED):
+            global _computer_use_worker_task
+            global _computer_use_worker_stop_event
+            if _computer_use_worker_stop_event is None:
+                _computer_use_worker_stop_event = asyncio.Event()
+            if _computer_use_worker_task is None or _computer_use_worker_task.done():
+                _computer_use_worker_stop_event.clear()
+                _computer_use_worker_task = asyncio.create_task(
+                    run_computer_use_worker_loop(_computer_use_worker_stop_event)
+                )
     except Exception as e:
         logger.error(f"Startup error during DB init/migration: {e}", exc_info=True)
         raise
@@ -162,13 +258,21 @@ async def startup_event():
 async def shutdown_event():
     """Gracefully stop background maintenance tasks."""
     global _auth_cleanup_task
+    global _computer_use_worker_task
     if _auth_cleanup_stop_event is not None:
         _auth_cleanup_stop_event.set()
+    if _computer_use_worker_stop_event is not None:
+        _computer_use_worker_stop_event.set()
     if _auth_cleanup_task and not _auth_cleanup_task.done():
         try:
             await asyncio.wait_for(_auth_cleanup_task, timeout=5)
         except Exception:
             _auth_cleanup_task.cancel()
+    if _computer_use_worker_task and not _computer_use_worker_task.done():
+        try:
+            await asyncio.wait_for(_computer_use_worker_task, timeout=5)
+        except Exception:
+            _computer_use_worker_task.cancel()
 
 
 # Register rate limiter with app state
@@ -456,6 +560,7 @@ app.include_router(admin.router)
 app.include_router(subscription.router)
 app.include_router(payment.router)
 app.include_router(logs.router)
+app.include_router(computer_use.router)
 
 @app.get("/health")
 async def health():
@@ -463,7 +568,7 @@ async def health():
 
 # ===== Auto Update API =====
 # 理쒖떊 踰꾩쟾 ?뺣낫 (諛고룷 ????媛믪쓣 ?낅뜲?댄듃)
-_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.21") or "1.4.21").strip()
+_DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.50") or "1.4.50").strip()
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
     "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/v"
@@ -477,10 +582,10 @@ APP_VERSION_INFO = {
     "version": _DEFAULT_APP_VERSION,
     "min_required_version": "1.0.0",
     "download_url": _DEFAULT_DOWNLOAD_URL,
-    "release_notes": """### v1.4.21 업데이트
-- 회원 DB에 YM 소식/정보 수신 동의(ym_news_opt_in) 항목 추가
-- 회원가입/관리자 조회 API에 수신 동의 필드 반영
-- 사용자 활동 로그 보관 정책을 환경변수 기반(기본 7일)으로 개선""",
+    "release_notes": """### 2026-05-27 업데이트
+- 안정성 중심 버그 수정
+- API 키 저장/삭제 동작 일관성 개선
+- 배치 처리 중 UI 업데이트 스레드 안정성 보강""",
     "is_mandatory": True,
     "update_channel": "stable",
     "file_hash": "b3b1dea69ced9f2cfdab0765cfe136b830465585cc4736bbf5efc8b168a369ea",
@@ -579,6 +684,117 @@ def _persist_app_version_info_to_db(version_info: dict) -> None:
 
 
 APP_VERSION_INFO = _load_app_version_info_from_db(APP_VERSION_INFO)
+_GITHUB_RELEASE_API_URL = os.getenv(
+    "APP_VERSION_GITHUB_RELEASE_API_URL",
+    "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases/latest",
+).strip()
+_GITHUB_VERSION_CACHE_TTL_SECONDS = int(os.getenv("APP_VERSION_GITHUB_CACHE_TTL_SECONDS", "300") or "300")
+_GITHUB_VERSION_CACHE: dict = {"checked_at": 0.0, "info": None}
+
+
+def _parse_version_tuple(version: str) -> tuple[int, int, int]:
+    try:
+        parts = str(version or "").strip().split(".")
+        parsed = [int(p) for p in parts[:3]]
+        while len(parsed) < 3:
+            parsed.append(0)
+        return tuple(parsed[:3])
+    except (ValueError, TypeError):
+        return (0, 0, 0)
+
+
+def _extract_sha256(text_value: str) -> str:
+    match = re.search(r"\b([a-fA-F0-9]{64})\b", str(text_value or ""))
+    return match.group(1).lower() if match else ""
+
+
+def _fetch_github_release_version_info() -> Optional[dict]:
+    if not _GITHUB_RELEASE_API_URL:
+        return None
+
+    now = time.time()
+    cached_info = _GITHUB_VERSION_CACHE.get("info")
+    checked_at = float(_GITHUB_VERSION_CACHE.get("checked_at") or 0)
+    if cached_info is not None and now - checked_at < _GITHUB_VERSION_CACHE_TTL_SECONDS:
+        return cached_info
+
+    try:
+        request = urllib.request.Request(
+            _GITHUB_RELEASE_API_URL,
+            headers={
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "SSMaker-Version-API",
+            },
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+
+        latest_version = str(payload.get("tag_name", "")).strip().lstrip("vV")
+        if not latest_version:
+            return None
+
+        assets = payload.get("assets", []) or []
+        preferred_name = f"ssmaker_setup_v{latest_version}.exe"
+        installer_asset = next(
+            (
+                asset
+                for asset in assets
+                if str(asset.get("name", "")).lower() == preferred_name
+            ),
+            None,
+        )
+        if installer_asset is None:
+            installer_asset = next(
+                (
+                    asset
+                    for asset in assets
+                    if str(asset.get("name", "")).lower().endswith(".exe")
+                ),
+                None,
+            )
+        if installer_asset is None:
+            return None
+
+        digest = str(installer_asset.get("digest", "")).strip()
+        file_hash = digest.split(":", 1)[1].strip() if digest.lower().startswith("sha256:") else ""
+        if not file_hash:
+            file_hash = _extract_sha256(payload.get("body", ""))
+        download_url = str(installer_asset.get("browser_download_url", "")).strip()
+        if not download_url or not file_hash:
+            return None
+
+        info = {
+            "version": latest_version,
+            "download_url": download_url,
+            "release_notes": payload.get("body", ""),
+            "is_mandatory": False,
+            "file_hash": file_hash,
+            "update_channel": "stable",
+        }
+        _GITHUB_VERSION_CACHE["checked_at"] = now
+        _GITHUB_VERSION_CACHE["info"] = info
+        return info
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, OSError) as e:
+        logger.warning("GitHub version fallback failed: %s", e)
+        _GITHUB_VERSION_CACHE["checked_at"] = now
+        _GITHUB_VERSION_CACHE["info"] = None
+        return None
+
+
+def _get_effective_app_version_info() -> dict:
+    effective_info = dict(APP_VERSION_INFO)
+    github_info = _fetch_github_release_version_info()
+    if not github_info:
+        return effective_info
+
+    if _parse_version_tuple(str(effective_info.get("version", "0.0.0"))) < _parse_version_tuple(
+        str(github_info.get("version", "0.0.0"))
+    ):
+        merged = dict(effective_info)
+        merged.update(github_info)
+        merged.setdefault("min_required_version", effective_info.get("min_required_version", "1.0.0"))
+        return merged
+    return effective_info
 
 
 class VersionUpdateRequest(BaseModel):
@@ -606,7 +822,16 @@ async def get_app_version():
             "is_mandatory": false
         }
     """
-    return APP_VERSION_INFO
+    return _get_effective_app_version_info()
+
+
+@app.get("/free/lately/")
+async def get_legacy_free_lately(item: Optional[int] = Query(None)):
+    """Legacy desktop-client version endpoint compatibility."""
+    return {
+        **_get_effective_app_version_info(),
+        "item": item,
+    }
 
 
 @app.get("/free/lately/")
@@ -715,20 +940,13 @@ async def check_app_version(current_version: str = Query(..., max_length=20)):
             "is_mandatory": false
         }
     """
-    latest_version = APP_VERSION_INFO["version"]
-    min_required = APP_VERSION_INFO.get("min_required_version", "0.0.0")
+    version_info = _get_effective_app_version_info()
+    latest_version = version_info["version"]
+    min_required = version_info.get("min_required_version", "0.0.0")
     
-    # Parse versions for comparison
-    def parse_ver(v: str):
-        try:
-            parts = v.strip().split('.')
-            return tuple(int(p) for p in parts[:3])
-        except (ValueError, IndexError):
-            return (0, 0, 0)
-    
-    current_tuple = parse_ver(current_version)
-    latest_tuple = parse_ver(latest_version)
-    min_tuple = parse_ver(min_required)
+    current_tuple = _parse_version_tuple(current_version)
+    latest_tuple = _parse_version_tuple(latest_version)
+    min_tuple = _parse_version_tuple(min_required)
     
     update_available = current_tuple < latest_tuple
     is_mandatory = current_tuple < min_tuple
@@ -737,8 +955,8 @@ async def check_app_version(current_version: str = Query(..., max_length=20)):
         "update_available": update_available,
         "current_version": current_version,
         "latest_version": latest_version,
-        "download_url": APP_VERSION_INFO.get("download_url"),
-        "release_notes": APP_VERSION_INFO.get("release_notes", ""),
+        "download_url": version_info.get("download_url"),
+        "release_notes": version_info.get("release_notes", ""),
         "is_mandatory": is_mandatory,
-        "file_hash": APP_VERSION_INFO.get("file_hash", ""),
+        "file_hash": version_info.get("file_hash", ""),
     }

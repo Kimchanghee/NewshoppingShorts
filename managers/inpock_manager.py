@@ -93,6 +93,14 @@ class InpockManager:
         self.settings.set_inpock_cookies(cookie_dict)
         logger.info("[Inpock] Cookies saved")
 
+    def is_connected(self) -> bool:
+        """Check whether Inpock cookies are available."""
+        try:
+            cookies = self.settings.get_inpock_cookies()
+            return bool(cookies)
+        except Exception:
+            return False
+
     def login_manual(self):
         """
         Open browser for manual login and save cookies.
