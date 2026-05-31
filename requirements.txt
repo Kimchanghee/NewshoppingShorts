@@ -79,3 +79,8 @@ pytest-cov>=4.1.0
 selenium>=4.15.0
 webdriver-manager>=4.0.0
 beautifulsoup4>=4.12.0
+# zendriver drives the full-automation sourcing pipeline (core/sourcing/pipeline.py).
+# Previously only installed by the _install_*.py helpers, so a plain
+# `pip install -r requirements.txt` left the pipeline unable to launch a browser.
+# Requires Python >= 3.10.
+zendriver>=0.15.0
