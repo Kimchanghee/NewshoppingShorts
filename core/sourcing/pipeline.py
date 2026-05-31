@@ -554,7 +554,7 @@ class SourcingPipeline:
                 try:
                     candidates_1688_text = await asyncio.wait_for(
                         search_1688(
-                            browser, cn_kw, self.product_info["name"]
+                            browser, cn_kw, self.product_info["name"], en_kw
                         ),
                         timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )

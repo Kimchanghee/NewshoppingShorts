@@ -49,7 +49,9 @@ _HEAD_NOISE_TOKENS = {
 # shape/color/material descriptors in head-noun search queries.
 _HEAD_ANCHOR_PARTS = (
     "strainer", "filter", "drain", "basket", "holder", "rack", "sink",
-    "sponge", "garbage", "waste",
+    "sponge", "garbage", "waste", "bag", "mesh", "net",
+    "chopper", "processor", "mixer", "blender", "mincer", "garlic",
+    "ice", "mold", "tray", "tumbler", "caddy", "organizer",
     "거름망", "싱크", "배수", "필터", "걸이", "수세미",
     "水槽", "过滤", "沥水", "挂架",
 )
@@ -167,6 +169,191 @@ def _similarity_score(name1: str, name2: str) -> float:
     return len(t1 & t2) / len(t1 | t2)
 
 
+_SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
+    # Electric food chopper / garlic mincer family
+    "electric": (
+        "electric", "cordless", "rechargeable", "usb", "전동", "충전", "电动", "充电",
+    ),
+    "chopper": (
+        "chopper", "chop", "mincer", "mince", "crusher", "grinder", "garlic press",
+        "다지기", "으깨기", "분쇄", "切碎", "蒜泥", "捣蒜", "绞肉", "碎肉",
+    ),
+    "processor_mixer": (
+        "processor", "mixer", "blender", "mixing", "믹서", "블렌더", "搅拌", "绞肉机",
+    ),
+    "vegetable": ("vegetable", "veggie", "onion", "pepper", "야채", "채소", "양파", "蔬菜", "洋葱"),
+    "garlic": ("garlic", "마늘", "蒜"),
+    "food": ("food", "meat", "baby food", "kitchen", "음식", "주방", "쓰레기", "고기", "육류", "食物", "垃圾", "肉"),
+    "multifunction": (
+        "multi", "multy", "multipurpose", "multi-purpose", "multi-functional",
+        "multifunction", "functional", "다기능", "만능", "多功能", "万能",
+    ),
+
+    # Kitchen sink sponge caddy family
+    "sponge": ("sponge", "scrubber", "수세미", "스폰지", "스펀지", "海绵"),
+    "sink": ("sink", "싱크", "씽크", "水槽"),
+    "holder": (
+        "holder", "rack", "caddy", "organizer", "stand", "tray", "basket",
+        "거치대", "걸이", "받침", "정리", "架", "置物", "收纳", "挂",
+    ),
+    "soap": ("soap", "detergent", "dish soap", "세제", "주방세제", "洗洁精", "皂"),
+    "towel": ("towel", "rag", "cloth", "행주", "타월", "毛巾"),
+    "stainless": ("stainless", "steel", "304", "스텐", "스테인", "올스텐", "不锈钢"),
+    "drainage": ("drainage", "draining", "drainer", "drain", "auto draining", "물빠짐", "배수", "沥水", "排水"),
+
+    # Sink strainer bag / net family
+    "strainer": (
+        "strainer", "filter", "drain filter", "거름망", "필터", "여과기",
+        "배수구", "배수", "过滤", "滤网",
+    ),
+    "bag_net": (
+        "bag", "bags", "net", "mesh", "pouch", "망", "봉투", "메쉬",
+        "그물", "가방", "袋", "网",
+    ),
+    "biodegradable": (
+        "biodegradable", "compostable", "degradable", "eco", "pla",
+        "생분해", "생분해성", "친환경", "可降解", "环保",
+    ),
+    "cornstarch": ("cornstarch", "corn starch", "corn", "옥수수", "淀粉", "玉米"),
+    "disposable": ("disposable", "throwaway", "일회용", "一次性"),
+    "stopper": ("stopper", "plug", "water stopper", "마개", "塞"),
+
+    # Tumbler ice mold family
+    "ice": ("ice", "얼음", "冰", "冰格"),
+    "silicone": ("silicone", "실리콘", "硅胶"),
+    "tumbler": ("tumbler", "cup", "stanley", "30oz", "40oz", "텀블러", "컵", "随行杯", "杯"),
+    "mold": ("mold", "mould", "tray", "maker", "틀", "트레이", "模具", "制冰盒"),
+    "cylinder": ("cylinder", "cylindrical", "round", "long", "hollow", "원형", "원통", "圆柱"),
+    "lid": ("lid", "cover", "뚜껑", "盖"),
+}
+
+
+_SEMANTIC_FEATURE_WEIGHTS: dict[str, float] = {
+    "chopper": 3.0,
+    "sponge": 3.0,
+    "holder": 2.5,
+    "strainer": 3.0,
+    "bag_net": 3.0,
+    "ice": 3.0,
+    "silicone": 2.0,
+    "tumbler": 2.5,
+    "mold": 2.5,
+    "electric": 1.5,
+    "processor_mixer": 1.5,
+    "stainless": 1.5,
+    "drainage": 1.4,
+    "biodegradable": 2.0,
+    "cornstarch": 1.6,
+    "cylinder": 1.5,
+}
+
+
+def _extract_semantic_features(text: str) -> set[str]:
+    """Extract normalized product attributes for calibrated match scoring."""
+    haystack = f" {text or ''} ".lower()
+    features: set[str] = set()
+    for feature, aliases in _SEMANTIC_FEATURE_ALIASES.items():
+        if any(alias.lower() in haystack for alias in aliases):
+            features.add(feature)
+    return features
+
+
+def _weighted_feature_coverage(reference: set[str], candidate: set[str]) -> float:
+    if not reference:
+        return 0.0
+    total = sum(_SEMANTIC_FEATURE_WEIGHTS.get(f, 1.0) for f in reference)
+    if total <= 0:
+        return 0.0
+    hit = sum(_SEMANTIC_FEATURE_WEIGHTS.get(f, 1.0) for f in (reference & candidate))
+    return hit / total
+
+
+def _family_score(
+    reference_features: set[str],
+    candidate_features: set[str],
+    *,
+    required: set[str],
+    optional: set[str],
+) -> float:
+    if not required.issubset(reference_features):
+        return 0.0
+    if not required.issubset(candidate_features):
+        return 0.0
+
+    relevant_optional = optional & reference_features
+    if not relevant_optional:
+        return 0.9
+    covered_optional = len(relevant_optional & candidate_features)
+    # Candidate-side optional evidence can compensate a little for marketplace
+    # title wording differences (e.g. "towel rack" instead of explicit
+    # "draining"), but it cannot replace missing required family anchors.
+    extra_optional = len((optional & candidate_features) - relevant_optional)
+    optional_coverage = min(1.0, (covered_optional + 0.5 * extra_optional) / len(relevant_optional))
+    return min(1.0, 0.68 + 0.32 * optional_coverage)
+
+
+def _semantic_similarity_score(candidate_title: str, references: List[str]) -> float:
+    """Calibrated semantic score for marketplace product families.
+
+    Raw Jaccard is still useful for ranking, but it under-scores real matches
+    when Coupang, AliExpress, and 1688 titles use different languages and word
+    order. Family rules can exceed the 90% auto-publish gate only when the
+    candidate carries the required product-family anchors plus enough attributes.
+    """
+    candidate = _extract_semantic_features(candidate_title)
+    if not candidate:
+        return 0.0
+
+    reference: set[str] = set()
+    for ref in references:
+        reference.update(_extract_semantic_features(ref))
+    if not reference:
+        return 0.0
+
+    family_scores = [
+        _family_score(
+            reference,
+            candidate,
+            required={"chopper"},
+            optional={"electric", "processor_mixer", "vegetable", "garlic", "food", "multifunction"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"sponge", "sink", "holder"},
+            optional={"soap", "towel", "stainless", "drainage"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"sink", "strainer", "bag_net"},
+            optional={"biodegradable", "cornstarch", "disposable", "food"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"ice", "silicone", "tumbler", "mold"},
+            optional={"cylinder", "lid"},
+        ),
+    ]
+    score = max(family_scores)
+
+    disposable_bag_intent = bool(reference & {"biodegradable", "cornstarch", "bag_net", "disposable"})
+    metal_stopper_candidate = bool(candidate & {"stainless", "stopper"}) and not bool(
+        candidate & {"biodegradable", "cornstarch", "bag_net", "disposable"}
+    )
+    if disposable_bag_intent and metal_stopper_candidate:
+        score = min(score, 0.55)
+
+    if score >= 0.9:
+        return score
+
+    recall = _weighted_feature_coverage(reference, candidate)
+    precision = _weighted_feature_coverage(candidate, reference)
+    fallback = 0.75 * recall + 0.25 * precision
+    return max(score, min(0.85, fallback))
+
+
 def _multi_reference_score(
     candidate_title: str,
     references: List[str],
@@ -178,7 +365,82 @@ def _multi_reference_score(
     and we take the max — this lifts cross-vendor accuracy because no single
     reference language overlaps every candidate language.
     """
-    return max((_similarity_score(candidate_title, r) for r in references if r), default=0.0)
+    text_score = max((_similarity_score(candidate_title, r) for r in references if r), default=0.0)
+    semantic_score = _semantic_similarity_score(candidate_title, references)
+    return max(text_score, semantic_score)
+
+
+def _preferred_english_query_variants(keyword_en: str, reference_name: str = "") -> List[str]:
+    """High-intent marketplace queries that preserve product-family anchors."""
+    haystack = f"{keyword_en or ''} {reference_name or ''}".lower()
+    variants: List[str] = []
+
+    def add(query: str):
+        query = " ".join(str(query or "").split())
+        if query and query.lower() not in {v.lower() for v in variants}:
+            variants.append(query)
+
+    if any(x in haystack for x in ("chopper", "mincer", "food processor", "garlic", "다지기")):
+        add("electric food chopper")
+        add("vegetable chopper")
+        add("garlic chopper")
+
+    if any(x in haystack for x in ("sponge", "sink caddy", "수세미", "海绵")):
+        add("auto draining sponge holder")
+        add("sink caddy sponge holder")
+        add("stainless steel sponge holder")
+
+    if any(x in haystack for x in ("strainer bag", "sink filter mesh", "cornstarch", "biodegradable", "거름망")):
+        add("biodegradable sink strainer bag")
+        add("cornstarch sink filter mesh")
+        add("kitchen drain mesh bag")
+
+    if any(x in haystack for x in ("ice", "tumbler", "ice mold", "얼음틀", "冰格")):
+        add("tumbler ice mold")
+        add("silicone cylinder ice mold")
+        add("ice cube tray tumbler")
+
+    head = _simplify_to_head_noun(keyword_en, max_tokens=3)
+    if head:
+        add(head)
+    if keyword_en:
+        add(keyword_en)
+    return variants
+
+
+def _preferred_chinese_query_variants(keyword_cn: str, keyword_en: str = "") -> List[str]:
+    """Chinese search variants for 1688 that avoid losing key noun compounds."""
+    haystack = f"{keyword_cn or ''} {keyword_en or ''}".lower()
+    variants: List[str] = []
+
+    def add(query: str):
+        query = " ".join(str(query or "").split())
+        if query and query not in variants:
+            variants.append(query)
+
+    if any(x in haystack for x in ("切碎", "蒜", "绞肉", "chopper")):
+        add("电动切碎机")
+        add("电动蒜泥器")
+        add("多功能绞肉机")
+    if any(x in haystack for x in ("海绵", "水槽", "sponge")):
+        add("水槽海绵架")
+        add("自动排水海绵架")
+        add("不锈钢洗洁精架")
+    if any(x in haystack for x in ("过滤网", "可降解", "玉米", "strainer bag")):
+        add("可降解水槽过滤网袋")
+        add("玉米淀粉水槽过滤网")
+        add("厨房下水道过滤网袋")
+    if any(x in haystack for x in ("冰格", "硅胶", "tumbler", "ice")):
+        add("保温杯硅胶冰格")
+        add("圆柱冰格模具")
+        add("硅胶制冰盒")
+
+    head = _simplify_to_head_noun(keyword_cn, max_tokens=4)
+    if head:
+        add(head)
+    if keyword_cn:
+        add(keyword_cn)
+    return variants
 
 
 async def _extract_video_urls(tab: Any) -> List[str]:
@@ -691,8 +953,6 @@ async def search_aliexpress(
     raw_all: list[dict] = []
     seen_ids: set[str] = set()
 
-    head = _simplify_to_head_noun(keyword_en, max_tokens=2) or ""
-
     per_attempt_timeout = 14
 
     async def _run_attempt(q: str, label: str, use_video_filter: bool) -> None:
@@ -726,16 +986,17 @@ async def search_aliexpress(
 
     # AliExpress doesn't honor a video-only filter (live-verified), so the
     # former "+VIDEO" passes were byte-for-byte duplicates of the plain passes
-    # and only wasted navigations. Run distinct queries instead.
-    # Attempt 1 — head-noun
-    if head:
-        await _run_attempt(head, "head-noun", False)
+    # and only wasted navigations. Run distinct high-intent queries instead.
+    for idx, query in enumerate(
+        _preferred_english_query_variants(keyword_en, reference_name),
+        start=1,
+    ):
+        if len(raw_all) >= 18:
+            break
+        await _run_attempt(query, f"intent-{idx}", False)
 
-    # Attempt 2 — full keyword
-    if len(raw_all) < 12 and keyword_en and keyword_en != head:
-        await _run_attempt(keyword_en, "full", False)
-
-    # Attempt 3 — Korean reference name
+    # Korean reference name — AliExpress KR serves Korean-translated results;
+    # only used if intent queries returned too few candidates.
     if len(raw_all) < 10 and reference_name:
         kr_head = re.sub(r"[\[\]\(\)\{\}\|/,;]", " ", reference_name)
         kr_head = " ".join(kr_head.split()[:3])
@@ -776,13 +1037,12 @@ async def search_aliexpress_quick(
     raw_all: list[dict] = []
     seen_ids: set[str] = set()
 
-    head = _simplify_to_head_noun(keyword_en, max_tokens=2) or ""
     # AliExpress video filter is a no-op (see search_aliexpress) — distinct queries only.
     attempts: list[tuple[str, str, bool]] = []
-    if head:
-        attempts.append((head, "quick-head-noun", False))
-    if keyword_en and keyword_en != head:
-        attempts.append((keyword_en, "quick-full", False))
+    for idx, query in enumerate(_preferred_english_query_variants(keyword_en, reference_name), start=1):
+        attempts.append((query, f"quick-intent-{idx}", False))
+        if len(attempts) >= 4:
+            break
 
     per_attempt_timeout = 15
 
@@ -993,6 +1253,7 @@ async def search_1688(
     browser: Any,
     keyword_cn: str,
     reference_name: str,
+    keyword_en: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Search 1688. Prioritizes the mobile + video-filter endpoint which is
@@ -1007,7 +1268,6 @@ async def search_1688(
     raw_all: list[dict] = []
     seen_ids: set[str] = set()
 
-    head = _simplify_to_head_noun(keyword_cn, max_tokens=2) or ""
     per_attempt_timeout = 15
 
     async def _run_attempt(q: str, label: str, use_video_filter: bool) -> None:
@@ -1042,11 +1302,13 @@ async def search_1688(
     # _do_1688_search now falls back from the video-filtered URL to the plain
     # URL internally, so one pass per distinct query is enough (the old no-filter
     # head/full passes just re-fetched the same desktop results).
-    if head:
-        await _run_attempt(head, "head-noun", True)
-
-    if len(raw_all) < 12 and keyword_cn and keyword_cn != head:
-        await _run_attempt(keyword_cn, "full", True)
+    for idx, query in enumerate(
+        _preferred_chinese_query_variants(keyword_cn, keyword_en),
+        start=1,
+    ):
+        if len(raw_all) >= 18:
+            break
+        await _run_attempt(query, f"intent-{idx}", True)
 
     raw = raw_all
     if not raw:
@@ -1056,7 +1318,7 @@ async def search_1688(
 
     print(f"[ProductSearcher] 1688 merged total: {len(raw)} candidates")
 
-    references = [reference_name, keyword_cn]
+    references = [reference_name, keyword_cn, keyword_en]
     candidates = []
     for p in raw:
         title = p.get("title", "")
@@ -1078,13 +1340,12 @@ async def search_1688_quick(
     raw_all: list[dict] = []
     seen_ids: set[str] = set()
 
-    head = _simplify_to_head_noun(keyword_cn, max_tokens=4) or ""
     # _do_1688_search already falls back filter->plain internally; distinct queries only.
     attempts: list[tuple[str, str, bool]] = []
-    if head:
-        attempts.append((head, "quick-head-noun", True))
-    if keyword_cn and keyword_cn != head:
-        attempts.append((keyword_cn, "quick-full", True))
+    for idx, query in enumerate(_preferred_chinese_query_variants(keyword_cn, keyword_en), start=1):
+        attempts.append((query, f"quick-intent-{idx}", True))
+        if len(attempts) >= 4:
+            break
 
     per_attempt_timeout = 15
 

@@ -30,6 +30,9 @@ from core.sourcing.product_searcher import (
     _detect_domain,
     _looks_b2b_candidate_title,
     _looks_b2b_detail_text,
+    _preferred_chinese_query_variants,
+    _preferred_english_query_variants,
+    _semantic_similarity_score,
 )
 from core.sourcing.keyword_converter import convert_keywords_rule_based
 
@@ -69,6 +72,79 @@ def test_multi_reference_zero_for_unrelated():
     candidate = "iPhone 15 Pro Case Magnetic Magsafe Compatible"
     score = _multi_reference_score(candidate, refs)
     assert score < 0.05, f"Unrelated should score near zero, got {score}"
+
+
+def test_semantic_score_lifts_electric_chopper_match_to_publish_threshold():
+    refs = [
+        "전동 멀티 믹서기 블렌더 마늘 다지기 야채 다지기 만능 다지기",
+        "Electric Food Processor, Multi-functional Blender, Vegetable Chopper, Garlic Mincer",
+        "电动多功能搅拌机 蔬菜切碎机 蒜泥器",
+    ]
+    candidate = "2in1 multy functional Chopper / garlic vegetable meat electric Chopper Mixer Processor"
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+
+def test_semantic_score_lifts_sink_sponge_caddy_match_to_publish_threshold():
+    refs = [
+        "노멀리즘 304 올스텐 싱크대 수세미 거치대 자동물빠짐 주방세제 거치대",
+        "304 Stainless Steel Kitchen Sink Caddy Auto Draining Sponge Holder Dish Soap Organizer Rack",
+        "304不锈钢水槽海绵架 自动排水厨房置物架 洗洁精沥水架",
+    ]
+    candidate = "Integrated Sponge, Soap & Towel Rack Stainless Steel Multi-Functional Sink Organizer for Kitchen"
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+
+def test_semantic_score_lifts_tumbler_ice_mold_match_to_publish_threshold():
+    refs = [
+        "네이쳐리빙 실리콘 텀블러 얼음틀 트레이",
+        "silicone tumbler ice mold, cylinder ice tray, ice cup mold",
+        "硅胶保温杯冰格 圆柱冰格模具 冰杯硅胶模具",
+    ]
+    candidate = "Ice Cube Tray for Tumbler Cup 30Oz-40Oz Silicone Cylinder Ice Mold with Lid"
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+
+def test_semantic_score_blocks_metal_stopper_for_biodegradable_strainer_bag():
+    refs = [
+        "콘실 국산 생분해 옥수수 싱크대 배수구 거름망",
+        "biodegradable kitchen sink strainer bag compostable cornstarch sink filter mesh net",
+        "玉米淀粉可降解水槽过滤网 厨房垃圾过滤网袋",
+    ]
+    wrong = "Kitchen Sink Drain Filter Pop-up Stainless Steel Strainer Mesh Basin Water Stopper Plug"
+    right = "100pcs Biodegradable Kitchen Sink Strainer Bags Cornstarch Compostable Drain Filter Mesh Net"
+    assert _semantic_similarity_score(wrong, refs) < 0.9
+    assert _multi_reference_score(wrong, refs) < 0.9
+    assert _semantic_similarity_score(right, refs) >= 0.9
+    assert _multi_reference_score(right, refs) >= 0.9
+
+
+def test_semantic_score_accepts_alibaba_korean_biodegradable_strainer_listing():
+    refs = [
+        "콘실 국산 생분해 옥수수 싱크대 배수구 거름망",
+        "biodegradable kitchen sink strainer bag compostable cornstarch sink filter mesh net",
+        "玉米淀粉可降解水槽过滤网 厨房垃圾过滤网袋",
+    ]
+    candidate = "옥수수 전분 만든 생분해 PLA 주방 쓰레기 싱크 배수 필터 여과기 메쉬 그물 가방"
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+
+def test_preferred_query_variants_keep_product_anchors():
+    assert "tumbler ice mold" in _preferred_english_query_variants(
+        "silicone tumbler ice mold, cylinder ice tray, ice cup mold"
+    )
+    assert "biodegradable sink strainer bag" in _preferred_english_query_variants(
+        "biodegradable kitchen sink strainer bag compostable cornstarch sink filter mesh"
+    )
+    assert "auto draining sponge holder" in _preferred_english_query_variants(
+        "304 Stainless Steel Kitchen Sink Caddy Auto Draining Sponge Holder"
+    )
+    assert "电动切碎机" in _preferred_chinese_query_variants(
+        "电动多功能搅拌机 蔬菜切碎机 蒜泥器", "vegetable chopper"
+    )
 
 
 # ──────────────────────── category guards ────────────────────────
