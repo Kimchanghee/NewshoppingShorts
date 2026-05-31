@@ -31,9 +31,7 @@ _COMPOUND_MAP = {
     "주방 수전": {"cn": "厨房水龙头", "en": "kitchen faucet"},
     "주방 선반": {"cn": "厨房置物架", "en": "kitchen shelf"},
     "주방용품": {"cn": "厨房用品", "en": "kitchen tool"},
-    "도마": {"cn": "砧板", "en": "cutting board"},
     "식기 정리": {"cn": "餐具沥水架", "en": "dish drying rack"},
-    "식기건조대": {"cn": "碗碟架", "en": "dish drying rack"},
     "행주걸이": {"cn": "毛巾架", "en": "towel rack"},
     "물비누 디스펜서": {"cn": "皂液器", "en": "soap dispenser"},
     "양념 정리함": {"cn": "调味料收纳盒", "en": "spice rack"},
@@ -160,7 +158,6 @@ _COMPOUND_MAP = {
     "주방 솔": {"cn": "厨房刷", "en": "kitchen brush"},
     "병 솔": {"cn": "瓶刷", "en": "bottle brush"},
     "배수구 거름망": {"cn": "下水道过滤网", "en": "drain strainer"},
-    "싱크대 거름망": {"cn": "水槽过滤网", "en": "sink strainer"},
 
     # 냉장고 / 정리 (kitchen-adjacent)
     "냉장고 정리함": {"cn": "冰箱收纳盒", "en": "fridge organizer container"},
@@ -336,7 +333,7 @@ async def generate_content_text(gemini_client: object, prompt: str) -> str:
         import config
 
         model_name = getattr(config, "GEMINI_TEXT_MODEL", "gemini-3.5-flash")
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _build_model_fallback_chain(primary: str) -> List[str]:
             chain: List[str] = []
@@ -399,7 +396,7 @@ async def generate_content_text(gemini_client: object, prompt: str) -> str:
         return ""
 
     if hasattr(gemini_client, "generate_content"):
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         response = await loop.run_in_executor(None, lambda: gemini_client.generate_content(prompt))
         return str(getattr(response, "text", "") or "").strip()
 

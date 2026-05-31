@@ -238,6 +238,41 @@ class SourcingPipeline:
                 """)
             except Exception as e:
                 logger.warning("[Pipeline] geo-cookie seed failed: %s", e)
+
+            # Bridge any stored 1688 login cookies into THIS zendriver session.
+            # Root cause of 1688 producing 0 sourced videos in practice: the
+            # manual 1688 login saves cookies into settings for the *Selenium*
+            # SourcingManager only (managers/sourcing_manager.py), and this
+            # zendriver pipeline never loaded them — so search_1688 always hit
+            # the login wall. Best-effort: any failure is non-fatal and simply
+            # leaves 1688 behaving as before.
+            try:
+                from managers.settings_manager import get_settings_manager
+                from zendriver import cdp as _cdp
+
+                try:
+                    cookies_1688 = get_settings_manager().get_1688_cookies() or {}
+                except Exception:
+                    cookies_1688 = {}
+                if cookies_1688:
+                    params = [
+                        _cdp.network.CookieParam(
+                            name=str(name),
+                            value=str(value),
+                            domain=".1688.com",
+                            path="/",
+                        )
+                        for name, value in cookies_1688.items()
+                        if name
+                    ]
+                    if params:
+                        await br.cookies.set_all(params)
+                        logger.info(
+                            "[Pipeline] Seeded %d stored 1688 cookie(s) into zendriver session",
+                            len(params),
+                        )
+            except Exception as e:
+                logger.warning("[Pipeline] 1688 cookie bridge failed (non-fatal): %s", e)
             return br
 
         try:
@@ -362,9 +397,40 @@ class SourcingPipeline:
                 coupang_image = "https:" + coupang_image
             print(f"[Pipeline] Coupang image URL: {coupang_image[:100] or '(none)'}")
 
+            # 1688 requires a logged-in session: every guest endpoint is
+            # login/anti-bot walled (verified live AND in this app's own logs,
+            # where 1688 produced 0 sourced videos across hundreds of runs). The
+            # only place a 1688 login is stored is settings.cookies_1688, which
+            # _start_browser bridges into this session. So only run the otherwise
+            # guaranteed-to-fail, time-wasting 1688 phases when we actually hold
+            # those cookies. Override with SSMAKER_FORCE_1688=1 (on) / =0 (off).
+            _force_1688 = os.getenv("SSMAKER_FORCE_1688", "").strip()
+            if _force_1688 == "1":
+                run_1688 = True
+            elif _force_1688 == "0":
+                run_1688 = False
+            else:
+                try:
+                    run_1688 = bool(get_settings_manager().get_1688_cookies())
+                except Exception:
+                    run_1688 = False
+            if not run_1688:
+                logger.info(
+                    "[Pipeline] Skipping 1688 search: no stored 1688 login cookies. "
+                    "1688 guest access is login/anti-bot walled, so running it would "
+                    "only waste navigations. Set SSMAKER_FORCE_1688=1 to override."
+                )
+
+            # Track whether any 1688 navigation actually happened. The browser
+            # restarts below exist only to recover from 1688-induced CDP tab
+            # corruption, so when 1688 never navigated we can safely skip the
+            # (expensive) cold Chrome relaunch.
+            ran_1688_nav = False
+
             # 1688 image-first search
             candidates_1688_img: List[Dict] = []
-            if coupang_image.startswith("http"):
+            if coupang_image.startswith("http") and run_1688:
+                ran_1688_nav = True
                 self._progress("overseas_search", "1688 이미지 검색(우선) 중...", 0.08)
                 try:
                     candidates_1688_img = await asyncio.wait_for(
@@ -408,7 +474,8 @@ class SourcingPipeline:
             # 1688 keyword search (augmentation for image-first mode)
             candidates_1688_text: List[Dict] = []
             should_run_1688_text = len(candidates_1688_img) < 12
-            if should_run_1688_text and cn_kw:
+            if should_run_1688_text and cn_kw and run_1688:
+                ran_1688_nav = True
                 try:
                     candidates_1688_text = await asyncio.wait_for(
                         search_1688(
@@ -469,17 +536,22 @@ class SourcingPipeline:
             # 1688 login/challenge redirects can poison the current CDP tab
             # state (frequent InvalidStateError in zendriver). Recreate the
             # browser session before AliExpress search to keep candidate
-            # extraction stable.
-            try:
-                logger.info("[Pipeline] Reinitializing browser session before AliExpress search")
-                await browser.stop()
-            except Exception:
-                pass
-            browser = await self._start_browser()
-            if browser is None:
-                self.error = "AliExpress 검색용 브라우저를 시작할 수 없습니다."
-                self._progress("overseas_search", self.error, 0.7)
-                return False
+            # extraction stable — but only if 1688 actually navigated this run,
+            # since an unused 1688 phase can't have corrupted the CDP state.
+            if ran_1688_nav:
+                try:
+                    logger.info("[Pipeline] Reinitializing browser session before AliExpress search")
+                    await browser.stop()
+                except Exception:
+                    pass
+                browser = await self._start_browser()
+                if browser is None:
+                    self.error = "AliExpress 검색용 브라우저를 시작할 수 없습니다."
+                    self._progress("overseas_search", self.error, 0.7)
+                    return False
+                ran_1688_nav = False
+            else:
+                logger.info("[Pipeline] Skipping pre-AliExpress browser restart (no 1688 navigation)")
 
             # AliExpress (English keyword required)
             candidates_ali_text: List[Dict] = []
@@ -574,7 +646,8 @@ class SourcingPipeline:
                     )
 
                     # 1688 additional scans (query-by-query, dedup by id).
-                    if gem_1688_queries:
+                    if gem_1688_queries and run_1688:
+                        ran_1688_nav = True
                         existing_1688_ids = {c.get("id") for c in candidates_1688 if c.get("id")}
                         for q in gem_1688_queries:
                             try:
@@ -631,17 +704,22 @@ class SourcingPipeline:
 
             # Recreate browser once more before final AliExpress fallback and
             # video scan stage. 1688 quick searches above can leave webdriver
-            # targets in an invalid state.
-            try:
-                logger.info("[Pipeline] Reinitializing browser session before final AliExpress fallback")
-                await browser.stop()
-            except Exception:
-                pass
-            browser = await self._start_browser()
-            if browser is None:
-                self.error = "최종 검색용 브라우저를 시작할 수 없습니다."
-                self._progress("overseas_search", self.error, 1.0)
-                return False
+            # targets in an invalid state — only restart if a 1688 augmentation
+            # scan actually ran since the last restart.
+            if ran_1688_nav:
+                try:
+                    logger.info("[Pipeline] Reinitializing browser session before final AliExpress fallback")
+                    await browser.stop()
+                except Exception:
+                    pass
+                browser = await self._start_browser()
+                if browser is None:
+                    self.error = "최종 검색용 브라우저를 시작할 수 없습니다."
+                    self._progress("overseas_search", self.error, 1.0)
+                    return False
+                ran_1688_nav = False
+            else:
+                logger.info("[Pipeline] Skipping pre-final-fallback browser restart (no 1688 navigation since last restart)")
 
             # Image-based search FALLBACK — when text search yields very few
             # candidates the Coupang product image is a much stronger query
@@ -902,6 +980,30 @@ class SourcingPipeline:
                             )
                             found_ali_loose = []
                         self.sourced_products.extend(found_ali_loose)
+
+                    # 1688 also benefits from threshold relaxation. Without this
+                    # branch, products that only surfaced 1688 candidates never
+                    # got a relaxed retry and silently failed (Korean Coupang vs
+                    # Chinese 1688 titles routinely score < 0.15).
+                    if not self.sourced_products and candidates_1688:
+                        try:
+                            found_1688_loose = await asyncio.wait_for(
+                                find_products_with_video(
+                                    browser, candidates_1688, self.output_dir, "1688",
+                                    count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                    category_terms=category_terms,
+                                    overlap_references=overlap_refs,
+                                ),
+                                timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                            )
+                        except asyncio.TimeoutError:
+                            logger.warning(
+                                "[Pipeline] 1688 relaxed scan timeout (%ss, min_score=%.2f)",
+                                MARKETPLACE_VIDEO_SCAN_TIMEOUT,
+                                relaxed,
+                            )
+                            found_1688_loose = []
+                        self.sourced_products.extend(found_1688_loose)
 
             # Final exact-product fallback: only after strict + relaxed
             # marketplace scans are exhausted.

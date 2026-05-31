@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import uuid
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -138,10 +139,19 @@ def _tokenize(s: str):
     s = s.lower()
     tokens = set(re.findall(r'[\u4e00-\u9fff]+|[\uac00-\ud7af]+|[a-z]+|\d+', s))
     chars = set()
+    bigrams = set()
     for t in list(tokens):
         if re.match(r'[\u4e00-\u9fff]', t):
             chars.update(t)
+            # Adjacent-character bigrams are far more discriminative than single
+            # CJK chars: a phone stand (\u624b\u673a\u652f\u67b6) and a sponge rack (\u6d77\u7ef5\u67b6) both
+            # contain \u67b6, but share no bigram \u2014 so bigrams curb common-character
+            # similarity inflation while still rewarding genuine overlap. Single
+            # chars are kept too, so cross-vendor partial matches still register.
+            for i in range(len(t) - 1):
+                bigrams.add(t[i:i + 2])
     tokens.update(chars)
+    tokens.update(bigrams)
     # Rewrite Korean synonyms to canonical, then drop noise.
     normalized = {_normalize_synonyms(t) for t in tokens}
     return {t for t in normalized if t not in _STOPWORD_TOKENS}
@@ -329,9 +339,80 @@ async def _extract_video_urls(tab: Any) -> List[str]:
     """) or []
 
 
-def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2) -> Optional[float]:
-    """Download video file with retry. Returns size in MB or None on failure."""
+# Hard caps so a mis-detected URL (an HLS playlist that trickles bytes, or an
+# unexpectedly huge file) can never hang the pipeline or fill the disk. The
+# requests stream `timeout` only bounds the gap *between* chunks, not the whole
+# transfer — these enforce the overall ceilings. Override via env if needed.
+_DOWNLOAD_MAX_BYTES = int(os.getenv("SSMAKER_DOWNLOAD_MAX_BYTES", str(200 * 1024 * 1024)))
+_DOWNLOAD_MAX_SECONDS = float(os.getenv("SSMAKER_DOWNLOAD_MAX_SECONDS", "180"))
+
+
+def _download_hls_via_ffmpeg(url: str, filepath: str, referer: str,
+                             max_seconds: float = _DOWNLOAD_MAX_SECONDS) -> Optional[float]:
+    """Best-effort HLS (.m3u8) download via ffmpeg.
+
+    Marketplace videos are occasionally served only as HLS playlists, which the
+    plain byte-stream path can't assemble (it would just save the text manifest
+    and fail validation). When ffmpeg is available we remux the stream into the
+    mp4 at `filepath`. Any failure returns None — no worse than the old behavior
+    where every .m3u8 URL was discarded outright.
+    """
+    import subprocess
+    try:
+        from utils.ffmpeg import resolve_ffmpeg_exe
+        ffmpeg = resolve_ffmpeg_exe()
+    except Exception:
+        ffmpeg = None
+    if not ffmpeg:
+        logger.info("[ProductSearcher] HLS url but ffmpeg unavailable, skip: %s", url[:80])
+        return None
+    try:
+        cmd = [
+            ffmpeg, "-y",
+            "-headers", f"Referer: {referer}\r\n",
+            "-i", url,
+            "-c", "copy", "-bsf:a", "aac_adtstoasc",
+            filepath,
+        ]
+        proc = subprocess.run(cmd, capture_output=True, timeout=max_seconds)
+        if proc.returncode != 0 or not os.path.exists(filepath):
+            logger.info("[ProductSearcher] ffmpeg HLS download failed (rc=%s): %s",
+                        getattr(proc, "returncode", "?"), url[:80])
+            if os.path.exists(filepath):
+                os.remove(filepath)
+            return None
+        size = os.path.getsize(filepath)
+        if size < 10_000 or not _is_valid_video_file(filepath):
+            logger.warning("[ProductSearcher] HLS result invalid/too small, discarding: %s", filepath)
+            os.remove(filepath)
+            return None
+        return round(size / (1024 * 1024), 1)
+    except subprocess.TimeoutExpired:
+        logger.warning("[ProductSearcher] ffmpeg HLS timeout (%ss): %s", max_seconds, url[:80])
+    except Exception as e:
+        logger.info("[ProductSearcher] ffmpeg HLS error: %s", e)
+    try:
+        if os.path.exists(filepath):
+            os.remove(filepath)
+    except OSError:
+        pass
+    return None
+
+
+def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2,
+                    max_bytes: int = _DOWNLOAD_MAX_BYTES,
+                    max_seconds: float = _DOWNLOAD_MAX_SECONDS) -> Optional[float]:
+    """Download video file with retry. Returns size in MB or None on failure.
+
+    Enforces both a maximum byte size and a maximum wall-clock duration per
+    attempt — requests' stream `timeout` only limits the gap between chunks, so
+    a slow trickle or an unexpectedly huge file would otherwise run unbounded.
+    """
     import time
+
+    # HLS playlists need ffmpeg; the byte-stream path below can't assemble them.
+    if ".m3u8" in url.lower():
+        return _download_hls_via_ffmpeg(url, filepath, referer, max_seconds)
 
     for attempt in range(1, max_retries + 1):
         try:
@@ -339,7 +420,7 @@ def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2)
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": referer,
             }
-            r = requests.get(url, headers=headers, timeout=60, stream=True)
+            r = requests.get(url, headers=headers, timeout=(10, 60), stream=True)
             if r.status_code != 200:
                 logger.warning("[ProductSearcher] Download HTTP %d (attempt %d/%d): %s",
                                r.status_code, attempt, max_retries, url[:80])
@@ -348,11 +429,27 @@ def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2)
                     continue
                 return None
 
+            deadline = time.time() + max_seconds
             total = 0
+            aborted: Optional[str] = None
             with open(filepath, "wb") as f:
-                for chunk in r.iter_content(chunk_size=8192):
+                for chunk in r.iter_content(chunk_size=65536):
+                    if not chunk:
+                        continue
                     f.write(chunk)
                     total += len(chunk)
+                    if total > max_bytes:
+                        aborted = f"size > {max_bytes} bytes"
+                        break
+                    if time.time() > deadline:
+                        aborted = f"exceeded {max_seconds:.0f}s"
+                        break
+
+            if aborted:
+                logger.warning("[ProductSearcher] Download aborted (%s): %s", aborted, url[:80])
+                if os.path.exists(filepath):
+                    os.remove(filepath)
+                return None  # too big / too slow won't improve on retry
 
             if total < 10_000:  # <10KB = not a real video
                 logger.warning("[ProductSearcher] File too small (%d bytes), discarding", total)
@@ -469,14 +566,13 @@ async def _do_aliexpress_search(
     Returns the raw candidate list (unsorted, unscored). Caller scores+merges.
     """
     import urllib.parse
-    base = f"https://www.aliexpress.com/wholesale?SearchText={urllib.parse.quote(query)}"
-    if video_filter:
-        # AliExpress supports two video-filter parameters depending on the
-        # entry point that was used. Sending both is safe (unknown ones get
-        # ignored by the server).
-        url = base + "&filterCategory=video&filter=hasVideo"
-    else:
-        url = base
+    # Live-verified (2026-05): AliExpress does NOT honor a generic "video only"
+    # search filter. Appending filterCategory=video&filter=hasVideo returns the
+    # IDENTICAL result pool as the plain query (params are dropped and the
+    # request is redirected to the localized /w/ results page). So `video_filter`
+    # no longer changes the URL — it is kept only for call-site compatibility,
+    # and callers must not assume the results are video-only.
+    url = f"https://www.aliexpress.com/wholesale?SearchText={urllib.parse.quote(query)}"
     logger.info("[ProductSearcher] AliExpress search [%s%s]: %s",
                 log_label, " VIDEO" if video_filter else "", query)
     print(f"[ProductSearcher] AliExpress search [{log_label}{' VIDEO' if video_filter else ''}]: {query}")
@@ -628,23 +724,18 @@ async def search_aliexpress(
                 seen_ids.add(xid)
                 raw_all.append(x)
 
-    # Attempt 1 — head-noun + VIDEO filter (most likely to yield video-bearing items)
+    # AliExpress doesn't honor a video-only filter (live-verified), so the
+    # former "+VIDEO" passes were byte-for-byte duplicates of the plain passes
+    # and only wasted navigations. Run distinct queries instead.
+    # Attempt 1 — head-noun
     if head:
-        await _run_attempt(head, "head-noun", True)
-
-    # Attempt 2 — full keyword + VIDEO filter (precision pass)
-    if len(raw_all) < 12:
-        await _run_attempt(keyword_en, "full", True)
-
-    # Attempt 3 — head-noun without filter (recall pass)
-    if len(raw_all) < 12 and head:
         await _run_attempt(head, "head-noun", False)
 
-    # Attempt 4 — full keyword without filter
-    if len(raw_all) < 12:
+    # Attempt 2 — full keyword
+    if len(raw_all) < 12 and keyword_en and keyword_en != head:
         await _run_attempt(keyword_en, "full", False)
 
-    # Attempt 5 — Korean reference name
+    # Attempt 3 — Korean reference name
     if len(raw_all) < 10 and reference_name:
         kr_head = re.sub(r"[\[\]\(\)\{\}\|/,;]", " ", reference_name)
         kr_head = " ".join(kr_head.split()[:3])
@@ -686,13 +777,12 @@ async def search_aliexpress_quick(
     seen_ids: set[str] = set()
 
     head = _simplify_to_head_noun(keyword_en, max_tokens=2) or ""
+    # AliExpress video filter is a no-op (see search_aliexpress) — distinct queries only.
     attempts: list[tuple[str, str, bool]] = []
     if head:
-        attempts.append((head, "quick-head-noun", True))
-    if keyword_en and keyword_en != head:
-        attempts.append((keyword_en, "quick-full", True))
-    if head:
         attempts.append((head, "quick-head-noun", False))
+    if keyword_en and keyword_en != head:
+        attempts.append((keyword_en, "quick-full", False))
 
     per_attempt_timeout = 15
 
@@ -751,17 +841,19 @@ async def _do_1688_search(
     """
     import urllib.parse
     q = urllib.parse.quote(query)
+    # Live-verified (2026-05): the m.1688.com mobile search endpoints
+    # (page/offerlist.html, offer/search.htm, page/searchResult.html) no longer
+    # resolve to a results page — they return "旺铺不存在" / an offer-unavailable
+    # page / a 404. The desktop selloffer search is the only working endpoint
+    # (anti-bot gated, which the app's persistent logged-in profile clears). The
+    # video-filtered URL is tried first, then plain as a recall fallback.
     if video_filter:
         candidate_urls = [
-            # Mobile + video filter — most likely to succeed without login
-            f"https://m.1688.com/page/offerlist.html?keywords={q}&video=1",
-            f"https://m.1688.com/offer/search.htm?keywords={q}&video=1",
-            # Desktop + video filter
             f"https://s.1688.com/selloffer/offer_search.htm?keywords={q}&filter=video",
+            f"https://s.1688.com/selloffer/offer_search.htm?keywords={q}",
         ]
     else:
         candidate_urls = [
-            f"https://m.1688.com/page/offerlist.html?keywords={q}",
             f"https://s.1688.com/selloffer/offer_search.htm?keywords={q}",
         ]
     logger.info("[ProductSearcher] 1688 search [%s%s]: %s",
@@ -774,8 +866,10 @@ async def _do_1688_search(
             continue
         await tab.sleep(3)
         current_url = await tab.evaluate("window.location.href") or ""
-        if "login.taobao.com" in current_url or "login.1688.com" in current_url:
-            logger.info("[ProductSearcher] 1688 endpoint %s requires login, trying next", url[:60])
+        if any(x in current_url for x in (
+            "login.taobao.com", "login.1688.com", "_____tmd_____", "punish", "captcha", "nouser",
+        )):
+            logger.info("[ProductSearcher] 1688 endpoint %s login/anti-bot blocked, trying next", url[:60])
             continue
         # Scroll for lazy-load. Some 1688 endpoints occasionally return an
         # intermediate/blank document where document.body is still null; treat
@@ -913,21 +1007,14 @@ async def search_1688(
                 seen_ids.add(xid)
                 raw_all.append(x)
 
-    # 1. head-noun + VIDEO
+    # _do_1688_search now falls back from the video-filtered URL to the plain
+    # URL internally, so one pass per distinct query is enough (the old no-filter
+    # head/full passes just re-fetched the same desktop results).
     if head:
         await _run_attempt(head, "head-noun", True)
 
-    # 2. full + VIDEO
-    if len(raw_all) < 12:
+    if len(raw_all) < 12 and keyword_cn and keyword_cn != head:
         await _run_attempt(keyword_cn, "full", True)
-
-    # 3. head-noun no filter
-    if len(raw_all) < 12 and head:
-        await _run_attempt(head, "head-noun", False)
-
-    # 4. full no filter
-    if len(raw_all) < 12:
-        await _run_attempt(keyword_cn, "full", False)
 
     raw = raw_all
     if not raw:
@@ -960,13 +1047,12 @@ async def search_1688_quick(
     seen_ids: set[str] = set()
 
     head = _simplify_to_head_noun(keyword_cn, max_tokens=4) or ""
+    # _do_1688_search already falls back filter->plain internally; distinct queries only.
     attempts: list[tuple[str, str, bool]] = []
     if head:
         attempts.append((head, "quick-head-noun", True))
     if keyword_cn and keyword_cn != head:
         attempts.append((keyword_cn, "quick-full", True))
-    if head:
-        attempts.append((head, "quick-head-noun", False))
 
     per_attempt_timeout = 15
 
@@ -1534,6 +1620,22 @@ def _detect_domain(reference_name: str, keyword_en: str, keyword_cn: str) -> str
     return best_domain if scores.get(best_domain, 0) > 0 else ""
 
 
+def _guard_key_matches(guard_key: str, kw: str) -> bool:
+    """Word-boundary match of a guard key against the search keyword.
+
+    Plain substring matching (`guard_key in kw`) mis-fires: "pan" is inside
+    "japanese", "pen" inside "dispenser", "pot" inside "potato". That silently
+    swaps in the wrong category guard and then rejects every correct candidate.
+    Anchoring on alphanumeric boundaries prevents the collisions while still
+    allowing multi-word keys like "car fan".
+    """
+    if not guard_key or not kw:
+        return False
+    return re.search(
+        r"(?<![a-z0-9])" + re.escape(guard_key) + r"(?![a-z0-9])", kw
+    ) is not None
+
+
 def _category_terms_for_keyword(
     keyword_en: str,
     *,
@@ -1552,7 +1654,7 @@ def _category_terms_for_keyword(
     kw = (keyword_en or "").lower()
     # 1) Longest specific guard wins
     matches = sorted(
-        (g for g in _CATEGORY_GUARDS if g in kw),
+        (g for g in _CATEGORY_GUARDS if _guard_key_matches(g, kw)),
         key=len,
         reverse=True,
     )
@@ -1776,6 +1878,11 @@ async def find_products_with_video(
 
         cand_score = float(cand.get("score") or 0.0)
         cand_title = str(cand.get("title") or "")
+        # Some search results (notably the 1688 id-only HTML fallback) arrive
+        # with no title. Title-based gates below would reject ALL of them before
+        # we ever load the detail page — which DOES carry the title. So when the
+        # title is missing we defer every title gate to after the page loads.
+        has_title = bool(cand_title.strip())
         is_image_candidate = bool(cand.get("image_search"))
         # Image-search candidates are visually pre-filtered, so allow a lower
         # text-score gate. Keep category/reference guards active below.
@@ -1783,14 +1890,14 @@ async def find_products_with_video(
         if is_image_candidate and min_score >= MIN_SIMILARITY_SCORE:
             effective_min_score = max(0.05, min_score - 0.10)
 
-        if _looks_b2b_candidate_title(cand_title):
+        if has_title and _looks_b2b_candidate_title(cand_title):
             logger.info(
                 "[ProductSearcher] [%s] skip b2b-title %s",
                 source_label, cand_title[:60],
             )
             continue
 
-        if cand_score < effective_min_score:
+        if has_title and cand_score < effective_min_score:
             rejected_low_score += 1
             logger.info(
                 "[ProductSearcher] [%s] skip low-score=%.3f (<%.2f) %s",
@@ -1801,7 +1908,7 @@ async def find_products_with_video(
         # Safety net for the 0.0-threshold fallback: require token overlap with
         # at least one reference. Otherwise category guards become the sole
         # filter, and an uncovered category category would let anything through.
-        if min_score < 0.05 and overlap_references:
+        if has_title and min_score < 0.05 and overlap_references:
             if not _has_minimum_overlap(cand.get("title", ""), overlap_references):
                 logger.info(
                     "[ProductSearcher] [%s] skip zero-overlap %s",
@@ -1812,14 +1919,14 @@ async def find_products_with_video(
         # Category guard — HARD reject if the title doesn't even mention the
         # product family. This is the single biggest reason wrong-category videos
         # ever passed (e.g. "support" matched a phone stand).
-        if not _passes_category_guard(cand.get("title"), category_terms or []):
+        if has_title and not _passes_category_guard(cand.get("title"), category_terms or []):
             logger.info(
                 "[ProductSearcher] [%s] skip category-guard %s",
                 source_label, (cand.get("title") or "")[:50],
             )
             continue
 
-        if not _passes_reference_constraints(cand.get("title", ""), overlap_references):
+        if has_title and not _passes_reference_constraints(cand.get("title", ""), overlap_references):
             logger.info(
                 "[ProductSearcher] [%s] skip reference-constraint %s",
                 source_label, (cand.get("title") or "")[:50],
@@ -1837,6 +1944,39 @@ async def find_products_with_video(
             if tab is None:
                 logger.warning("[ProductSearcher]   tab open failed, skip")
                 continue
+            # Deferred gating: candidates that had no title in the search result
+            # are judged here using the title resolved from the detail page, so
+            # the same category / reference / overlap gates still apply — we just
+            # apply them after the (cheap) navigation instead of dropping blind.
+            if not has_title:
+                resolved_title = ""
+                try:
+                    resolved_title = str(await tab.evaluate(
+                        "((document.querySelector('h1,h2') || {}).textContent"
+                        " || document.title || '').trim()"
+                    ) or "").strip()
+                except Exception:
+                    resolved_title = ""
+                if not resolved_title:
+                    logger.info("[ProductSearcher]   [%s] no resolvable title, skip", source_label)
+                    continue
+                cand_title = resolved_title
+                cand["title"] = resolved_title
+                cand["score"] = _multi_reference_score(
+                    resolved_title, [r for r in (overlap_references or []) if r]
+                )
+                if _looks_b2b_candidate_title(resolved_title):
+                    logger.info("[ProductSearcher] [%s] skip b2b-title(resolved) %s", source_label, resolved_title[:60])
+                    continue
+                if not _passes_category_guard(resolved_title, category_terms or []):
+                    logger.info("[ProductSearcher] [%s] skip category-guard(resolved) %s", source_label, resolved_title[:50])
+                    continue
+                if not _passes_reference_constraints(resolved_title, overlap_references):
+                    logger.info("[ProductSearcher] [%s] skip reference-constraint(resolved) %s", source_label, resolved_title[:50])
+                    continue
+                if overlap_references and not _has_minimum_overlap(resolved_title, overlap_references):
+                    logger.info("[ProductSearcher] [%s] skip zero-overlap(resolved) %s", source_label, resolved_title[:50])
+                    continue
             # Early B2B screening on the detail page content before expensive
             # video extraction/downloading.
             try:
@@ -1975,7 +2115,13 @@ async def find_products_with_video(
             # Try downloading
             for vurl in video_urls[:3]:
                 idx = len(found) + 1
-                filepath = os.path.join(output_dir, f"sourcing_{source_label}_{idx}_video.mp4")
+                # Unique token guards against collisions when find_products_with_video
+                # is invoked more than once for the same source_label in a run
+                # (initial / expanded / relaxed / image passes all use "aliexpress").
+                filepath = os.path.join(
+                    output_dir,
+                    f"sourcing_{source_label}_{idx}_{uuid.uuid4().hex[:8]}_video.mp4",
+                )
                 size = await asyncio.to_thread(_download_video, vurl, filepath, detail_url)
                 if size:
                     logger.info("[ProductSearcher]   downloaded %.1fMB", size)
