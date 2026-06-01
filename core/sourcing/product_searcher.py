@@ -7,6 +7,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import sys
 import uuid
 from typing import Any, Dict, List, Optional
 
@@ -15,6 +16,19 @@ import requests
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+
+
+def _safe_print(message: Any) -> None:
+    text = str(message)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        try:
+            sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
+            sys.stdout.flush()
+        except Exception:
+            logger.info(text)
 
 
 # Tokens that inflate Jaccard similarity without identifying the product family.
@@ -189,6 +203,27 @@ _SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
         "multifunction", "functional", "다기능", "만능", "多功能", "万能",
     ),
 
+    # Portable appliance families used by strict auto-sourcing.
+    "brush": (
+        "brush", "scrubber", "spin scrubber", "cleaning brush", "cleaning tool",
+        "청소솔", "브러쉬", "브러시",
+    ),
+    "sealer": (
+        "sealer", "sealing", "seal", "heat sealer", "sealing machine",
+        "밀봉", "실링", "포장기", "봉합", "封口",
+    ),
+    "frother": (
+        "frother", "frothers", "milk frother", "whisk", "egg beater",
+        "beater", "cream whipper", "hand mixer", "휘핑기", "거품기", "머랭",
+    ),
+    "milk": ("milk", "coffee", "cappuccino", "latte", "우유", "커피"),
+    "handheld": (
+        "handheld", "hand held", "portable", "mini", "clip", "hand press",
+        "휴대용", "미니", "핸드", "손잡이",
+    ),
+    "vacuum": ("vacuum", "suction", "진공", "청소기"),
+    "vehicle": ("car", "vehicle", "automotive", "dashboard", "차량", "자동차", "차"),
+
     # Kitchen sink sponge caddy family
     "sponge": ("sponge", "scrubber", "수세미", "스폰지", "스펀지", "海绵"),
     "sink": ("sink", "싱크", "씽크", "水槽"),
@@ -238,6 +273,13 @@ _SEMANTIC_FEATURE_WEIGHTS: dict[str, float] = {
     "silicone": 2.0,
     "tumbler": 2.5,
     "mold": 2.5,
+    "brush": 3.0,
+    "sealer": 3.0,
+    "frother": 3.0,
+    "vacuum": 3.0,
+    "vehicle": 2.6,
+    "handheld": 1.4,
+    "milk": 1.2,
     "electric": 1.5,
     "processor_mixer": 1.5,
     "stainless": 1.5,
@@ -253,9 +295,18 @@ def _extract_semantic_features(text: str) -> set[str]:
     haystack = f" {text or ''} ".lower()
     features: set[str] = set()
     for feature, aliases in _SEMANTIC_FEATURE_ALIASES.items():
-        if any(alias.lower() in haystack for alias in aliases):
+        if any(_semantic_alias_matches(haystack, alias) for alias in aliases):
             features.add(feature)
     return features
+
+
+def _semantic_alias_matches(haystack: str, alias: str) -> bool:
+    alias_l = str(alias or "").lower()
+    if not alias_l:
+        return False
+    if re.fullmatch(r"[a-z0-9]{1,3}", alias_l):
+        return re.search(rf"(?<![a-z0-9]){re.escape(alias_l)}(?![a-z0-9])", haystack) is not None
+    return alias_l in haystack
 
 
 def _weighted_feature_coverage(reference: set[str], candidate: set[str]) -> float:
@@ -317,6 +368,30 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
             candidate,
             required={"chopper"},
             optional={"electric", "processor_mixer", "vegetable", "garlic", "food", "multifunction"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"brush"},
+            optional={"electric", "handheld", "food"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"sealer", "bag_net"},
+            optional={"electric", "handheld", "food"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"frother"},
+            optional={"electric", "handheld", "milk", "food", "processor_mixer"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"vacuum", "vehicle"},
+            optional={"electric", "handheld"},
         ),
         _family_score(
             reference,
@@ -848,7 +923,7 @@ async def _do_aliexpress_search(
     url = f"https://www.aliexpress.com/wholesale?SearchText={urllib.parse.quote(query)}"
     logger.info("[ProductSearcher] AliExpress search [%s%s]: %s",
                 log_label, " VIDEO" if video_filter else "", query)
-    print(f"[ProductSearcher] AliExpress search [{log_label}{' VIDEO' if video_filter else ''}]: {query}")
+    _safe_print(f"[ProductSearcher] AliExpress search [{log_label}{' VIDEO' if video_filter else ''}]: {query}")
 
     tab = await browser.get(url)
     if tab is None:
@@ -1015,7 +1090,7 @@ async def search_aliexpress(
             await _run_attempt(kr_head, "kr-head", False)
 
     raw = raw_all
-    print(f"[ProductSearcher] AliExpress merged total: {len(raw)} candidates (video-filter prioritized)")
+    _safe_print(f"[ProductSearcher] AliExpress merged total: {len(raw)} candidates (video-filter prioritized)")
 
     # Score and sort — score against ALL three reference forms (Korean original
     # title, English keyword, Chinese keyword) and take the max. This is the
@@ -1126,7 +1201,7 @@ async def _do_1688_search(
         candidate_urls = [_base]
     logger.info("[ProductSearcher] 1688 search [%s%s]: %s",
                 log_label, " VIDEO" if video_filter else "", query)
-    print(f"[ProductSearcher] 1688 search [{log_label}{' VIDEO' if video_filter else ''}]: {query}")
+    _safe_print(f"[ProductSearcher] 1688 search [{log_label}{' VIDEO' if video_filter else ''}]: {query}")
 
     # Warm up on the 1688 homepage, then navigate the search URL carrying the
     # homepage Referer (via CDP). Direct deep-links get an "unusual traffic"
@@ -1324,10 +1399,10 @@ async def search_1688(
     raw = raw_all
     if not raw:
         logger.info("[ProductSearcher] 1688 returned 0 candidates (likely login wall)")
-        print(f"[ProductSearcher] 1688 returned 0 candidates")
+        _safe_print(f"[ProductSearcher] 1688 returned 0 candidates")
         return []
 
-    print(f"[ProductSearcher] 1688 merged total: {len(raw)} candidates")
+    _safe_print(f"[ProductSearcher] 1688 merged total: {len(raw)} candidates")
 
     references = [reference_name, keyword_cn, keyword_en]
     candidates = []
@@ -1422,7 +1497,7 @@ async def search_1688_by_image(
     if not image_url or not image_url.startswith("http"):
         return []
 
-    print(f"[ProductSearcher] 1688 IMAGE search: {image_url[:80]}")
+    _safe_print(f"[ProductSearcher] 1688 IMAGE search: {image_url[:80]}")
     logger.info("[ProductSearcher] 1688 image search: %s", image_url[:80])
 
     encoded = urllib.parse.quote(image_url, safe="")
@@ -1510,7 +1585,7 @@ async def search_1688_by_image(
             logger.warning("[ProductSearcher] 1688 image endpoint #%d error: %s", idx, e)
 
     if not raw_all:
-        print("[ProductSearcher] 1688 IMAGE search: 0 candidates")
+        _safe_print("[ProductSearcher] 1688 IMAGE search: 0 candidates")
         return []
 
     references = [reference_name, keyword_cn, keyword_en]
@@ -1527,7 +1602,7 @@ async def search_1688_by_image(
             }
         )
     candidates.sort(key=lambda x: x["score"], reverse=True)
-    print(f"[ProductSearcher] 1688 IMAGE search: {len(candidates)} candidates")
+    _safe_print(f"[ProductSearcher] 1688 IMAGE search: {len(candidates)} candidates")
     return candidates
 
 
@@ -1551,7 +1626,7 @@ async def search_aliexpress_by_image(
     if not image_url or not image_url.startswith("http"):
         return []
 
-    print(f"[ProductSearcher] AliExpress IMAGE search: {image_url[:80]}")
+    _safe_print(f"[ProductSearcher] AliExpress IMAGE search: {image_url[:80]}")
     logger.info("[ProductSearcher] AliExpress image search: %s", image_url[:80])
 
     encoded = urllib.parse.quote(image_url, safe="")
@@ -1649,7 +1724,7 @@ async def search_aliexpress_by_image(
             "image_search": True,
         })
     candidates.sort(key=lambda x: x["score"], reverse=True)
-    print(f"[ProductSearcher] AliExpress IMAGE search: {len(candidates)} candidates")
+    _safe_print(f"[ProductSearcher] AliExpress IMAGE search: {len(candidates)} candidates")
     return candidates
 
 
@@ -2415,7 +2490,7 @@ async def find_products_with_video(
                     mobile_url = f"https://m.aliexpress.com/item/{cand_id}.html"
                     try:
                         logger.info("[ProductSearcher]   trying mobile detail: %s", mobile_url)
-                        print(f"[ProductSearcher]   mobile fallback: {mobile_url}")
+                        _safe_print(f"[ProductSearcher]   mobile fallback: {mobile_url}")
                         m_tab = await browser.get(mobile_url)
                         if m_tab is not None:
                             await asyncio.wait_for(m_tab.sleep(5), timeout=12)
@@ -2442,7 +2517,7 @@ async def find_products_with_video(
                     mobile_url = f"https://m.1688.com/offer/{cand_id}.html"
                     try:
                         logger.info("[ProductSearcher]   trying 1688 mobile: %s", mobile_url)
-                        print(f"[ProductSearcher]   1688 mobile fallback: {mobile_url}")
+                        _safe_print(f"[ProductSearcher]   1688 mobile fallback: {mobile_url}")
                         m_tab = await browser.get(mobile_url)
                         if m_tab is not None:
                             await asyncio.wait_for(m_tab.sleep(5), timeout=12)

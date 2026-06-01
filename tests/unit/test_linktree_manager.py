@@ -102,6 +102,7 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
 
     monkeypatch.setattr(LinktreeManager, "publish_link", _fake_publish_link)
     monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
     manager = _make_manager({"webhook_url": "https://example.com/hook", "api_key": "", "profile_url": "", "auto_publish": True})
     ok = manager.publish_coupang_link(

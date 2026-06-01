@@ -17,6 +17,18 @@ logger = get_logger(__name__)
 class SettingsManager:
     """Manages persistent storage of UI preferences (thread-safe)"""
 
+    REMOTE_SECRET_STRING_KEYS = {
+        "coupang_access_key",
+        "coupang_secret_key",
+        "linktree_webhook_url",
+        "linktree_api_key",
+        "computer_use_bridge_api_key",
+    }
+    REMOTE_SECRET_JSON_KEYS = {
+        "cookies_inpock",
+        "cookies_1688",
+    }
+
     DEFAULT_PLATFORM_PROMPTS = {
         "youtube": {
             "title_prompt": (
@@ -194,6 +206,9 @@ class SettingsManager:
         self.settings_file = settings_file
         self._settings: Dict[str, Any] = {}
         self._lock = threading.Lock()  # Thread safety lock
+        self._remote_sync_enabled = False
+        self._remote_push_running = False
+        self._remote_lock = threading.Lock()
         self._load_settings()
 
     def _get_settings_dir(self) -> str:
@@ -280,7 +295,7 @@ class SettingsManager:
             except Exception:
                 pass
 
-    def _save_settings(self) -> bool:
+    def _save_settings(self, sync_remote: bool = True) -> bool:
         """Save settings to file (thread-safe)"""
         settings_path = self._get_settings_path()
 
@@ -290,10 +305,172 @@ class SettingsManager:
                 with open(settings_path, 'w', encoding='utf-8') as f:
                     json.dump(self._settings, f, ensure_ascii=False, indent=2)
             logger.debug(f"[SettingsManager] Settings saved: {settings_path}")
+            if sync_remote:
+                self.schedule_remote_push()
             return True
         except Exception as e:
             logger.error(f"[SettingsManager] Settings save failed: {e}")
             return False
+
+    # ============ Account Settings Sync ============
+
+    @staticmethod
+    def _remote_sync_disabled() -> bool:
+        return os.getenv("SSMAKER_DISABLE_REMOTE_SETTINGS_SYNC", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+
+    def _export_remote_settings(self) -> Dict[str, Any]:
+        """
+        Build a portable settings snapshot for account sync.
+
+        Sensitive values are decrypted before upload so another logged-in device can
+        re-encrypt them with its local secure-storage key after download.
+        """
+        with self._lock:
+            snapshot = self._settings.copy()
+
+        exported: Dict[str, Any] = {}
+        for key, value in snapshot.items():
+            if key in self.REMOTE_SECRET_STRING_KEYS:
+                if isinstance(value, str) and value:
+                    try:
+                        exported[key] = self._decrypt_value(value)
+                    except Exception:
+                        exported[key] = ""
+                else:
+                    exported[key] = str(value or "")
+            elif key in self.REMOTE_SECRET_JSON_KEYS:
+                if isinstance(value, str):
+                    try:
+                        decrypted = self._decrypt_value(value)
+                        exported[key] = json.loads(decrypted) if decrypted else {}
+                    except Exception:
+                        exported[key] = {}
+                elif isinstance(value, dict):
+                    exported[key] = value.copy()
+                else:
+                    exported[key] = {}
+            else:
+                exported[key] = value
+        return exported
+
+    def _prepare_remote_settings_for_local(self, remote_settings: Dict[str, Any]) -> Dict[str, Any]:
+        """Convert a portable server snapshot into local encrypted settings."""
+        if not isinstance(remote_settings, dict):
+            remote_settings = {}
+
+        prepared = {**self.DEFAULT_SETTINGS, **remote_settings}
+
+        for key in self.REMOTE_SECRET_STRING_KEYS:
+            value = prepared.get(key, "")
+            if isinstance(value, str) and value.startswith("fernet:"):
+                # Legacy server payload from older client. Keep as-is; current
+                # machine may still be able to decrypt if the key matches.
+                continue
+            prepared[key] = self._encrypt_value(str(value or "").strip())
+
+        for key in self.REMOTE_SECRET_JSON_KEYS:
+            value = prepared.get(key, {})
+            if isinstance(value, str) and value.startswith("fernet:"):
+                continue
+            if not isinstance(value, dict):
+                value = {}
+            prepared[key] = (
+                self._encrypt_value(json.dumps(value, ensure_ascii=False))
+                if value
+                else {}
+            )
+
+        return prepared
+
+    def apply_remote_settings(self, remote_settings: Dict[str, Any]) -> bool:
+        """Apply a settings snapshot pulled from the authenticated account."""
+        prepared = self._prepare_remote_settings_for_local(remote_settings)
+        with self._lock:
+            self._settings = prepared
+        return self._save_settings(sync_remote=False)
+
+    def push_remote_settings(self) -> bool:
+        """Upload the current local settings snapshot to the authenticated account."""
+        if self._remote_sync_disabled():
+            return False
+        try:
+            from caller import rest
+
+            payload = self._export_remote_settings()
+            result = rest.save_user_settings(payload)
+            ok = bool(isinstance(result, dict) and result.get("success"))
+            if ok:
+                logger.debug("[SettingsSync] Remote settings saved")
+            else:
+                logger.debug("[SettingsSync] Remote settings save skipped/failed: %s", result)
+            return ok
+        except Exception as exc:
+            logger.debug("[SettingsSync] Remote push failed: %s", exc)
+            return False
+
+    def pull_remote_settings(self) -> bool:
+        """Download and apply settings from the authenticated account, if present."""
+        if self._remote_sync_disabled():
+            return False
+        try:
+            from caller import rest
+
+            result = rest.fetch_user_settings()
+            if not (isinstance(result, dict) and result.get("success")):
+                logger.debug("[SettingsSync] Remote settings fetch skipped/failed: %s", result)
+                return False
+
+            remote_settings = result.get("settings")
+            if not isinstance(remote_settings, dict) or not remote_settings:
+                return False
+
+            if self.apply_remote_settings(remote_settings):
+                logger.info("[SettingsSync] Remote settings loaded")
+                return True
+            return False
+        except Exception as exc:
+            logger.debug("[SettingsSync] Remote pull failed: %s", exc)
+            return False
+
+    def sync_with_remote(self, login_data: Optional[Dict[str, Any]] = None) -> bool:
+        """
+        Enable account sync and reconcile local settings after login.
+
+        Remote values win when they exist so a user logging in on another device
+        immediately gets their saved setup. If no remote snapshot exists yet, the
+        current local setup seeds the account.
+        """
+        if self._remote_sync_disabled():
+            return False
+        self._remote_sync_enabled = True
+        pulled = self.pull_remote_settings()
+        if pulled:
+            return True
+        return self.push_remote_settings()
+
+    def schedule_remote_push(self) -> None:
+        """Best-effort non-blocking upload after local settings changes."""
+        if (
+            self._remote_sync_disabled()
+            or not self._remote_sync_enabled
+            or self._remote_push_running
+        ):
+            return
+        self._remote_push_running = True
+
+        def _worker() -> None:
+            with self._remote_lock:
+                try:
+                    self.push_remote_settings()
+                finally:
+                    self._remote_push_running = False
+
+        threading.Thread(target=_worker, daemon=True).start()
 
     # ============ CTA Settings ============
 

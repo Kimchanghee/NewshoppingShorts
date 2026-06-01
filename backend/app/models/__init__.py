@@ -21,6 +21,7 @@ from app.models.billing import BillingKey, RecurringSubscription, SubscriptionSt
 from app.models.payment_error import PaymentErrorLog, UserPaymentStats
 from app.models.user_log import UserLog
 from app.models.computer_use_job import ComputerUseJob, ComputerUseJobStatus
+from app.models.user_settings import UserSettings
 
 __all__ = [
     'User',
@@ -38,4 +39,5 @@ __all__ = [
     'UserLog',
     'ComputerUseJob',
     'ComputerUseJobStatus',
+    'UserSettings',
 ]

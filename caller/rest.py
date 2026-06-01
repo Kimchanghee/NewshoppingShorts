@@ -1826,6 +1826,65 @@ def safe_subscription_request(user_id: str, message: str = "") -> Dict[str, Any]
         return {"success": False, "message": "Subscription request failed."}
 
 
+def fetch_user_settings() -> Dict[str, Any]:
+    """Fetch synced desktop settings for the currently authenticated user."""
+    token = _get_auth_token()
+    if not token:
+        return {"success": False, "message": "No auth token"}
+
+    try:
+        response = _secure_session.get(
+            f"{main_server}/user/settings",
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=(3, 10),
+        )
+        if response.status_code == 401:
+            return {"success": False, "message": "AUTH_REQUIRED", "auth_required": True}
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {"success": False, "message": "Invalid response"}
+    except requests.exceptions.Timeout:
+        logger.warning("[SettingsSync] Fetch timed out")
+        return {"success": False, "message": _ERROR_MESSAGES["timeout"], "transient": True}
+    except requests.exceptions.RequestException as exc:
+        logger.warning("[SettingsSync] Fetch failed: %s", str(exc)[:160])
+        return {"success": False, "message": _ERROR_MESSAGES["network"], "transient": True}
+    except Exception as exc:
+        logger.warning("[SettingsSync] Fetch error: %s", str(exc)[:160])
+        return {"success": False, "message": _ERROR_MESSAGES["unexpected"]}
+
+
+def save_user_settings(settings_payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Persist synced desktop settings for the currently authenticated user."""
+    token = _get_auth_token()
+    if not token:
+        return {"success": False, "message": "No auth token"}
+    if not isinstance(settings_payload, dict):
+        return {"success": False, "message": "Invalid settings payload"}
+
+    try:
+        response = _secure_session.put(
+            f"{main_server}/user/settings",
+            json={"settings": settings_payload},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=(3, 10),
+        )
+        if response.status_code == 401:
+            return {"success": False, "message": "AUTH_REQUIRED", "auth_required": True}
+        response.raise_for_status()
+        payload = response.json()
+        return payload if isinstance(payload, dict) else {"success": False, "message": "Invalid response"}
+    except requests.exceptions.Timeout:
+        logger.warning("[SettingsSync] Save timed out")
+        return {"success": False, "message": _ERROR_MESSAGES["timeout"], "transient": True}
+    except requests.exceptions.RequestException as exc:
+        logger.warning("[SettingsSync] Save failed: %s", str(exc)[:160])
+        return {"success": False, "message": _ERROR_MESSAGES["network"], "transient": True}
+    except Exception as exc:
+        logger.warning("[SettingsSync] Save error: %s", str(exc)[:160])
+        return {"success": False, "message": _ERROR_MESSAGES["unexpected"]}
+
+
 def log_user_action(action: str, content: str = None, level: str = "INFO") -> None:
     """
     Log user activity for debugging.

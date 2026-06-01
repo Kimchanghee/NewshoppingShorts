@@ -66,7 +66,14 @@ def _load_context(video_path: str, coupang_url: str = "") -> dict:
     """Best-effort metadata from the newest sourcing report for this video."""
     out_dir = Path(os.path.expanduser("~/.ssmaker/sourcing_output"))
     video_abs = os.path.abspath(os.path.expanduser(video_path))
-    reports = sorted(out_dir.glob("report_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+    report_candidates = []
+    for pattern in ("report_*.json", "**/report.json", "**/report_*.json"):
+        report_candidates.extend(out_dir.glob(pattern))
+    reports = sorted(
+        {p.resolve(): p for p in report_candidates}.values(),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
 
     def _context_from_report(data: dict) -> dict:
         product = data.get("product_info") or {}
@@ -248,6 +255,55 @@ def main(video_path: str, coupang_url: str = "", privacy: str = "unlisted") -> i
     video_url = item.get("video_url") or (
         "https://youtu.be/" + item["video_id"] if item.get("video_id") else ""
     )
+
+    linktree_publish_ok = None
+    try:
+        from managers.linktree_manager import get_linktree_manager
+
+        linktree_manager = get_linktree_manager()
+        if linktree_manager.is_auto_publish_enabled():
+            linktree_publish_ok = linktree_manager.publish_coupang_link(
+                product_name=product_name,
+                coupang_url=purchase_url,
+                source_url=source_url,
+            )
+            print(f"    Linktree 자동 발행: {'성공' if linktree_publish_ok else '실패'}")
+        else:
+            linktree_publish_ok = False
+            print("    Linktree 자동 발행: 건너뜀(webhook URL 또는 자동 발행 설정 필요)")
+    except Exception as linktree_error:
+        linktree_publish_ok = False
+        print(f"    Linktree 자동 발행 오류: {linktree_error}")
+
+    result_json = os.environ.get("YOUTUBE_UPLOAD_RESULT_JSON", "").strip()
+    if result_json:
+        try:
+            result_path = Path(result_json).expanduser()
+            result_path.parent.mkdir(parents=True, exist_ok=True)
+            result_path.write_text(
+                json.dumps(
+                    {
+                        "success": True,
+                        "video_id": item.get("video_id", ""),
+                        "video_url": video_url,
+                        "channel_id": info.get("id", ""),
+                        "channel_name": info.get("channel_name", ""),
+                        "privacy": privacy,
+                        "title": item.get("title", title),
+                        "description": item.get("description", description),
+                        "tags": item.get("tags", tags),
+                        "purchase_url": purchase_url,
+                        "source_url": source_url,
+                        "linktree_url": linktree_url,
+                        "linktree_publish_ok": linktree_publish_ok,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except Exception as result_error:
+            print(f"    업로드 결과 JSON 저장 실패: {result_error}")
 
     print("=" * 70)
     print("[✓] YouTube 업로드 완료!")

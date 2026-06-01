@@ -70,6 +70,7 @@ def init_db():
         payment_session,
         user_log,
         computer_use_job,
+        user_settings,
     )
     from app.models import billing  # 빌링키 및 정기결제 모델
     Base.metadata.create_all(bind=engine)

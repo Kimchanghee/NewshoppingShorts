@@ -71,9 +71,27 @@ class LoginHandler:
         except Exception as e:
             logger.warning(f"[LoginHandler] Auto trial request check failed: {e}")
 
+        self._start_account_settings_sync()
+
         self.app._login_watch_stop = False
         t = threading.Thread(target=self._login_watch_loop, daemon=True)
         t.start()
+
+    def _start_account_settings_sync(self) -> None:
+        """Load/save Settings tab values against the authenticated account."""
+        def _sync() -> None:
+            try:
+                from managers.settings_manager import get_settings_manager
+
+                ok = get_settings_manager().sync_with_remote(self.app.login_data)
+                if ok:
+                    logger.info("[LoginHandler] Account settings sync complete")
+                else:
+                    logger.debug("[LoginHandler] Account settings sync skipped")
+            except Exception as exc:
+                logger.debug("[LoginHandler] Account settings sync failed: %s", exc)
+
+        threading.Thread(target=_sync, daemon=True).start()
 
     def _auto_request_trial(self, user_id):
         """신규 사용자를 위한 자동 체험판 신청"""

@@ -32,6 +32,7 @@ from core.sourcing.product_searcher import (
     _looks_b2b_detail_text,
     _preferred_chinese_query_variants,
     _preferred_english_query_variants,
+    _extract_semantic_features,
     _semantic_similarity_score,
 )
 from core.sourcing.keyword_converter import convert_keywords_rule_based
@@ -103,6 +104,47 @@ def test_semantic_score_lifts_tumbler_ice_mold_match_to_publish_threshold():
         "硅胶保温杯冰格 圆柱冰格模具 冰杯硅胶模具",
     ]
     candidate = "Ice Cube Tray for Tumbler Cup 30Oz-40Oz Silicone Cylinder Ice Mold with Lid"
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+
+def test_semantic_score_lifts_portable_bag_sealer_match_to_publish_threshold():
+    refs = [
+        "FDUCE mini bag sealer portable heat sealer handheld plastic bag sealing machine",
+        "mini bag sealer, portable heat sealer, handheld bag sealer, plastic bag sealing machine",
+    ]
+    candidate = "Mini Heat Sealer Plastic Bag Heat Sealing Machine Rechargable Plastic Storage Package Sealer Handheld Clip Bag Food Heat Sealer"
+    assert "biodegradable" not in _extract_semantic_features("plastic bag sealing machine")
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+
+def test_semantic_score_lifts_milk_frother_match_to_publish_threshold():
+    refs = [
+        "cordless electric hand mixer portable milk frother handheld egg beater cream whipper",
+        "portable milk frother electric whisk mixer egg beater",
+    ]
+    candidate = "Portable Electric Milk Frothers Handheld Blender USB Mini Coffee Maker Whisk Mixer Cappuccino Cream Egg Beater Food Blender"
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+
+def test_semantic_score_lifts_car_vacuum_match_to_publish_threshold():
+    refs = [
+        "xiaomi mijia car vacuum cleaner cordless handheld vacuum portable car vacuum",
+        "car vacuum cleaner cordless handheld vacuum cleaner",
+    ]
+    candidate = "SZUK 9998700PA Car Vacuum Cleaner Strong Suction Cordless Wireless Cleaner Portable HandHeld Vacuum Cleaner Cleaning Machine"
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+
+def test_semantic_score_lifts_electric_cleaning_brush_match_to_publish_threshold():
+    refs = [
+        "automatic electric cleaning brush set electric spin scrubber cleaning brush",
+        "electric spin scrubber cordless cleaning brush",
+    ]
+    candidate = "Electric Spin Scrubber Cleaning Brush Cordless Power Cleaning Tool for Bathroom Kitchen"
     assert _semantic_similarity_score(candidate, refs) >= 0.9
     assert _multi_reference_score(candidate, refs) >= 0.9
 

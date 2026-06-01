@@ -1,17 +1,20 @@
 import hashlib
 import ipaddress
+import json
 import os
 import re
 import logging
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 
 from fastapi import APIRouter, Depends, Request, Header, HTTPException
+from pydantic import BaseModel, Field, field_validator
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
 from app.database import get_db
+from app.dependencies import get_current_user_id
 from app.schemas.auth import (
     LoginRequest,
     LoginResponse,
@@ -25,6 +28,13 @@ from app.schemas.auth import (
 from app.services.auth_service import AuthService
 from app.models.user import User
 from app.models.registration_request import RegistrationRequest, RequestStatus
+from app.models.user_settings import UserSettings
+from app.utils.billing_crypto import (
+    decrypt_billing_key,
+    encrypt_billing_key,
+    has_encryption_key,
+    is_encrypted,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -127,6 +137,23 @@ def get_client_ip(request: Request) -> str:
 limiter = Limiter(key_func=get_client_ip)
 
 router = APIRouter(prefix="/user", tags=["auth"])
+
+
+class UserSettingsRequest(BaseModel):
+    """Desktop app settings snapshot for the authenticated account."""
+
+    settings: Dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("settings")
+    @classmethod
+    def validate_settings_size(cls, value: Dict[str, Any]) -> Dict[str, Any]:
+        try:
+            serialized = json.dumps(value, ensure_ascii=False, default=str)
+        except TypeError as exc:
+            raise ValueError("Settings must be JSON serializable") from exc
+        if len(serialized.encode("utf-8")) > 256 * 1024:
+            raise ValueError("Settings payload is too large")
+        return value
 
 
 def _resolve_token(
@@ -245,6 +272,68 @@ async def change_password(
         raise HTTPException(status_code=400, detail=result.get("message", "Password change failed"))
 
     return {"success": True}
+
+
+@router.get("/settings")
+@limiter.limit("60/minute")
+async def get_user_settings(
+    request: Request,
+    current_user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Return the authenticated user's synced desktop settings."""
+    record = (
+        db.query(UserSettings)
+        .filter(UserSettings.user_id == current_user_id)
+        .first()
+    )
+    if not record:
+        return {"success": True, "settings": {}, "updated_at": None}
+
+    try:
+        raw_settings_json = record.settings_json or "{}"
+        if is_encrypted(raw_settings_json):
+            raw_settings_json = decrypt_billing_key(raw_settings_json)
+        settings_payload = json.loads(raw_settings_json)
+    except json.JSONDecodeError:
+        logger.warning("[UserSettings] Corrupted settings JSON for user_id=%s", current_user_id)
+        settings_payload = {}
+
+    updated_at = record.updated_at.isoformat() if record.updated_at else None
+    return {"success": True, "settings": settings_payload, "updated_at": updated_at}
+
+
+@router.put("/settings")
+@limiter.limit("30/minute")
+async def save_user_settings(
+    request: Request,
+    data: UserSettingsRequest,
+    current_user_id: int = Depends(get_current_user_id),
+    db: Session = Depends(get_db),
+):
+    """Upsert the authenticated user's synced desktop settings."""
+    settings_json = json.dumps(data.settings, ensure_ascii=False, separators=(",", ":"), default=str)
+    stored_settings_json = (
+        encrypt_billing_key(settings_json)
+        if has_encryption_key()
+        else settings_json
+    )
+
+    record = (
+        db.query(UserSettings)
+        .filter(UserSettings.user_id == current_user_id)
+        .first()
+    )
+    if record:
+        record.settings_json = stored_settings_json
+    else:
+        record = UserSettings(user_id=current_user_id, settings_json=stored_settings_json)
+        db.add(record)
+
+    db.commit()
+    db.refresh(record)
+    updated_at = record.updated_at.isoformat() if record.updated_at else None
+    return {"success": True, "updated_at": updated_at}
 
 
 @router.get("/check-username/{username}")

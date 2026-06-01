@@ -8,6 +8,7 @@ from __future__ import annotations
 import asyncio
 import os
 import json
+import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
@@ -30,6 +31,19 @@ MARKETPLACE_SEARCH_STAGE_TIMEOUT = int(
 MARKETPLACE_VIDEO_SCAN_TIMEOUT = int(
     os.getenv("SSMAKER_MARKETPLACE_VIDEO_SCAN_TIMEOUT", "240")
 )
+
+
+def _safe_print(message: Any) -> None:
+    text = str(message)
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        encoding = getattr(sys.stdout, "encoding", None) or "utf-8"
+        try:
+            sys.stdout.buffer.write((text + "\n").encode(encoding, errors="replace"))
+            sys.stdout.flush()
+        except Exception:
+            logger.info(text)
 
 
 class SourcingPipeline:
@@ -482,7 +496,7 @@ class SourcingPipeline:
             # Normalize protocol-relative URLs (//image.coupangcdn.com/... → https://...)
             if coupang_image.startswith("//"):
                 coupang_image = "https:" + coupang_image
-            print(f"[Pipeline] Coupang image URL: {coupang_image[:100] or '(none)'}")
+            _safe_print(f"[Pipeline] Coupang image URL: {coupang_image[:100] or '(none)'}")
 
             # 1688 needs NO login (live-verified 2026-06): the searcher warms up
             # on the 1688 homepage and navigates the search URL with a Referer
@@ -806,7 +820,7 @@ class SourcingPipeline:
                 and coupang_image.startswith("http")
             ):
                 msg = "[Pipeline] Few candidates — adding image-search fallback"
-                print(msg)
+                _safe_print(msg)
                 logger.info(msg)
                 try:
                     img_candidates = await asyncio.wait_for(
@@ -862,11 +876,11 @@ class SourcingPipeline:
             # doesn't always tail.
             if category_terms:
                 msg = f"[Pipeline] Category guard active ({len(category_terms)} terms): {', '.join(category_terms[:6])}..."
-                print(msg)
+                _safe_print(msg)
                 logger.info(msg)
             else:
                 msg = "[Pipeline] No category guard — relying on score + overlap safety net"
-                print(msg)
+                _safe_print(msg)
                 logger.info(msg)
 
             marketplace_video_min_score = (
@@ -978,7 +992,7 @@ class SourcingPipeline:
                 and not any(c.get("image_search") for c in candidates_ali)
             ):
                 msg = "[Pipeline] 0 videos from text search — last-resort image search"
-                print(msg)
+                _safe_print(msg)
                 logger.info(msg)
                 try:
                     img_candidates = await asyncio.wait_for(
@@ -1008,7 +1022,7 @@ class SourcingPipeline:
                             found_img = []
                         self.sourced_products.extend(found_img)
                         msg2 = f"[Pipeline] Image-search fallback yielded {len(found_img)} video(s)"
-                        print(msg2)
+                        _safe_print(msg2)
                         logger.info(msg2)
                 except Exception as e:
                     logger.warning("[Pipeline] Last-resort image search failed: %s", e)
