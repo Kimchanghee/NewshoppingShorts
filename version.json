@@ -1,8 +1,8 @@
 ﻿{
-  "version": "1.4.54",
+  "version": "1.4.55",
   "build_date": "2026-06-01",
   "updated_at": "2026-06-01",
-  "build_number": "87",
+  "build_number": "88",
   "min_required_version": "1.0.0",
   "update_channel": "stable"
 }
