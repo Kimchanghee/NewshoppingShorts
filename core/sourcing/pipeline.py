@@ -869,6 +869,12 @@ class SourcingPipeline:
                 print(msg)
                 logger.info(msg)
 
+            marketplace_video_min_score = (
+                self.min_similarity_score
+                if self.enforce_min_similarity
+                else MIN_TRUSTED_VIDEO_SCORE
+            )
+
             need_from_ali = 2 if not candidates_1688 else 1
             need_from_1688 = 2 - need_from_ali
 
@@ -888,6 +894,7 @@ class SourcingPipeline:
                             browser, candidates_ali, self.output_dir, "aliexpress",
                             count=need_from_ali,
                             max_try=ali_max_try,
+                            min_score=marketplace_video_min_score,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
                         ),
@@ -922,6 +929,7 @@ class SourcingPipeline:
                                 "aliexpress",
                                 count=need_from_ali,
                                 max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
+                                min_score=marketplace_video_min_score,
                                 category_terms=category_terms,
                                 overlap_references=overlap_refs,
                             ),
@@ -944,7 +952,8 @@ class SourcingPipeline:
                     found_1688 = await asyncio.wait_for(
                         find_products_with_video(
                             browser, candidates_1688, self.output_dir, "1688",
-                            count=need_from_1688, category_terms=category_terms,
+                            count=need_from_1688, min_score=marketplace_video_min_score,
+                            category_terms=category_terms,
                             overlap_references=overlap_refs,
                         ),
                         timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
@@ -985,7 +994,7 @@ class SourcingPipeline:
                                 find_products_with_video(
                                     browser, img_candidates, self.output_dir,
                                     "aliexpress", count=2, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
-                                    min_score=0.0,
+                                    min_score=marketplace_video_min_score,
                                     category_terms=category_terms,
                                     overlap_references=overlap_refs,
                                 ),
@@ -1023,7 +1032,11 @@ class SourcingPipeline:
             # fall through to threshold 0 (any candidate that has video) before
             # giving up. For products with a valid Coupang image, the exact
             # image-video fallback above will normally stop before this point.
-            if not self.sourced_products and (candidates_ali or candidates_1688):
+            if (
+                not self.enforce_min_similarity
+                and not self.sourced_products
+                and (candidates_ali or candidates_1688)
+            ):
                 for relaxed in (0.05, 0.0):
                     if self.sourced_products:
                         break

@@ -300,6 +300,7 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
     order. Family rules can exceed the 90% auto-publish gate only when the
     candidate carries the required product-family anchors plus enough attributes.
     """
+    candidate_title_l = (candidate_title or "").lower()
     candidate = _extract_semantic_features(candidate_title)
     if not candidate:
         return 0.0
@@ -342,7 +343,17 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
     metal_stopper_candidate = bool(candidate & {"stainless", "stopper"}) and not bool(
         candidate & {"biodegradable", "cornstarch", "bag_net", "disposable"}
     )
-    if disposable_bag_intent and metal_stopper_candidate:
+    non_bag_drain_candidate = any(
+        marker in candidate_title_l
+        for marker in ("hair catcher", "shower", "bathroom", "floor drain", "drain cover", "stopper", "plug")
+    ) and not any(
+        marker in candidate_title_l
+        for marker in (
+            "bag", "bags", "filter bag", "biodegradable", "compostable",
+            "cornstarch", "corn starch", "pla", "생분해", "옥수수", "可降解", "玉米", "袋",
+        )
+    )
+    if disposable_bag_intent and (metal_stopper_candidate or non_bag_drain_candidate):
         score = min(score, 0.55)
 
     if score >= 0.9:
@@ -422,7 +433,7 @@ def _preferred_chinese_query_variants(keyword_cn: str, keyword_en: str = "") -> 
         add("电动切碎机")
         add("电动蒜泥器")
         add("多功能绞肉机")
-    if any(x in haystack for x in ("海绵", "水槽", "sponge")):
+    if any(x in haystack for x in ("海绵", "sponge", "수세미")):
         add("水槽海绵架")
         add("自动排水海绵架")
         add("不锈钢洗洁精架")
@@ -1662,6 +1673,13 @@ _CATEGORY_GUARDS: Dict[str, List[str]] = {
     "dish rack": ["dish", "drying", "rack", "건조", "식기", "碗碟", "沥水"],
     "dish drainer": ["dish", "drainer", "drying", "rack", "식기", "건조", "碗碟", "沥水"],
     "drying rack": ["dish", "drying", "rack", "건조", "식기", "碗碟", "沥水"],
+    "biodegradable sink strainer bag": ["biodegradable", "compostable", "cornstarch", "pla", "bag", "mesh", "net", "생분해", "옥수수", "봉투", "袋", "网"],
+    "biodegradable sink mesh bag": ["biodegradable", "compostable", "cornstarch", "pla", "bag", "mesh", "net", "생분해", "옥수수", "봉투", "袋", "网"],
+    "cornstarch sink filter mesh": ["biodegradable", "compostable", "cornstarch", "pla", "bag", "mesh", "net", "생분해", "옥수수", "봉투", "袋", "网"],
+    "kitchen drain mesh bag": ["biodegradable", "compostable", "cornstarch", "pla", "bag", "mesh", "net", "생분해", "옥수수", "봉투", "袋", "网"],
+    "sink filter bag": ["biodegradable", "compostable", "cornstarch", "pla", "bag", "mesh", "net", "생분해", "옥수수", "봉투", "袋", "网"],
+    "sink mesh bag": ["biodegradable", "compostable", "cornstarch", "pla", "bag", "mesh", "net", "생분해", "옥수수", "봉투", "袋", "网"],
+    "drain strainer": ["strainer", "sink", "drain", "filter", "bag", "mesh", "net", "거름망", "싱크", "씽크", "水槽", "过滤"],
     "sink strainer": ["strainer", "sink", "drain", "filter", "거름망", "싱크", "씽크", "水槽", "过滤"],
     "strainer holder": ["strainer", "sink", "drain", "filter", "거름망", "싱크", "씽크", "水槽", "过滤"],
     "food waste strainer": ["strainer", "sink", "drain", "filter", "food", "거름망", "음식물", "水槽", "过滤"],
@@ -2031,6 +2049,37 @@ def _passes_reference_constraints(title: str, references: Optional[List[str]]) -
     if any(marker in ref for marker in strainer_intent_markers):
         if any(marker in title_l for marker in basin_fixture_markers) and not any(
             marker in title_l for marker in strainer_title_markers
+        ):
+            return False
+
+    # Biodegradable sink-filter bag intent: reject shower/floor drain hair
+    # catchers, metal stoppers, and generic sink strainers unless the title also
+    # carries bag/net or biodegradable/cornstarch/PLA evidence.
+    bag_strainer_ref_markers = (
+        "biodegradable", "compostable", "cornstarch", "corn starch", "pla",
+        "sink mesh bag", "sink filter bag", "strainer bag", "mesh net",
+        "생분해", "옥수수", "可降解", "玉米", "淀粉", "过滤网袋",
+    )
+    bag_title_markers = (
+        "bag", "bags", "mesh bag", "net bag", "filter bag", "pouch",
+        "garbage bag", "봉투", "가방", "袋",
+    )
+    biodegradable_title_markers = (
+        "biodegradable", "compostable", "degradable", "cornstarch",
+        "corn starch", "pla", "eco", "생분해", "옥수수", "可降解", "玉米", "淀粉",
+    )
+    non_bag_drain_markers = (
+        "hair catcher", "shower", "bathroom", "floor drain", "drain cover",
+        "stopper", "plug", "stainless", "steel", "basin", "욕실", "샤워", "머리카락",
+    )
+    if any(marker in ref for marker in bag_strainer_ref_markers):
+        has_bag_or_bio = any(marker in title_l for marker in bag_title_markers) or any(
+            marker in title_l for marker in biodegradable_title_markers
+        )
+        if not has_bag_or_bio:
+            return False
+        if any(marker in title_l for marker in non_bag_drain_markers) and not any(
+            marker in title_l for marker in biodegradable_title_markers
         ):
             return False
 

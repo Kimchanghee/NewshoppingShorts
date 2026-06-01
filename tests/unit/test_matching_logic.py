@@ -132,6 +132,36 @@ def test_semantic_score_accepts_alibaba_korean_biodegradable_strainer_listing():
     assert _multi_reference_score(candidate, refs) >= 0.9
 
 
+def test_biodegradable_strainer_constraints_reject_shower_hair_catcher():
+    refs = [
+        "콘실 국산 생분해 옥수수 싱크대 배수구 거름망",
+        "biodegradable sink mesh bag compostable drain strainer",
+        "可降解水槽过滤网 玉米淀粉水槽滤网",
+    ]
+    bad = "Disposable Shower Drain Hair Catcher Mesh Shower Drain Covers Floor Sink Strainer Filter Hair Stopper"
+    good = "Biodegradable Kitchen Sink Filter Bag Cornstarch Drain Mesh Net"
+    assert not _passes_reference_constraints(bad, refs)
+    assert _multi_reference_score(bad, refs) < 0.9
+    assert _passes_reference_constraints(good, refs)
+
+
+def test_biodegradable_strainer_query_does_not_trigger_sponge_search():
+    variants = _preferred_chinese_query_variants(
+        "可降解水槽过滤网 玉米淀粉水槽滤网 生物降解厨房水槽过滤袋",
+        "biodegradable sink mesh bag compostable drain strainer",
+    )
+    assert "可降解水槽过滤网袋" in variants
+    assert "水槽海绵架" not in variants
+
+    terms = _category_terms_for_keyword(
+        "biodegradable sink mesh bag compostable drain strainer",
+        reference_name="콘실 국산 생분해 옥수수 싱크대 배수구 거름망",
+        keyword_cn="可降解水槽过滤网 玉米淀粉水槽滤网",
+    )
+    assert "sponge" not in terms
+    assert "bag" in terms or "mesh" in terms
+
+
 def test_preferred_query_variants_keep_product_anchors():
     assert "tumbler ice mold" in _preferred_english_query_variants(
         "silicone tumbler ice mold, cylinder ice tray, ice cup mold"
