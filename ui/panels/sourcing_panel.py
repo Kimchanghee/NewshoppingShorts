@@ -329,6 +329,25 @@ class SourcingPanel(QWidget):
         except Exception as exc:
             logger.warning("[SourcingPanel] Failed to save match policy: %s", exc)
 
+    def refresh_match_policy(self):
+        """Reload match controls after account settings sync."""
+        if not hasattr(self, "match_threshold_spin"):
+            return
+        policy = self._load_match_policy()
+        try:
+            self.match_threshold_spin.blockSignals(True)
+            self.chk_auto_skip_low_similarity.blockSignals(True)
+            self.match_threshold_spin.setValue(
+                int(policy.get("min_similarity_percent", 90))
+            )
+            self.chk_auto_skip_low_similarity.setChecked(
+                bool(policy.get("auto_skip_low_similarity", False))
+            )
+        finally:
+            self.match_threshold_spin.blockSignals(False)
+            self.chk_auto_skip_low_similarity.blockSignals(False)
+        self._sync_next_links_enabled()
+
     def _match_threshold_score(self) -> float:
         if hasattr(self, "match_threshold_spin"):
             return max(0.0, min(1.0, self.match_threshold_spin.value() / 100.0))
@@ -578,6 +597,8 @@ class SourcingPanel(QWidget):
             self.results_label.setStyleSheet(f"color: {get_color('text_primary')};")
 
             # Store in app state
+            report["linktree_auto_publish_requested"] = self.chk_linktree.isChecked()
+            report["youtube_auto_upload_requested"] = self.chk_upload.isChecked()
             if hasattr(self.gui, 'state'):
                 self.gui.state.sourcing_result = report
 
@@ -658,7 +679,7 @@ class SourcingPanel(QWidget):
             # the original Coupang URL so the action is not silently skipped
             # when Coupang Partners keys are not configured yet).
             publish_url = pipeline.deep_link or pipeline.coupang_url
-            if self.chk_linktree.isChecked() and publish_url:
+            if self.chk_linktree.isChecked() and publish_url and not self.chk_upload.isChecked():
                 try:
                     from managers.linktree_manager import get_linktree_manager
                     lm = get_linktree_manager()
@@ -674,6 +695,8 @@ class SourcingPanel(QWidget):
                         logger.info("[SourcingPanel] Linktree 미연결 - 자동 발행 건너뜀")
                 except Exception as e:
                     logger.warning("[SourcingPanel] Linktree publish error: %s", e)
+            elif self.chk_linktree.isChecked() and publish_url:
+                logger.info("[SourcingPanel] Linktree publish deferred until render integrity passes")
 
             # Full automation: chain to batch processing if YouTube auto-upload is checked
             if self.chk_upload.isChecked():

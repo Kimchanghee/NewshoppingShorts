@@ -345,7 +345,6 @@ class YouTubeManager:
             logger.warning("[YouTube] YouTube API library is not installed.")
             self._last_error_message = "YouTube API 라이브러리가 설치되지 않았습니다."
             return False
-
         try:
             self._migrate_legacy_oauth_files()
 
@@ -797,6 +796,20 @@ class YouTubeManager:
         """Get auto-upload settings"""
         return self._upload_settings
 
+    def apply_settings_manager_upload_settings(self, start_upload: bool = True) -> None:
+        """Reload auto-upload settings after account settings sync."""
+        try:
+            settings = get_settings_manager()
+            self._upload_settings.enabled = bool(settings.get_youtube_auto_upload())
+            self._upload_settings.interval_minutes = int(settings.get_youtube_upload_interval())
+            self._save_settings()
+            if self._upload_settings.enabled and start_upload:
+                self.start_auto_upload()
+            elif not self._upload_settings.enabled:
+                self.stop_auto_upload()
+        except Exception as exc:
+            logger.debug("[YouTube] Failed to apply synced upload settings: %s", exc)
+
     def set_upload_enabled(self, enabled: bool) -> None:
         """Enable/disable auto-upload"""
         self._upload_settings.enabled = enabled
@@ -1033,6 +1046,8 @@ class YouTubeManager:
         source_url: str = "",
         coupang_deep_link: str = "",
         linktree_url: str = "",
+        render_integrity: Optional[Dict[str, Any]] = None,
+        render_integrity_required: bool = False,
     ) -> None:
         """
         Add video to upload queue.
@@ -1071,6 +1086,10 @@ class YouTubeManager:
         if not normalized_tags and self._upload_settings.auto_hashtags:
             normalized_tags = self.generate_seo_hashtags(clean_product_info, self._upload_settings.max_hashtags)
 
+        if render_integrity_required and not (render_integrity or {}).get("ok"):
+            logger.warning("[YouTube] Upload blocked: render integrity was not verified.")
+            return
+
         self._upload_queue.append({
             "video_path": video_path,
             "title": clean_title or "쇼핑 추천 영상",
@@ -1080,6 +1099,8 @@ class YouTubeManager:
             "source_url": clean_source_url or "",
             "coupang_deep_link": clean_coupang_link or "",
             "linktree_url": linktree_url or "",
+            "render_integrity": render_integrity or {},
+            "render_integrity_required": bool(render_integrity_required),
             "added_at": datetime.now().isoformat()
         })
 
@@ -1161,6 +1182,12 @@ class YouTubeManager:
         video_path = item.get("video_path", "")
         if not os.path.exists(video_path):
             logger.warning(f"[YouTube] 비디오 파일 없음: {video_path}")
+            return False
+
+        if item.get("render_integrity_required") and not (
+            item.get("render_integrity") or {}
+        ).get("ok"):
+            logger.warning("[YouTube] Upload blocked: render integrity guard failed.")
             return False
 
         try:

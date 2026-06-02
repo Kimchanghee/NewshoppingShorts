@@ -104,12 +104,27 @@ class SubtitleProcessor:
 
         blur_opt = getattr(self.gui, "apply_blur", None)
         blur_val = _get_bool(blur_opt)
+        self.gui.latest_blur_metadata = {
+            "requested": blur_val is not False,
+            "completed": False,
+            "applied": False,
+            "regions": 0,
+            "reason": "",
+        }
         logger.debug("[BLUR MAIN] Option status:")
         logger.debug(f"  - add_subtitles: {_get_bool(getattr(self.gui, 'add_subtitles', None))}")
         logger.debug(f"  - apply_blur: {blur_val}")
 
         if blur_val is not None and not blur_val:
             logger.info("[BLUR MAIN] Blur option disabled - skipping")
+            self.gui.latest_blur_metadata.update(
+                {
+                    "requested": False,
+                    "completed": True,
+                    "applied": False,
+                    "reason": "disabled",
+                }
+            )
             self.gui.update_progress_state(
                 "subtitle", "completed", 100, "블러 단계가 비활성화되어 건너뛰었습니다."
             )
@@ -182,6 +197,14 @@ class SubtitleProcessor:
                     "  2. Subtitle position is in upper half (y < 50%) and filtered out"
                 )
                 logger.debug("  3. OCR did not detect text")
+                self.gui.latest_blur_metadata.update(
+                    {
+                        "completed": True,
+                        "applied": False,
+                        "regions": 0,
+                        "reason": "no_chinese_regions_detected",
+                    }
+                )
                 self.gui.update_progress_state(
                     "subtitle",
                     "completed",
@@ -219,6 +242,14 @@ class SubtitleProcessor:
 
             logger.info("[BLUR MAIN] Blur processing completed")
             logger.debug("=" * 60)
+            self.gui.latest_blur_metadata.update(
+                {
+                    "completed": True,
+                    "applied": True,
+                    "regions": len(chinese_positions),
+                    "reason": "",
+                }
+            )
             self.gui.update_progress_state(
                 "subtitle",
                 "completed",
@@ -232,6 +263,13 @@ class SubtitleProcessor:
             ui_controller.write_error_log(e)
             logger.error(f"[BLUR MAIN] Error occurred: {str(e)}")
             logger.exception("Chinese subtitle processing failed")
+            self.gui.latest_blur_metadata.update(
+                {
+                    "completed": False,
+                    "applied": False,
+                    "reason": f"error: {e}",
+                }
+            )
             self.gui.update_progress_state(
                 "subtitle", "error", 0, "중국어 자막 처리 중 오류가 발생했어요."
             )

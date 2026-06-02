@@ -115,6 +115,12 @@ def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
         "source": str(matched_item.get("source") or "").strip(),
         "auto_publish_safe": matched_item.get("auto_publish_safe"),
         "requires_review": matched_item.get("requires_review"),
+        "linktree_auto_publish_requested": bool(
+            result.get("linktree_auto_publish_requested", False)
+        ),
+        "youtube_auto_upload_requested": bool(
+            result.get("youtube_auto_upload_requested", False)
+        ),
     }
 
 
@@ -1597,6 +1603,33 @@ def _process_single_video(app, url, current_number, total_urls):
                         final_video_path = latest_video.get("saved_path")
 
                         if final_video_path and os.path.exists(final_video_path):
+                            from core.video.render_integrity import (
+                                summarize_integrity_failure,
+                                validate_render_ready_for_upload,
+                            )
+
+                            render_integrity = validate_render_ready_for_upload(
+                                app,
+                                final_video_path,
+                                latest_video,
+                            )
+                            latest_video["render_integrity_validation"] = render_integrity
+                            if not render_integrity.get("ok"):
+                                integrity_reason = summarize_integrity_failure(render_integrity)
+                                logger.warning(
+                                    "[UploadGuard] YouTube auto-upload blocked: %s",
+                                    integrity_reason,
+                                )
+                                try:
+                                    app.add_log(
+                                        f"[UploadGuard] YouTube auto-upload blocked: {integrity_reason}"
+                                    )
+                                except Exception:
+                                    pass
+                                raise RuntimeError(
+                                    f"render integrity blocked upload: {integrity_reason}"
+                                )
+
                             # Common Data
                             sourcing_context = _resolve_sourcing_context(app, url)
                             original_source_url = (
@@ -1646,6 +1679,7 @@ def _process_single_video(app, url, current_number, total_urls):
                                 coupang_link = original_source_url
 
                             linktree_url = ""
+                            linktree_manager = None
                             try:
                                 linktree_manager = getattr(app, "linktree_manager", None)
                                 if linktree_manager is None:
@@ -1657,6 +1691,27 @@ def _process_single_video(app, url, current_number, total_urls):
                                 logger.debug("[Automation] Linktree profile lookup skipped: %s", linktree_err)
 
                             if coupang_link:
+                                if sourcing_context.get("linktree_auto_publish_requested"):
+                                    try:
+                                        if linktree_manager and linktree_manager.is_connected():
+                                            linktree_ok = linktree_manager.publish_coupang_link(
+                                                product_name=product_name,
+                                                coupang_url=coupang_link,
+                                                source_url=original_source_url or url,
+                                            )
+                                            logger.info(
+                                                "[Automation] Linktree publish after render: %s",
+                                                "success" if linktree_ok else "failed",
+                                            )
+                                        else:
+                                            logger.info(
+                                                "[Automation] Linktree not connected; publish skipped after render"
+                                            )
+                                    except Exception as linktree_publish_err:
+                                        logger.warning(
+                                            "[Automation] Linktree publish after render failed: %s",
+                                            linktree_publish_err,
+                                        )
                                 video_desc += f"\n\n🛒 쿠팡 상품 보기: {coupang_link}"
 
                                 # Update Inpock if link generated/configured.
@@ -1705,6 +1760,8 @@ def _process_single_video(app, url, current_number, total_urls):
                                     source_url=original_source_url or url,
                                     coupang_deep_link=coupang_link,
                                     linktree_url=linktree_url,
+                                    render_integrity=render_integrity,
+                                    render_integrity_required=True,
                                 )
                                 logger.info("[Automation] Added to YouTube upload queue")
                                 try:
@@ -2165,6 +2222,7 @@ def _create_final_video_for_batch(
 
         # Subtitles
         subtitle_applied = False
+        subtitle_count = 0
         analysis_progress_base = min(100, merge_end + 5)
         overlay_progress_base = min(100, analysis_progress_base + 5)
 
@@ -2504,6 +2562,19 @@ def _create_final_video_for_batch(
         )
         app.add_log(f"[인코딩] 렌더링 완료 - {final_duration:.1f}초, {file_size:.1f}MB")
         app.final_video_path = output_path
+        try:
+            from core.video.render_integrity import create_render_integrity_metadata
+
+            app.final_render_integrity = create_render_integrity_metadata(
+                app,
+                output_path,
+                subtitle_applied=subtitle_applied,
+                subtitle_count=subtitle_count,
+                voice=voice_label,
+            )
+        except Exception as integrity_err:
+            logger.warning("[UploadGuard] render integrity metadata failed: %s", integrity_err)
+            app.final_render_integrity = {}
         if hasattr(app, "register_generated_video"):
             app.register_generated_video(
                 voice, output_path, final_duration, file_size, temp_dir
@@ -2706,6 +2777,9 @@ def clear_all_previous_results(app):
     app.tts_file_path = ""
     app.tts_files = []
     app.final_video_path = ""
+    app.final_render_integrity = {}
+    app.render_integrity_by_path = {}
+    app.latest_blur_metadata = {}
 
     # 7. TTS 관련 변수 완전 초기화
     app.speaker_voice_mapping = {}

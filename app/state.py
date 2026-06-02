@@ -126,6 +126,9 @@ class AppState:
         self.final_video_path = ""
         self.final_video_temp_dir = None
         self.generated_videos: List[Dict[str, Any]] = []
+        self.final_render_integrity: Dict[str, Any] = {}
+        self.render_integrity_by_path: Dict[str, Dict[str, Any]] = {}
+        self.latest_blur_metadata: Dict[str, Any] = {}
         self.korean_subtitle_override = None
         self.korean_subtitle_mode = 'default'
         self.subtitle_overlay_on_chinese = True

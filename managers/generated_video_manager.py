@@ -44,16 +44,24 @@ class GeneratedVideoManager:
         if not hasattr(self.app, "generated_videos"):
             self.app.generated_videos = []
 
-        self.app.generated_videos.append(
-            {
-                "voice": voice,
-                "path": output_path,
-                "duration": duration,
-                "file_size_mb": file_size,
-                "temp_dir": temp_dir,
-                "timestamp": datetime.now().isoformat(),
-            }
-        )
+        video_info = {
+            "voice": voice,
+            "path": output_path,
+            "duration": duration,
+            "file_size_mb": file_size,
+            "temp_dir": temp_dir,
+            "timestamp": datetime.now().isoformat(),
+        }
+        integrity = getattr(self.app, "final_render_integrity", None)
+        if isinstance(integrity, dict):
+            video_info["render_integrity"] = dict(integrity)
+
+        self.app.generated_videos.append(video_info)
+
+        if isinstance(integrity, dict):
+            if not hasattr(self.app, "render_integrity_by_path"):
+                self.app.render_integrity_by_path = {}
+            self.app.render_integrity_by_path[output_path] = dict(integrity)
 
     def save_locally(self, show_popup: bool = True) -> int:
         """Save generated videos to output folder.
@@ -96,6 +104,12 @@ class GeneratedVideoManager:
             try:
                 shutil.move(src_path, dst_path)
                 video_info["saved_path"] = dst_path
+                integrity = video_info.get("render_integrity")
+                if isinstance(integrity, dict):
+                    integrity["video_path"] = dst_path
+                    if not hasattr(self.app, "render_integrity_by_path"):
+                        self.app.render_integrity_by_path = {}
+                    self.app.render_integrity_by_path[dst_path] = dict(integrity)
                 saved_count += 1
                 logger.info(f"[저장] {os.path.basename(dst_path)} -> {url_output_dir}")
             except Exception as e:
@@ -103,6 +117,12 @@ class GeneratedVideoManager:
                 try:
                     shutil.copy2(src_path, dst_path)
                     video_info["saved_path"] = dst_path
+                    integrity = video_info.get("render_integrity")
+                    if isinstance(integrity, dict):
+                        integrity["video_path"] = dst_path
+                        if not hasattr(self.app, "render_integrity_by_path"):
+                            self.app.render_integrity_by_path = {}
+                        self.app.render_integrity_by_path[dst_path] = dict(integrity)
                     saved_count += 1
                 except Exception as copy_err:
                     logger.error(f"[저장] 복사도 실패: {copy_err}")

@@ -79,6 +79,16 @@ class LoginHandler:
 
     def _start_account_settings_sync(self) -> None:
         """Load/save Settings tab values against the authenticated account."""
+        def _notify_live_settings_refresh() -> None:
+            refresh = getattr(self.app, "refresh_settings_from_manager", None)
+            if not callable(refresh):
+                return
+            cb_signal = getattr(self.app, "ui_callback_signal", None)
+            if cb_signal is not None:
+                cb_signal.emit(refresh)
+            else:
+                QTimer.singleShot(0, refresh)
+
         def _sync() -> None:
             try:
                 from managers.settings_manager import get_settings_manager
@@ -86,6 +96,7 @@ class LoginHandler:
                 ok = get_settings_manager().sync_with_remote(self.app.login_data)
                 if ok:
                     logger.info("[LoginHandler] Account settings sync complete")
+                    _notify_live_settings_refresh()
                 else:
                     logger.debug("[LoginHandler] Account settings sync skipped")
             except Exception as exc:

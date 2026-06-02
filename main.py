@@ -342,6 +342,42 @@ class VideoAnalyzerGUI(
         if settings_tab and hasattr(settings_tab, "focus_api_key_setup"):
             QTimer.singleShot(0, settings_tab.focus_api_key_setup)
 
+    def refresh_settings_from_manager(self) -> None:
+        """Apply synced SettingsManager values to live panels and managers."""
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            settings = get_settings_manager()
+            output_folder = settings.get_output_folder()
+            if output_folder:
+                self.output_folder_path = output_folder
+                if hasattr(self, "state"):
+                    self.state.output_folder_path = output_folder
+
+            if hasattr(self, "state"):
+                self.state.youtube_auto_upload = settings.get_youtube_auto_upload()
+                self.state.youtube_upload_interval_minutes = settings.get_youtube_upload_interval()
+
+            yt_manager = getattr(self, "youtube_manager", None)
+            if yt_manager and hasattr(yt_manager, "apply_settings_manager_upload_settings"):
+                yt_manager.apply_settings_manager_upload_settings(start_upload=False)
+
+            for attr, method in (
+                ("subtitle_settings_panel", "_load_settings"),
+                ("watermark_panel", "_load_settings"),
+                ("sourcing_panel", "refresh_match_policy"),
+                ("settings_tab", "_load_link_automation_settings"),
+                ("upload_panel", "refresh"),
+            ):
+                panel = getattr(self, attr, None)
+                callback = getattr(panel, method, None) if panel is not None else None
+                if callable(callback):
+                    callback()
+
+            logger.info("[SettingsSync] Applied synced settings to live UI")
+        except Exception as exc:
+            logger.debug("[SettingsSync] Live settings refresh skipped: %s", exc)
+
 
 def main():
     sys.excepthook = global_exception_handler

@@ -106,7 +106,14 @@ class WindowRecorder(QObject):
 class DemoController(QObject):
     """Run scripted UI demo scenario."""
 
-    def __init__(self, gui: VideoAnalyzerGUI, recorder: WindowRecorder, coupang_url: str):
+    def __init__(
+        self,
+        gui: VideoAnalyzerGUI,
+        recorder: WindowRecorder,
+        coupang_url: str,
+        max_total_wait: int = 14 * 60,
+        max_pipeline_wait: int = 12 * 60,
+    ):
         super().__init__(gui)
         self.gui = gui
         self.recorder = recorder
@@ -120,13 +127,14 @@ class DemoController(QObject):
         self._monitor_timer = QTimer(self)
         self._monitor_timer.timeout.connect(self._monitor_pipeline)
         self._started_batch = False
+        self._batch_start_retries = 0
         self._pipeline_started_at = 0.0
-        self._max_pipeline_wait = 12 * 60  # 12min
+        self._max_pipeline_wait = max_pipeline_wait
 
         self._hard_timeout = QTimer(self)
         self._hard_timeout.setSingleShot(True)
         self._hard_timeout.timeout.connect(self._on_hard_timeout)
-        self._max_total_wait = 14 * 60  # 14min total
+        self._max_total_wait = max_total_wait
 
     def start(self):
         print("[DEMO] start")
@@ -224,25 +232,50 @@ class DemoController(QObject):
                 yt_queue_count = int(ym.get_queue_count())
         except Exception:
             yt_queue_count = 0
+        active_steps = []
+        try:
+            states = getattr(self.gui, "progress_states", {}) or {}
+            for key in ("download", "analysis", "translation", "tts", "subtitle", "subtitle_overlay", "finalize"):
+                state = states.get(key, {}) if isinstance(states, dict) else {}
+                status = state.get("status")
+                progress = state.get("progress")
+                if status and status not in ("waiting", None):
+                    active_steps.append(f"{key}:{status}:{progress}")
+        except Exception:
+            active_steps = []
 
         if batch_running:
             self._started_batch = True
+        elif queue_active and (not running) and (not self._started_batch) and self._batch_start_retries < 5:
+            self._batch_start_retries += 1
+            try:
+                print(f"[DEMO] retry batch start #{self._batch_start_retries}")
+                self.gui.start_batch_processing()
+            except Exception as exc:
+                logger.warning("[Demo] batch start retry failed: %s", exc)
 
         elapsed = time.time() - self._pipeline_started_at
         print(
             "[DEMO] monitor "
             f"sourcing={running} batch={batch_running} "
             f"queue_active={queue_active} yt_q={yt_queue_count} "
-            f"started_batch={self._started_batch} elapsed={elapsed:.1f}s"
+            f"started_batch={self._started_batch} elapsed={elapsed:.1f}s "
+            f"steps={'|'.join(active_steps[-4:])}"
         )
 
-        if self._started_batch and (not running) and (not queue_active) and yt_queue_count == 0:
+        if (
+            self._started_batch
+            and (not running)
+            and (not batch_running)
+            and (not queue_active)
+            and yt_queue_count == 0
+        ):
             self._monitor_timer.stop()
             # Give YouTube upload thread some time to work
             QTimer.singleShot(15000, self._show_upload_panel)
             return
 
-        if (not self._started_batch) and (not running) and elapsed > 20:
+        if (not self._started_batch) and (not running) and (not queue_active) and elapsed > 20:
             self._monitor_timer.stop()
             QTimer.singleShot(5000, self._show_upload_panel)
             return
@@ -342,15 +375,30 @@ def main():
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(True)
 
-    output_dir = Path.home() / "Desktop"
+    output_dir = Path(os.environ.get("SSMAKER_DEMO_OUTPUT_DIR") or (Path.home() / "Desktop"))
     output_dir.mkdir(parents=True, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
     output_path = str(output_dir / f"ssmaker_demo_{ts}.mp4")
 
-    coupang_url = "https://link.coupang.com/a/dTH6WefOMu"
+    coupang_url = os.environ.get("SSMAKER_DEMO_URL") or "https://link.coupang.com/a/dTH6WefOMu"
     gui = VideoAnalyzerGUI()
-    recorder = WindowRecorder(gui, output_path=output_path, fps=10)
-    controller = DemoController(gui, recorder, coupang_url=coupang_url)
+    demo_privacy = os.environ.get("SSMAKER_DEMO_PRIVACY", "").strip()
+    if demo_privacy:
+        try:
+            gui.youtube_manager.get_upload_settings().default_privacy = demo_privacy
+        except Exception as exc:
+            logger.warning("[Demo] failed to apply demo privacy setting: %s", exc)
+    fps = int(os.environ.get("SSMAKER_DEMO_FPS") or "10")
+    max_minutes = int(os.environ.get("SSMAKER_DEMO_MAX_MINUTES") or "14")
+    pipeline_minutes = int(os.environ.get("SSMAKER_DEMO_PIPELINE_MINUTES") or str(max(1, max_minutes - 2)))
+    recorder = WindowRecorder(gui, output_path=output_path, fps=fps)
+    controller = DemoController(
+        gui,
+        recorder,
+        coupang_url=coupang_url,
+        max_total_wait=max_minutes * 60,
+        max_pipeline_wait=pipeline_minutes * 60,
+    )
 
     QTimer.singleShot(0, controller.start)
     rc = app.exec()

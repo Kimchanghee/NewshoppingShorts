@@ -10,6 +10,7 @@ import time
 import traceback
 import threading
 import sys
+import queue
 
 from PyQt6.QtCore import QTimer
 from google.genai import types
@@ -26,6 +27,96 @@ import config
 from prompts import get_video_analysis_prompt, get_translation_prompt
 
 logger = get_logger(__name__)
+
+
+def _run_with_timeout(callback, timeout_seconds: int, label: str):
+    """Run an SDK call without letting a stuck network request block the batch."""
+    result_queue = queue.Queue(maxsize=1)
+
+    def worker():
+        try:
+            result_queue.put((True, callback()), block=False)
+        except Exception as exc:
+            try:
+                result_queue.put((False, exc), block=False)
+            except queue.Full:
+                pass
+
+    thread = threading.Thread(
+        target=worker,
+        name=f"batch-analysis-{label}",
+        daemon=True,
+    )
+    thread.start()
+
+    try:
+        ok, value = result_queue.get(timeout=timeout_seconds)
+    except queue.Empty:
+        raise TimeoutError(f"{label} timeout ({timeout_seconds}s)")
+
+    if ok:
+        return value
+    raise value
+
+
+def _get_sourcing_fallback_text(app) -> str:
+    """Return product text that can be used when video analysis times out."""
+    result = {}
+    try:
+        state = getattr(app, "state", None)
+        if state is not None:
+            result = getattr(state, "sourcing_result", None) or {}
+    except Exception:
+        result = {}
+    if not isinstance(result, dict):
+        result = {}
+
+    product_info = result.get("product_info") or {}
+    name = ""
+    if isinstance(product_info, dict):
+        name = str(product_info.get("name") or "").strip()
+    description = str(result.get("description") or "").strip()
+    if not description and isinstance(product_info, dict):
+        description = str(product_info.get("description") or "").strip()
+    text = description or name
+    if not text:
+        text = str(
+            getattr(app, "product_name", "")
+            or getattr(app, "video_title", "")
+            or ""
+        ).strip()
+    return text
+
+
+def _apply_sourcing_analysis_fallback(app, reason: str) -> bool:
+    """Use sourced product info so the render can continue after AI timeout."""
+    fallback_text = _get_sourcing_fallback_text(app)
+    if not fallback_text:
+        return False
+
+    logger.warning("[Batch Analysis] Using sourcing fallback after analysis failure: %s", reason)
+    app.add_log("[분석] AI 분석 지연으로 상품 정보 기반 대본을 사용합니다.")
+    try:
+        app.update_progress_state("ocr_analysis", "processing", 10, "중국어 자막을 찾고 있습니다.")
+        subtitle_positions = app.detect_subtitles_with_opencv()
+        app.update_progress_state("ocr_analysis", "completed", 100, "OCR 분석 완료!")
+    except Exception as ocr_err:
+        logger.warning("[Batch Analysis] Fallback OCR failed: %s", ocr_err)
+        subtitle_positions = []
+        try:
+            app.update_progress_state("ocr_analysis", "completed", 100, "OCR fallback skipped.")
+        except Exception:
+            pass
+
+    app.video_analysis_result = fallback_text
+    app.translation_result = fallback_text
+    app.analysis_result = {
+        "script": [],
+        "subtitle_positions": subtitle_positions,
+        "raw_subtitle_positions": subtitle_positions,
+        "fallback_reason": reason,
+    }
+    return True
 
 
 def _analyze_video_for_batch(app):
@@ -55,9 +146,12 @@ def _analyze_video_for_batch(app):
         prompt = get_video_analysis_prompt(cta_lines)
 
         # 5분 타임아웃으로 분석 실행 (최대 5회 재시도)
-        from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
-        ANALYSIS_TIMEOUT = 300  # 5분
-        MAX_RETRIES = 5
+        has_sourcing_fallback = bool(_get_sourcing_fallback_text(app))
+        ANALYSIS_TIMEOUT = 120 if has_sourcing_fallback else 300
+        FILE_UPLOAD_TIMEOUT = 60 if has_sourcing_fallback else 180
+        FILE_STATUS_TIMEOUT = 30 if has_sourcing_fallback else 60
+        FILE_PROCESSING_TIMEOUT = 120 if has_sourcing_fallback else 600
+        MAX_RETRIES = 2 if has_sourcing_fallback else 5
 
         # 진행 상황 표시 스레드 관련 변수
         analysis_done = threading.Event()
@@ -140,12 +234,16 @@ def _analyze_video_for_batch(app):
                     # 파일 업로드 (Gemini가 자동으로 최적 해상도 선택)
                     app.add_log(f"[분석] 영상 파일 업로드 중... ({os.path.basename(app._temp_downloaded_file)})")
                     logger.info(f"[배치 분석] 영상 파일 업로드 중... ({os.path.basename(app._temp_downloaded_file)})")
-                    video_file = app.genai_client.files.upload(file=app._temp_downloaded_file)
+                    video_file = _run_with_timeout(
+                        lambda: app.genai_client.files.upload(file=app._temp_downloaded_file),
+                        FILE_UPLOAD_TIMEOUT,
+                        "Gemini file upload",
+                    )
                     app.add_log("[분석] 업로드 완료, Gemini 서버에서 처리 대기 중...")
                     logger.info("[배치 분석] 업로드 완료, 파일 처리 대기 중...")
 
                     wait_count = 0
-                    max_wait_time = 600  # 최대 10분 대기
+                    max_wait_time = FILE_PROCESSING_TIMEOUT
                     while video_file.state == types.FileState.PROCESSING:
                         time.sleep(2)
                         wait_count += 2
@@ -153,7 +251,11 @@ def _analyze_video_for_batch(app):
                             raise TimeoutError(f"파일 처리 시간 초과 ({max_wait_time}초)")
                         if wait_count % 10 == 0:
                             app.add_log(f"[분석] 서버 처리 중... ({wait_count}초 경과)")
-                        video_file = app.genai_client.files.get(name=video_file.name)
+                        video_file = _run_with_timeout(
+                            lambda: app.genai_client.files.get(name=video_file.name),
+                            FILE_STATUS_TIMEOUT,
+                            "Gemini file status",
+                        )
 
                     if video_file.state == types.FileState.FAILED:
                         error_message = getattr(getattr(video_file, "error", None), "message", "")
@@ -206,22 +308,24 @@ def _analyze_video_for_batch(app):
                         config=generation_config,
                     )
 
-                with ThreadPoolExecutor(max_workers=1) as executor:
-                    future = executor.submit(call_gemini_api_internal)
-                    try:
-                        response = future.result(timeout=ANALYSIS_TIMEOUT)
-                        app.add_log("[분석] AI 분석 응답 수신 완료!")
-                        logger.info(f"[배치 분석] API 호출 성공 (시도 {attempt})")
-                        break  # 성공하면 루프 종료
-                    except FuturesTimeoutError:
-                        logger.warning(f"[배치 분석] 타임아웃! {ANALYSIS_TIMEOUT}초 초과 (시도 {attempt}/{MAX_RETRIES})")
-                        last_error = f"분석 타임아웃 ({ANALYSIS_TIMEOUT}초 초과)"
-                        is_server_error = True
-                        if attempt < MAX_RETRIES:
-                            import random
-                            wait_time = min(60, 10 * (2 ** (attempt - 1))) + random.uniform(0, 5)
-                            time.sleep(wait_time)
-                        continue
+                try:
+                    response = _run_with_timeout(
+                        call_gemini_api_internal,
+                        ANALYSIS_TIMEOUT,
+                        "Gemini video analysis",
+                    )
+                    app.add_log("[분석] AI 분석 응답 수신 완료!")
+                    logger.info(f"[배치 분석] API 호출 성공 (시도 {attempt})")
+                    break  # 성공하면 루프 종료
+                except TimeoutError:
+                    logger.warning(f"[배치 분석] 타임아웃! {ANALYSIS_TIMEOUT}초 초과 (시도 {attempt}/{MAX_RETRIES})")
+                    last_error = f"분석 타임아웃 ({ANALYSIS_TIMEOUT}초 초과)"
+                    is_server_error = True
+                    if attempt < MAX_RETRIES:
+                        import random
+                        wait_time = min(60, 10 * (2 ** (attempt - 1))) + random.uniform(0, 5)
+                        time.sleep(wait_time)
+                    continue
 
             except Exception as e:
                 last_error = str(e)
@@ -284,6 +388,8 @@ def _analyze_video_for_batch(app):
         progress_thread.join(timeout=0.5)
 
         if response is None:
+            if _apply_sourcing_analysis_fallback(app, str(last_error or "analysis failed")):
+                return
             # Gemini 서버 오류면 팝업 표시
             if is_server_error:
                 show_server_error_popup()

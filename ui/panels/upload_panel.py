@@ -549,6 +549,24 @@ class YouTubeUploadSettingsSection(QFrame):
         self._update_interval_label()
         self._interval_widget.setVisible(self.auto_upload_checkbox.isChecked())
 
+    def refresh_from_settings(self):
+        """Reload controls after account settings sync."""
+        enabled = self.settings.get_youtube_auto_upload()
+        interval_hours = max(1, min(4, self.settings.get_youtube_upload_interval() // 60))
+        self.auto_upload_checkbox.blockSignals(True)
+        self.interval_slider.blockSignals(True)
+        try:
+            self.auto_upload_checkbox.setChecked(enabled)
+            self.interval_slider.setValue(interval_hours)
+        finally:
+            self.interval_slider.blockSignals(False)
+            self.auto_upload_checkbox.blockSignals(False)
+        self._update_interval_label()
+        self._interval_widget.setVisible(enabled)
+        if self.gui and hasattr(self.gui, "state"):
+            self.gui.state.youtube_auto_upload = enabled
+            self.gui.state.youtube_upload_interval_minutes = interval_hours * 60
+
     def _on_auto_upload_changed(self, state: int):
         enabled = self.auto_upload_checkbox.isChecked()
         self.settings.set_youtube_auto_upload(enabled)
@@ -2237,6 +2255,16 @@ class UploadPanel(QFrame, ThemedMixin):
 
     def refresh(self):
         """Refresh panel state when navigated to."""
+        try:
+            if hasattr(self, "_yt_prompts"):
+                self._yt_prompts._load_prompts()
+            if hasattr(self, "_yt_comment"):
+                self._yt_comment._load_settings()
+            if hasattr(self, "_yt_upload_settings"):
+                self._yt_upload_settings.refresh_from_settings()
+        except Exception as exc:
+            logger.debug("[UploadPanel] Settings refresh skipped: %s", exc)
+
         yt_connected = self.settings.get_youtube_connected()
         if yt_connected:
             channel = self.settings.get_youtube_channel_info()
