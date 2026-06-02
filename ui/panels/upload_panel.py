@@ -1029,6 +1029,48 @@ class UploadPanel(QFrame, ThemedMixin):
         )
         layout.addWidget(self._yt_connection_state)
 
+        account_guard = QFrame(page)
+        account_guard.setStyleSheet(f"""
+            QFrame {{
+                background-color: {c.surface_variant};
+                border: 1px solid {c.border_light};
+                border-radius: {self.ds.radius.sm}px;
+            }}
+            QFrame QLabel {{
+                background-color: transparent;
+                border: none;
+            }}
+        """)
+        account_layout = QVBoxLayout(account_guard)
+        account_layout.setContentsMargins(12, 10, 12, 10)
+        account_layout.setSpacing(8)
+
+        account_title = QLabel("YouTube 계정 이메일 검증")
+        account_title.setFont(QFont(self.ds.typography.font_family_primary, 11, QFont.Weight.Bold))
+        account_title.setStyleSheet(f"color: {c.text_primary};")
+        account_layout.addWidget(account_title)
+
+        account_row = QHBoxLayout()
+        account_row.setSpacing(8)
+        self.youtube_expected_email_input = QLineEdit()
+        self.youtube_expected_email_input.setPlaceholderText("예: ympartners.uk@gmail.com")
+        self.youtube_expected_email_input.setText(self.settings.get_youtube_expected_account_email())
+        self.youtube_expected_email_input.setToolTip("이 이메일과 OAuth 계정 이메일이 일치할 때만 자동 업로드를 허용합니다.")
+        account_row.addWidget(self.youtube_expected_email_input, 1)
+
+        save_expected_btn = QPushButton("저장")
+        save_expected_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        save_expected_btn.clicked.connect(self._save_youtube_expected_account_email)
+        account_row.addWidget(save_expected_btn)
+        account_layout.addLayout(account_row)
+
+        self.youtube_account_status_label = QLabel()
+        self.youtube_account_status_label.setWordWrap(True)
+        self.youtube_account_status_label.setStyleSheet(f"color: {c.text_muted};")
+        account_layout.addWidget(self.youtube_account_status_label)
+        layout.addWidget(account_guard)
+        self._refresh_youtube_account_status()
+
         self.youtube_card = SocialAuthCard(
             platform_id="youtube",
             is_connected=yt_connected,
@@ -1081,6 +1123,34 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addStretch()
         self._set_youtube_feature_enabled(yt_connected)
         return page
+
+    def _refresh_youtube_account_status(self) -> None:
+        """Refresh the YouTube expected/actual account email status label."""
+        label = getattr(self, "youtube_account_status_label", None)
+        if label is None:
+            return
+        verification = self.settings.get_youtube_account_verification()
+        expected = verification.get("expected") or ""
+        actual = verification.get("actual") or ""
+        if not expected:
+            label.setText("기대 계정 이메일을 저장하면 해당 Google 계정에서만 자동 업로드를 허용합니다.")
+        elif verification.get("ok"):
+            label.setText(f"계정 확인 완료: {actual}")
+        else:
+            message = verification.get("message") or "YouTube 계정 이메일 확인이 필요합니다."
+            label.setText(message)
+
+    def _save_youtube_expected_account_email(self) -> None:
+        """Persist the required YouTube Google account email."""
+        from ui.components.custom_dialog import show_info, show_warning
+
+        email = self.youtube_expected_email_input.text().strip()
+        if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+            show_warning(self, "이메일 형식 확인", "YouTube 기대 계정 이메일 형식을 확인해주세요.")
+            return
+        self.settings.set_youtube_expected_account_email(email)
+        self._refresh_youtube_account_status()
+        show_info(self, "저장 완료", "YouTube 기대 계정 이메일을 저장했습니다.")
 
     def _create_coupang_verification_card(self, parent: Optional[QWidget] = None) -> QFrame:
         """Create Coupang Partners verification helper for the connected channel."""
@@ -1914,10 +1984,12 @@ class UploadPanel(QFrame, ThemedMixin):
             or "유튜브 채널"
         )
         channel_id = channel_info.get("id") or channel_info.get("channel_id", "")
+        account_email = channel_info.get("account_email", "")
 
-        self.settings.set_youtube_connected(True, channel_id, channel_name)
+        self.settings.set_youtube_connected(True, channel_id, channel_name, account_email)
         self.youtube_card.set_connected(True, {"name": channel_name})
         self._set_youtube_feature_enabled(True)
+        self._refresh_youtube_account_status()
         self._refresh_channel_tab_labels()
 
         if self.gui and hasattr(self.gui, 'state'):
@@ -1937,6 +2009,7 @@ class UploadPanel(QFrame, ThemedMixin):
         self.settings.set_youtube_auto_upload(False)
         self.youtube_card.set_connected(False)
         self._set_youtube_feature_enabled(False)
+        self._refresh_youtube_account_status()
         self._refresh_channel_tab_labels()
 
         if self.gui and hasattr(self.gui, 'state'):

@@ -2,7 +2,7 @@ import os
 import stat
 from pathlib import Path
 
-from managers.youtube_manager import YouTubeManager
+from managers.youtube_manager import AutoUploadSettings, YouTubeChannel, YouTubeManager
 
 
 class _TestYouTubeManager(YouTubeManager):
@@ -97,3 +97,67 @@ def test_migrate_legacy_oauth_files_to_user_profile(tmp_path):
     assert '"token": "legacy"' in token_path.read_text(encoding="utf-8")
     assert '"client_id": "legacy"' in secure_store[manager.CLIENT_SECRETS_KEY]
     assert not secret_path.exists()
+
+
+class _AccountVerificationSettings:
+    def __init__(self, ok, message=""):
+        self.ok = ok
+        self.message = message
+        self.account_email = ""
+
+    def set_youtube_account_email(self, email):
+        self.account_email = email
+        return True
+
+    def get_youtube_account_verification(self):
+        return {
+            "required": True,
+            "ok": self.ok,
+            "expected": "ympartners.uk@gmail.com",
+            "actual": self.account_email,
+            "message": self.message,
+        }
+
+
+def _make_upload_manager(monkeypatch, verification_settings):
+    manager = object.__new__(YouTubeManager)
+    manager._upload_settings = AutoUploadSettings(enabled=False)
+    manager._upload_queue = []
+    manager._upload_running = False
+    manager._last_error_message = ""
+    manager._channel = YouTubeChannel(account_email=verification_settings.account_email)
+    monkeypatch.setattr("managers.youtube_manager.get_settings_manager", lambda: verification_settings)
+    return manager
+
+
+def test_upload_queue_blocks_when_expected_youtube_account_not_verified(monkeypatch):
+    settings = _AccountVerificationSettings(
+        ok=False,
+        message="YouTube 기대 계정 이메일이 설정되어 있지만 OAuth 계정 이메일이 확인되지 않았습니다.",
+    )
+    manager = _make_upload_manager(monkeypatch, settings)
+
+    manager.add_to_upload_queue(
+        video_path="video.mp4",
+        title="title",
+        render_integrity={"ok": True},
+        render_integrity_required=True,
+    )
+
+    assert manager._upload_queue == []
+    assert "OAuth 계정 이메일" in manager.get_last_error()
+
+
+def test_upload_queue_allows_verified_youtube_account(monkeypatch):
+    settings = _AccountVerificationSettings(ok=True)
+    settings.account_email = "ympartners.uk@gmail.com"
+    manager = _make_upload_manager(monkeypatch, settings)
+
+    manager.add_to_upload_queue(
+        video_path="video.mp4",
+        title="title",
+        render_integrity={"ok": True},
+        render_integrity_required=True,
+    )
+
+    assert len(manager._upload_queue) == 1

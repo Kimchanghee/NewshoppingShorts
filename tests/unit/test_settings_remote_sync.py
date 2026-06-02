@@ -11,7 +11,11 @@ def test_remote_sync_seeds_account_with_portable_secret_values(monkeypatch, tmp_
         api_key="secret-token",
         profile_url="https://linktr.ee/example",
         auto_publish=True,
+        account_email="k931103@gmail.com",
+        expected_account_email="k931103@gmail.com",
     )
+    manager.set_youtube_expected_account_email("ympartners.uk@gmail.com")
+    manager.set_youtube_account_email("ympartners.uk@gmail.com")
 
     captured = {}
 
@@ -29,7 +33,11 @@ def test_remote_sync_seeds_account_with_portable_secret_values(monkeypatch, tmp_
     assert captured["linktree_webhook_url"] == "https://example.com/linktree-hook"
     assert captured["linktree_api_key"] == "secret-token"
     assert captured["linktree_profile_url"] == "https://linktr.ee/example"
+    assert captured["linktree_account_email"] == "k931103@gmail.com"
+    assert captured["linktree_expected_account_email"] == "k931103@gmail.com"
     assert captured["linktree_auto_publish"] is True
+    assert captured["youtube_account_email"] == "ympartners.uk@gmail.com"
+    assert captured["youtube_expected_account_email"] == "ympartners.uk@gmail.com"
 
 
 def test_remote_sync_loads_account_settings_and_reencrypts_locally(monkeypatch, tmp_path):
@@ -45,7 +53,11 @@ def test_remote_sync_loads_account_settings_and_reencrypts_locally(monkeypatch, 
         "linktree_webhook_url": "https://example.com/remote-hook",
         "linktree_api_key": "remote-secret",
         "linktree_profile_url": "https://linktr.ee/remote",
+        "linktree_account_email": "k931103@gmail.com",
+        "linktree_expected_account_email": "k931103@gmail.com",
         "linktree_auto_publish": True,
+        "youtube_account_email": "ympartners.uk@gmail.com",
+        "youtube_expected_account_email": "ympartners.uk@gmail.com",
         "cookies_1688": {"session": "abc"},
     }
 
@@ -65,6 +77,9 @@ def test_remote_sync_loads_account_settings_and_reencrypts_locally(monkeypatch, 
     assert manager.get_linktree_settings()["webhook_url"] == "https://example.com/remote-hook"
     assert manager.get_linktree_settings()["api_key"] == "remote-secret"
     assert manager.get_linktree_settings()["profile_url"] == "https://linktr.ee/remote"
+    assert manager.get_linktree_settings()["account_email"] == "k931103@gmail.com"
+    assert manager.get_linktree_settings()["expected_account_email"] == "k931103@gmail.com"
     assert manager.get_linktree_auto_publish() is True
+    assert manager.get_youtube_account_verification()["ok"] is True
     assert manager.get_1688_cookies() == {"session": "abc"}
     assert manager.get_all_settings()["linktree_webhook_url"].startswith("fernet:")

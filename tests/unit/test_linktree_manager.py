@@ -8,6 +8,19 @@ class _DummySettings:
     def get_linktree_settings(self):
         return dict(self._data)
 
+    def get_linktree_account_verification(self):
+        expected = str(self._data.get("expected_account_email", "") or "").strip().lower()
+        actual = str(self._data.get("account_email", "") or "").strip().lower()
+        if expected and actual != expected:
+            return {
+                "required": True,
+                "ok": False,
+                "expected": expected,
+                "actual": actual,
+                "message": f"Linktree 계정이 다릅니다. 기대: {expected}, 현재: {actual}",
+            }
+        return {"required": bool(expected), "ok": True, "expected": expected, "actual": actual, "message": ""}
+
 
 class _DummyResponse:
     def __init__(self, status_code=200, text="ok"):
@@ -57,6 +70,24 @@ def test_connection_issue_rejects_invalid_webhook_scheme():
 
     assert ok is False
     assert "http://" in message
+
+
+def test_connection_issue_rejects_wrong_linktree_account():
+    manager = _make_manager(
+        {
+            "webhook_url": "https://example.com/hook",
+            "api_key": "",
+            "profile_url": "",
+            "auto_publish": True,
+            "account_email": "wrong@example.com",
+            "expected_account_email": "k931103@gmail.com",
+        }
+    )
+
+    ok, message = manager.require_connected_for_publish()
+
+    assert ok is False
+    assert "k931103@gmail.com" in message
 
 
 def test_connection_issue_empty_when_publish_ready():

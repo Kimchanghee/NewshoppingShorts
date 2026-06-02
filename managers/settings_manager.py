@@ -139,6 +139,8 @@ class SettingsManager:
         "youtube_connected": False,
         "youtube_channel_id": "",
         "youtube_channel_name": "",
+        "youtube_account_email": "",
+        "youtube_expected_account_email": "",
         "youtube_auto_upload": False,
         "youtube_upload_interval": 60,  # 분 단위 (60, 120, 180, 240)
         # 업로드 프롬프트 설정 (채널별)
@@ -175,6 +177,8 @@ class SettingsManager:
         "linktree_webhook_url": "",
         "linktree_api_key": "",
         "linktree_profile_url": "",
+        "linktree_account_email": "",
+        "linktree_expected_account_email": "",
         "linktree_auto_publish": False,
         # Codex CLI bridge settings (for setup assistant computer-use handoff)
         "codex_cli_enabled": True,
@@ -774,16 +778,30 @@ class SettingsManager:
 
     # ============ Social Media Connection Settings ============
 
+    @staticmethod
+    def _normalize_account_email(email: str) -> str:
+        return str(email or "").strip().lower()
+
     def get_youtube_connected(self) -> bool:
         """Get YouTube connection status"""
         return self._settings.get("youtube_connected", False)
 
-    def set_youtube_connected(self, connected: bool, channel_id: str = "", channel_name: str = "") -> bool:
+    def set_youtube_connected(
+        self,
+        connected: bool,
+        channel_id: str = "",
+        channel_name: str = "",
+        account_email: Optional[str] = None,
+    ) -> bool:
         """Save YouTube connection status"""
         with self._lock:
             self._settings["youtube_connected"] = bool(connected)
             self._settings["youtube_channel_id"] = channel_id
             self._settings["youtube_channel_name"] = channel_name
+            if account_email is not None:
+                self._settings["youtube_account_email"] = self._normalize_account_email(account_email)
+            if not connected:
+                self._settings["youtube_account_email"] = ""
         return self._save_settings()
 
     def get_youtube_channel_info(self) -> Dict[str, str]:
@@ -791,7 +809,56 @@ class SettingsManager:
         return {
             "channel_id": self._settings.get("youtube_channel_id", ""),
             "channel_name": self._settings.get("youtube_channel_name", ""),
+            "account_email": self._settings.get("youtube_account_email", ""),
+            "expected_account_email": self._settings.get("youtube_expected_account_email", ""),
         }
+
+    def get_youtube_account_email(self) -> str:
+        """Get the verified Google account email used by YouTube OAuth."""
+        return self._normalize_account_email(self._settings.get("youtube_account_email", ""))
+
+    def set_youtube_account_email(self, email: str) -> bool:
+        """Save the verified Google account email used by YouTube OAuth."""
+        with self._lock:
+            self._settings["youtube_account_email"] = self._normalize_account_email(email)
+        return self._save_settings()
+
+    def get_youtube_expected_account_email(self) -> str:
+        """Get the required Google account email for YouTube uploads."""
+        return self._normalize_account_email(self._settings.get("youtube_expected_account_email", ""))
+
+    def set_youtube_expected_account_email(self, email: str) -> bool:
+        """Save the required Google account email for YouTube uploads."""
+        with self._lock:
+            self._settings["youtube_expected_account_email"] = self._normalize_account_email(email)
+        return self._save_settings()
+
+    def get_youtube_account_verification(self) -> Dict[str, Any]:
+        """Return whether the connected YouTube OAuth account matches expectation."""
+        expected = self.get_youtube_expected_account_email()
+        actual = self.get_youtube_account_email()
+        if not expected:
+            return {"required": False, "ok": True, "expected": "", "actual": actual, "message": ""}
+        if not actual:
+            return {
+                "required": True,
+                "ok": False,
+                "expected": expected,
+                "actual": "",
+                "message": (
+                    "YouTube 기대 계정 이메일이 설정되어 있지만 OAuth 계정 이메일이 확인되지 않았습니다. "
+                    "YouTube 채널을 다시 연결해 이메일 권한을 승인하세요."
+                ),
+            }
+        if actual != expected:
+            return {
+                "required": True,
+                "ok": False,
+                "expected": expected,
+                "actual": actual,
+                "message": f"YouTube 연결 계정이 다릅니다. 기대: {expected}, 현재: {actual}",
+            }
+        return {"required": True, "ok": True, "expected": expected, "actual": actual, "message": ""}
 
     def get_youtube_auto_upload(self) -> bool:
         """Get YouTube auto-upload enabled status"""
@@ -851,6 +918,7 @@ class SettingsManager:
         return {
             "youtube_connected": self.get_youtube_connected(),
             "youtube_channel_info": self.get_youtube_channel_info(),
+            "youtube_account_verification": self.get_youtube_account_verification(),
             "youtube_auto_upload": self.get_youtube_auto_upload(),
             "youtube_upload_interval": self.get_youtube_upload_interval(),
             "tiktok_connected": self._settings.get("tiktok_connected", False),
@@ -859,6 +927,7 @@ class SettingsManager:
             "x_connected": self._settings.get("x_connected", False),
             "coupang_connected": bool(self._settings.get("coupang_access_key") and self._settings.get("coupang_secret_key")),
             "linktree_connected": bool(self._settings.get("linktree_webhook_url")),
+            "linktree_account_verification": self.get_linktree_account_verification(),
             "inpock_connected": bool(self._settings.get("cookies_inpock")),
         }
 
@@ -1108,6 +1177,10 @@ class SettingsManager:
         raw_webhook = self._settings.get("linktree_webhook_url", "")
         raw_api_key = self._settings.get("linktree_api_key", "")
         profile_url = str(self._settings.get("linktree_profile_url", "") or "").strip()
+        account_email = self._normalize_account_email(self._settings.get("linktree_account_email", ""))
+        expected_account_email = self._normalize_account_email(
+            self._settings.get("linktree_expected_account_email", "")
+        )
         auto_publish = bool(self._settings.get("linktree_auto_publish", False))
 
         webhook_url = self._decrypt_value(raw_webhook).strip()
@@ -1131,6 +1204,8 @@ class SettingsManager:
             "webhook_url": webhook_url,
             "api_key": api_key,
             "profile_url": profile_url,
+            "account_email": account_email,
+            "expected_account_email": expected_account_email,
             "auto_publish": auto_publish,
         }
 
@@ -1140,15 +1215,70 @@ class SettingsManager:
         api_key: str,
         profile_url: str = "",
         auto_publish: Optional[bool] = None,
+        account_email: Optional[str] = None,
+        expected_account_email: Optional[str] = None,
     ) -> bool:
         """Save Linktree webhook integration settings."""
         with self._lock:
             self._settings["linktree_webhook_url"] = self._encrypt_value(str(webhook_url or "").strip())
             self._settings["linktree_api_key"] = self._encrypt_value(str(api_key or "").strip())
             self._settings["linktree_profile_url"] = str(profile_url or "").strip()
+            if account_email is not None:
+                self._settings["linktree_account_email"] = self._normalize_account_email(account_email)
+            if expected_account_email is not None:
+                self._settings["linktree_expected_account_email"] = self._normalize_account_email(
+                    expected_account_email
+                )
             if auto_publish is not None:
                 self._settings["linktree_auto_publish"] = bool(auto_publish)
         return self._save_settings()
+
+    def get_linktree_account_email(self) -> str:
+        """Get the Linktree account email recorded by the user/setup flow."""
+        return self._normalize_account_email(self._settings.get("linktree_account_email", ""))
+
+    def set_linktree_account_email(self, email: str) -> bool:
+        """Save the Linktree account email recorded by the user/setup flow."""
+        with self._lock:
+            self._settings["linktree_account_email"] = self._normalize_account_email(email)
+        return self._save_settings()
+
+    def get_linktree_expected_account_email(self) -> str:
+        """Get the required Linktree account email for publishing."""
+        return self._normalize_account_email(self._settings.get("linktree_expected_account_email", ""))
+
+    def set_linktree_expected_account_email(self, email: str) -> bool:
+        """Save the required Linktree account email for publishing."""
+        with self._lock:
+            self._settings["linktree_expected_account_email"] = self._normalize_account_email(email)
+        return self._save_settings()
+
+    def get_linktree_account_verification(self) -> Dict[str, Any]:
+        """Return whether the recorded Linktree account matches expectation."""
+        expected = self.get_linktree_expected_account_email()
+        actual = self.get_linktree_account_email()
+        if not expected:
+            return {"required": False, "ok": True, "expected": "", "actual": actual, "message": ""}
+        if not actual:
+            return {
+                "required": True,
+                "ok": False,
+                "expected": expected,
+                "actual": "",
+                "message": (
+                    "Linktree 기대 계정 이메일이 설정되어 있지만 현재 Linktree 계정 이메일이 저장되어 있지 않습니다. "
+                    "설정에서 Linktree 계정 이메일을 확인해 저장하세요."
+                ),
+            }
+        if actual != expected:
+            return {
+                "required": True,
+                "ok": False,
+                "expected": expected,
+                "actual": actual,
+                "message": f"Linktree 계정이 다릅니다. 기대: {expected}, 현재: {actual}",
+            }
+        return {"required": True, "ok": True, "expected": expected, "actual": actual, "message": ""}
 
     def get_linktree_auto_publish(self) -> bool:
         """Get Linktree auto-publish flag."""

@@ -29,6 +29,21 @@ except ImportError:
         BRIGHT = RESET_ALL = ''
 
 
+def _safe_symbol(symbol: str, fallback: str) -> str:
+    """Return fallback when the active console cannot encode symbol."""
+    encoding = sys.stdout.encoding or "utf-8"
+    try:
+        symbol.encode(encoding)
+        return symbol
+    except UnicodeEncodeError:
+        return fallback
+
+
+SYMBOL_OK = _safe_symbol("✓", "OK")
+SYMBOL_FAIL = _safe_symbol("✗", "X")
+SYMBOL_WARN = _safe_symbol("⚠", "!")
+
+
 class StartupValidator:
     """
     System startup validator.
@@ -86,11 +101,11 @@ class StartupValidator:
         print("=" * 60)
 
         if self.checks_failed > 0:
-            print("\n" + Fore.RED + "⚠ Some checks failed. Please fix the issues above.")
+            print("\n" + Fore.RED + f"{SYMBOL_WARN} Some checks failed. Please fix the issues above.")
             print("일부 검사가 실패했습니다. 위의 문제를 해결해주세요.")
             return False, errors
         else:
-            print("\n" + Fore.GREEN + "✓ All checks passed! Ready to run.")
+            print("\n" + Fore.GREEN + f"{SYMBOL_OK} All checks passed! Ready to run.")
             print("모든 검사 통과! 실행 준비 완료.")
             return True, []
 
@@ -100,25 +115,25 @@ class StartupValidator:
         version_str = f"{version.major}.{version.minor}.{version.micro}"
 
         if version.major == 3 and version.minor >= 12:
-            return True, f"Python {version_str} ✓"
+            return True, f"Python {version_str} {SYMBOL_OK}"
         else:
             return False, f"Python {version_str} (require 3.12+)"
 
     def _check_required_packages(self) -> Tuple[bool, str]:
         """Check required Python packages"""
         required = [
-            "PyQt6",
-            "requests",
-            "opencv-python",
-            "numpy",
-            "moviepy",
-            "psutil",
+            ("PyQt6", "PyQt6"),
+            ("requests", "requests"),
+            ("opencv-python", "cv2"),
+            ("numpy", "numpy"),
+            ("moviepy", "moviepy"),
+            ("psutil", "psutil"),
         ]
 
         missing = []
-        for package in required:
+        for package, import_name in required:
             try:
-                __import__(package.replace("-", "_"))
+                __import__(import_name)
             except ImportError:
                 missing.append(package)
 
@@ -192,15 +207,15 @@ class StartupValidator:
 
     def _print_success(self, message: str):
         """Print success message"""
-        print(Fore.GREEN + "  ✓ " + Style.RESET_ALL + message)
+        print(Fore.GREEN + f"  {SYMBOL_OK} " + Style.RESET_ALL + message)
 
     def _print_error(self, message: str):
         """Print error message"""
-        print(Fore.RED + "  ✗ " + Style.RESET_ALL + message)
+        print(Fore.RED + f"  {SYMBOL_FAIL} " + Style.RESET_ALL + message)
 
     def _print_warning(self, message: str):
         """Print warning message"""
-        print(Fore.YELLOW + "  ⚠ " + Style.RESET_ALL + message)
+        print(Fore.YELLOW + f"  {SYMBOL_WARN} " + Style.RESET_ALL + message)
 
 
 def main():

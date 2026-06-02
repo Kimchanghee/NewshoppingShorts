@@ -21,6 +21,8 @@ from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass
 
+import requests
+
 from utils.logging_config import get_logger
 from utils.secrets_manager import get_secrets_manager
 from managers.settings_manager import get_settings_manager
@@ -69,6 +71,7 @@ class YouTubeChannel:
     """YouTube channel data structure"""
     channel_id: str = ""
     channel_name: str = ""
+    account_email: str = ""
     thumbnail_url: str = ""
     subscriber_count: str = "0"
     video_count: str = "0"
@@ -100,6 +103,7 @@ class YouTubeManager:
         "https://www.googleapis.com/auth/youtube.upload",
         "https://www.googleapis.com/auth/youtube.readonly",
         "https://www.googleapis.com/auth/youtube.force-ssl",
+        "https://www.googleapis.com/auth/userinfo.email",
     ]
     OAUTH_FLOW_TIMEOUT_SECONDS = 180
     CLIENT_SECRETS_KEY = "youtube_client_secrets_json_v1"
@@ -210,6 +214,7 @@ class YouTubeManager:
                     self._channel = YouTubeChannel(
                         channel_id=ch.get("channel_id", ""),
                         channel_name=ch.get("channel_name", ""),
+                        account_email=str(ch.get("account_email", "") or "").strip().lower(),
                         thumbnail_url=ch.get("thumbnail_url", ""),
                         subscriber_count=ch.get("subscriber_count", "0"),
                         video_count=ch.get("video_count", "0"),
@@ -250,6 +255,7 @@ class YouTubeManager:
                     True,
                     self._channel.channel_id,
                     self._channel.channel_name,
+                    self._channel.account_email,
                 )
             else:
                 settings.set_youtube_connected(False, "", "")
@@ -267,6 +273,7 @@ class YouTubeManager:
                 "channel": {
                     "channel_id": self._channel.channel_id if self._channel else "",
                     "channel_name": self._channel.channel_name if self._channel else "",
+                    "account_email": self._channel.account_email if self._channel else "",
                     "thumbnail_url": self._channel.thumbnail_url if self._channel else "",
                     "subscriber_count": self._channel.subscriber_count if self._channel else "0",
                     "video_count": self._channel.video_count if self._channel else "0",
@@ -308,6 +315,7 @@ class YouTubeManager:
             "id": self._channel.channel_id,
             "title": self._channel.channel_name,
             "channel_name": self._channel.channel_name,
+            "account_email": self._channel.account_email,
             "thumbnail_url": self._channel.thumbnail_url,
             "subscriber_count": self._channel.subscriber_count,
             "video_count": self._channel.video_count,
@@ -324,6 +332,59 @@ class YouTubeManager:
     def get_last_error(self) -> str:
         """Return the latest YouTube connection error message."""
         return self._last_error_message
+
+    def _fetch_oauth_account_email(self, creds: Optional[Any] = None) -> str:
+        """Return the Google account email granted to the OAuth token, if available."""
+        creds = creds or self._credentials
+        token = str(getattr(creds, "token", "") or "").strip()
+        if not token:
+            return ""
+        try:
+            response = requests.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=10,
+            )
+            if response.status_code != 200:
+                logger.debug(
+                    "[YouTube] OAuth account email lookup failed: status=%s body=%s",
+                    response.status_code,
+                    response.text[:200],
+                )
+                return ""
+            payload = response.json() if response.content else {}
+            return str(payload.get("email", "") or "").strip().lower()
+        except Exception as exc:
+            logger.debug("[YouTube] OAuth account email lookup skipped: %s", exc)
+            return ""
+
+    def _account_guard_message(self) -> str:
+        """Return a blocking message when configured account verification fails."""
+        try:
+            settings = get_settings_manager()
+            if self._channel and self._channel.account_email:
+                settings.set_youtube_account_email(self._channel.account_email)
+            verification = settings.get_youtube_account_verification()
+            if verification.get("required") and not verification.get("ok"):
+                return str(verification.get("message") or "YouTube 계정 이메일 확인이 필요합니다.")
+        except Exception as exc:
+            logger.debug("[YouTube] Account verification skipped: %s", exc)
+        return ""
+
+    def get_account_verification_status(self) -> Dict[str, Any]:
+        """Return current YouTube OAuth account verification state."""
+        try:
+            if self._channel and self._channel.account_email:
+                get_settings_manager().set_youtube_account_email(self._channel.account_email)
+            return get_settings_manager().get_youtube_account_verification()
+        except Exception as exc:
+            return {
+                "required": False,
+                "ok": False,
+                "expected": "",
+                "actual": "",
+                "message": f"YouTube 계정 검증 상태를 확인하지 못했습니다: {exc}",
+            }
 
     def connect_channel(
         self,
@@ -451,9 +512,15 @@ class YouTubeManager:
 
             # Build YouTube service
             self._youtube_service = build('youtube', 'v3', credentials=creds)
+            account_email = self._fetch_oauth_account_email(creds)
 
             # Get channel info
-            self._fetch_channel_info()
+            self._fetch_channel_info(account_email=account_email)
+            account_guard = self._account_guard_message()
+            if account_guard:
+                self._last_error_message = account_guard
+                logger.warning("[YouTube] Connection account verification failed: %s", account_guard)
+                return False
 
             # Notify callback
             if self._on_connection_changed:
@@ -711,7 +778,7 @@ class YouTubeManager:
         logger.info("[YouTube] OAuth JSON securely stored (keyring/encrypted storage)")
         return destination_abs
 
-    def _fetch_channel_info(self) -> None:
+    def _fetch_channel_info(self, account_email: str = "") -> None:
         """Fetch connected channel information"""
         if not self._youtube_service:
             return
@@ -726,10 +793,13 @@ class YouTubeManager:
                 item = response["items"][0]
                 snippet = item.get("snippet", {})
                 stats = item.get("statistics", {})
+                previous_email = self._channel.account_email if self._channel else ""
+                account_email = str(account_email or previous_email or "").strip().lower()
 
                 self._channel = YouTubeChannel(
                     channel_id=item.get("id", ""),
                     channel_name=snippet.get("title", ""),
+                    account_email=account_email,
                     thumbnail_url=snippet.get("thumbnails", {}).get("default", {}).get("url", ""),
                     subscriber_count=stats.get("subscriberCount", "0"),
                     video_count=stats.get("videoCount", "0"),
@@ -778,7 +848,13 @@ class YouTubeManager:
             self._credentials = creds
             self._youtube_service = build("youtube", "v3", credentials=creds)
             if not self._channel or not self._channel.channel_id:
-                self._fetch_channel_info()
+                self._fetch_channel_info(account_email=self._fetch_oauth_account_email(creds))
+            elif not self._channel.account_email:
+                account_email = self._fetch_oauth_account_email(creds)
+                if account_email:
+                    self._channel.account_email = account_email
+                    self._save_settings()
+                    self._sync_settings_manager_state()
             return self._youtube_service is not None
         except Exception as e:
             if "invalid_grant" in str(e).lower():
@@ -1090,6 +1166,12 @@ class YouTubeManager:
             logger.warning("[YouTube] Upload blocked: render integrity was not verified.")
             return
 
+        account_guard = self._account_guard_message()
+        if account_guard:
+            logger.warning("[YouTube] Upload blocked: %s", account_guard)
+            self._last_error_message = account_guard
+            return
+
         self._upload_queue.append({
             "video_path": video_path,
             "title": clean_title or "쇼핑 추천 영상",
@@ -1121,6 +1203,12 @@ class YouTubeManager:
 
         if not self._ensure_youtube_service():
             logger.warning("[YouTube] 업로드 서비스를 준비하지 못했습니다. 채널 재연결 후 다시 시도해주세요.")
+            return
+
+        account_guard = self._account_guard_message()
+        if account_guard:
+            logger.warning("[YouTube] Auto-upload blocked: %s", account_guard)
+            self._last_error_message = account_guard
             return
 
         self._upload_running = True

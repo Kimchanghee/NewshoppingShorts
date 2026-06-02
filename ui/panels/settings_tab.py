@@ -680,6 +680,20 @@ class SettingsTab(QWidget, ThemedMixin):
         self.linktree_api_key_input.setStyleSheet(automation_input_style)
         add_advanced_row("Webhook 인증 키", self.linktree_api_key_input)
 
+        self.linktree_account_email_input = QLineEdit()
+        self.linktree_account_email_input.setPlaceholderText("Linktree 로그인 이메일")
+        self.linktree_account_email_input.setToolTip("현재 Linktree에 연결한 계정 이메일을 기록합니다.")
+        self.linktree_account_email_input.setStyleSheet(automation_input_style)
+        self.linktree_account_email_input.textChanged.connect(self._update_link_automation_status)
+        add_advanced_row("Linktree 계정", self.linktree_account_email_input)
+
+        self.linktree_expected_email_input = QLineEdit()
+        self.linktree_expected_email_input.setPlaceholderText("기대 계정 이메일")
+        self.linktree_expected_email_input.setToolTip("이 이메일과 Linktree 계정 이메일이 일치할 때만 자동 발행을 허용합니다.")
+        self.linktree_expected_email_input.setStyleSheet(automation_input_style)
+        self.linktree_expected_email_input.textChanged.connect(self._update_link_automation_status)
+        add_advanced_row("기대 계정", self.linktree_expected_email_input)
+
         checkbox_container = QWidget()
         checkbox_container.setStyleSheet("background: transparent; border: none;")
         checkbox_layout = QHBoxLayout(checkbox_container)
@@ -3121,6 +3135,8 @@ class SettingsTab(QWidget, ThemedMixin):
             self.linktree_webhook_input.setText(linktree.get("webhook_url", ""))
             self.linktree_api_key_input.setText(linktree.get("api_key", ""))
             self.linktree_profile_input.setText(linktree.get("profile_url", ""))
+            self.linktree_account_email_input.setText(linktree.get("account_email", ""))
+            self.linktree_expected_email_input.setText(linktree.get("expected_account_email", ""))
             self.linktree_auto_checkbox.setChecked(bool(linktree.get("auto_publish", False)))
 
             if hasattr(self, "setup_instagram_handle_input"):
@@ -3137,6 +3153,8 @@ class SettingsTab(QWidget, ThemedMixin):
                 coupang.get("secret_key"),
                 linktree.get("webhook_url"),
                 linktree.get("api_key"),
+                linktree.get("account_email"),
+                linktree.get("expected_account_email"),
                 linktree.get("auto_publish", False),
             ])
             self._set_link_advanced_visible(has_advanced_settings)
@@ -3161,8 +3179,20 @@ class SettingsTab(QWidget, ThemedMixin):
         linktree_profile_ready = bool(self.linktree_profile_input.text().strip())
         linktree_auto_ready = bool(self.linktree_webhook_input.text().strip())
         auto_enabled = bool(self.linktree_auto_checkbox.isChecked())
+        expected_email = (
+            self.linktree_expected_email_input.text().strip()
+            if hasattr(self, "linktree_expected_email_input")
+            else ""
+        )
+        account_email = (
+            self.linktree_account_email_input.text().strip()
+            if hasattr(self, "linktree_account_email_input")
+            else ""
+        )
 
         status_parts = ["공개 주소 저장됨" if linktree_profile_ready else "공개 주소 미설정"]
+        if expected_email:
+            status_parts.append("계정 확인 완료" if account_email.lower() == expected_email.lower() else "Linktree 계정 확인 필요")
         if coupang_ready:
             status_parts.append("쿠팡 자동 딥링크 준비")
         if auto_enabled:
@@ -3262,6 +3292,8 @@ class SettingsTab(QWidget, ThemedMixin):
         webhook_url = self.linktree_webhook_input.text().strip()
         api_key = self.linktree_api_key_input.text().strip()
         profile_url = self.linktree_profile_input.text().strip()
+        account_email = self.linktree_account_email_input.text().strip()
+        expected_email = self.linktree_expected_email_input.text().strip()
         auto_publish = self.linktree_auto_checkbox.isChecked()
 
         if webhook_url and not webhook_url.lower().startswith(("http://", "https://")):
@@ -3271,6 +3303,11 @@ class SettingsTab(QWidget, ThemedMixin):
         if profile_url and not profile_url.lower().startswith(("http://", "https://")):
             show_warning(self, "입력 확인", "Linktree Profile URL은 http:// 또는 https:// 형식이어야 합니다.")
             return
+
+        for label, email in (("Linktree 계정 이메일", account_email), ("기대 계정 이메일", expected_email)):
+            if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
+                show_warning(self, "이메일 형식 확인", f"{label} 형식을 확인해주세요.")
+                return
 
         if auto_publish and not webhook_url:
             show_warning(
@@ -3287,6 +3324,8 @@ class SettingsTab(QWidget, ThemedMixin):
                 api_key=api_key,
                 profile_url=profile_url,
                 auto_publish=auto_publish,
+                account_email=account_email,
+                expected_account_email=expected_email,
             )
             if not saved:
                 show_error(self, "저장 실패", "링크트리 설정을 저장하지 못했습니다.")
@@ -3318,6 +3357,8 @@ class SettingsTab(QWidget, ThemedMixin):
             api_key=self.linktree_api_key_input.text().strip(),
             profile_url=self.linktree_profile_input.text().strip(),
             auto_publish=self.linktree_auto_checkbox.isChecked(),
+            account_email=self.linktree_account_email_input.text().strip(),
+            expected_account_email=self.linktree_expected_email_input.text().strip(),
         )
         self._update_link_automation_status()
         self._refresh_setup_assistant_status()
