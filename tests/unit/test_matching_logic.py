@@ -139,6 +139,30 @@ def test_semantic_score_lifts_car_vacuum_match_to_publish_threshold():
     assert _multi_reference_score(candidate, refs) >= 0.9
 
 
+def test_semantic_score_lifts_handheld_fan_match_to_publish_threshold():
+    refs = [
+        "카프 빅팬 접이식 핸디 선풍기 USB 휴대용 BLDC 충전식",
+        "foldable handheld fan portable USB fan folding mini personal fan",
+        "handheld fan portable usb rechargeable folding fan",
+    ]
+    candidate = "Portable Mini Hand Fan USB Rechargeable Folding Fan"
+    wrong = "Foldable Retro Handheld Game Console 3000mAh Battery"
+
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+    assert _semantic_similarity_score(wrong, refs) < 0.9
+    assert _multi_reference_score(wrong, refs) < 0.9
+
+
+def test_semantic_score_blocks_hand_fan_for_car_fan_intent():
+    refs = ["car fan", "vehicle cooling fan", "차량용 선풍기", "车载风扇"]
+    hand_fan = "Portable Mini Hand Fan USB Rechargeable Folding Fan"
+    car_fan = "12V Car Dashboard Cooling Fan"
+
+    assert _semantic_similarity_score(car_fan, refs) >= 0.9
+    assert _semantic_similarity_score(hand_fan, refs) < 0.9
+
+
 def test_semantic_score_lifts_electric_cleaning_brush_match_to_publish_threshold():
     refs = [
         "automatic electric cleaning brush set electric spin scrubber cleaning brush",
@@ -214,9 +238,13 @@ def test_preferred_query_variants_keep_product_anchors():
     assert "auto draining sponge holder" in _preferred_english_query_variants(
         "304 Stainless Steel Kitchen Sink Caddy Auto Draining Sponge Holder"
     )
+    assert "foldable handheld fan" in _preferred_english_query_variants(
+        "Foldable handheld fan, portable USB fan, folding mini personal fan"
+    )
     assert "电动切碎机" in _preferred_chinese_query_variants(
         "电动多功能搅拌机 蔬菜切碎机 蒜泥器", "vegetable chopper"
     )
+    assert "手持风扇" in _preferred_chinese_query_variants("折叠手持风扇", "foldable handheld fan")
 
 
 # ──────────────────────── category guards ────────────────────────

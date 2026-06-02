@@ -6,12 +6,10 @@ Extracts product name, thumbnail, price from a Coupang product URL.
 from __future__ import annotations
 
 import asyncio
-import json
-import os
 import re
-from pathlib import Path
 from typing import Any, Dict, Optional
 
+from core.sourcing.report_cache import find_cached_product_info, normalize_image_url
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -20,65 +18,14 @@ MAX_RETRIES = 2
 PAGE_LOAD_TIMEOUT = 15  # seconds
 
 
-def _extract_product_id(url: str) -> str:
-    match = re.search(r"/products/(\d+)", url or "")
-    return match.group(1) if match else ""
-
-
-def _extract_partner_code(url: str) -> str:
-    match = re.search(r"link\.coupang\.com/a/([A-Za-z0-9_-]+)", url or "")
-    return match.group(1) if match else ""
-
-
 def _normalize_image_url(url: str) -> str:
-    if url and url.startswith("//"):
-        return "https:" + url
-    return url or ""
+    return normalize_image_url(url)
 
 
 def _cached_product_from_reports(product_url: str) -> Optional[Dict[str, str]]:
     """Fallback for Coupang anti-bot blocks: reuse this app's latest report data."""
-    product_id = _extract_product_id(product_url)
-    partner_code = _extract_partner_code(product_url)
-    report_dir = Path(os.path.expanduser("~/.ssmaker/sourcing_output"))
-    if not report_dir.is_dir():
-        return None
-
-    reports = sorted(
-        report_dir.glob("report_*.json"),
-        key=lambda path: path.stat().st_mtime,
-        reverse=True,
-    )
-    for report_path in reports[:80]:
-        try:
-            data = json.loads(report_path.read_text(encoding="utf-8"))
-        except Exception:
-            continue
-
-        report_url = str(data.get("coupang_url") or "")
-        product = data.get("product_info") or {}
-        product_info_url = str(product.get("url") or "")
-        haystack = f"{report_url} {product_info_url}"
-
-        if partner_code and partner_code not in haystack:
-            continue
-        if product_id and product_id not in haystack:
-            continue
-        if not partner_code and not product_id:
-            continue
-
-        name = str(product.get("name") or "").strip()
-        image = _normalize_image_url(str(product.get("image") or "").strip())
-        if not name:
-            continue
-        return {
-            "name": name,
-            "image": image,
-            "price": product.get("price"),
-            "url": product_info_url or report_url or product_url,
-            "source": "cached_report",
-        }
-    return None
+    cached = find_cached_product_info(product_url)
+    return cached if cached else None
 
 
 async def scrape_product(browser: Any, product_url: str) -> Optional[Dict[str, str]]:

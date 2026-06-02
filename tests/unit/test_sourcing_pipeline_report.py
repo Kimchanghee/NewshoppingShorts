@@ -1,3 +1,6 @@
+import json
+
+from core.sourcing.coupang_scraper import _cached_product_from_reports
 from core.sourcing.pipeline import SourcingPipeline
 
 
@@ -109,3 +112,133 @@ def test_similarity_gate_ignores_coupang_image_fallback_as_match():
 
     assert pipeline.evaluate_similarity_threshold() is False
     assert pipeline.match_status == "not_found"
+
+
+def test_cached_marketplace_video_reuses_nested_safe_report(tmp_path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    report_dir = cache_root / "old_run" / "01"
+    report_dir.mkdir(parents=True)
+    video_path = report_dir / "source.mp4"
+    video_path.write_bytes(b"x" * (128 * 1024))
+    (report_dir / "report.json").write_text(
+        json.dumps(
+            {
+                "coupang_url": "https://www.coupang.com/vp/products/5575481544",
+                "product_info": {
+                    "name": "Automatic electric cleaning brush set",
+                    "url": "https://www.coupang.com/vp/products/5575481544",
+                },
+                "best_similarity": 1.0,
+                "sourced_products": [
+                    {
+                        "source": "aliexpress",
+                        "title": "Electric Spin Scrubber Cleaning Brush",
+                        "url": "https://www.aliexpress.com/item/1005010461954174.html",
+                        "similarity": 1.0,
+                        "video_file": str(video_path),
+                        "video_size_mb": 1.2,
+                        "auto_publish_safe": True,
+                        "requires_review": False,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SSMAKER_SOURCING_CACHE_ROOT", str(cache_root))
+
+    pipeline = SourcingPipeline(
+        coupang_url="https://www.coupang.com/vp/products/5575481544",
+        output_dir=str(tmp_path / "new_run"),
+        min_similarity_score=0.9,
+        enforce_min_similarity=True,
+    )
+    pipeline.product_info = {
+        "name": "Automatic electric cleaning brush set",
+        "url": "https://www.coupang.com/vp/products/5575481544",
+    }
+
+    cached = pipeline._find_cached_marketplace_video()
+
+    assert cached is not None
+    assert cached["fallback_reason"] == "cached_marketplace_video"
+    assert cached["auto_publish_safe"] is True
+    assert cached["product"]["score"] == 1.0
+    assert cached["video_file"] == str(video_path)
+
+    pipeline.sourced_products = [cached]
+    assert pipeline.evaluate_similarity_threshold() is True
+    assert pipeline.get_report()["sourced_products"][0]["cached_from_report"].endswith("report.json")
+
+
+def test_cached_marketplace_video_rejects_different_product_id(tmp_path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    report_dir = cache_root / "old_run"
+    report_dir.mkdir(parents=True)
+    video_path = report_dir / "source.mp4"
+    video_path.write_bytes(b"x" * (128 * 1024))
+    (report_dir / "report.json").write_text(
+        json.dumps(
+            {
+                "coupang_url": "https://www.coupang.com/vp/products/9999999999",
+                "product_info": {
+                    "name": "Same display name",
+                    "url": "https://www.coupang.com/vp/products/9999999999",
+                },
+                "sourced_products": [
+                    {
+                        "source": "aliexpress",
+                        "title": "Electric Spin Scrubber Cleaning Brush",
+                        "similarity": 1.0,
+                        "video_file": str(video_path),
+                        "auto_publish_safe": True,
+                        "requires_review": False,
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SSMAKER_SOURCING_CACHE_ROOT", str(cache_root))
+
+    pipeline = SourcingPipeline(
+        coupang_url="https://www.coupang.com/vp/products/5575481544",
+        output_dir=str(tmp_path / "new_run"),
+        min_similarity_score=0.9,
+    )
+    pipeline.product_info = {
+        "name": "Same display name",
+        "url": "https://www.coupang.com/vp/products/5575481544",
+    }
+
+    assert pipeline._find_cached_marketplace_video() is None
+
+
+def test_cached_product_info_reads_nested_report_json(tmp_path, monkeypatch):
+    cache_root = tmp_path / "cache"
+    report_dir = cache_root / "old_run" / "01"
+    report_dir.mkdir(parents=True)
+    (report_dir / "report.json").write_text(
+        json.dumps(
+            {
+                "coupang_url": "https://www.coupang.com/vp/products/12345",
+                "product_info": {
+                    "name": "Cached Coupang product",
+                    "image": "//thumbnail.coupangcdn.com/sample.jpg",
+                    "price": "12900",
+                    "url": "https://www.coupang.com/vp/products/12345",
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("SSMAKER_SOURCING_CACHE_ROOT", str(cache_root))
+
+    cached = _cached_product_from_reports("https://www.coupang.com/vp/products/12345")
+
+    assert cached["name"] == "Cached Coupang product"
+    assert cached["image"] == "https://thumbnail.coupangcdn.com/sample.jpg"
+    assert cached["price"] == "12900"

@@ -223,6 +223,16 @@ _SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
     ),
     "vacuum": ("vacuum", "suction", "진공", "청소기"),
     "vehicle": ("car", "vehicle", "automotive", "dashboard", "차량", "자동차", "차"),
+    "fan": (
+        "fan", "fans", "hand fan", "mini fan", "personal fan", "cooling fan",
+        "electric fan", "blower", "airflow", "wind", "\u98ce\u6247",
+        "\u98ce\u673a", "선풍기", "팬",
+    ),
+    "foldable": ("foldable", "folding", "fold", "접이식", "\u6298\u53e0"),
+    "personal_cooling": (
+        "cooling", "personal", "desk fan", "neck fan", "portable fan",
+        "hand fan", "손풍기", "휴대용",
+    ),
 
     # Kitchen sink sponge caddy family
     "sponge": ("sponge", "scrubber", "수세미", "스폰지", "스펀지", "海绵"),
@@ -278,7 +288,10 @@ _SEMANTIC_FEATURE_WEIGHTS: dict[str, float] = {
     "frother": 3.0,
     "vacuum": 3.0,
     "vehicle": 2.6,
+    "fan": 3.0,
     "handheld": 1.4,
+    "foldable": 1.2,
+    "personal_cooling": 1.2,
     "milk": 1.2,
     "electric": 1.5,
     "processor_mixer": 1.5,
@@ -396,6 +409,18 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
         _family_score(
             reference,
             candidate,
+            required={"fan", "vehicle"},
+            optional={"electric", "handheld", "foldable", "personal_cooling"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"fan"},
+            optional={"electric", "handheld", "foldable", "personal_cooling"},
+        ),
+        _family_score(
+            reference,
+            candidate,
             required={"sponge", "sink", "holder"},
             optional={"soap", "towel", "stainless", "drainage"},
         ),
@@ -430,6 +455,9 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
     )
     if disposable_bag_intent and (metal_stopper_candidate or non_bag_drain_candidate):
         score = min(score, 0.55)
+
+    if "fan" in reference and "vehicle" in reference and "vehicle" not in candidate:
+        score = min(score, 0.65)
 
     if score >= 0.9:
         return score
@@ -486,6 +514,14 @@ def _preferred_english_query_variants(keyword_en: str, reference_name: str = "")
         add("silicone cylinder ice mold")
         add("ice cube tray tumbler")
 
+    if any(x in haystack for x in (
+        "handheld fan", "hand fan", "portable fan", "foldable fan",
+        "folding fan", "usb fan", "personal fan", "선풍기",
+    )):
+        add("foldable handheld fan")
+        add("portable usb fan")
+        add("rechargeable hand fan")
+
     head = _simplify_to_head_noun(keyword_en, max_tokens=3)
     if head:
         add(head)
@@ -520,6 +556,10 @@ def _preferred_chinese_query_variants(keyword_cn: str, keyword_en: str = "") -> 
         add("保温杯硅胶冰格")
         add("圆柱冰格模具")
         add("硅胶制冰盒")
+    if any(x in haystack for x in ("fan", "风扇", "风机")):
+        add("手持风扇")
+        add("折叠风扇")
+        add("便携式风扇")
 
     head = _simplify_to_head_noun(keyword_cn, max_tokens=4)
     if head:

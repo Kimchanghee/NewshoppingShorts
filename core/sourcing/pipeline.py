@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import json
 import sys
 import time
 from pathlib import Path
@@ -1239,105 +1238,152 @@ class SourcingPipeline:
             from core.sourcing.product_searcher import _looks_b2b_candidate_title
         except Exception:
             _looks_b2b_candidate_title = None
+        from core.sourcing.report_cache import (
+            get_default_report_root,
+            iter_report_payloads,
+            report_matches_target,
+        )
 
         current_name = ((self.product_info or {}).get("name") or "").strip()
         current_url = (self.coupang_url or "").strip()
+
+        roots: list[Path] = []
         output = Path(self.output_dir).expanduser()
-        if not output.exists():
-            return None
+        if output.exists():
+            roots.append(output)
+        default_root = get_default_report_root()
+        if default_root.exists() and default_root not in roots:
+            roots.append(default_root)
 
-        reports = sorted(
-            output.glob("report_*.json"),
-            key=lambda p: p.stat().st_mtime,
-            reverse=True,
-        )
-
-        def _same_target(report: Dict[str, Any]) -> bool:
-            report_url = str(report.get("coupang_url") or "").strip()
-            report_name = str((report.get("product_info") or {}).get("name") or "").strip()
-            return bool(
-                (current_url and report_url == current_url)
-                or (current_name and report_name and report_name == current_name)
-            )
-
-        for report_path in reports:
-            try:
-                report = json.loads(report_path.read_text(encoding="utf-8"))
-            except Exception:
-                continue
-            if not _same_target(report):
-                continue
-            for item in report.get("sourced_products") or report.get("sourcing_results") or []:
-                source = str(item.get("source") or "").lower()
-                video_file = str(item.get("video_file") or "")
-                title = str(item.get("title") or "")
-                raw_similarity = item.get("similarity", item.get("score"))
-                similarity: Optional[float] = None
-                if raw_similarity is not None:
-                    try:
-                        similarity = float(raw_similarity)
-                    except (TypeError, ValueError):
-                        similarity = None
-                if (
-                    source == "coupang_image"
-                    or item.get("requires_review") is True
-                    or item.get("auto_publish_safe") is False
-                    or not video_file
-                    or not os.path.exists(video_file)
+        seen_report_keys: set[str] = set()
+        for root in roots:
+            for report_path, report in iter_report_payloads(root):
+                report_product = report.get("product_info") or {}
+                report_key = (
+                    f"{report_path}:"
+                    f"{report.get('coupang_url') or ''}:"
+                    f"{report_product.get('name') or ''}"
+                )
+                if report_key in seen_report_keys:
+                    continue
+                seen_report_keys.add(report_key)
+                if not report_matches_target(
+                    report,
+                    target_url=current_url,
+                    target_product_info=self.product_info,
+                    target_name=current_name,
                 ):
                     continue
-                if _looks_b2b_candidate_title and _looks_b2b_candidate_title(title):
-                    logger.info(
-                        "[Pipeline] Skip cached marketplace video (b2b-like title): %s",
-                        title[:80],
-                    )
-                    continue
-                cache_threshold = MIN_TRUSTED_VIDEO_SCORE
-                if self.enforce_min_similarity:
-                    cache_threshold = max(cache_threshold, self.min_similarity_score)
-                if similarity is None and self.enforce_min_similarity:
-                    logger.info(
-                        "[Pipeline] Skip cached marketplace video (unknown similarity): %s",
-                        title[:80],
-                    )
-                    continue
-                if similarity is not None and similarity < cache_threshold:
-                    logger.info(
-                        "[Pipeline] Skip cached marketplace video (low similarity=%.3f): %s",
-                        similarity,
-                        title[:80],
-                    )
-                    continue
-
-                size_mb = item.get("video_size_mb")
-                if size_mb is None:
-                    try:
-                        size_mb = round(os.path.getsize(video_file) / (1024 * 1024), 1)
-                    except OSError:
-                        size_mb = 0
-
-                logger.info(
-                    "[Pipeline] Reusing cached marketplace video from %s: %s",
+                cached = self._cached_video_from_report_item(
                     report_path,
-                    video_file,
+                    report,
+                    current_name=current_name,
+                    current_url=current_url,
+                    b2b_title_check=_looks_b2b_candidate_title,
                 )
-                product = {
-                    "title": title or current_name,
-                    "url": item.get("url") or current_url,
-                    "score": similarity if similarity is not None else 1.0,
-                    "source": item.get("source") or source,
-                    "cached_from_report": str(report_path),
-                }
-                return {
-                    "source": item.get("source") or source,
-                    "product": product,
-                    "video_url": item.get("url") or "",
-                    "video_file": video_file,
-                    "size_mb": size_mb,
-                    "fallback_reason": "cached_marketplace_video",
-                    "auto_publish_safe": True,
-                    "requires_review": False,
-                }
+                if cached:
+                    return cached
+        return None
+
+    def _cached_video_from_report_item(
+        self,
+        report_path: Path,
+        report: Dict[str, Any],
+        *,
+        current_name: str,
+        current_url: str,
+        b2b_title_check: Optional[Callable[[str], bool]],
+    ) -> Optional[Dict[str, Any]]:
+        for item in report.get("sourced_products") or report.get("sourcing_results") or []:
+            product_meta = item.get("product") or {}
+            source = str(item.get("source") or product_meta.get("source") or "").lower()
+            video_file = str(item.get("video_file") or "")
+            title = str(item.get("title") or product_meta.get("title") or "")
+            item_url = item.get("url") or product_meta.get("url") or ""
+            raw_similarity = item.get(
+                "similarity",
+                item.get("score", product_meta.get("score", report.get("best_similarity"))),
+            )
+            similarity: Optional[float] = None
+            if raw_similarity is not None:
+                try:
+                    similarity = float(raw_similarity)
+                except (TypeError, ValueError):
+                    similarity = None
+            if (
+                source == "coupang_image"
+                or item.get("requires_review") is True
+                or item.get("auto_publish_safe") is False
+                or not video_file
+            ):
+                continue
+
+            video_path = Path(video_file).expanduser()
+            if not video_path.is_absolute():
+                video_path = (report_path.parent / video_path).resolve()
+            if not video_path.exists():
+                continue
+            try:
+                byte_size = video_path.stat().st_size
+            except OSError:
+                continue
+            if byte_size < 100 * 1024:
+                logger.info(
+                    "[Pipeline] Skip cached marketplace video (too small=%s): %s",
+                    byte_size,
+                    video_path,
+                )
+                continue
+            if b2b_title_check and b2b_title_check(title):
+                logger.info(
+                    "[Pipeline] Skip cached marketplace video (b2b-like title): %s",
+                    title[:80],
+                )
+                continue
+            cache_threshold = MIN_TRUSTED_VIDEO_SCORE
+            if self.enforce_min_similarity:
+                cache_threshold = max(cache_threshold, self.min_similarity_score)
+            if similarity is None and self.enforce_min_similarity:
+                logger.info(
+                    "[Pipeline] Skip cached marketplace video (unknown similarity): %s",
+                    title[:80],
+                )
+                continue
+            if similarity is not None and similarity < cache_threshold:
+                logger.info(
+                    "[Pipeline] Skip cached marketplace video (low similarity=%.3f): %s",
+                    similarity,
+                    title[:80],
+                )
+                continue
+
+            size_mb = item.get("video_size_mb")
+            if size_mb is None:
+                size_mb = round(byte_size / (1024 * 1024), 1)
+
+            logger.info(
+                "[Pipeline] Reusing cached marketplace video from %s: %s",
+                report_path,
+                video_path,
+            )
+            product = {
+                "title": title or current_name,
+                "url": item_url or current_url,
+                "score": similarity if similarity is not None else 1.0,
+                "source": item.get("source") or product_meta.get("source") or source,
+                "cached_from_report": str(report_path),
+            }
+            return {
+                "source": item.get("source") or product_meta.get("source") or source,
+                "product": product,
+                "video_url": item.get("video_url") or item_url or "",
+                "video_file": str(video_path),
+                "size_mb": size_mb,
+                "fallback_reason": "cached_marketplace_video",
+                "auto_publish_safe": True,
+                "requires_review": False,
+                "cached_from_report": str(report_path),
+            }
         return None
 
     async def _run_blocking_image_video_create(self, image_url: str) -> Optional[Dict[str, Any]]:
@@ -1477,6 +1523,7 @@ class SourcingPipeline:
                 "fallback_reason": p.get("fallback_reason") or p["product"].get("fallback_reason"),
                 "auto_publish_safe": bool(p.get("auto_publish_safe", p["source"] != "coupang_image")),
                 "requires_review": bool(p.get("requires_review", p["source"] == "coupang_image")),
+                "cached_from_report": p.get("cached_from_report") or p["product"].get("cached_from_report"),
             }
             for p in self.sourced_products
         ]
