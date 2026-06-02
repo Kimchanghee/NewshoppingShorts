@@ -77,6 +77,9 @@ def iter_report_payloads(
         except Exception:
             continue
 
+        if not isinstance(data, dict):
+            continue
+
         if path.name == "summary.json" and isinstance(data.get("results"), list):
             for result in data.get("results") or []:
                 report = _report_from_summary_result(result)
@@ -84,8 +87,7 @@ def iter_report_payloads(
                     yield path, report
             continue
 
-        if isinstance(data, dict):
-            yield path, data
+        yield path, data
 
 
 def report_matches_target(

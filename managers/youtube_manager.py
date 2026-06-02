@@ -832,8 +832,9 @@ class YouTubeManager:
                 logger.warning("[YouTube] OAuth 토큰이 없어 업로드를 시작할 수 없습니다.")
                 return False
 
-            creds = Credentials.from_authorized_user_file(token_path, self.SCOPES)
-            if not creds.valid:
+            def _refresh_if_needed(creds: Any) -> bool:
+                if creds.valid:
+                    return True
                 if creds.expired and creds.refresh_token:
                     creds.refresh(Request())
                     try:
@@ -841,8 +842,22 @@ class YouTubeManager:
                             token.write(creds.to_json())
                     except Exception as save_err:
                         logger.debug("[YouTube] 갱신 토큰 저장 실패: %s", save_err)
-                else:
-                    logger.warning("[YouTube] OAuth 토큰이 유효하지 않습니다. 채널을 다시 연결해주세요.")
+                    return True
+                logger.warning("[YouTube] OAuth 토큰이 유효하지 않습니다. 채널을 다시 연결해주세요.")
+                return False
+
+            creds = Credentials.from_authorized_user_file(token_path, self.SCOPES)
+            try:
+                if not _refresh_if_needed(creds):
+                    return False
+            except Exception as refresh_exc:
+                if "invalid_scope" not in str(refresh_exc).lower():
+                    raise
+                logger.warning(
+                    "[YouTube] OAuth 토큰 scope가 기존 연결과 달라 저장된 scope로 복원합니다."
+                )
+                creds = Credentials.from_authorized_user_file(token_path)
+                if not _refresh_if_needed(creds):
                     return False
 
             self._credentials = creds

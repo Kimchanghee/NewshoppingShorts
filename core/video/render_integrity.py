@@ -215,13 +215,15 @@ def validate_render_ready_for_upload(
 
     blur = metadata.get("blur", {}) if isinstance(metadata, dict) else {}
     blur_state = blur.get("state", {}) if isinstance(blur, dict) else {}
+    blur_reason = str(blur.get("reason") or "")
+    no_blur_needed = bool(blur.get("completed")) and blur_reason == "no_chinese_regions_detected"
     if not blur.get("requested", True):
         reasons.append("blur_disabled")
     if isinstance(blur_state, dict) and blur_state.get("status") == "error":
         reasons.append("blur_error")
-    if not blur.get("applied"):
+    if not blur.get("applied") and not no_blur_needed:
         reasons.append("blur_not_applied")
-    if int(blur.get("regions") or 0) <= 0:
+    if int(blur.get("regions") or 0) <= 0 and not no_blur_needed:
         reasons.append("missing_blur_regions")
 
     return {

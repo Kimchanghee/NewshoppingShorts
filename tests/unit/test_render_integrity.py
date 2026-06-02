@@ -98,3 +98,35 @@ def test_render_integrity_blocks_when_blur_was_not_applied(tmp_path, monkeypatch
     assert not result["ok"]
     assert "blur_not_applied" in result["reasons"]
     assert "missing_blur_regions" in result["reasons"]
+
+
+def test_render_integrity_passes_when_no_chinese_regions_need_blur(tmp_path, monkeypatch):
+    video = tmp_path / "final.mp4"
+    video.write_bytes(b"video")
+    app = _app(tmp_path, blur_applied=False)
+    app.latest_blur_metadata["reason"] = "no_chinese_regions_detected"
+    monkeypatch.setattr(
+        render_integrity,
+        "_probe_video",
+        lambda _path: {
+            "has_video": True,
+            "has_audio": True,
+            "width": 1080,
+            "height": 1920,
+            "duration": 12.0,
+        },
+    )
+    metadata = render_integrity.create_render_integrity_metadata(
+        app,
+        str(video),
+        subtitle_applied=True,
+        subtitle_count=2,
+        voice="test",
+    )
+    app.final_render_integrity = metadata
+
+    result = render_integrity.validate_render_ready_for_upload(app, str(video))
+
+    assert result["ok"]
+    assert "blur_not_applied" not in result["reasons"]
+    assert "missing_blur_regions" not in result["reasons"]
