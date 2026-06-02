@@ -472,6 +472,36 @@ class SourcingPanel(QWidget):
                 }}
             """)
 
+    def _validate_linktree_publish_ready(self) -> bool:
+        """Block full automation when Linktree publish is requested but disconnected."""
+        if not getattr(self, "chk_linktree", None) or not self.chk_linktree.isChecked():
+            return True
+
+        try:
+            from managers.linktree_manager import get_linktree_manager
+
+            ok, message = get_linktree_manager().require_connected_for_publish()
+        except Exception as exc:
+            logger.warning("[SourcingPanel] Linktree preflight failed: %s", exc)
+            ok = False
+            message = (
+                "Linktree 자동 발행 상태를 확인하지 못했습니다. "
+                "설정 > Coupang/Linktree 자동화에서 연결 상태를 확인한 뒤 다시 실행하세요."
+            )
+
+        if ok:
+            return True
+
+        self.results_label.setText(message)
+        self.results_label.setStyleSheet(f"color: {get_color('warning')};")
+        try:
+            from ui.components.custom_dialog import show_warning
+
+            show_warning(self, "Linktree 연결 필요", message)
+        except Exception:
+            pass
+        return False
+
     def _on_start_clicked(self):
         url = self.url_input.text().strip()
         if not url:
@@ -487,6 +517,8 @@ class SourcingPanel(QWidget):
 
         min_similarity_score = self._match_threshold_score()
         self._save_match_policy()
+        if not self._validate_linktree_publish_ready():
+            return
         self._running = True
         self.btn_start.setEnabled(False)
         self.btn_start.setText("소싱 진행 중...")

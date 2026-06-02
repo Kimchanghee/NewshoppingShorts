@@ -91,6 +91,25 @@ class LinktreeManager:
         webhook_url = str(self.get_settings().get("webhook_url", "")).strip()
         return bool(webhook_url)
 
+    def get_connection_issue(self) -> str:
+        """Return a user-facing reason why automatic Linktree publish cannot run."""
+        settings = self.get_settings()
+        webhook_url = str(settings.get("webhook_url", "")).strip()
+        if not webhook_url:
+            return (
+                "Linktree 자동 발행이 켜져 있지만 Webhook URL이 없습니다. "
+                "설정 > Coupang/Linktree 자동화에서 Webhook URL을 연결하거나 "
+                "Linktree 자동 발행 체크를 끄고 다시 실행하세요."
+            )
+        if not re.match(r"^https?://", webhook_url, re.IGNORECASE):
+            return "Linktree Webhook URL은 http:// 또는 https:// 형식이어야 합니다."
+        return ""
+
+    def require_connected_for_publish(self) -> tuple[bool, str]:
+        """Return whether Linktree publish can run, plus the blocking message."""
+        issue = self.get_connection_issue()
+        return (not issue, issue)
+
     def is_auto_publish_enabled(self) -> bool:
         """Return whether automatic Linktree publish is enabled."""
         settings = self.get_settings()

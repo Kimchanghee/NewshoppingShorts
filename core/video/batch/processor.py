@@ -124,6 +124,23 @@ def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
     }
 
 
+def _get_linktree_publish_connection_issue(linktree_manager) -> str:
+    """Return a blocking reason when requested Linktree publish cannot run."""
+    if linktree_manager is None:
+        return "Linktree 자동 발행이 요청되었지만 Linktree 매니저를 초기화하지 못했습니다."
+    try:
+        if hasattr(linktree_manager, "require_connected_for_publish"):
+            ok, message = linktree_manager.require_connected_for_publish()
+            return "" if ok else str(message or "Linktree 자동 발행 연결이 필요합니다.")
+        if hasattr(linktree_manager, "get_connection_issue"):
+            return str(linktree_manager.get_connection_issue() or "")
+        if hasattr(linktree_manager, "is_connected") and not linktree_manager.is_connected():
+            return "Linktree 자동 발행이 요청되었지만 연결되어 있지 않습니다."
+    except Exception as exc:
+        return f"Linktree 자동 발행 상태 확인 중 오류가 발생했습니다: {exc}"
+    return ""
+
+
 def _safe_set_url_status(app, url: str, status: str):
     """스레드 안전하게 url_status 설정"""
     lock = getattr(app, "url_status_lock", None)
@@ -1680,6 +1697,8 @@ def _process_single_video(app, url, current_number, total_urls):
 
                             linktree_url = ""
                             linktree_manager = None
+                            linktree_publish_blocked = False
+                            linktree_publish_block_reason = ""
                             try:
                                 linktree_manager = getattr(app, "linktree_manager", None)
                                 if linktree_manager is None:
@@ -1693,7 +1712,13 @@ def _process_single_video(app, url, current_number, total_urls):
                             if coupang_link:
                                 if sourcing_context.get("linktree_auto_publish_requested"):
                                     try:
-                                        if linktree_manager and linktree_manager.is_connected():
+                                        linktree_publish_block_reason = _get_linktree_publish_connection_issue(
+                                            linktree_manager
+                                        )
+                                        if linktree_publish_block_reason:
+                                            linktree_publish_blocked = True
+                                            logger.warning("[Automation] %s", linktree_publish_block_reason)
+                                        else:
                                             linktree_ok = linktree_manager.publish_coupang_link(
                                                 product_name=product_name,
                                                 coupang_url=coupang_link,
@@ -1703,14 +1728,19 @@ def _process_single_video(app, url, current_number, total_urls):
                                                 "[Automation] Linktree publish after render: %s",
                                                 "success" if linktree_ok else "failed",
                                             )
-                                        else:
-                                            logger.info(
-                                                "[Automation] Linktree not connected; publish skipped after render"
-                                            )
+                                            if not linktree_ok:
+                                                linktree_publish_blocked = True
+                                                linktree_publish_block_reason = (
+                                                    "Linktree 자동 발행 요청이 실패해 YouTube 업로드를 중지했습니다."
+                                                )
                                     except Exception as linktree_publish_err:
                                         logger.warning(
                                             "[Automation] Linktree publish after render failed: %s",
                                             linktree_publish_err,
+                                        )
+                                        linktree_publish_blocked = True
+                                        linktree_publish_block_reason = (
+                                            "Linktree 자동 발행 중 오류가 발생해 YouTube 업로드를 중지했습니다."
                                         )
                                 video_desc += f"\n\n🛒 쿠팡 상품 보기: {coupang_link}"
 
@@ -1750,6 +1780,18 @@ def _process_single_video(app, url, current_number, total_urls):
                                 logger.warning(
                                     "[Automation] YouTube auto-upload skipped: sourced video requires review"
                                 )
+                            elif yt_manager and yt_manager.get_upload_settings().enabled and linktree_publish_blocked:
+                                message = linktree_publish_block_reason or (
+                                    "Linktree 자동 발행 실패로 YouTube 자동 업로드를 중지했습니다."
+                                )
+                                logger.warning("[Automation] YouTube auto-upload skipped: %s", message)
+                                _safe_set_url_status(app, url, "failed")
+                                if not hasattr(app, "url_status_message"):
+                                    app.url_status_message = {}
+                                app.url_status_message[url] = message
+                                update_fn = getattr(app, "update_url_listbox", None)
+                                if update_fn is not None:
+                                    _dispatch_ui_callback(app, update_fn)
                             elif yt_manager and yt_manager.get_upload_settings().enabled:
                                 yt_manager.add_to_upload_queue(
                                     video_path=final_video_path,

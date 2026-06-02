@@ -40,6 +40,34 @@ def test_is_auto_publish_enabled_requires_flag_and_webhook():
     assert manager.is_auto_publish_enabled() is True
 
 
+def test_connection_issue_requires_webhook_for_auto_publish():
+    manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "https://linktr.ee/example", "auto_publish": True})
+
+    ok, message = manager.require_connected_for_publish()
+
+    assert ok is False
+    assert "Webhook URL" in message
+    assert "Linktree 자동 발행" in message
+
+
+def test_connection_issue_rejects_invalid_webhook_scheme():
+    manager = _make_manager({"webhook_url": "ftp://example.com/hook", "api_key": "", "profile_url": "", "auto_publish": True})
+
+    ok, message = manager.require_connected_for_publish()
+
+    assert ok is False
+    assert "http://" in message
+
+
+def test_connection_issue_empty_when_publish_ready():
+    manager = _make_manager({"webhook_url": "https://example.com/hook", "api_key": "", "profile_url": "", "auto_publish": True})
+
+    ok, message = manager.require_connected_for_publish()
+
+    assert ok is True
+    assert message == ""
+
+
 def test_publish_link_posts_payload_and_returns_true(monkeypatch):
     called = {}
 
