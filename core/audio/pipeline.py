@@ -478,50 +478,60 @@ class AudioPipeline:
         logger.debug(f"  원본: {script[:50]}...")
         logger.debug(f"  TTS용: {tts_text[:50]}...")
 
-        # Gemini TTS API 호출
-        response = self.app.genai_client.models.generate_content(
-            model=self.app.config.GEMINI_TTS_MODEL,
-            contents=[tts_text],
-            config=types.GenerateContentConfig(
-                response_modalities=["AUDIO"],
-                speech_config=types.SpeechConfig(
-                    voice_config=types.VoiceConfig(
-                        prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                            voice_name=voice
-                        )
-                    )
-                ),
-            ),
-        )
-
-        # 응답 검증
-        if not response or not response.candidates:
-            raise RuntimeError("TTS API 응답 없음")
-
-        candidate = response.candidates[0]
-        if not candidate.content or not candidate.content.parts:
-            raise RuntimeError("TTS API 응답에 오디오 데이터 없음")
-
-        audio_data = candidate.content.parts[0].inline_data.data
-        if not audio_data:
-            raise RuntimeError("TTS 오디오 데이터가 비어있음")
-
         # 원본 TTS 저장
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:21]
         random_suffix = secrets.token_hex(4)
         original_filename = f"tts_full_{voice}_{timestamp}_{random_suffix}.wav"
         original_path = os.path.join(self.app.tts_output_dir, original_filename)
 
-        # WAV 파일 저장
-        if audio_data[:4] == b"RIFF":
-            with open(original_path, "wb") as f:
-                f.write(audio_data)
+        audio_data = b""
+        try:
+            response = self.app.genai_client.models.generate_content(
+                model=self.app.config.GEMINI_TTS_MODEL,
+                contents=[tts_text],
+                config=types.GenerateContentConfig(
+                    response_modalities=["AUDIO"],
+                    speech_config=types.SpeechConfig(
+                        voice_config=types.VoiceConfig(
+                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                voice_name=voice
+                            )
+                        )
+                    ),
+                ),
+            )
+            if response and response.candidates:
+                candidate = response.candidates[0]
+                parts = (
+                    getattr(getattr(candidate, "content", None), "parts", None)
+                    or []
+                )
+                if parts and getattr(parts[0], "inline_data", None):
+                    audio_data = parts[0].inline_data.data or b""
+                else:
+                    finish_reason = getattr(candidate, "finish_reason", "unknown")
+                    logger.warning(
+                        "[TTS] Gemini returned no audio parts (finish=%s); using Edge fallback.",
+                        finish_reason,
+                    )
+            else:
+                logger.warning("[TTS] Gemini returned no candidates; using Edge fallback.")
+        except Exception as exc:
+            logger.warning("[TTS] Gemini TTS failed; using Edge fallback: %s", exc)
+
+        if audio_data:
+            # WAV 파일 저장
+            if audio_data[:4] == b"RIFF":
+                with open(original_path, "wb") as f:
+                    f.write(audio_data)
+            else:
+                with wave.open(original_path, "wb") as wf:
+                    wf.setnchannels(1)
+                    wf.setsampwidth(2)
+                    wf.setframerate(24000)
+                    wf.writeframes(audio_data)
         else:
-            with wave.open(original_path, "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(24000)
-                wf.writeframes(audio_data)
+            self._generate_edge_tts_wav(tts_text, original_path)
 
         # pydub로 로드 및 정규화
         from core.video.batch.audio_utils import (
@@ -585,6 +595,44 @@ class AudioPipeline:
             voice_start=voice_start,
             voice_end=voice_end,
         )
+
+    def _generate_edge_tts_wav(self, text: str, output_path: str) -> None:
+        """Generate a Korean TTS WAV file with edge-tts as a runtime fallback."""
+        import asyncio
+
+        try:
+            import edge_tts
+        except ImportError as exc:
+            raise RuntimeError("Gemini TTS returned no audio and edge-tts is not installed.") from exc
+        if not PYDUB_AVAILABLE or AudioSegment is None:
+            raise RuntimeError("Gemini TTS returned no audio and pydub is not installed.")
+
+        voice = getattr(self.app, "edge_tts_voice", "ko-KR-HyunsuMultilingualNeural")
+        mp3_path = os.path.splitext(output_path)[0] + "_edge.mp3"
+
+        async def _save():
+            communicate = edge_tts.Communicate(text, voice=voice)
+            await communicate.save(mp3_path)
+
+        try:
+            asyncio.run(_save())
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            try:
+                loop.run_until_complete(_save())
+            finally:
+                loop.close()
+
+        if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) == 0:
+            raise RuntimeError("Edge TTS fallback did not create audio.")
+
+        audio = AudioSegment.from_file(mp3_path)
+        audio.export(output_path, format="wav")
+        try:
+            os.remove(mp3_path)
+        except OSError:
+            pass
+        logger.info("[TTS] Edge fallback generated audio: %s", output_path)
 
     def _apply_speed(
         self,

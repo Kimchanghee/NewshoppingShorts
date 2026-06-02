@@ -138,6 +138,67 @@ def _safe_get_url_status(app, url: str, default=None):
         return app.url_status.get(url, default)
 
 
+def _trim_source_video_for_batch(app, source_path: str, max_duration: float) -> str:
+    """Create a temporary working clip no longer than max_duration seconds."""
+    if not source_path or not os.path.exists(source_path):
+        raise FileNotFoundError(f"Source video not found: {source_path}")
+
+    from utils.ffmpeg import ensure_ffmpeg_on_path
+
+    fd, output_path = tempfile.mkstemp(prefix="batch_source_trim_", suffix=".mp4")
+    os.close(fd)
+
+    ffmpeg_exe = ensure_ffmpeg_on_path() or "ffmpeg"
+    cmd = [
+        ffmpeg_exe,
+        "-y",
+        "-i",
+        source_path,
+        "-t",
+        f"{float(max_duration):.3f}",
+        "-map",
+        "0:v:0",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "20",
+        "-c:a",
+        "aac",
+        "-movflags",
+        "+faststart",
+        output_path,
+    ]
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=180,
+    )
+    if (
+        result.returncode != 0
+        or not os.path.exists(output_path)
+        or os.path.getsize(output_path) == 0
+    ):
+        try:
+            os.remove(output_path)
+        except OSError:
+            pass
+        raise RuntimeError(
+            "Failed to trim source video: "
+            + ((result.stderr or result.stdout or "").strip()[-500:])
+        )
+
+    _register_temp_download_files(app, [output_path])
+    return output_path
+
+
 def _dispatch_ui_callback(app, callback) -> None:
     """Dispatch a UI callback safely from worker threads."""
     if callback is None:
@@ -1228,29 +1289,31 @@ def _process_single_video(app, url, current_number, total_urls):
         MAX_VIDEO_DURATION = 35
         MIN_VIDEO_DURATION = 10
 
-        # 35초 초과 영상 건너뛰기 (팝업 없이 자동 스킵)
+        # 35초 초과 소스는 스킵하지 않고 작업용 쇼츠 클립으로 잘라 계속 처리한다.
         if original_video_duration > MAX_VIDEO_DURATION:
-            skip_message = f"영상 길이 초과 (제한: {MAX_VIDEO_DURATION}초, 실제: {original_video_duration:.1f}초)"
+            original_source_file = app._temp_downloaded_file
             app.add_log(
-                f"⏭️ [{current_number}/{total_urls}] {skip_message} - 다음 영상으로 자동 이동"
+                f"[다운로드] [{current_number}/{total_urls}] 원본 {original_video_duration:.1f}s -> "
+                f"작업용 {MAX_VIDEO_DURATION}s 클립으로 준비합니다."
             )
-            try:
-                rest.log_user_action("영상 스킵", f"[{current_number}/{total_urls}] {skip_message}")
-            except Exception:
-                pass
-            _safe_set_url_status(app, url, "skipped")
-            app.url_status_message[url] = f"길이초과{int(original_video_duration)}초"
-            _dispatch_ui_callback(app, getattr(app, "update_url_listbox", None))
-
-            # 팝업 제거 - 로그만 남기고 다음 영상으로 진행
-
-            app.cleanup_temp_files()
-            app.reset_progress_states()
-            try:
-                app._auto_save_session()
-            except Exception as session_err:
-                logger.warning("[세션] 저장 실패: %s", session_err)
-            return
+            logger.info(
+                "[Source Trim] %.1fs source exceeds limit; trimming to %.1fs: %s",
+                original_video_duration,
+                MAX_VIDEO_DURATION,
+                original_source_file,
+            )
+            trimmed_path = _trim_source_video_for_batch(
+                app, original_source_file, MAX_VIDEO_DURATION
+            )
+            app._temp_downloaded_file = trimmed_path
+            if getattr(app, "video_source", None) == "local":
+                app.local_file_path = trimmed_path
+            app.original_source_video_duration = original_video_duration
+            original_video_duration = app.get_video_duration_helper()
+            app.original_video_duration = original_video_duration
+            app.add_log(
+                f"[다운로드] 작업용 클립 준비 완료: {original_video_duration:.1f}s"
+            )
 
         # 10초 미만 영상 건너뛰기 (팝업 없이 자동 스킵)
         if original_video_duration < MIN_VIDEO_DURATION:
