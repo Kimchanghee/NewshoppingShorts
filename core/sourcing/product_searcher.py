@@ -233,6 +233,12 @@ _SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
         "cooling", "personal", "desk fan", "neck fan", "portable fan",
         "hand fan", "손풍기", "휴대용",
     ),
+    "neck_wearable": (
+        "neck fan", "neckband fan", "wearable fan", "bladeless fan",
+        "hanging neck", "around neck", "목걸이 선풍기", "목 선풍기", "넥밴드 선풍기",
+        "넥 선풍기", "\u6302\u8116\u98ce\u6247", "\u9888\u6302\u98ce\u6247",
+        "\u65e0\u53f6\u98ce\u6247",
+    ),
 
     # Kitchen sink sponge caddy family
     "sponge": ("sponge", "scrubber", "수세미", "스폰지", "스펀지", "海绵"),
@@ -292,6 +298,7 @@ _SEMANTIC_FEATURE_WEIGHTS: dict[str, float] = {
     "handheld": 1.4,
     "foldable": 1.2,
     "personal_cooling": 1.2,
+    "neck_wearable": 1.5,
     "milk": 1.2,
     "electric": 1.5,
     "processor_mixer": 1.5,
@@ -457,6 +464,11 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
         score = min(score, 0.55)
 
     if "fan" in reference and "vehicle" in reference and "vehicle" not in candidate:
+        score = min(score, 0.65)
+
+    if "fan" in reference and "neck_wearable" in candidate and "neck_wearable" not in reference:
+        score = min(score, 0.65)
+    if "fan" in reference and "neck_wearable" in reference and "neck_wearable" not in candidate:
         score = min(score, 0.65)
 
     if score >= 0.9:
@@ -2195,6 +2207,39 @@ def _passes_reference_constraints(title: str, references: Optional[List[str]]) -
             return False
         if any(marker in title_l for marker in non_bag_drain_markers) and not any(
             marker in title_l for marker in biodegradable_title_markers
+        ):
+            return False
+
+    hand_fan_ref_markers = (
+        "handheld fan", "hand fan", "portable fan", "foldable fan", "folding fan",
+        "핸디 선풍기", "손 선풍기", "손풍기", "휴대용 선풍기", "접이식 선풍기",
+        "\u624b\u6301\u98ce\u6247", "\u624b\u6301\u5f0f \u7535\u98ce\u6247",
+        "\u6298\u53e0\u98ce\u6247",
+    )
+    neck_fan_ref_markers = (
+        "neck fan", "neckband fan", "wearable fan", "bladeless fan",
+        "목걸이 선풍기", "목 선풍기", "넥밴드 선풍기", "넥 선풍기",
+        "\u6302\u8116\u98ce\u6247", "\u9888\u6302\u98ce\u6247",
+        "\u65e0\u53f6\u98ce\u6247",
+    )
+    hand_fan_title_markers = (
+        "hand fan", "handheld fan", "mini hand fan", "foldable fan", "folding fan",
+        "손풍기", "핸디 선풍기", "휴대용 선풍기", "\u624b\u6301\u98ce\u6247",
+        "\u6298\u53e0\u98ce\u6247",
+    )
+    neck_fan_title_markers = (
+        "neck fan", "neckband", "wearable fan", "bladeless fan",
+        "around neck", "hanging neck", "목걸이", "넥밴드", "넥 선풍기",
+        "\u6302\u8116", "\u9888\u6302", "\u65e0\u53f6",
+    )
+    if any(marker in ref for marker in hand_fan_ref_markers):
+        if any(marker in title_l for marker in neck_fan_title_markers) and not any(
+            marker in title_l for marker in hand_fan_title_markers
+        ):
+            return False
+    if any(marker in ref for marker in neck_fan_ref_markers):
+        if any(marker in title_l for marker in hand_fan_title_markers) and not any(
+            marker in title_l for marker in neck_fan_title_markers
         ):
             return False
 

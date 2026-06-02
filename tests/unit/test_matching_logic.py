@@ -154,6 +154,38 @@ def test_semantic_score_lifts_handheld_fan_match_to_publish_threshold():
     assert _multi_reference_score(wrong, refs) < 0.9
 
 
+def test_semantic_score_blocks_neck_fan_for_handheld_fan_intent():
+    refs = [
+        "카프 빅팬 접이식 핸디 선풍기",
+        "handheld fan foldable portable",
+        "手持式 电风扇 折叠 便携式",
+    ]
+    right = "Large Head Portable Handheld Fan Foldable USB Rechargeable Cooling Fan"
+    wrong = "Portable Neck Fan USB Rechargeable Bladeless Cooling Fan"
+
+    assert _semantic_similarity_score(right, refs) >= 0.9
+    assert _multi_reference_score(right, refs) >= 0.9
+    assert _semantic_similarity_score(wrong, refs) < 0.9
+    assert _multi_reference_score(wrong, refs) < 0.9
+    assert not _passes_reference_constraints(wrong, refs)
+
+
+def test_semantic_score_blocks_hand_fan_for_neck_fan_intent():
+    refs = [
+        "넥밴드 목걸이 선풍기",
+        "neck fan wearable fan bladeless fan",
+        "颈挂风扇 无叶风扇",
+    ]
+    right = "Wearable Neck Fan USB Rechargeable Bladeless Cooling Fan"
+    wrong = "Portable Mini Hand Fan USB Rechargeable Folding Fan"
+
+    assert _semantic_similarity_score(right, refs) >= 0.9
+    assert _multi_reference_score(right, refs) >= 0.9
+    assert _semantic_similarity_score(wrong, refs) < 0.9
+    assert _multi_reference_score(wrong, refs) < 0.9
+    assert not _passes_reference_constraints(wrong, refs)
+
+
 def test_semantic_score_blocks_hand_fan_for_car_fan_intent():
     refs = ["car fan", "vehicle cooling fan", "차량용 선풍기", "车载风扇"]
     hand_fan = "Portable Mini Hand Fan USB Rechargeable Folding Fan"
