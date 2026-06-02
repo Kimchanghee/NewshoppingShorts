@@ -161,3 +161,51 @@ def test_upload_queue_allows_verified_youtube_account(monkeypatch):
     )
 
     assert len(manager._upload_queue) == 1
+
+
+class _SyncSettings:
+    def __init__(self):
+        self.account_email = "ympartners.uk@gmail.com"
+        self.connected_calls = []
+        self.auto_upload_enabled = None
+
+    def set_youtube_connected(self, connected, channel_id="", channel_name="", account_email=None):
+        self.connected_calls.append(
+            {
+                "connected": connected,
+                "channel_id": channel_id,
+                "channel_name": channel_name,
+                "account_email": account_email,
+            }
+        )
+        if account_email is not None:
+            self.account_email = account_email
+        if not connected:
+            self.account_email = ""
+        return True
+
+    def set_youtube_auto_upload(self, enabled):
+        self.auto_upload_enabled = enabled
+        return True
+
+
+def test_sync_settings_preserves_existing_youtube_account_email_when_channel_email_unknown(monkeypatch, tmp_path):
+    settings = _SyncSettings()
+    manager = object.__new__(YouTubeManager)
+    manager._channel = YouTubeChannel(
+        channel_id="UCkWrhk9ooMO5BFa-syG6Qig",
+        channel_name="오늘의 쇼핑",
+        account_email="",
+    )
+    manager._upload_settings = AutoUploadSettings(enabled=True)
+
+    token_path = tmp_path / "youtube_token.json"
+    token_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(manager, "_get_token_path", lambda: str(token_path))
+    monkeypatch.setattr("managers.youtube_manager.get_settings_manager", lambda: settings)
+
+    manager._sync_settings_manager_state()
+
+    assert settings.connected_calls[-1]["account_email"] is None
+    assert settings.account_email == "ympartners.uk@gmail.com"
+    assert settings.auto_upload_enabled is True

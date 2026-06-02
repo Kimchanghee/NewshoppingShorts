@@ -255,7 +255,7 @@ class YouTubeManager:
                     True,
                     self._channel.channel_id,
                     self._channel.channel_name,
-                    self._channel.account_email,
+                    self._channel.account_email or None,
                 )
             else:
                 settings.set_youtube_connected(False, "", "")
