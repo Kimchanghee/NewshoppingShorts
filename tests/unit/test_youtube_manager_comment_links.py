@@ -156,6 +156,50 @@ def test_auto_comment_product_and_linktree_placeholders_do_not_duplicate(monkeyp
     assert "구매 링크: https://link.coupang.com/a/abc123" in text
 
 
+def test_auto_comment_prefixes_product_with_upload_number(monkeypatch):
+    manager = object.__new__(YouTubeManager)
+    settings = _DummySettings(
+        enabled=False,
+        prompt="",
+        manual_link="",
+        linktree_profile_url="https://linktr.ee/studio.idol",
+    )
+    monkeypatch.setattr("managers.youtube_manager.get_settings_manager", lambda: settings)
+
+    text = manager._build_auto_comment_text(
+        {
+            "product_info": "카프 빅팬 접이식 핸디 선풍기",
+            "coupang_deep_link": "https://link.coupang.com/a/abc123",
+            "upload_number": 7,
+        }
+    )
+
+    assert "상품: [007] 카프 빅팬 접이식 핸디 선풍기" in text
+    assert "링크 모음: https://linktr.ee/studio.idol" in text
+
+
+def test_auto_comment_template_supports_upload_number_token(monkeypatch):
+    manager = object.__new__(YouTubeManager)
+    settings = _DummySettings(
+        enabled=True,
+        prompt="번호: {upload_number}\n상품: {product_description}",
+        manual_link="",
+        linktree_profile_url="https://linktr.ee/studio.idol",
+    )
+    monkeypatch.setattr("managers.youtube_manager.get_settings_manager", lambda: settings)
+
+    text = manager._build_auto_comment_text(
+        {
+            "product_info": "FDUCE 미니 밀봉 실링기",
+            "coupang_deep_link": "https://link.coupang.com/a/token",
+            "upload_number": 12,
+        }
+    )
+
+    assert "번호: [012]" in text
+    assert "상품: [012] FDUCE 미니 밀봉 실링기" in text
+
+
 def test_coupang_description_keeps_disclosure_and_purchase_link_visible():
     description = YouTubeManager.ensure_coupang_affiliate_compliance(
         "오늘의 쇼핑 추천입니다.",

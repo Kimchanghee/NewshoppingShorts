@@ -29,7 +29,7 @@ class LinktreeManager:
     """Manages Linktree webhook publishing for generated affiliate links."""
 
     DEFAULT_TIMEOUT_SECONDS = 12
-    MAX_PRODUCT_TITLE_LENGTH = 15
+    MAX_PRODUCT_TITLE_LENGTH = 40
 
     def __init__(self):
         self.settings = get_settings_manager()
@@ -41,7 +41,7 @@ class LinktreeManager:
 
         Rules:
         - Should remain recognizable as the product name
-        - Must be 15 characters or fewer
+        - Must stay compact enough for Linktree cards
         """
         name = str(product_name or "").strip()
         if not name:
@@ -57,7 +57,7 @@ class LinktreeManager:
         chunks = re.split(r"[|/,;]| - | – | — |·", normalized)
         candidate = next((chunk.strip() for chunk in chunks if chunk and chunk.strip()), normalized)
 
-        # Keep up to 15 chars, trying to preserve whole words first.
+        # Keep the title compact, trying to preserve whole words first.
         if len(candidate) > cls.MAX_PRODUCT_TITLE_LENGTH and " " in candidate:
             words = candidate.split()
             kept_words = []
@@ -77,6 +77,37 @@ class LinktreeManager:
             candidate = name[: cls.MAX_PRODUCT_TITLE_LENGTH].strip()
 
         return candidate or "추천상품"
+
+    @staticmethod
+    def _coerce_publish_index(index: Any) -> Optional[int]:
+        try:
+            if isinstance(index, str):
+                match = re.search(r"\d+", index)
+                if not match:
+                    return None
+                value = int(match.group(0))
+            else:
+                value = int(index)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    @classmethod
+    def format_publish_index(cls, index: Any) -> str:
+        value = cls._coerce_publish_index(index)
+        return f"[{value:03d}]" if value else ""
+
+    @classmethod
+    def _build_numbered_product_title(cls, product_name: str, index: Any) -> str:
+        marker = cls.format_publish_index(index)
+        concise = cls._build_concise_product_title(product_name)
+        if not marker:
+            return concise
+
+        prefix = f"{marker} "
+        body_limit = max(1, cls.MAX_PRODUCT_TITLE_LENGTH - len(prefix))
+        body = concise[:body_limit].rstrip()
+        return (prefix + body).strip()
 
     def get_settings(self) -> Dict[str, Any]:
         """Return current Linktree settings from SettingsManager."""
@@ -234,31 +265,52 @@ class LinktreeManager:
         except OSError:
             pass
 
-    def publish_coupang_link(self, product_name: str, coupang_url: str, source_url: str = "") -> bool:
-        """Publish Coupang deep-link payload for the generated product.
+    def publish_coupang_link_with_metadata(
+        self,
+        product_name: str,
+        coupang_url: str,
+        source_url: str = "",
+    ) -> Dict[str, Any]:
+        """Publish Coupang deep-link payload and return numbering metadata.
 
         Title format: "[001] 상품명" where the number is the monotonic upload order.
-        Final length is still capped at MAX_PRODUCT_TITLE_LENGTH after the prefix
-        so it stays readable on Linktree cards.
+        Reuse this index on connected channels so users can match the Linktree
+        card to YouTube descriptions, comments, and future social posts.
         """
-        concise = self._build_concise_product_title(product_name)
         index = self._next_publish_index()
-        prefix = f"[{index:03d}] "
-        # Trim concise body so prefix + body fits the visual budget.
-        compose_cap = self.MAX_PRODUCT_TITLE_LENGTH
-        body = concise[: max(1, compose_cap - len(prefix))]
-        title = (prefix + body).strip()
-
+        number = self.format_publish_index(index)
+        title = self._build_numbered_product_title(product_name, index)
         description = COUPANG_AFFILIATE_DISCLOSURE
         ok = self.publish_link(
             title=title,
             url=coupang_url,
             description=description,
             source_url=source_url,
-            extra={"channel": "shopping_shorts_maker", "publish_index": index},
+            extra={
+                "channel": "shopping_shorts_maker",
+                "publish_index": index,
+                "display_number": number,
+            },
         )
         if ok:
             logger.info("[Linktree] Published #%d → %s", index, title)
+        return {
+            "ok": bool(ok),
+            "publish_index": index,
+            "number": number,
+            "title": title,
+            "url": coupang_url,
+            "description": description,
+        }
+
+    def publish_coupang_link(self, product_name: str, coupang_url: str, source_url: str = "") -> bool:
+        """Publish Coupang deep-link payload for the generated product."""
+        result = self.publish_coupang_link_with_metadata(
+            product_name=product_name,
+            coupang_url=coupang_url,
+            source_url=source_url,
+        )
+        ok = bool(result.get("ok"))
         return ok
 
     def test_connection(self) -> bool:

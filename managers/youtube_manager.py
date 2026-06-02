@@ -1065,6 +1065,101 @@ class YouTubeManager:
 
         return text.strip()
 
+    @staticmethod
+    def _coerce_upload_number(upload_number: Any) -> Optional[int]:
+        try:
+            if isinstance(upload_number, str):
+                match = re.search(r"\d+", upload_number)
+                if not match:
+                    return None
+                value = int(match.group(0))
+            else:
+                value = int(upload_number)
+        except (TypeError, ValueError):
+            return None
+        return value if value > 0 else None
+
+    @classmethod
+    def format_upload_number(cls, upload_number: Any) -> str:
+        value = cls._coerce_upload_number(upload_number)
+        return f"[{value:03d}]" if value else ""
+
+    @classmethod
+    def apply_upload_number_to_product_text(
+        cls,
+        text: str,
+        upload_number: Any,
+        limit: int = 220,
+    ) -> str:
+        clean = str(text or "").strip()
+        marker = cls.format_upload_number(upload_number)
+        if not marker:
+            return cls._sanitize_public_text(clean, limit=limit)
+
+        clean = re.sub(r"^\[\d+\]\s*", "", clean).strip()
+        numbered = f"{marker} {clean}".strip() if clean else marker
+        return cls._sanitize_public_text(numbered, limit=limit)
+
+    @classmethod
+    def apply_upload_number_to_title(
+        cls,
+        title: str,
+        upload_number: Any,
+        max_length: int = 100,
+    ) -> str:
+        marker = cls.format_upload_number(upload_number)
+        clean = " ".join(str(title or "").split()).strip()
+        if not marker:
+            return clean[:max_length].rstrip()
+
+        paid_marker = COUPANG_PAID_PROMOTION_TITLE_MARKER
+        parts: List[str] = []
+        if clean.startswith(paid_marker):
+            parts.append(paid_marker)
+            clean = clean[len(paid_marker):].strip()
+
+        clean = re.sub(r"^\[\d+\]\s*", "", clean).strip()
+        parts.append(marker)
+        head = " ".join(parts)
+        available = max(0, max_length - len(head) - 1)
+        if clean and len(clean) > available:
+            clean = clean[: max(1, available - 3)].rstrip() + "..."
+        return f"{head} {clean}".strip()[:max_length].rstrip()
+
+    @classmethod
+    def apply_upload_number_to_description(
+        cls,
+        description: str,
+        upload_number: Any,
+        product_text: str = "",
+        limit: int = 5000,
+    ) -> str:
+        marker = cls.format_upload_number(upload_number)
+        desc = str(description or "").strip()
+        if not marker:
+            return cls._sanitize_public_text(desc, limit=limit)
+
+        desc = re.sub(r"(?m)^상품 번호:\s*\[\d+\]\s*$\n?", "", desc).strip()
+        product_line_text = cls.apply_upload_number_to_product_text(
+            product_text,
+            upload_number,
+            limit=220,
+        )
+        product_line = f"상품: {product_line_text}" if product_line_text else f"상품 번호: {marker}"
+
+        if product_line in desc:
+            return cls._sanitize_public_text(desc, limit=limit)
+
+        if desc.startswith(COUPANG_AFFILIATE_DISCLOSURE):
+            tail = desc[len(COUPANG_AFFILIATE_DISCLOSURE):].lstrip()
+            parts = [COUPANG_AFFILIATE_DISCLOSURE, product_line]
+            if tail:
+                parts.append(tail)
+            return cls._sanitize_public_text("\n\n".join(parts), limit=limit)
+
+        combined = f"{product_line}\n{desc}".strip() if desc else product_line
+        return cls._sanitize_public_text(combined, limit=limit)
+
     def generate_seo_hashtags(self, product_info: str, max_count: int = 10) -> List[str]:
         """
         Generate SEO-optimized hashtags.
@@ -1124,6 +1219,7 @@ class YouTubeManager:
         linktree_url: str = "",
         render_integrity: Optional[Dict[str, Any]] = None,
         render_integrity_required: bool = False,
+        upload_number: Optional[int] = None,
     ) -> None:
         """
         Add video to upload queue.
@@ -1136,12 +1232,15 @@ class YouTubeManager:
             product_info: Product information for SEO generation
             source_url: Source URL
             linktree_url: Public Linktree profile URL for the auto-comment
+            upload_number: Shared Linktree/channel number, shown as [001]
         """
         clean_source_url = self._normalize_public_url(source_url)
         clean_coupang_link = self._normalize_public_url(coupang_deep_link)
         clean_product_info = self._sanitize_public_text(product_info, limit=220)
         clean_title = self._sanitize_public_text(title, limit=100)
         clean_description = self._sanitize_public_text(description, limit=5000)
+        clean_upload_number = self._coerce_upload_number(upload_number)
+        unnumbered_product_info = clean_product_info
 
         # Generate SEO content if enabled and not provided
         if not clean_title and self._upload_settings.auto_title:
@@ -1154,6 +1253,21 @@ class YouTubeManager:
         if self._is_coupang_url(purchase_link) or self._is_coupang_url(clean_source_url):
             clean_title = self.ensure_coupang_title_compliance(clean_title)
             clean_description = self.ensure_coupang_affiliate_compliance(clean_description, purchase_link)
+
+        if clean_upload_number:
+            clean_product_info = self.apply_upload_number_to_product_text(
+                clean_product_info,
+                clean_upload_number,
+            )
+            clean_title = self.apply_upload_number_to_title(
+                clean_title or unnumbered_product_info,
+                clean_upload_number,
+            )
+            clean_description = self.apply_upload_number_to_description(
+                clean_description,
+                clean_upload_number,
+                product_text=unnumbered_product_info,
+            )
 
         normalized_tags = [
             t for t in (self._normalize_hashtag_token(tag) for tag in (tags or []))
@@ -1181,6 +1295,7 @@ class YouTubeManager:
             "source_url": clean_source_url or "",
             "coupang_deep_link": clean_coupang_link or "",
             "linktree_url": linktree_url or "",
+            "upload_number": clean_upload_number,
             "render_integrity": render_integrity or {},
             "render_integrity_required": bool(render_integrity_required),
             "added_at": datetime.now().isoformat()
@@ -1461,6 +1576,7 @@ class YouTubeManager:
         original_link: str,
         product_description: str = "",
         linktree_link: str = "",
+        upload_number: str = "",
     ) -> str:
         replacements = {
             "{구매링크}": purchase_link,
@@ -1476,6 +1592,9 @@ class YouTubeManager:
             "{링크트리}": linktree_link,
             "{링크트리링크}": linktree_link,
             "{linktree_link}": linktree_link,
+            "{상품번호}": upload_number,
+            "{업로드번호}": upload_number,
+            "{upload_number}": upload_number,
         }
 
         rendered = str(template or "")
@@ -1530,7 +1649,16 @@ class YouTubeManager:
         text = YouTubeManager._sanitize_public_text(raw, limit=limit)
         if not text:
             return ""
-        return text
+        upload_number = (
+            item.get("upload_number")
+            or item.get("linktree_publish_index")
+            or item.get("publish_index")
+        )
+        return YouTubeManager.apply_upload_number_to_product_text(
+            text,
+            upload_number,
+            limit=limit,
+        )
 
     def _resolve_comment_original_link(self, item: Dict[str, Any]) -> str:
         settings = get_settings_manager()
@@ -1574,6 +1702,11 @@ class YouTubeManager:
         purchase_link = self._normalize_public_url(item.get("coupang_deep_link", ""))
         original_link = self._resolve_comment_original_link(item)
         product_description = self._build_comment_product_description(item)
+        upload_number = self.format_upload_number(
+            item.get("upload_number")
+            or item.get("linktree_publish_index")
+            or item.get("publish_index")
+        )
         has_product_context = any((product_description, purchase_link, original_link))
         linktree_link = (
             self._resolve_comment_linktree_url(settings, item)
@@ -1593,6 +1726,7 @@ class YouTubeManager:
             original_link=original_link,
             product_description=product_description,
             linktree_link=linktree_link,
+            upload_number=upload_number,
         )
 
         purchase_tokens = ("{구매링크}", "{쿠팡링크}", "{딥링크}", "{purchase_link}")

@@ -163,6 +163,29 @@ def test_upload_queue_allows_verified_youtube_account(monkeypatch):
     assert len(manager._upload_queue) == 1
 
 
+def test_upload_queue_applies_shared_upload_number(monkeypatch):
+    settings = _AccountVerificationSettings(ok=True)
+    settings.account_email = "ympartners.uk@gmail.com"
+    manager = _make_upload_manager(monkeypatch, settings)
+
+    manager.add_to_upload_queue(
+        video_path="video.mp4",
+        title="[광고] 추천 상품",
+        description="오늘의 상품입니다.",
+        product_info="카프 빅팬 접이식 핸디 선풍기",
+        coupang_deep_link="https://link.coupang.com/a/example",
+        upload_number=3,
+        render_integrity={"ok": True},
+        render_integrity_required=True,
+    )
+
+    item = manager._upload_queue[0]
+    assert item["upload_number"] == 3
+    assert item["title"].startswith("[광고] [003] ")
+    assert item["product_info"].startswith("[003] 카프")
+    assert "상품: [003] 카프 빅팬 접이식 핸디 선풍기" in item["description"]
+
+
 class _SyncSettings:
     def __init__(self):
         self.account_email = "ympartners.uk@gmail.com"

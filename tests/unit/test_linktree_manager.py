@@ -177,9 +177,41 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
     assert captured["description"] == COUPANG_AFFILIATE_DISCLOSURE
     assert captured["source_url"] == "https://www.coupang.com/vp/products/1"
     assert captured["extra"]["channel"] == "shopping_shorts_maker"
+    assert captured["extra"]["display_number"] == "[001]"
 
 
-def test_concise_product_title_is_limited_to_15_chars():
+def test_publish_coupang_link_with_metadata_returns_matching_number(monkeypatch, tmp_path):
+    captured = {}
+
+    def _fake_publish_link(self, title, url, description="", source_url="", extra=None, timeout_seconds=None):
+        captured["title"] = title
+        captured["url"] = url
+        captured["description"] = description
+        captured["source_url"] = source_url
+        captured["extra"] = extra
+        return True
+
+    monkeypatch.setattr(LinktreeManager, "publish_link", _fake_publish_link)
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("USERPROFILE", str(tmp_path))
+
+    manager = _make_manager({"webhook_url": "https://example.com/hook", "api_key": "", "profile_url": "", "auto_publish": True})
+    result = manager.publish_coupang_link_with_metadata(
+        product_name="카프 빅팬 접이식 핸디 선풍기",
+        coupang_url="https://link.coupang.com/a/example",
+        source_url="https://www.coupang.com/vp/products/1",
+    )
+
+    assert result["ok"] is True
+    assert result["publish_index"] == 1
+    assert result["number"] == "[001]"
+    assert result["title"].startswith("[001] 카프")
+    assert captured["title"] == result["title"]
+    assert captured["extra"]["publish_index"] == 1
+    assert captured["extra"]["display_number"] == "[001]"
+
+
+def test_concise_product_title_is_limited_to_card_length():
     title = LinktreeManager._build_concise_product_title(
         "샤오미 무선 핸디 진공 청소기 초강력 흡입 업그레이드형"
     )

@@ -1699,6 +1699,7 @@ def _process_single_video(app, url, current_number, total_urls):
                             linktree_manager = None
                             linktree_publish_blocked = False
                             linktree_publish_block_reason = ""
+                            linktree_publish_index = None
                             try:
                                 linktree_manager = getattr(app, "linktree_manager", None)
                                 if linktree_manager is None:
@@ -1719,11 +1720,21 @@ def _process_single_video(app, url, current_number, total_urls):
                                             linktree_publish_blocked = True
                                             logger.warning("[Automation] %s", linktree_publish_block_reason)
                                         else:
-                                            linktree_ok = linktree_manager.publish_coupang_link(
-                                                product_name=product_name,
-                                                coupang_url=coupang_link,
-                                                source_url=original_source_url or url,
-                                            )
+                                            if hasattr(linktree_manager, "publish_coupang_link_with_metadata"):
+                                                linktree_result = linktree_manager.publish_coupang_link_with_metadata(
+                                                    product_name=product_name,
+                                                    coupang_url=coupang_link,
+                                                    source_url=original_source_url or url,
+                                                )
+                                                linktree_ok = bool(linktree_result.get("ok"))
+                                                if linktree_ok:
+                                                    linktree_publish_index = linktree_result.get("publish_index")
+                                            else:
+                                                linktree_ok = linktree_manager.publish_coupang_link(
+                                                    product_name=product_name,
+                                                    coupang_url=coupang_link,
+                                                    source_url=original_source_url or url,
+                                                )
                                             logger.info(
                                                 "[Automation] Linktree publish after render: %s",
                                                 "success" if linktree_ok else "failed",
@@ -1804,6 +1815,7 @@ def _process_single_video(app, url, current_number, total_urls):
                                     linktree_url=linktree_url,
                                     render_integrity=render_integrity,
                                     render_integrity_required=True,
+                                    upload_number=linktree_publish_index,
                                 )
                                 logger.info("[Automation] Added to YouTube upload queue")
                                 try:
