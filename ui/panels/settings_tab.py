@@ -545,9 +545,16 @@ class SettingsTab(QWidget, ThemedMixin):
         quick_btn_layout.setContentsMargins(0, 0, 0, 0)
         quick_btn_layout.setSpacing(8)
 
+        self.linktree_guide_btn = QPushButton("🪄 간편 설정 가이드")
+        self.linktree_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.linktree_guide_btn.setStyleSheet(automation_primary_button_style)
+        self.linktree_guide_btn.setToolTip("웹훅 연결을 단계별로 안내하고 테스트까지 한 번에 진행합니다.")
+        self.linktree_guide_btn.clicked.connect(self._open_linktree_setup_guide)
+        quick_btn_layout.addWidget(self.linktree_guide_btn)
+
         self.linktree_save_btn = QPushButton("저장")
         self.linktree_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.linktree_save_btn.setStyleSheet(automation_primary_button_style)
+        self.linktree_save_btn.setStyleSheet(automation_button_style)
         self.linktree_save_btn.clicked.connect(self._save_linktree_settings)
         quick_btn_layout.addWidget(self.linktree_save_btn)
         quick_btn_layout.addStretch()
@@ -3284,6 +3291,21 @@ class SettingsTab(QWidget, ThemedMixin):
         except Exception as exc:
             logger.error("[Settings] Coupang connection test failed: %s", exc)
             show_error(self, "연결 테스트 실패", f"쿠팡 연결 테스트 중 오류가 발생했습니다.\n{exc}")
+
+    def _open_linktree_setup_guide(self):
+        """Open the step-by-step Linktree webhook setup dialog."""
+        try:
+            from ui.components.linktree_setup_dialog import LinktreeSetupDialog
+
+            dialog = LinktreeSetupDialog(self, on_saved=self._load_link_automation_settings)
+            dialog.exec()
+        except Exception as exc:
+            logger.warning("[Settings] Linktree setup guide failed: %s", exc)
+        # 저장 여부와 무관하게 화면을 최신 상태로 갱신한다.
+        try:
+            self._load_link_automation_settings()
+        except Exception:
+            pass
 
     def _save_linktree_settings(self):
         """Persist Linktree webhook/API-key settings."""

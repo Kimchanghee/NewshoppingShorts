@@ -19,6 +19,7 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color
+from ui.components.automation_readiness import AutomationReadinessCard
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -111,6 +112,14 @@ class SourcingPanel(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(ds.spacing.space_6, ds.spacing.space_4, ds.spacing.space_6, ds.spacing.space_4)
         main_layout.setSpacing(ds.spacing.space_4)
+
+        # ── Full-automation readiness checklist (top) ──
+        # 사용자가 '소싱 시작'을 누르기 전에 AI·YouTube·Linktree·쿠팡 연동이
+        # 준비됐는지 한눈에 보여주고, 바로 설정 화면으로 이동하게 한다.
+        self.readiness_card = AutomationReadinessCard(
+            self.gui, on_navigate=self._navigate_to_setup
+        )
+        main_layout.addWidget(self.readiness_card)
 
         # ── Input Section ──
         input_frame = QFrame()
@@ -302,6 +311,58 @@ class SourcingPanel(QWidget):
 
         main_layout.addWidget(self.results_frame)
         main_layout.addStretch()
+
+        # Refresh readiness when automation options toggle, and paint once now.
+        self.chk_upload.toggled.connect(lambda _checked=False: self._refresh_readiness())
+        self.chk_linktree.toggled.connect(lambda _checked=False: self._refresh_readiness())
+        self._refresh_readiness()
+
+    def _navigate_to_setup(self, target: str) -> None:
+        """Jump to the settings/upload step (or guided dialog) that fixes a gap."""
+        if target == "linktree_setup":
+            self._open_linktree_setup_dialog()
+            return
+        gui = self.gui
+        if gui is not None and hasattr(gui, "_on_step_selected"):
+            try:
+                gui._on_step_selected(target)
+            except Exception as exc:
+                logger.warning("[SourcingPanel] navigate to %s failed: %s", target, exc)
+
+    def _open_linktree_setup_dialog(self) -> None:
+        """Open the guided Linktree webhook setup dialog and refresh on save."""
+        try:
+            from ui.components.linktree_setup_dialog import LinktreeSetupDialog
+
+            dialog = LinktreeSetupDialog(self, on_saved=self._refresh_readiness)
+            dialog.exec()
+        except Exception as exc:
+            logger.warning("[SourcingPanel] Linktree setup dialog failed: %s", exc)
+            try:
+                # Fallback: at least take the user to the settings tab.
+                gui = self.gui
+                if gui is not None and hasattr(gui, "_on_step_selected"):
+                    gui._on_step_selected("settings")
+            except Exception:
+                pass
+        self._refresh_readiness()
+
+    def _refresh_readiness(self) -> None:
+        """Recompute the readiness checklist from current options + connections."""
+        card = getattr(self, "readiness_card", None)
+        if card is None:
+            return
+        youtube_required = bool(getattr(self, "chk_upload", None) and self.chk_upload.isChecked())
+        linktree_required = bool(getattr(self, "chk_linktree", None) and self.chk_linktree.isChecked())
+        try:
+            card.refresh(youtube_required=youtube_required, linktree_required=linktree_required)
+        except Exception as exc:
+            logger.debug("[SourcingPanel] readiness refresh skipped: %s", exc)
+
+    def showEvent(self, event):
+        """Refresh readiness whenever the panel becomes visible."""
+        super().showEvent(event)
+        self._refresh_readiness()
 
     def _load_match_policy(self) -> dict:
         try:
@@ -502,6 +563,52 @@ class SourcingPanel(QWidget):
             pass
         return False
 
+    def _validate_youtube_upload_ready(self) -> bool:
+        """Block full automation when YouTube auto-upload is requested but the
+        channel is not connected (or the account-email guard fails).
+
+        Mirrors :meth:`_validate_linktree_publish_ready` so the user is told up
+        front instead of the upload step being silently skipped at the end.
+        """
+        if not getattr(self, "chk_upload", None) or not self.chk_upload.isChecked():
+            return True
+
+        message = ""
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            settings = get_settings_manager()
+            if not bool(settings.get_youtube_connected()):
+                message = (
+                    "YouTube 자동 업로드가 켜져 있지만 채널이 연결되지 않았습니다.\n"
+                    "‘업로드 설정’ 탭에서 채널을 연결하거나, YouTube 자동 업로드 체크를 끄고 다시 실행하세요."
+                )
+            else:
+                verification = settings.get_youtube_account_verification() or {}
+                if verification.get("required") and not verification.get("ok"):
+                    message = str(
+                        verification.get("message")
+                        or "YouTube 계정 이메일 검증이 필요합니다. ‘업로드 설정’ 탭에서 확인하세요."
+                    )
+        except Exception as exc:
+            logger.warning("[SourcingPanel] YouTube preflight failed: %s", exc)
+            # 예기치 못한 오류로는 차단하지 않는다(소싱/제작은 계속 가능).
+            return True
+
+        if not message:
+            return True
+
+        self.results_label.setText(message)
+        self.results_label.setStyleSheet(f"color: {get_color('warning')};")
+        try:
+            from ui.components.custom_dialog import show_warning
+
+            show_warning(self, "YouTube 연결 필요", message)
+        except Exception:
+            pass
+        self._refresh_readiness()
+        return False
+
     def _on_start_clicked(self):
         url = self.url_input.text().strip()
         if not url:
@@ -518,6 +625,8 @@ class SourcingPanel(QWidget):
         min_similarity_score = self._match_threshold_score()
         self._save_match_policy()
         if not self._validate_linktree_publish_ready():
+            return
+        if not self._validate_youtube_upload_ready():
             return
         self._running = True
         self.btn_start.setEnabled(False)
