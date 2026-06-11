@@ -106,6 +106,18 @@ jobs:
       shell: bash
       run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+    - name: Resolve release notes from tag message
+      id: notes
+      shell: bash
+      run: |
+        VERSION="${GITHUB_REF#refs/tags/v}"
+        SUMMARY="$(git tag -l --format='%(contents:subject)' "v${VERSION}" 2>/dev/null | head -n1)"
+        if [ -z "$(printf '%s' "$SUMMARY" | tr -d '[:space:]')" ]; then
+          SUMMARY="SSMaker v${VERSION} 업데이트"
+        fi
+        echo "SUMMARY=${SUMMARY}" >> "$GITHUB_OUTPUT"
+        echo "Resolved release notes: ${SUMMARY}"
+
     - name: Import Code Signing Certificate
       shell: pwsh
       run: |
@@ -176,16 +188,11 @@ jobs:
       with:
         files: dist/SSMaker_Setup_v${{ steps.version.outputs.VERSION }}.exe
         name: Release v${{ steps.version.outputs.VERSION }}
+        generate_release_notes: true
         body: |
           ## SSMaker v${{ steps.version.outputs.VERSION }}
 
-          ### 이번 업데이트 핵심
-          - PayApp 카드 빌링키 중복 방어를 암호문 인덱스가 아닌 SHA-256 지문 기반으로 보강했습니다.
-          - 기존 운영 DB에도 빌링키 지문 컬럼 백필과 유니크 인덱스 생성이 자동 반영되도록 마이그레이션을 강화했습니다.
-          - 비활성화된 기존 카드 재등록 시 중복 레코드 대신 기존 카드를 안전하게 재활성화하도록 개선했습니다.
-          - 자동 업데이트 다운로드 URL을 HTTPS 허용 도메인으로 제한하고, 리다이렉트 최종 URL까지 검증하도록 강화했습니다.
-          - 관리자 보조 API의 기본 비밀번호/비밀번호 해시 노출/미인증 관리자 API 접근 위험을 차단했습니다.
-          - 7일 테스트 상품 49,000원 판매 및 기존 3일 테스트 상품 신규 구매 차단 정책을 유지했습니다.
+          ${{ steps.notes.outputs.SUMMARY }}
 
           ### 설치 방법
           1. 설치 파일을 실행하면 기존 설치를 감지합니다.
@@ -204,6 +211,7 @@ jobs:
         VERSION: ${{ steps.version.outputs.VERSION }}
         FILE_HASH: ${{ steps.hash.outputs.FILE_HASH }}
         REPOSITORY: ${{ github.repository }}
+        RELEASE_NOTES_SUMMARY: ${{ steps.notes.outputs.SUMMARY }}
         APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
         APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}
         ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
@@ -224,7 +232,7 @@ jobs:
         payload = {
             "version": version,
             "download_url": download_url,
-            "release_notes": "결제 빌링키 지문 기반 중복 방어, 자동 업데이트 다운로드 검증, 관리자 API 인증 보강",
+            "release_notes": (os.environ.get("RELEASE_NOTES_SUMMARY") or f"SSMaker v{version} 업데이트").strip(),
             "is_mandatory": False,
             "file_hash": os.environ["FILE_HASH"].strip(),
         }

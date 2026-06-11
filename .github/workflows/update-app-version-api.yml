@@ -12,6 +12,9 @@ on:
       file_hash:
         description: 'Optional installer SHA256. If omitted, the workflow downloads the release asset and computes it.'
         required: false
+      release_notes:
+        description: 'Release notes shown in-app/website (optional)'
+        required: false
 
 permissions:
   contents: read
@@ -53,6 +56,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.VERSION }}
           FILE_HASH: ${{ steps.hash.outputs.FILE_HASH }}
           REPOSITORY: ${{ github.repository }}
+          RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
           APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
           APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}
           ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
@@ -73,7 +77,7 @@ jobs:
           payload = {
               "version": version,
               "download_url": download_url,
-              "release_notes": "7일 테스트 상품 신규 구매 제한 보강, 운영 버전 API GitHub fallback, PayApp 상품명 정리",
+              "release_notes": (os.environ.get("RELEASE_NOTES") or f"SSMaker v{version} 업데이트").strip(),
               "is_mandatory": False,
               "file_hash": os.environ["FILE_HASH"].strip(),
           }
