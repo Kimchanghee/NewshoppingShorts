@@ -61,9 +61,9 @@ def _load_api_keys() -> Dict[str, str]:
 
 GEMINI_API_KEYS = _load_api_keys()
 
-# Gemini - Default models (verified on 2026-05-20)
+# Gemini - Default models (re-verified 2026-06-11 against Google's current model list)
 # Text/Video: Gemini 3.5 Flash (stable, current flagship speed model)
-# TTS: Gemini 3.1 Flash TTS (preview)
+# TTS: Gemini 3.1 Flash TTS (preview, current)
 GEMINI_VIDEO_MODEL = os.getenv("GEMINI_VIDEO_MODEL", "gemini-3.5-flash")
 GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-3.5-flash")
 GEMINI_TTS_MODEL = os.getenv("GEMINI_TTS_MODEL", "gemini-3.1-flash-tts-preview")

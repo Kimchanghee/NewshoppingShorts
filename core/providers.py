@@ -93,8 +93,10 @@ class VertexGeminiProvider:
                 _add(env_name)
             _add("gemini-3.5-flash")
             _add("gemini-3.1-pro-preview")
+            _add("gemini-3.1-flash-lite")
             _add("gemini-2.5-pro")
             _add("gemini-2.5-flash")
+            _add("gemini-flash-latest")
             return chain
 
         def _is_model_not_found_error(exc: Exception) -> bool:

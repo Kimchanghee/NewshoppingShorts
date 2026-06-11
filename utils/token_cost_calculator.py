@@ -15,8 +15,8 @@ class TokenCostCalculator:
 
     # 모델별 가격 정보 (USD per 1M tokens)
     PRICING = {
-        # Gemini 3.0 Pro Preview
-        "gemini-3-pro-preview": {
+        # Gemini 3.1 Pro Preview (current Pro; gemini-3-pro-preview was shut down)
+        "gemini-3.1-pro-preview": {
             "input_small": 2.00,   # <= 200k tokens
             "input_large": 4.00,   # > 200k tokens
             "output_small": 12.00, # <= 200k tokens
@@ -87,13 +87,19 @@ class TokenCostCalculator:
             "output": 20.00
         },
 
-        # Gemini 2.0 Flash (backup)
-        "gemini-2.0-flash": {
-            "input_text": 0.10,
-            "input_image": 0.10,
-            "input_video": 0.10,
-            "input_audio": 0.70,
-            "output": 0.40
+        # Gemini 3.1 Flash-Lite (current low-cost fallback; gemini-2.0-flash was shut down 2026-06-01)
+        "gemini-3.1-flash-lite": {
+            "input_text": 0.25,
+            "input_image": 0.25,
+            "input_video": 0.25,
+            "input_audio": 0.50,
+            "output": 1.50
+        },
+
+        # Gemini 3.1 Flash TTS Preview (configured GEMINI_TTS_MODEL)
+        "gemini-3.1-flash-tts-preview": {
+            "input": 1.00,
+            "output": 20.00
         }
     }
 
@@ -112,7 +118,7 @@ class TokenCostCalculator:
         토큰 사용량을 기반으로 비용 계산
 
         Args:
-            model: 모델 이름 (예: "gemini-3-pro-preview")
+            model: 모델 이름 (예: "gemini-3.5-flash")
             usage_metadata: API 응답의 usage_metadata
                 {
                     "prompt_token_count": int,
