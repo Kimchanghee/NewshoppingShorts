@@ -87,3 +87,31 @@ def test_clear_all_api_keys_deletes_secure_storage_and_resets_state(monkeypatch)
     assert app.api_key_entries == []
     assert isinstance(app.api_key_manager, _FakeApiKeyManager)
     assert info_calls
+
+
+def test_save_api_keys_rejects_aq_restricted_token(monkeypatch):
+    app = SimpleNamespace(
+        api_key_entries=["AQ.Ab8RN6JvdXUtxRestrictedTokenExample1234567890"],
+        api_key_manager=None,
+    )
+    handler = APIHandler(app)
+
+    monkeypatch.setattr(config, "GEMINI_API_KEYS", {}, raising=False)
+    monkeypatch.setattr("app.api_handler.ApiKeyManager.APIKeyManager", _FakeApiKeyManager)
+
+    stored = []
+    monkeypatch.setattr(
+        "app.api_handler.SecretsManager.store_api_key",
+        lambda name, value: stored.append((name, value)) or True,
+    )
+    warnings = []
+    monkeypatch.setattr("app.api_handler.show_warning", lambda *args: warnings.append(args))
+    monkeypatch.setattr("app.api_handler.show_success", lambda *_args: None)
+    monkeypatch.setattr("app.api_handler.show_error", lambda *_args: None)
+
+    handler.save_api_keys_from_ui()
+
+    # Restricted AQ. token must not be stored, and the user must be warned about it.
+    assert stored == []
+    assert warnings, "expected a warning for the AQ. restricted token"
+    assert any("AQ." in str(arg) for arg in warnings[0])

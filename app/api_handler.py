@@ -121,19 +121,31 @@ class APIHandler:
         entries = getattr(self.app, "api_key_entries", [])
         new_keys = {}
         invalid = []
+        restricted_aq = []  # 'AQ.' 제한 토큰 (Gemini API에서 작동하지 않음)
         for idx, entry in enumerate(entries, start=1):
             key_value = entry.strip() if isinstance(entry, str) else ""
             if not key_value:
                 continue
             if GEMINI_API_KEY_PATTERN.match(key_value):
                 new_keys[f"api_{idx}"] = key_value
+            elif key_value.startswith("AQ."):
+                restricted_aq.append(idx)
             else:
                 invalid.append(idx)
 
-        if invalid or not new_keys:
-            msg = "유효한 키를 최소 1개 입력해주세요."
-            if invalid:
-                msg += f"\n잘못된 키: {invalid}"
+        if invalid or restricted_aq or not new_keys:
+            if restricted_aq:
+                msg = (
+                    f"'AQ.'로 시작하는 제한된 토큰이 감지되었습니다(위치: {restricted_aq}).\n"
+                    "계정 제한 시 발급되는 키로, Gemini API에서 작동하지 않습니다(401).\n"
+                    "Google AI Studio에서 'AIza...' 표준 키를 새로 발급받아 입력해주세요."
+                )
+                if invalid:
+                    msg += f"\n형식이 잘못된 키: {invalid}"
+            else:
+                msg = "유효한 키를 최소 1개 입력해주세요."
+                if invalid:
+                    msg += f"\n잘못된 키: {invalid}"
             show_warning(self.app, "검증 실패", msg)
             return
 
