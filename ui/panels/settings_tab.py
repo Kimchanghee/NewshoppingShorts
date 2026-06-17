@@ -1032,6 +1032,23 @@ class SettingsTab(QWidget, ThemedMixin):
             self.tab_widget.setCurrentIndex(self._tab_index.get("upload", 0))
         except Exception:
             pass
+
+    def select_connect_tab(self):
+        """'연결 도우미' 탭으로 전환하고 설정 도우미 영역을 보이게 스크롤."""
+        try:
+            self.tab_widget.setCurrentIndex(self._tab_index.get("connect", 0))
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_connect_scroll") and hasattr(self, "setup_assistant_section"):
+                QTimer.singleShot(
+                    0,
+                    lambda: self._connect_scroll.ensureWidgetVisible(
+                        self.setup_assistant_section, 40, 40
+                    ),
+                )
+        except Exception:
+            pass
     
     def _select_folder(self):
         """Open folder selection dialog"""

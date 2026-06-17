@@ -98,16 +98,8 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "tooltip_x": 260,
         "tooltip_y": 320,
     },
-    {
-        "id": "upload",
-        "title": "자동 업로드",
-        "description": "완성된 영상을 유튜브에 자동 업로드하세요.\n시간 간격을 설정하면 24시간 최대 6개까지\n자동으로 업로드됩니다.",
-        "target_type": "sidebar",
-        "target_id": "upload",
-        "navigate_to": "upload",
-        "tooltip_x": 260,
-        "tooltip_y": 368,
-    },
+    # '자동 업로드' 단계 제거: 올리기 설정이 좌측 메뉴에서 '설정 > 영상 올리기' 탭으로
+    # 이동했고, 마지막 '설정' 단계에서 함께 안내된다. (사이드바에 'upload' 버튼이 없어 스팟라이트가 깨짐)
     {
         "id": "queue",
         "title": "대기/진행",

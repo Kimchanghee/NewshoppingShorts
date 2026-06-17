@@ -1511,9 +1511,12 @@ class UploadPanel(QFrame, ThemedMixin):
         if settings_tab is None:
             return
 
+        # 설정이 탭 구조로 바뀌어, '연결 도우미' 탭으로 전환해야 설정 도우미가 보인다.
         try:
-            if hasattr(settings_tab, "scroll_area") and hasattr(settings_tab, "setup_assistant_section"):
-                settings_tab.scroll_area.ensureWidgetVisible(settings_tab.setup_assistant_section, 40, 40)
+            if hasattr(settings_tab, "select_connect_tab"):
+                settings_tab.select_connect_tab()
+            elif hasattr(settings_tab, "_connect_scroll") and hasattr(settings_tab, "setup_assistant_section"):
+                settings_tab._connect_scroll.ensureWidgetVisible(settings_tab.setup_assistant_section, 40, 40)
         except Exception:
             pass
 
