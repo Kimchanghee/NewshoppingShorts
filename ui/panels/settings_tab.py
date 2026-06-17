@@ -984,8 +984,6 @@ class SettingsTab(QWidget, ThemedMixin):
         self.subscription_btn.clicked.connect(self._go_to_subscription)
         sub_section.content_layout.addWidget(self.subscription_btn)
 
-        etc_layout.addWidget(sub_section)
-
         # =================== SECTION: Contact ===================
         contact_section = SettingsSection("문의하기")
 
@@ -1012,7 +1010,12 @@ class SettingsTab(QWidget, ThemedMixin):
         self.contact_btn.clicked.connect(self._open_contact_link)
         contact_section.content_layout.addWidget(self.contact_btn)
 
-        etc_layout.addWidget(contact_section)
+        # 구독 관리 / 문의하기를 위아래가 아니라 양옆으로 나란히 배치한다.
+        etc_row = QHBoxLayout()
+        etc_row.setSpacing(16)
+        etc_row.addWidget(sub_section, 1)
+        etc_row.addWidget(contact_section, 1)
+        etc_layout.addLayout(etc_row)
 
         # ── '영상 올리기' 탭: 안내 + 업로드 패널이 들어갈 자리(나중에 attach) ──
         upload_tab_intro = QLabel("YouTube 등 채널 연결과 자동 올리기 설정을 여기서 관리해요.")
