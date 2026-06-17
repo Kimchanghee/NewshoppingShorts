@@ -747,6 +747,8 @@ class UploadPanel(QFrame, ThemedMixin):
         self._active_channel: str = "youtube"
         # 틱톡 비활성화: 채널 탭 목록에서 제외(페이지도 생성하지 않음).
         self._platform_order = ["youtube", "instagram", "threads", "x"]
+        # 인스타그램·스레드·X는 아직 지원예정 → 채널 버튼 자체를 비활성화한다.
+        self._coming_soon_channels = {"instagram", "threads", "x"}
         body_layout.addWidget(self._create_channel_sidebar(main_body))
 
         self._channel_stack = QStackedWidget(main_body)
@@ -824,7 +826,7 @@ class UploadPanel(QFrame, ThemedMixin):
         title.setStyleSheet(f"color: {c.text_primary}; background-color: transparent; border: none;")
         layout.addWidget(title)
 
-        subtitle = QLabel("YouTube는 연결만 하면 자동으로 올라가요. 인스타그램·스레드는 지금은 안내문 저장만 되고, 자동 올리기는 준비 중(지원예정)이에요.")
+        subtitle = QLabel("지금은 YouTube만 연결하면 자동으로 올라가요. 인스타그램·스레드·X는 준비 중(지원예정)이라 아직 선택할 수 없어요.")
         subtitle.setWordWrap(True)
         subtitle.setFont(QFont(ds.typography.font_family_primary, 11))
         subtitle.setStyleSheet(f"color: {c.text_muted}; background-color: transparent; border: none;")
@@ -902,10 +904,16 @@ class UploadPanel(QFrame, ThemedMixin):
 
         for platform_id in self._platform_order:
             tab_btn = QPushButton()
-            tab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
             tab_btn.setCheckable(True)
             tab_btn.setMinimumHeight(62)
-            tab_btn.clicked.connect(lambda checked, pid=platform_id: self._set_active_channel(pid))
+            if platform_id in self._coming_soon_channels:
+                # 지원예정 채널: 선택 못 하게 버튼 자체를 비활성화(클릭 연결도 안 함)
+                tab_btn.setEnabled(False)
+                tab_btn.setCheckable(False)
+                tab_btn.setCursor(Qt.CursorShape.ArrowCursor)
+            else:
+                tab_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                tab_btn.clicked.connect(lambda checked, pid=platform_id: self._set_active_channel(pid))
             self._channel_tabs[platform_id] = tab_btn
             layout.addWidget(tab_btn)
 
@@ -1369,7 +1377,7 @@ class UploadPanel(QFrame, ThemedMixin):
         """Get short status text for channel tab."""
         if platform_id == "youtube":
             return "연결됨" if self.settings.get_youtube_connected() else "연결 필요"
-        if platform_id in {"tiktok", "instagram", "threads"}:
+        if platform_id in {"tiktok", "instagram", "threads", "x"}:
             return "지원예정"
         if self.settings.get_social_connection_status(platform_id):
             return "연결됨"
@@ -1417,6 +1425,23 @@ class UploadPanel(QFrame, ThemedMixin):
         ds = self.ds
         c = ds.colors
         platform_color = PLATFORM_CONFIG.get(platform_id, {}).get("color", c.primary)
+
+        if platform_id in getattr(self, "_coming_soon_channels", set()):
+            # 지원예정 채널: 항상 흐릿한 비활성 스타일(점선 테두리)로 표시
+            button.setStyleSheet(f"""
+                QPushButton {{
+                    background-color: {c.surface_variant};
+                    color: {c.text_muted};
+                    border: 1px dashed {c.border_light};
+                    border-radius: {ds.radius.sm}px;
+                    padding: 9px 10px;
+                    font-size: 12px;
+                    font-weight: 500;
+                    text-align: left;
+                    line-height: 1.3em;
+                }}
+            """)
+            return
 
         if active:
             button.setStyleSheet(f"""
