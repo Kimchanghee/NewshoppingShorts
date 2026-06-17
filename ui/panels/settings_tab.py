@@ -24,6 +24,7 @@ from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
 from ui.design_system_v2 import get_design_system
 from ui.components.base_widget import ThemedMixin
+from ui.components.linktree_setup_dialog import LinktreeSetupPanel
 from utils.secrets_manager import SecretsManager
 from utils.logging_config import get_logger
 from core.api.ApiKeyManager import APIKeyManager
@@ -524,8 +525,19 @@ class SettingsTab(QWidget, ThemedMixin):
         # 저장된 키 개수만 표시 (값은 자동으로 입력칸에 채우지 않음)
         self._update_key_count()
         
+        # =================== SECTION: Linktree 자동 등록 (인라인 가이드) ===================
+        # 예전에는 '🪄 간편 설정 가이드' 버튼이 팝업(LinktreeSetupDialog)을 띄웠지만,
+        # 이제 그 3단계 안내 화면을 이 탭 안에 인라인으로 직접 보여준다.
+        self.linktree_setup_section = SettingsSection("Linktree 자동 등록")
+        self.linktree_setup_panel = LinktreeSetupPanel(
+            parent=self,
+            on_saved=self._on_linktree_panel_saved,
+        )
+        self.linktree_setup_section.content_layout.addWidget(self.linktree_setup_panel)
+        connect_layout.addWidget(self.linktree_setup_section)
+
         # =================== SECTION: Coupang + Linktree Automation ===================
-        self.link_automation_section = SettingsSection("링크트리 연결 (선택)")
+        self.link_automation_section = SettingsSection("고급 설정 (쿠팡 키 · 직접 입력)")
 
         automation_intro = QLabel(
             "쿠팡 단축 링크를 직접 쓰면 아래 공개 주소만 저장하면 됩니다. "
@@ -579,33 +591,30 @@ class SettingsTab(QWidget, ThemedMixin):
             }}
         """
 
-        self.linktree_profile_input = QLineEdit()
+        # 공개 주소 입력과 '🪄 간편 설정 가이드'/'저장' 버튼은 이제 상단의
+        # 인라인 Linktree 패널(self.linktree_setup_panel)이 담당한다. 다만 기존
+        # 메서드들(_save_linktree_settings, _load_link_automation_settings,
+        # _open_linktree_setup_guide 등)이 이 위젯들을 참조하므로, 위젯 자체는
+        # 그대로 생성해 두되 화면 레이아웃에는 추가하지 않는다(숨김).
+        self.linktree_profile_input = QLineEdit(self)
         self.linktree_profile_input.setPlaceholderText("Linktree 공개 주소 예) https://linktr.ee/myshop")
         self.linktree_profile_input.setToolTip("YouTube 설명과 검수 화면에서 사용할 Linktree 공개 프로필 주소입니다.")
         self.linktree_profile_input.setStyleSheet(automation_input_style)
         self.linktree_profile_input.textChanged.connect(self._update_link_automation_status)
-        self.link_automation_section.add_row("공개 주소", self.linktree_profile_input)
+        self.linktree_profile_input.setVisible(False)
 
-        quick_btn_container = QWidget()
-        quick_btn_container.setStyleSheet("background: transparent; border: none;")
-        quick_btn_layout = QHBoxLayout(quick_btn_container)
-        quick_btn_layout.setContentsMargins(0, 0, 0, 0)
-        quick_btn_layout.setSpacing(8)
-
-        self.linktree_guide_btn = QPushButton("🪄 간편 설정 가이드")
+        self.linktree_guide_btn = QPushButton("🪄 간편 설정 가이드", self)
         self.linktree_guide_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.linktree_guide_btn.setStyleSheet(automation_primary_button_style)
         self.linktree_guide_btn.setToolTip("웹훅 연결을 단계별로 안내하고 테스트까지 한 번에 진행합니다.")
         self.linktree_guide_btn.clicked.connect(self._open_linktree_setup_guide)
-        quick_btn_layout.addWidget(self.linktree_guide_btn)
+        self.linktree_guide_btn.setVisible(False)
 
-        self.linktree_save_btn = QPushButton("저장")
+        self.linktree_save_btn = QPushButton("저장", self)
         self.linktree_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.linktree_save_btn.setStyleSheet(automation_button_style)
         self.linktree_save_btn.clicked.connect(self._save_linktree_settings)
-        quick_btn_layout.addWidget(self.linktree_save_btn)
-        quick_btn_layout.addStretch()
-        self.link_automation_section.add_row("Linktree", quick_btn_container)
+        self.linktree_save_btn.setVisible(False)
 
         setup_notice_links = QLabel(
             f'<a href="{SETUP_NOTICE_BASE_URL}/linktree-signup-link-setup" style="color: #3B82F6; text-decoration: none;">Linktree 세팅 가이드</a>'
@@ -3614,18 +3623,32 @@ class SettingsTab(QWidget, ThemedMixin):
             logger.error("[Settings] Coupang connection test failed: %s", exc)
             show_error(self, "연결 테스트 실패", f"쿠팡 연결 테스트 중 오류가 발생했습니다.\n{exc}")
 
-    def _open_linktree_setup_guide(self):
-        """Open the step-by-step Linktree webhook setup dialog."""
-        try:
-            from ui.components.linktree_setup_dialog import LinktreeSetupDialog
+    def _on_linktree_panel_saved(self):
+        """Inline Linktree 패널에서 저장이 끝나면 호출된다.
 
-            dialog = LinktreeSetupDialog(self, on_saved=self._load_link_automation_settings)
-            dialog.exec()
-        except Exception as exc:
-            logger.warning("[Settings] Linktree setup guide failed: %s", exc)
-        # 저장 여부와 무관하게 화면을 최신 상태로 갱신한다.
+        설정 탭의 다른 위젯(공개 주소/Webhook/상태 라벨 등)을 저장된 값으로 다시
+        맞추고 상태 라벨과 설정 도우미 칩을 갱신한다."""
         try:
             self._load_link_automation_settings()
+        except Exception as exc:
+            logger.debug("[Settings] reload after inline Linktree save skipped: %s", exc)
+
+    def _open_linktree_setup_guide(self):
+        """예전에는 단계별 설정 팝업을 띄웠으나, 이제 같은 3단계 안내가 '연결 도우미'
+        탭에 인라인으로 항상 표시된다. 따라서 팝업을 열지 않고, 해당 탭으로 전환하고
+        Linktree 패널이 보이도록 스크롤만 한다."""
+        try:
+            self.tab_widget.setCurrentIndex(self._tab_index.get("connect", 0))
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_connect_scroll") and hasattr(self, "linktree_setup_section"):
+                QTimer.singleShot(
+                    0,
+                    lambda: self._connect_scroll.ensureWidgetVisible(
+                        self.linktree_setup_section, 40, 40
+                    ),
+                )
         except Exception:
             pass
 

@@ -356,21 +356,23 @@ class SourcingPanel(QWidget):
                 logger.warning("[SourcingPanel] navigate to %s failed: %s", target, exc)
 
     def _open_linktree_setup_dialog(self) -> None:
-        """Open the guided Linktree webhook setup dialog and refresh on save."""
-        try:
-            from ui.components.linktree_setup_dialog import LinktreeSetupDialog
+        """Linktree 설정으로 사용자를 보낸다.
 
-            dialog = LinktreeSetupDialog(self, on_saved=self._refresh_readiness)
-            dialog.exec()
+        예전에는 팝업(LinktreeSetupDialog)을 띄웠지만, 이제 같은 3단계 안내가
+        설정 → '연결 도우미' 탭에 인라인으로 들어가 있다. 따라서 설정 화면으로
+        이동한 뒤 해당 탭을 선택한다. (메서드 이름은 호출부 호환을 위해 유지)"""
+        gui = self.gui
+        try:
+            if gui is not None and hasattr(gui, "_on_step_selected"):
+                gui._on_step_selected("settings")
         except Exception as exc:
-            logger.warning("[SourcingPanel] Linktree setup dialog failed: %s", exc)
-            try:
-                # Fallback: at least take the user to the settings tab.
-                gui = self.gui
-                if gui is not None and hasattr(gui, "_on_step_selected"):
-                    gui._on_step_selected("settings")
-            except Exception:
-                pass
+            logger.warning("[SourcingPanel] navigate to settings failed: %s", exc)
+        try:
+            settings_tab = getattr(gui, "settings_tab", None) if gui is not None else None
+            if settings_tab is not None and hasattr(settings_tab, "select_connect_tab"):
+                settings_tab.select_connect_tab()
+        except Exception as exc:
+            logger.warning("[SourcingPanel] select connect tab failed: %s", exc)
         self._refresh_readiness()
 
     def _refresh_readiness(self) -> None:

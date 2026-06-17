@@ -1,14 +1,20 @@
 # -*- coding: utf-8 -*-
 """
-Linktree 자동 발행 간편 설정 다이얼로그 (PyQt6)
+Linktree 자동 발행 간편 설정 (PyQt6)
 
 Linktree는 공식 '자동 등록 API'가 없어, 자동 발행은 웹훅(Make/Zapier/n8n 등)을
 통해 이뤄진다. 일반 사용자가 이 개념을 몰라도 한 번만 따라 하면 연결되도록,
 단계별 안내 + 예시 데이터 복사 + 테스트 발행 + 저장을 한 화면에 모았다.
 
-진입점:
+구성:
+- ``LinktreeSetupPanel(QWidget)`` — 3단계 안내 UI와 로드/저장/테스트 로직을 모두
+  담은 재사용 위젯(소스 오브 트루스). 설정 탭의 '연결 도우미'에 인라인으로 들어간다.
+- ``LinktreeSetupDialog(QDialog)`` — 위 패널을 그대로 임베드하고 '닫기' 버튼만
+  덧붙인 다이얼로그(하위 호환용; 다른 코드가 import 할 수 있어 유지한다).
+
+진입점(기존):
 - 풀 자동화(소싱) 화면의 준비 상태 카드 → Linktree "설정하기"
-- 설정 탭 Coupang/Linktree 자동화 섹션 → "간편 설정 가이드 열기"
+- 설정 탭 Coupang/Linktree 자동화 섹션 → "간편 설정 가이드"
 """
 from __future__ import annotations
 
@@ -43,8 +49,12 @@ EXAMPLE_PAYLOAD = {
 }
 
 
-class LinktreeSetupDialog(QDialog):
-    """Linktree 웹훅 자동 발행을 단계별로 연결하는 간편 설정 창."""
+class LinktreeSetupPanel(QWidget):
+    """Linktree 웹훅 자동 발행을 단계별로 연결하는 간편 설정 위젯(인라인용).
+
+    설정 탭에 직접 임베드하거나 :class:`LinktreeSetupDialog` 안에서 사용한다.
+    저장이 성공하면 ``on_saved`` 콜백을 호출해 호스트가 상태를 갱신할 수 있게 한다.
+    """
 
     _test_finished = pyqtSignal(bool, str)
 
@@ -61,12 +71,7 @@ class LinktreeSetupDialog(QDialog):
     def _build_ui(self) -> None:
         ds = self.ds
         c = get_color
-        self.setWindowTitle("Linktree 자동 등록 간편 설정")
-        self.setMinimumWidth(580)
-        self.setMinimumHeight(560)
-        self.setStyleSheet(
-            f"QDialog {{ background-color: {c('background')}; color: {c('text_primary')}; }}"
-        )
+        self.setStyleSheet("background: transparent;")
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -81,7 +86,7 @@ class LinktreeSetupDialog(QDialog):
         body = QWidget()
         body.setStyleSheet("background: transparent;")
         layout = QVBoxLayout(body)
-        layout.setContentsMargins(24, 20, 24, 8)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
         scroll.setWidget(body)
 
@@ -212,44 +217,33 @@ class LinktreeSetupDialog(QDialog):
         self.test_status.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent; padding-bottom: 3px;")
         test_row.addWidget(self.test_status, 1)
         s3.addLayout(test_row)
-        layout.addWidget(step3)
 
-        layout.addStretch()
-
-        # 하단 액션 바
-        footer = QWidget()
-        footer.setStyleSheet(f"background-color: {c('surface')}; border-top: 1px solid {c('border_light')};")
-        footer_layout = QHBoxLayout(footer)
-        footer_layout.setContentsMargins(24, 12, 24, 12)
-        footer_layout.setSpacing(8)
-        footer_layout.addStretch()
-
-        close_btn = QPushButton("닫기")
-        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        close_btn.setStyleSheet(self._ghost_button_style())
-        close_btn.clicked.connect(self.reject)
-        footer_layout.addWidget(close_btn)
-
-        self.save_btn = QPushButton("저장하고 닫기")
+        # 인라인 저장 액션(다이얼로그 푸터를 대체) — Step 3 영역 하단에 배치한다.
+        save_row = QHBoxLayout()
+        save_row.setSpacing(8)
+        save_row.addStretch()
+        self.save_btn = QPushButton("저장")
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.setStyleSheet(self._primary_button_style())
         self.save_btn.clicked.connect(self._on_save_clicked)
-        footer_layout.addWidget(self.save_btn)
+        save_row.addWidget(self.save_btn)
+        s3.addLayout(save_row)
+        layout.addWidget(step3)
 
-        outer.addWidget(footer)
+        layout.addStretch()
 
     class _StepBox(QFrame):
         def __init__(self, body_layout: QVBoxLayout):
             super().__init__()
             self.body = body_layout
 
-    def _step_box(self, badge: str, title: str) -> "LinktreeSetupDialog._StepBox":
+    def _step_box(self, badge: str, title: str) -> "LinktreeSetupPanel._StepBox":
         ds = self.ds
         c = get_color
         frame_body = QVBoxLayout()
-        box = LinktreeSetupDialog._StepBox(frame_body)
+        box = LinktreeSetupPanel._StepBox(frame_body)
         box.setStyleSheet(
-            f"LinktreeSetupDialog__StepBox, QFrame {{ background-color: {c('surface')}; "
+            f"LinktreeSetupPanel__StepBox, QFrame {{ background-color: {c('surface')}; "
             f"border: 1px solid {c('border_light')}; border-radius: {ds.radius.md}px; }} "
             f"QFrame QLabel {{ border: none; background: transparent; }}"
         )
@@ -371,7 +365,7 @@ class LinktreeSetupDialog(QDialog):
         self.test_btn.setEnabled(True)
         self.test_btn.setText("테스트로 보내 보기")
         if ok:
-            self.test_status.setText("성공! 연결이 잘 돼요. ‘저장하고 닫기’를 누르면 자동 등록이 켜져요.")
+            self.test_status.setText("성공! 연결이 잘 돼요. ‘저장’을 누르면 자동 등록이 켜져요.")
             self.test_status.setStyleSheet(f"color: {get_color('success')}; font-size: 12px; border: none; background: transparent;")
         else:
             msg = "테스트에 실패했어요. 자동 등록 주소와 설정 상태를 확인한 뒤 다시 시도하세요."
@@ -405,4 +399,62 @@ class LinktreeSetupDialog(QDialog):
                 logger.debug("[LinktreeSetup] on_saved callback failed: %s", exc)
 
         show_info(self, "저장 완료", "Linktree 자동 등록 설정을 저장했어요.")
+
+
+class LinktreeSetupDialog(QDialog):
+    """Linktree 간편 설정 패널을 그대로 임베드한 다이얼로그(하위 호환용).
+
+    UI/로직은 모두 :class:`LinktreeSetupPanel`에 있다. 이 다이얼로그는 패널을
+    감싸고 '닫기' 버튼만 덧붙인다. ``on_saved`` 콜백은 패널을 통해 그대로 동작한다.
+    """
+
+    def __init__(self, parent: Optional[QWidget] = None, on_saved: Optional[Callable[[], None]] = None):
+        super().__init__(parent)
+        self.ds = get_design_system()
+        c = get_color
+        self.setWindowTitle("Linktree 자동 등록 간편 설정")
+        self.setMinimumWidth(580)
+        self.setMinimumHeight(560)
+        self.setStyleSheet(
+            f"QDialog {{ background-color: {c('background')}; color: {c('text_primary')}; }}"
+        )
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        # 저장이 끝나면 호스트 콜백을 부르고 다이얼로그를 닫는다(기존 동작 유지).
+        self.panel = LinktreeSetupPanel(parent=self, on_saved=self._handle_saved)
+        self._external_on_saved = on_saved
+
+        panel_wrap = QWidget()
+        panel_wrap.setStyleSheet("background: transparent;")
+        panel_layout = QVBoxLayout(panel_wrap)
+        panel_layout.setContentsMargins(24, 20, 24, 8)
+        panel_layout.setSpacing(0)
+        panel_layout.addWidget(self.panel, 1)
+        outer.addWidget(panel_wrap, 1)
+
+        # 하단 액션 바(닫기). 저장은 패널 내부 버튼이 담당한다.
+        footer = QWidget()
+        footer.setStyleSheet(f"background-color: {c('surface')}; border-top: 1px solid {c('border_light')};")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(24, 12, 24, 12)
+        footer_layout.setSpacing(8)
+        footer_layout.addStretch()
+
+        close_btn = QPushButton("닫기")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setStyleSheet(self.panel._ghost_button_style())
+        close_btn.clicked.connect(self.reject)
+        footer_layout.addWidget(close_btn)
+
+        outer.addWidget(footer)
+
+    def _handle_saved(self) -> None:
+        if callable(self._external_on_saved):
+            try:
+                self._external_on_saved()
+            except Exception as exc:
+                logger.debug("[LinktreeSetup] dialog on_saved callback failed: %s", exc)
         self.accept()
