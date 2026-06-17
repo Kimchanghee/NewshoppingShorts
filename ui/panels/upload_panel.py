@@ -1296,11 +1296,13 @@ class UploadPanel(QFrame, ThemedMixin):
 
         prompt_section = UploadWorkflowSection(
             "2단계",
-            "올릴 때 쓸 글 안내문 미리 저장",
-            "내 채널 분위기에 맞는 문구를 미리 저장해 두면, 기능이 열린 뒤 바로 쓸 수 있어요.",
+            "올릴 때 쓸 글 안내문 (지원예정)",
+            "이 채널은 아직 준비 중이라 지금은 사용할 수 없어요. 기능이 열리면 여기서 설정할 수 있어요.",
             parent=page,
         )
-        prompt_section.add_widget(PromptInputGroup(platform_id, parent=page))
+        manual_pig = PromptInputGroup(platform_id, parent=page)
+        manual_pig.setEnabled(False)  # 지원예정: 입력·버튼 비활성화
+        prompt_section.add_widget(manual_pig)
         layout.addWidget(prompt_section)
 
         layout.addStretch()
@@ -1337,11 +1339,13 @@ class UploadPanel(QFrame, ThemedMixin):
 
         prompt_section = UploadWorkflowSection(
             "2단계",
-            "올릴 때 쓸 글 안내문 설정",
-            "글 안내문을 미리 저장해 두면 기능이 열린 뒤 바로 쓸 수 있어요.",
+            "올릴 때 쓸 글 안내문 (준비중)",
+            "이 채널은 아직 준비 중이라 지금은 사용할 수 없어요.",
             parent=page,
         )
-        prompt_section.add_widget(PromptInputGroup(platform_id, parent=page))
+        generic_pig = PromptInputGroup(platform_id, parent=page)
+        generic_pig.setEnabled(False)  # 준비중: 입력·버튼 비활성화
+        prompt_section.add_widget(generic_pig)
         layout.addWidget(prompt_section)
 
         layout.addStretch()

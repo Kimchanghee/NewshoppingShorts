@@ -1299,6 +1299,9 @@ class SettingsTab(QWidget, ThemedMixin):
         self.setup_open_instagram_btn.clicked.connect(self._assistant_open_instagram_setup)
         insta_input_row.addWidget(self.setup_open_instagram_btn)
         setup_input_layout.addLayout(insta_input_row)
+        # Instagram은 지원예정 — 입력·버튼 비활성화
+        self.setup_instagram_handle_input.setEnabled(False)
+        self.setup_open_instagram_btn.setEnabled(False)
 
         threads_input_row = QHBoxLayout()
         threads_input_row.setSpacing(8)
@@ -1311,6 +1314,9 @@ class SettingsTab(QWidget, ThemedMixin):
         self.setup_open_threads_btn.clicked.connect(self._assistant_open_threads_setup)
         threads_input_row.addWidget(self.setup_open_threads_btn)
         setup_input_layout.addLayout(threads_input_row)
+        # Threads는 지원예정 — 입력·버튼 비활성화
+        self.setup_threads_handle_input.setEnabled(False)
+        self.setup_open_threads_btn.setEnabled(False)
 
         helper_row = QHBoxLayout()
         helper_row.setSpacing(8)
