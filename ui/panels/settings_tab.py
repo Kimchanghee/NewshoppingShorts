@@ -1250,6 +1250,18 @@ class SettingsTab(QWidget, ThemedMixin):
         start_row.addStretch()
         self.setup_assistant_section.add_row("도우미 실행", start_wrap)
 
+        # '한 번에 자동 설정'이 뭔지 비개발자도 알 수 있게 설명을 항상 보이게 둔다.
+        auto_help = QLabel(
+            "🤖 한 번에 자동 설정이란? — 유료 구독자 전용 기능이에요. 버튼을 한 번 누르면 "
+            "YouTube 연결처럼 복잡한 설정을 컴퓨터가 대신 자동으로 진행해 줘요. "
+            "(로그인·본인 확인처럼 꼭 직접 해야 하는 부분만 그때그때 알려드립니다.)"
+        )
+        auto_help.setWordWrap(True)
+        auto_help.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding: 0 0 4px 0;"
+        )
+        self.setup_assistant_section.add_row("", auto_help)
+
         # 2-1) OAuth/code/manual identity input helpers
         setup_input_wrap = QFrame()
         setup_input_wrap.setStyleSheet(f"""
