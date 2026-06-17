@@ -98,6 +98,7 @@ class ModeCard(QFrame):
             ds.typography.size_sm
         ))
         self.desc_label.setWordWrap(True)
+        self.desc_label.setStyleSheet("padding-bottom: 3px;")
         self.desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.desc_label)
 
@@ -120,7 +121,7 @@ class ModeCard(QFrame):
                 ds.typography.font_family_primary,
                 ds.typography.size_xs
             ))
-            feature_label.setStyleSheet(f"color: {get_color('text_secondary')};")
+            feature_label.setStyleSheet(f"color: {get_color('text_secondary')}; padding-bottom: 3px;")
             feature_label.setWordWrap(True)
             feature_row.addWidget(feature_label, 1)
 
@@ -264,7 +265,7 @@ class ModeSelectionPanel(QWidget):
         welcome_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         header_layout.addWidget(welcome_label)
 
-        desc_label = QLabel("원하는 영상 제작 방식을 선택하세요")
+        desc_label = QLabel("어떤 방식으로 영상을 만들지 골라 주세요")
         desc_label.setFont(QFont(
             ds.typography.font_family_primary,
             ds.typography.size_base
@@ -285,14 +286,14 @@ class ModeSelectionPanel(QWidget):
         single_card = ModeCard(
             mode_id="single",
             title="단일 영상",
-            subtitle="1개의 영상을 변환",
-            description="하나의 상품 영상을 한국어 숏폼으로 변환합니다.",
+            subtitle="영상 1개를 한국어 숏폼으로",
+            description="해외 상품 영상 하나를 한국어 숏폼으로 바꿔 줍니다.",
             icon="🎬",
             features=[
-                "도우인(抖音) / 샤오홍슈(小红书) 영상 URL 입력",
-                "AI 번역 + 한국어 TTS 생성",
-                "여러 음성으로 동시 제작 가능",
-                "빠른 처리 속도"
+                "해외 영상 링크 1개만 붙여넣기 (도우인·샤오홍슈)",
+                "AI가 한국어로 번역하고 목소리를 입혀 줘요",
+                "여러 목소리로 한 번에 만들 수 있어요",
+                "빠르게 완성돼요"
             ],
             is_selected=False
         )
@@ -304,14 +305,14 @@ class ModeSelectionPanel(QWidget):
         mix_card = ModeCard(
             mode_id="mix",
             title="믹스 모드",
-            subtitle="최대 5개 영상을 믹스",
-            description="같은 상품의 여러 영상을 랜덤 믹스하여 새로운 영상을 만듭니다.",
+            subtitle="영상 여러 개를 섞어서 (최대 5개)",
+            description="같은 상품의 영상 여러 개를 자동으로 섞어 새 영상을 만듭니다.",
             icon="🎞️",
             features=[
-                "동일 상품 영상 최대 5개 입력",
-                "장면 랜덤 믹스 & 편집",
-                "다양한 영상 구성 가능",
-                "중복 콘텐츠 방지"
+                "같은 상품 영상을 최대 5개까지 넣기",
+                "여러 장면을 자동으로 섞어서 편집",
+                "매번 다른 느낌의 영상이 나와요",
+                "똑같은 영상이 반복되지 않아요"
             ],
             is_selected=False
         )
@@ -322,15 +323,15 @@ class ModeSelectionPanel(QWidget):
         # Sourcing (Full Automation) Mode Card - Mode 3
         sourcing_card = ModeCard(
             mode_id="sourcing",
-            title="풀 자동화 소싱",
-            subtitle="쿠팡 링크 하나로 전체 자동화",
-            description="쿠팡 상품 링크만 입력하면 해외 영상 소싱부터 업로드까지 자동 진행.",
+            title="전체 자동 만들기",
+            subtitle="쿠팡 링크 하나면 끝까지 자동",
+            description="쿠팡 상품 링크만 넣으면 영상 찾기부터 올리기까지 알아서 진행해요.",
             icon="🤖",
             features=[
-                "쿠팡 상품 링크 1개 입력",
-                "해외(도우인/샤오홍슈) 영상 자동 소싱",
-                "파트너스 딥링크 + 링크트리 자동 발행",
-                "영상 제작 → YouTube 업로드까지 자동"
+                "쿠팡 상품 링크 1개만 붙여넣기",
+                "어울리는 해외 영상을 자동으로 찾아 줘요",
+                "수수료 추적 링크를 만들어 Linktree에 자동 등록",
+                "영상 제작부터 YouTube 올리기까지 자동"
             ],
             is_selected=False
         )

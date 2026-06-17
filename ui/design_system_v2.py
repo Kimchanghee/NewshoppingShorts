@@ -524,6 +524,47 @@ def get_color(name: str) -> str:
     return get_design_system().get_color(name)
 
 
+def _check_icon_path() -> str:
+    """체크박스 indicator에 사용할 체크 아이콘(SVG)의 절대 경로(슬래시 정규화)."""
+    import os
+    path = os.path.join(os.path.dirname(__file__), "assets", "icons", "check.svg")
+    return path.replace("\\", "/")
+
+
+def checkbox_qss(size: int = 18, radius: int = 4) -> str:
+    """공통 체크박스 스타일시트(QSS)를 반환합니다.
+
+    체크 시 박스를 빨간색으로 가득 채우지 않고, 외곽선 박스 안에 빨간 체크 표시(✓)만
+    그립니다. 라벨은 다크 테마에서 보이도록 text_primary로 지정합니다.
+    """
+    return f"""
+        QCheckBox {{
+            color: {get_color('text_primary')};
+            spacing: 8px;
+            background-color: transparent;
+            border: none;
+        }}
+        QCheckBox:disabled {{
+            color: {get_color('text_muted')};
+        }}
+        QCheckBox::indicator {{
+            width: {size}px;
+            height: {size}px;
+            border: 2px solid {get_color('border_light')};
+            border-radius: {radius}px;
+            background-color: {get_color('surface_variant')};
+        }}
+        QCheckBox::indicator:hover {{
+            border-color: {get_color('primary')};
+        }}
+        QCheckBox::indicator:checked {{
+            border-color: {get_color('primary')};
+            background-color: {get_color('surface_variant')};
+            image: url("{_check_icon_path()}");
+        }}
+    """
+
+
 def is_dark_mode() -> bool:
     """
     현재 다크 모드가 활성화되어 있는지 확인합니다.

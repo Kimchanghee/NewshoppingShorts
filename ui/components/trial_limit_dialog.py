@@ -179,6 +179,7 @@ class TrialLimitDialog(QDialog):
                 line-height: {self.ds.typography.line_height_normal};
                 background: transparent;
                 font-family: {self.ds.typography.font_family_primary};
+                padding-bottom: 3px;
             }}
         """)
         container_layout.addWidget(explanation_label)

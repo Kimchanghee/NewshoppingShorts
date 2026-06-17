@@ -17,7 +17,8 @@ from typing import Any, Callable, Dict, List, Optional
 import requests
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QLabel, QFrame,
-    QLineEdit, QPushButton, QScrollArea, QFileDialog, QCheckBox, QTextEdit
+    QLineEdit, QPushButton, QScrollArea, QFileDialog, QCheckBox, QTextEdit,
+    QTabWidget
 )
 from PyQt6.QtCore import Qt, QTimer, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
@@ -94,7 +95,7 @@ class SettingsSection(QFrame):
         
         label = QLabel(label_text)
         label.setFont(QFont(ds.typography.font_family_primary, 12))
-        label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;")
         label.setMinimumWidth(120)
         row.addWidget(label)
         
@@ -154,24 +155,70 @@ class SettingsTab(QWidget, ThemedMixin):
         ds = self.ds
         c = ds.colors
         
-        # Main scroll area
+        # ── 탭 구조: 길게 스크롤하던 설정들을 주제별 탭으로 분리 ──
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-        
-        scroll = self.scroll_area = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setStyleSheet(f"background-color: {c.background};")
-        
-        content = QWidget()
-        content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(
-            ds.spacing.space_4, ds.spacing.space_4,
-            ds.spacing.space_4, ds.spacing.space_4
-        )
-        content_layout.setSpacing(ds.spacing.space_5)
-        
+
+        self.tab_widget = QTabWidget()
+        self.tab_widget.setStyleSheet(f"""
+            QTabWidget::pane {{
+                border: none;
+                background-color: {c.background};
+            }}
+            QTabBar::tab {{
+                background-color: {c.surface_variant};
+                color: {c.text_secondary};
+                padding: 9px 18px;
+                margin-right: 4px;
+                border-top-left-radius: {ds.radius.sm}px;
+                border-top-right-radius: {ds.radius.sm}px;
+                font-size: 13px;
+                font-weight: 600;
+            }}
+            QTabBar::tab:selected {{
+                background-color: {c.primary};
+                color: {c.text_on_primary};
+            }}
+            QTabBar::tab:hover:!selected {{
+                color: {c.text_primary};
+            }}
+        """)
+        main_layout.addWidget(self.tab_widget)
+
+        def _make_tab():
+            tab_scroll = QScrollArea()
+            tab_scroll.setWidgetResizable(True)
+            tab_scroll.setFrameShape(QFrame.Shape.NoFrame)
+            tab_scroll.setStyleSheet(f"background-color: {c.background}; border: none;")
+            page = QWidget()
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(
+                ds.spacing.space_4, ds.spacing.space_4,
+                ds.spacing.space_4, ds.spacing.space_4
+            )
+            lay.setSpacing(ds.spacing.space_5)
+            tab_scroll.setWidget(page)
+            return tab_scroll, lay
+
+        gen_scroll, gen_layout = _make_tab()
+        api_scroll, api_layout = _make_tab()
+        upload_scroll, upload_layout = _make_tab()
+        connect_scroll, connect_layout = _make_tab()
+        etc_scroll, etc_layout = _make_tab()
+
+        self.tab_widget.addTab(gen_scroll, "일반")
+        self.tab_widget.addTab(api_scroll, "API 키")
+        self.tab_widget.addTab(upload_scroll, "영상 올리기")
+        self.tab_widget.addTab(connect_scroll, "연결 도우미")
+        self.tab_widget.addTab(etc_scroll, "구독·문의")
+
+        # focus 헬퍼/탭 이동에서 사용
+        self.scroll_area = api_scroll          # focus_api_key_setup 용
+        self._connect_scroll = connect_scroll  # focus_coupang_setup 용
+        self._upload_tab_layout = upload_layout
+        self._tab_index = {"general": 0, "api": 1, "upload": 2, "connect": 3, "etc": 4}
+
         # =================== SECTION: Output Folder ===================
         output_section = SettingsSection("저장 경로 설정")
         
@@ -236,7 +283,7 @@ class SettingsTab(QWidget, ThemedMixin):
         folder_layout.addWidget(self.folder_open_btn)
 
         output_section.add_row("저장 위치", folder_container)
-        content_layout.addWidget(output_section)
+        gen_layout.addWidget(output_section)
 
         # =================== SECTION: Work Community ===================
         self.work_community_section = SettingsSection("작업 커뮤니티")
@@ -246,13 +293,13 @@ class SettingsTab(QWidget, ThemedMixin):
         )
         self.work_community_intro.setWordWrap(True)
         self.work_community_intro.setStyleSheet(
-            f"color: {c.text_secondary}; border: none; background: transparent;"
+            f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;"
         )
         self.work_community_section.content_layout.addWidget(self.work_community_intro)
 
         self.work_community_question = QLabel("현재까지 작업량은?")
         self.work_community_question.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding-bottom: 3px;"
         )
         self.work_community_section.content_layout.addWidget(self.work_community_question)
 
@@ -273,7 +320,7 @@ class SettingsTab(QWidget, ThemedMixin):
 
         self.work_community_next = QLabel("다음 레벨까지 5회")
         self.work_community_next.setStyleSheet(
-            f"color: {c.text_secondary}; border: none; background: transparent;"
+            f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;"
         )
         meta_row.addWidget(self.work_community_next, alignment=Qt.AlignmentFlag.AlignLeft)
         meta_row.addStretch()
@@ -300,10 +347,10 @@ class SettingsTab(QWidget, ThemedMixin):
             alignment=Qt.AlignmentFlag.AlignLeft
         )
 
-        content_layout.addWidget(self.work_community_section)
+        gen_layout.addWidget(self.work_community_section)
 
         # =================== SECTION: Guided Setup Assistant ===================
-        self._build_setup_assistant_section(content_layout)
+        self._build_setup_assistant_section(connect_layout)
         
         # =================== SECTION: API Key Management ===================
         self.api_section = SettingsSection("API 키 설정 (최대 8개)")
@@ -317,7 +364,7 @@ class SettingsTab(QWidget, ThemedMixin):
         # 설명 라벨
         desc_label = QLabel("여러 개의 API 키를 등록하면 자동으로 로테이션됩니다. Rate Limit 발생 시 다음 키로 자동 전환됩니다.")
         desc_label.setWordWrap(True)
-        desc_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;")
+        desc_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding-bottom: 3px;")
         self.api_section.content_layout.addWidget(desc_label)
 
         # API 키 입력 필드들 (8개)
@@ -469,10 +516,10 @@ class SettingsTab(QWidget, ThemedMixin):
 
         # 등록된 키 개수 표시
         self.api_count_label = QLabel("저장된 키: 0개")
-        self.api_count_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;")
+        self.api_count_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding-bottom: 3px;")
         self.api_section.content_layout.addWidget(self.api_count_label)
 
-        content_layout.addWidget(self.api_section)
+        api_layout.addWidget(self.api_section)
 
         # 저장된 키 개수만 표시 (값은 자동으로 입력칸에 채우지 않음)
         self._update_key_count()
@@ -486,7 +533,7 @@ class SettingsTab(QWidget, ThemedMixin):
         )
         automation_intro.setWordWrap(True)
         automation_intro.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding-bottom: 3px;"
         )
         self.link_automation_section.content_layout.addWidget(automation_intro)
 
@@ -579,127 +626,228 @@ class SettingsTab(QWidget, ThemedMixin):
         self.link_advanced_toggle.toggled.connect(self._set_link_advanced_visible)
         self.link_automation_section.content_layout.addWidget(self.link_advanced_toggle)
 
+        # ── 고급 자동화: 항목별 접이식 카드 (한 번에 하나만 펼침, 기본 접힘) ──
         self.link_advanced_container = QFrame()
-        self.link_advanced_container.setStyleSheet(f"""
-            QFrame {{
+        self.link_advanced_container.setStyleSheet("QFrame { background: transparent; border: none; }")
+        link_advanced_layout = QVBoxLayout(self.link_advanced_container)
+        link_advanced_layout.setContentsMargins(0, 4, 0, 0)
+        link_advanced_layout.setSpacing(8)
+
+        card_style = f"""
+            QFrame#CuCard {{
                 background-color: {c.surface_variant};
                 border: 1px solid {c.border_light};
                 border-radius: {ds.radius.base}px;
             }}
-        """)
-        link_advanced_layout = QVBoxLayout(self.link_advanced_container)
-        link_advanced_layout.setContentsMargins(14, 12, 14, 12)
-        link_advanced_layout.setSpacing(10)
-
-        advanced_note = QLabel(
-            "원본 coupang.com 링크를 자동 딥링크로 바꾸거나 Linktree 카드까지 자동 발행할 때만 필요합니다."
+        """
+        card_header_style = f"""
+            QPushButton {{
+                background: transparent;
+                color: {c.text_primary};
+                text-align: left;
+                padding: 11px 14px;
+                border: none;
+                font-weight: 700;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{ color: {c.primary}; }}
+        """
+        cu_button_style = f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: {c.text_on_primary};
+                padding: 8px 14px;
+                border: 1px solid {c.primary};
+                border-radius: {ds.radius.sm}px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{
+                background-color: {c.primary_hover};
+                border-color: {c.primary_hover};
+            }}
+        """
+        cu_tooltip = (
+            "컴퓨터를 자동 조작해 이 항목 설정을 대신 진행합니다(선택 기능).\n"
+            "필요 조건: 유료 플랜, Codex CLI 설치 및 'codex login', computer-use MCP 활성화.\n"
+            "조건 미충족 시 실행되지 않고 안내만 표시됩니다."
         )
-        advanced_note.setWordWrap(True)
-        advanced_note.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
-        )
-        link_advanced_layout.addWidget(advanced_note)
 
-        def add_advanced_row(label_text: str, widget: QWidget):
+        self._link_cards = []
+
+        def make_card(title: str, subtitle: str = ""):
+            """Create a collapsible card; returns its body layout. Accordion: opening
+            one collapses the others."""
+            card = QFrame()
+            card.setObjectName("CuCard")
+            card.setStyleSheet(card_style)
+            cl = QVBoxLayout(card)
+            cl.setContentsMargins(0, 0, 0, 0)
+            cl.setSpacing(0)
+
+            header = QPushButton("▸  " + title)
+            header.setCheckable(True)
+            header.setCursor(Qt.CursorShape.PointingHandCursor)
+            header.setStyleSheet(card_header_style)
+            cl.addWidget(header)
+
+            body = QFrame()
+            body.setStyleSheet("background: transparent; border: none;")
+            body.setVisible(False)
+            bl = QVBoxLayout(body)
+            bl.setContentsMargins(14, 2, 14, 14)
+            bl.setSpacing(10)
+            if subtitle:
+                sub = QLabel(subtitle)
+                sub.setWordWrap(True)
+                sub.setStyleSheet(
+                    f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding-bottom: 3px;"
+                )
+                bl.addWidget(sub)
+            cl.addWidget(body)
+
+            def _on_toggled(checked, _h=header, _b=body, _t=title):
+                _b.setVisible(checked)
+                _h.setText(("▾  " if checked else "▸  ") + _t)
+                if checked:
+                    for other_h, _other_b in self._link_cards:
+                        if other_h is not _h and other_h.isChecked():
+                            other_h.setChecked(False)
+
+            header.toggled.connect(_on_toggled)
+            self._link_cards.append((header, body))
+            link_advanced_layout.addWidget(card)
+            return bl
+
+        def add_row(layout, label_text: str, widget: QWidget):
             row = QHBoxLayout()
             row.setSpacing(ds.spacing.space_4)
-
             label = QLabel(label_text)
             label.setFont(QFont(ds.typography.font_family_primary, 12))
-            label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
-            label.setMinimumWidth(120)
+            label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;")
+            label.setMinimumWidth(110)
             row.addWidget(label)
-
             widget.setStyleSheet(widget.styleSheet() + " border: none;")
             row.addWidget(widget, stretch=1)
-            link_advanced_layout.addLayout(row)
+            layout.addLayout(row)
 
-        shortcut_btn_container = QWidget()
-        shortcut_btn_container.setStyleSheet("background: transparent; border: none;")
-        shortcut_btn_layout = QHBoxLayout(shortcut_btn_container)
-        shortcut_btn_layout.setContentsMargins(0, 0, 0, 0)
-        shortcut_btn_layout.setSpacing(8)
+        def button_row(*buttons):
+            cont = QWidget()
+            cont.setStyleSheet("background: transparent; border: none;")
+            lay = QHBoxLayout(cont)
+            lay.setContentsMargins(0, 0, 0, 0)
+            lay.setSpacing(8)
+            for b in buttons:
+                lay.addWidget(b)
+            lay.addStretch()
+            return cont
+
+        def make_cu_button(target: str, label: str):
+            btn = QPushButton("🤖 자동으로 설정")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setStyleSheet(cu_button_style)
+            btn.setToolTip(cu_tooltip)
+            btn.clicked.connect(
+                lambda _checked=False, t=target, lb=label: self._run_computer_use_prompt(
+                    self._build_computer_use_prompt_for_target(t), lb
+                )
+            )
+            return btn
+
+        # ── Card 1: Linktree 계정 연결 ──
+        lt_body = make_card(
+            "Linktree 계정 연결",
+            "공개 프로필 주소와 로그인 계정을 기록합니다. 로그인은 직접 진행하세요.",
+        )
 
         self.linktree_profile_open_btn = QPushButton("공개 페이지 열기")
         self.linktree_profile_open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.linktree_profile_open_btn.setStyleSheet(automation_button_style)
         self.linktree_profile_open_btn.clicked.connect(self._open_linktree_profile)
-        shortcut_btn_layout.addWidget(self.linktree_profile_open_btn)
 
         self.linktree_admin_btn = QPushButton("관리자 열기")
         self.linktree_admin_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.linktree_admin_btn.setStyleSheet(automation_button_style)
         self.linktree_admin_btn.clicked.connect(self._open_linktree_admin)
-        shortcut_btn_layout.addWidget(self.linktree_admin_btn)
 
         self.linktree_signup_btn = QPushButton("가입/로그인")
         self.linktree_signup_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.linktree_signup_btn.setStyleSheet(automation_button_style)
         self.linktree_signup_btn.clicked.connect(self._open_linktree_signup)
-        shortcut_btn_layout.addWidget(self.linktree_signup_btn)
-        shortcut_btn_layout.addStretch()
-        add_advanced_row("Linktree 바로가기", shortcut_btn_container)
-
-        self.coupang_access_input = QLineEdit()
-        self.coupang_access_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Access Key")
-        self.coupang_access_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.coupang_access_input.setStyleSheet(automation_input_style)
-        self.coupang_access_input.textChanged.connect(self._update_link_automation_status)
-        add_advanced_row("Coupang Access", self.coupang_access_input)
-
-        self.coupang_secret_input = QLineEdit()
-        self.coupang_secret_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Secret Key")
-        self.coupang_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.coupang_secret_input.setStyleSheet(automation_input_style)
-        self.coupang_secret_input.textChanged.connect(self._update_link_automation_status)
-        add_advanced_row("Coupang Secret", self.coupang_secret_input)
-
-        coupang_btn_container = QWidget()
-        coupang_btn_container.setStyleSheet("background: transparent; border: none;")
-        coupang_btn_layout = QHBoxLayout(coupang_btn_container)
-        coupang_btn_layout.setContentsMargins(0, 0, 0, 0)
-        coupang_btn_layout.setSpacing(8)
-
-        self.coupang_save_btn = QPushButton("쿠팡 키 저장")
-        self.coupang_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.coupang_save_btn.setStyleSheet(automation_button_style)
-        self.coupang_save_btn.clicked.connect(self._save_coupang_settings)
-        coupang_btn_layout.addWidget(self.coupang_save_btn)
-
-        self.coupang_test_btn = QPushButton("쿠팡 연결 테스트")
-        self.coupang_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.coupang_test_btn.setStyleSheet(automation_button_style)
-        self.coupang_test_btn.clicked.connect(self._test_coupang_connection)
-        coupang_btn_layout.addWidget(self.coupang_test_btn)
-        coupang_btn_layout.addStretch()
-        add_advanced_row("Coupang", coupang_btn_container)
-
-        self.linktree_webhook_input = QLineEdit()
-        self.linktree_webhook_input.setPlaceholderText("선택: 자동 발행용 Webhook URL (https://...)")
-        self.linktree_webhook_input.setToolTip("Linktree 카드를 프로그램이 자동으로 추가하려면 Webhook URL이 필요합니다.")
-        self.linktree_webhook_input.setStyleSheet(automation_input_style)
-        self.linktree_webhook_input.textChanged.connect(self._update_link_automation_status)
-        add_advanced_row("Webhook URL", self.linktree_webhook_input)
-
-        self.linktree_api_key_input = QLineEdit()
-        self.linktree_api_key_input.setPlaceholderText("선택: Webhook 인증 키")
-        self.linktree_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.linktree_api_key_input.setStyleSheet(automation_input_style)
-        add_advanced_row("Webhook 인증 키", self.linktree_api_key_input)
+        add_row(lt_body, "바로가기", button_row(
+            self.linktree_profile_open_btn, self.linktree_admin_btn, self.linktree_signup_btn
+        ))
 
         self.linktree_account_email_input = QLineEdit()
         self.linktree_account_email_input.setPlaceholderText("Linktree 로그인 이메일")
         self.linktree_account_email_input.setToolTip("현재 Linktree에 연결한 계정 이메일을 기록합니다.")
         self.linktree_account_email_input.setStyleSheet(automation_input_style)
         self.linktree_account_email_input.textChanged.connect(self._update_link_automation_status)
-        add_advanced_row("Linktree 계정", self.linktree_account_email_input)
+        add_row(lt_body, "Linktree 계정", self.linktree_account_email_input)
 
         self.linktree_expected_email_input = QLineEdit()
         self.linktree_expected_email_input.setPlaceholderText("기대 계정 이메일")
         self.linktree_expected_email_input.setToolTip("이 이메일과 Linktree 계정 이메일이 일치할 때만 자동 발행을 허용합니다.")
         self.linktree_expected_email_input.setStyleSheet(automation_input_style)
         self.linktree_expected_email_input.textChanged.connect(self._update_link_automation_status)
-        add_advanced_row("기대 계정", self.linktree_expected_email_input)
+        add_row(lt_body, "기대 계정", self.linktree_expected_email_input)
+
+        self.linktree_cu_btn = make_cu_button("linktree", "Linktree 자동 설정")
+        add_row(lt_body, "Computer Use", button_row(self.linktree_cu_btn))
+
+        # ── Card 2: 쿠팡 파트너스 딥링크 ──
+        cp_body = make_card(
+            "쿠팡 파트너스 딥링크 (선택)",
+            "원본 coupang.com 링크를 파트너스 딥링크로 자동 변환할 때만 필요합니다.",
+        )
+
+        self.coupang_access_input = QLineEdit()
+        self.coupang_access_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Access Key")
+        self.coupang_access_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.coupang_access_input.setStyleSheet(automation_input_style)
+        self.coupang_access_input.textChanged.connect(self._update_link_automation_status)
+        add_row(cp_body, "Coupang Access", self.coupang_access_input)
+
+        self.coupang_secret_input = QLineEdit()
+        self.coupang_secret_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Secret Key")
+        self.coupang_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.coupang_secret_input.setStyleSheet(automation_input_style)
+        self.coupang_secret_input.textChanged.connect(self._update_link_automation_status)
+        add_row(cp_body, "Coupang Secret", self.coupang_secret_input)
+
+        self.coupang_save_btn = QPushButton("쿠팡 키 저장")
+        self.coupang_save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coupang_save_btn.setStyleSheet(automation_button_style)
+        self.coupang_save_btn.clicked.connect(self._save_coupang_settings)
+
+        self.coupang_test_btn = QPushButton("쿠팡 연결 테스트")
+        self.coupang_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.coupang_test_btn.setStyleSheet(automation_button_style)
+        self.coupang_test_btn.clicked.connect(self._test_coupang_connection)
+
+        self.coupang_cu_btn = make_cu_button("coupang", "쿠팡 키 자동 발급")
+        add_row(cp_body, "작업", button_row(
+            self.coupang_save_btn, self.coupang_test_btn, self.coupang_cu_btn
+        ))
+        self._coupang_card_header = self._link_cards[-1][0]
+
+        # ── Card 3: Webhook 자동 발행 ──
+        wh_body = make_card(
+            "Webhook 자동 발행 (선택)",
+            "Make/Zapier/n8n Webhook으로 Linktree 카드를 자동 추가합니다.",
+        )
+
+        self.linktree_webhook_input = QLineEdit()
+        self.linktree_webhook_input.setPlaceholderText("선택: 자동 발행용 Webhook URL (https://...)")
+        self.linktree_webhook_input.setToolTip("Linktree 카드를 프로그램이 자동으로 추가하려면 Webhook URL이 필요합니다.")
+        self.linktree_webhook_input.setStyleSheet(automation_input_style)
+        self.linktree_webhook_input.textChanged.connect(self._update_link_automation_status)
+        add_row(wh_body, "Webhook URL", self.linktree_webhook_input)
+
+        self.linktree_api_key_input = QLineEdit()
+        self.linktree_api_key_input.setPlaceholderText("선택: Webhook 인증 키")
+        self.linktree_api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
+        self.linktree_api_key_input.setStyleSheet(automation_input_style)
+        add_row(wh_body, "Webhook 인증 키", self.linktree_api_key_input)
 
         checkbox_container = QWidget()
         checkbox_container.setStyleSheet("background: transparent; border: none;")
@@ -713,39 +861,33 @@ class SettingsTab(QWidget, ThemedMixin):
         self.linktree_auto_checkbox.stateChanged.connect(self._update_link_automation_status)
         checkbox_layout.addWidget(self.linktree_auto_checkbox)
         checkbox_layout.addStretch()
-        add_advanced_row("자동 업로드", checkbox_container)
-
-        linktree_btn_container = QWidget()
-        linktree_btn_container.setStyleSheet("background: transparent; border: none;")
-        linktree_btn_layout = QHBoxLayout(linktree_btn_container)
-        linktree_btn_layout.setContentsMargins(0, 0, 0, 0)
-        linktree_btn_layout.setSpacing(8)
+        add_row(wh_body, "자동 업로드", checkbox_container)
 
         self.linktree_test_btn = QPushButton("테스트 업로드")
         self.linktree_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.linktree_test_btn.setStyleSheet(automation_button_style)
         self.linktree_test_btn.clicked.connect(self._test_linktree_publish)
-        linktree_btn_layout.addWidget(self.linktree_test_btn)
-        linktree_btn_layout.addStretch()
-        add_advanced_row("Linktree", linktree_btn_container)
+
+        self.webhook_cu_btn = make_cu_button("webhook", "Webhook 시나리오 자동 설정")
+        add_row(wh_body, "작업", button_row(self.linktree_test_btn, self.webhook_cu_btn))
 
         linktree_docs_link = QLabel(
             '<a href="https://docs.linktr.ee/" style="color: #3B82F6; text-decoration: none;">Linktree 개발 문서 보기</a>'
         )
         linktree_docs_link.setOpenExternalLinks(True)
         linktree_docs_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
-        link_advanced_layout.addWidget(linktree_docs_link)
+        wh_body.addWidget(linktree_docs_link)
 
         self.link_automation_section.content_layout.addWidget(self.link_advanced_container)
         self._set_link_advanced_visible(False)
 
         self.link_automation_status = QLabel("상태: 미설정")
         self.link_automation_status.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding-bottom: 3px;"
         )
         self.link_automation_section.content_layout.addWidget(self.link_automation_status)
 
-        content_layout.addWidget(self.link_automation_section)
+        connect_layout.addWidget(self.link_automation_section)
         self._load_link_automation_settings()
         
         # =================== SECTION: App Info ===================
@@ -753,26 +895,26 @@ class SettingsTab(QWidget, ThemedMixin):
 
         version_info = self._load_version_info()
         version_label = QLabel(f"버전: {version_info.get('version', '알 수 없음')}")
-        version_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        version_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;")
         info_section.content_layout.addWidget(version_label)
 
         updated_at = version_info.get('updated_at', version_info.get('build_date', '알 수 없음'))
         update_label = QLabel(f"업데이트: {updated_at}")
-        update_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        update_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;")
         info_section.content_layout.addWidget(update_label)
 
         dev_label = QLabel("개발: 쇼핑 숏폼 팀")
         dev_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
         info_section.content_layout.addWidget(dev_label)
 
-        content_layout.addWidget(info_section)
+        gen_layout.addWidget(info_section)
 
         # =================== SECTION: Tutorial ===================
         tutorial_section = SettingsSection("튜토리얼")
 
         tutorial_desc = QLabel("앱 사용법을 다시 확인하고 싶으시면 튜토리얼을 재실행하세요.")
         tutorial_desc.setWordWrap(True)
-        tutorial_desc.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        tutorial_desc.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;")
         tutorial_section.content_layout.addWidget(tutorial_desc)
 
         self.replay_tutorial_btn = QPushButton("튜토리얼 재실행")
@@ -793,14 +935,14 @@ class SettingsTab(QWidget, ThemedMixin):
         self.replay_tutorial_btn.clicked.connect(self._replay_tutorial)
         tutorial_section.content_layout.addWidget(self.replay_tutorial_btn)
 
-        content_layout.addWidget(tutorial_section)
+        gen_layout.addWidget(tutorial_section)
 
         # =================== SECTION: Subscription ===================
         sub_section = SettingsSection("구독 관리")
 
         sub_desc = QLabel("구독 상태 확인 및 플랜을 변경할 수 있습니다.")
         sub_desc.setWordWrap(True)
-        sub_desc.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        sub_desc.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;")
         sub_section.content_layout.addWidget(sub_desc)
 
         self.subscription_btn = QPushButton("구독 관리 페이지로 이동")
@@ -821,14 +963,14 @@ class SettingsTab(QWidget, ThemedMixin):
         self.subscription_btn.clicked.connect(self._go_to_subscription)
         sub_section.content_layout.addWidget(self.subscription_btn)
 
-        content_layout.addWidget(sub_section)
+        etc_layout.addWidget(sub_section)
 
         # =================== SECTION: Contact ===================
         contact_section = SettingsSection("문의하기")
 
         contact_desc = QLabel("이용 중 불편사항이나 문의가 있으시면 카카오 오픈채팅으로 연락주세요.")
         contact_desc.setWordWrap(True)
-        contact_desc.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
+        contact_desc.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;")
         contact_section.content_layout.addWidget(contact_desc)
 
         self.contact_btn = QPushButton("문의하기")
@@ -849,13 +991,47 @@ class SettingsTab(QWidget, ThemedMixin):
         self.contact_btn.clicked.connect(self._open_contact_link)
         contact_section.content_layout.addWidget(self.contact_btn)
 
-        content_layout.addWidget(contact_section)
+        etc_layout.addWidget(contact_section)
 
-        # Spacer
-        content_layout.addStretch()
-        
-        scroll.setWidget(content)
-        main_layout.addWidget(scroll)
+        # ── '영상 올리기' 탭: 안내 + 업로드 패널이 들어갈 자리(나중에 attach) ──
+        upload_tab_intro = QLabel("YouTube 등 채널 연결과 자동 올리기 설정을 여기서 관리해요.")
+        upload_tab_intro.setWordWrap(True)
+        upload_tab_intro.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px; padding-bottom: 3px;"
+        )
+        upload_layout.addWidget(upload_tab_intro)
+        self._upload_tab_placeholder = QLabel("업로드 설정을 불러오는 중…")
+        self._upload_tab_placeholder.setStyleSheet(
+            f"color: {c.text_muted}; border: none; background: transparent;"
+        )
+        upload_layout.addWidget(self._upload_tab_placeholder)
+
+        # 각 탭 하단 여백
+        for _lay in (gen_layout, api_layout, connect_layout, etc_layout):
+            _lay.addStretch()
+        upload_layout.addStretch()
+
+    def attach_upload_panel(self, panel: QWidget):
+        """좌측 메뉴에 있던 '올리기 설정'(UploadPanel)을 '영상 올리기' 탭 안으로 넣는다.
+        ui_initializer에서 settings_tab/upload_panel 생성 후 호출."""
+        if panel is None:
+            return
+        try:
+            if hasattr(self, "_upload_tab_placeholder") and self._upload_tab_placeholder is not None:
+                self._upload_tab_placeholder.setParent(None)
+                self._upload_tab_placeholder = None
+            # addStretch가 마지막에 있으므로, 그 앞(인덱스 기준 끝-1)에 삽입
+            insert_at = max(0, self._upload_tab_layout.count() - 1)
+            self._upload_tab_layout.insertWidget(insert_at, panel, 1)
+        except Exception as exc:
+            logger.warning("[SettingsTab] attach_upload_panel failed: %s", exc)
+
+    def select_upload_tab(self):
+        """'영상 올리기' 탭으로 전환."""
+        try:
+            self.tab_widget.setCurrentIndex(self._tab_index.get("upload", 0))
+        except Exception:
+            pass
     
     def _select_folder(self):
         """Open folder selection dialog"""
@@ -884,17 +1060,56 @@ class SettingsTab(QWidget, ThemedMixin):
         ds = self.ds
         c = ds.colors
 
-        self.setup_assistant_section = SettingsSection("자동 설정 도우미")
+        self.setup_assistant_section = SettingsSection("설정 도우미 (단계별 안내)")
 
         intro = QLabel(
-            "초기 사용자용 반자동 설정 흐름입니다. 자동 단계는 앱이 수행하고, "
-            "로그인/2FA/동의 화면은 필요한 순간에만 직접 진행한 뒤 '완료했어요'를 눌러 다음으로 넘어갑니다."
+            "처음이신가요? 아래 'YouTube 설정' 버튼만 눌러서 채널을 연결하면, 영상이 자동으로 올라갑니다. "
+            "방법을 잘 모르겠다면 먼저 '📖 사용 설명서 보기'를 눌러보세요."
         )
         intro.setWordWrap(True)
         intro.setStyleSheet(
-            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 11px;"
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px; padding-bottom: 3px;"
         )
         self.setup_assistant_section.content_layout.addWidget(intro)
+
+        # 도움말 버튼: 사용 설명서(웹 공지/매뉴얼) + 'Linktree가 뭔가요?'
+        help_row = QHBoxLayout()
+        help_row.setSpacing(8)
+        self.setup_manual_btn = QPushButton("📖 사용 설명서 보기")
+        self.setup_manual_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_manual_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: {c.text_on_primary};
+                border: 1px solid {c.primary};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 14px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{ background-color: {c.primary_hover}; border-color: {c.primary_hover}; }}
+        """)
+        self.setup_manual_btn.clicked.connect(lambda: self._open_external_url(SETUP_NOTICE_BASE_URL))
+        help_row.addWidget(self.setup_manual_btn)
+
+        self.setup_linktree_help_btn = QPushButton("Linktree가 뭔가요?")
+        self.setup_linktree_help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_linktree_help_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 14px;
+                font-weight: 600;
+            }}
+            QPushButton:hover {{ background-color: {c.surface}; }}
+        """)
+        self.setup_linktree_help_btn.clicked.connect(
+            lambda: self._open_external_url(f"{SETUP_NOTICE_BASE_URL}/linktree-signup-link-setup")
+        )
+        help_row.addWidget(self.setup_linktree_help_btn)
+        help_row.addStretch()
+        self.setup_assistant_section.content_layout.addLayout(help_row)
 
         # 1) Connection chips
         chip_wrap = QWidget()
@@ -903,6 +1118,8 @@ class SettingsTab(QWidget, ThemedMixin):
         chip_row.setContentsMargins(0, 0, 0, 0)
         chip_row.setSpacing(8)
 
+        # 칩 객체는 모두 생성(다른 코드에서 set_chip 참조)하되, 화면에는 동작하는
+        # 채널(Gemini/YouTube/Linktree)만 표시한다. 틱톡은 비활성화로 숨김.
         self.setup_chip_gemini = QLabel()
         self.setup_chip_youtube = QLabel()
         self.setup_chip_tiktok = QLabel()
@@ -912,9 +1129,6 @@ class SettingsTab(QWidget, ThemedMixin):
         for chip in (
             self.setup_chip_gemini,
             self.setup_chip_youtube,
-            self.setup_chip_tiktok,
-            self.setup_chip_instagram,
-            self.setup_chip_threads,
             self.setup_chip_linktree,
         ):
             chip.setStyleSheet(
@@ -948,10 +1162,13 @@ class SettingsTab(QWidget, ThemedMixin):
                 border-color: {c.primary_hover};
             }}
         """)
+        # '원클릭 설정 시작'/'소셜4종'/'TikTok만'/'Instagram만'/'Threads만'은
+        # 실효성이 없어(외부 Codex 필요 + 틱톡/IG/스레드는 지원예정) 화면에서 제거.
+        # 실제로 작동하는 YouTube·Linktree 설정만 남긴다.
+        # setup_start_all_btn 객체는 다른 버튼들의 스타일 소스로만 유지(레이아웃 미추가).
         self.setup_start_all_btn.clicked.connect(lambda: self._start_setup_assistant("all"))
-        start_row.addWidget(self.setup_start_all_btn)
 
-        self.setup_start_youtube_btn = QPushButton("YouTube만 설정")
+        self.setup_start_youtube_btn = QPushButton("YouTube 설정")
         self.setup_start_youtube_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_start_youtube_btn.setStyleSheet(f"""
             QPushButton {{
@@ -967,31 +1184,7 @@ class SettingsTab(QWidget, ThemedMixin):
         self.setup_start_youtube_btn.clicked.connect(lambda: self._start_setup_assistant("youtube"))
         start_row.addWidget(self.setup_start_youtube_btn)
 
-        self.setup_start_social_btn = QPushButton("소셜4종 설정")
-        self.setup_start_social_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setup_start_social_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
-        self.setup_start_social_btn.clicked.connect(lambda: self._start_setup_assistant("social4"))
-        start_row.addWidget(self.setup_start_social_btn)
-
-        self.setup_start_tiktok_btn = QPushButton("TikTok만")
-        self.setup_start_tiktok_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setup_start_tiktok_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
-        self.setup_start_tiktok_btn.clicked.connect(lambda: self._start_setup_assistant("tiktok"))
-        start_row.addWidget(self.setup_start_tiktok_btn)
-
-        self.setup_start_instagram_btn = QPushButton("Instagram만")
-        self.setup_start_instagram_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setup_start_instagram_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
-        self.setup_start_instagram_btn.clicked.connect(lambda: self._start_setup_assistant("instagram"))
-        start_row.addWidget(self.setup_start_instagram_btn)
-
-        self.setup_start_threads_btn = QPushButton("Threads만")
-        self.setup_start_threads_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setup_start_threads_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
-        self.setup_start_threads_btn.clicked.connect(lambda: self._start_setup_assistant("threads"))
-        start_row.addWidget(self.setup_start_threads_btn)
-
-        self.setup_start_linktree_btn = QPushButton("Linktree만")
+        self.setup_start_linktree_btn = QPushButton("Linktree 설정")
         self.setup_start_linktree_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_start_linktree_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
         self.setup_start_linktree_btn.clicked.connect(lambda: self._start_setup_assistant("linktree"))
@@ -1034,7 +1227,8 @@ class SettingsTab(QWidget, ThemedMixin):
         self.setup_open_tiktok_auth_btn.setStyleSheet(self.setup_start_youtube_btn.styleSheet())
         self.setup_open_tiktok_auth_btn.clicked.connect(self._assistant_open_tiktok_auth)
         tiktok_input_row.addWidget(self.setup_open_tiktok_auth_btn)
-        setup_input_layout.addLayout(tiktok_input_row)
+        # 틱톡 비활성화: 위젯 객체는 다른 코드 참조 안전을 위해 생성만 하고 화면에는 추가하지 않는다.
+        # setup_input_layout.addLayout(tiktok_input_row)
 
         insta_input_row = QHBoxLayout()
         insta_input_row.setSpacing(8)
@@ -1136,12 +1330,17 @@ class SettingsTab(QWidget, ThemedMixin):
         self.setup_codex_launch_btn = QPushButton("현재 단계 Codex 실행")
         self.setup_codex_launch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_codex_launch_btn.setStyleSheet(self.setup_start_all_btn.styleSheet())
+        self.setup_codex_launch_btn.setToolTip(
+            "컴퓨터를 자동 조작해 현재 단계를 대신 처리합니다(선택 기능).\n"
+            "필요 조건: 유료 플랜, Codex CLI 설치 및 'codex login', computer-use MCP 활성화.\n"
+            "조건이 충족되지 않으면 실행되지 않고 안내만 표시됩니다."
+        )
         self.setup_codex_launch_btn.clicked.connect(self._launch_codex_for_current_step)
         codex_row.addWidget(self.setup_codex_launch_btn)
 
         self.setup_codex_status = QLabel(self._codex_status_summary)
         self.setup_codex_status.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding-bottom: 3px;"
         )
         codex_row.addWidget(self.setup_codex_status, stretch=1)
         setup_input_layout.addLayout(codex_row)
@@ -1166,55 +1365,29 @@ class SettingsTab(QWidget, ThemedMixin):
 
         self.setup_clipboard_status = QLabel("대기 중")
         self.setup_clipboard_status.setStyleSheet(
-            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px;"
+            f"color: {c.text_muted}; border: none; background: transparent; font-size: 11px; padding-bottom: 3px;"
         )
         clipboard_row.addWidget(self.setup_clipboard_status, stretch=1)
         setup_input_layout.addLayout(clipboard_row)
 
-        self.setup_assistant_section.add_row("소셜 인증 입력", setup_input_wrap)
+        # '소셜 인증 입력'은 컴퓨터 자동조작(Codex)·브리지 등 고급/개발자용 항목이라
+        # 초보자가 겁먹지 않도록 기본 숨김 처리하고, 토글로만 펼치게 한다.
+        self.setup_advanced_toggle = QCheckBox("고급 설정 보기 (개발자용 · 평소엔 안 건드려도 됩니다)")
+        self.setup_advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_advanced_toggle.setStyleSheet(
+            f"color: {c.text_muted}; spacing: 8px; border: none; background: transparent; font-size: 11px;"
+        )
+        self.setup_advanced_toggle.toggled.connect(setup_input_wrap.setVisible)
+        self.setup_assistant_section.content_layout.addWidget(self.setup_advanced_toggle)
+
+        setup_input_wrap.setVisible(False)
+        self.setup_assistant_section.content_layout.addWidget(setup_input_wrap)
         self._load_codex_cli_settings()
 
-        # 3) Timeline
-        timeline_wrap = QFrame()
-        timeline_wrap.setStyleSheet(f"""
-            QFrame {{
-                background-color: {c.surface_variant};
-                border: 1px solid {c.border_light};
-                border-radius: {ds.radius.base}px;
-            }}
-        """)
-        timeline_layout = QVBoxLayout(timeline_wrap)
-        timeline_layout.setContentsMargins(12, 10, 12, 10)
-        timeline_layout.setSpacing(6)
-
+        # 3) Timeline 제거됨 — '진행 타임라인'이 소싱 화면의 '콘텐츠 생성 진행 목록'과
+        #    혼동을 일으켜 삭제. 단계 상태는 로그(_append_setup_log)와 현재 단계 패널로 확인한다.
+        #    _set_setup_row_state/_reset_setup_timeline은 빈 dict에서 안전하게 no-op 처리된다.
         self._setup_rows = {}
-        for step_id in self.SETUP_STEP_DEFS:
-            row_widget = QWidget()
-            row_widget.setStyleSheet("background: transparent; border: none;")
-            row_layout = QHBoxLayout(row_widget)
-            row_layout.setContentsMargins(0, 0, 0, 0)
-            row_layout.setSpacing(8)
-
-            title_label = QLabel(self.SETUP_STEP_DEFS[step_id]["title"])
-            title_label.setStyleSheet(f"color: {c.text_primary}; border: none; background: transparent;")
-            row_layout.addWidget(title_label, stretch=1)
-
-            actor = self.SETUP_STEP_DEFS[step_id]["actor"]
-            actor_label = QLabel("자동" if actor == "auto" else "사용자")
-            actor_label.setStyleSheet(
-                f"padding: 2px 8px; border-radius: {ds.radius.full}px; "
-                f"border: 1px solid {c.border_light}; color: {c.text_secondary}; background: {c.surface};"
-            )
-            row_layout.addWidget(actor_label)
-
-            state_label = QLabel("대기")
-            state_label.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
-            row_layout.addWidget(state_label)
-
-            timeline_layout.addWidget(row_widget)
-            self._setup_rows[step_id] = {"title": title_label, "state": state_label}
-
-        self.setup_assistant_section.add_row("진행 타임라인", timeline_wrap)
 
         # 4) Current action panel
         action_wrap = QFrame()
@@ -1238,7 +1411,7 @@ class SettingsTab(QWidget, ThemedMixin):
         self.setup_current_desc = QLabel("도우미를 시작하면 단계별로 필요한 작업을 안내합니다.")
         self.setup_current_desc.setWordWrap(True)
         self.setup_current_desc.setStyleSheet(
-            f"color: {c.text_secondary}; border: none; background: transparent;"
+            f"color: {c.text_secondary}; border: none; background: transparent; padding-bottom: 3px;"
         )
         action_layout.addWidget(self.setup_current_desc)
 
@@ -1882,13 +2055,13 @@ class SettingsTab(QWidget, ThemedMixin):
         if scope == "threads":
             return ["precheck", *threads_steps, "final_verify"]
         if scope == "social4":
-            return ["precheck", *youtube_steps, *tiktok_steps, *instagram_steps, *threads_steps, "final_verify"]
+            # 틱톡 비활성화: 틱톡 단계 제외
+            return ["precheck", *youtube_steps, *instagram_steps, *threads_steps, "final_verify"]
         if scope == "linktree":
             return ["precheck", *linktree_steps, "final_verify"]
         return [
             "precheck",
             *youtube_steps,
-            *tiktok_steps,
             *instagram_steps,
             *threads_steps,
             *linktree_steps,
@@ -2941,6 +3114,138 @@ class SettingsTab(QWidget, ThemedMixin):
             cwd=workspace,
         )
 
+    def _build_computer_use_prompt_for_target(self, target: str) -> str:
+        """Build a Computer Use handoff prompt scoped to a single integration."""
+        if os.name == "nt":
+            host_os = "Windows"
+        elif sys.platform == "darwin":
+            host_os = "macOS"
+        else:
+            host_os = "Linux"
+
+        focus_map = {
+            "linktree": (
+                "Linktree 계정 로그인 및 공개 프로필 설정",
+                "https://linktr.ee/login , https://linktr.ee/admin",
+            ),
+            "coupang": (
+                "쿠팡 파트너스 Access Key / Secret Key 발급",
+                "https://partners.coupang.com/",
+            ),
+            "webhook": (
+                "Make(Integromat)/Zapier/n8n에서 Linktree 자동 발행용 Webhook 시나리오 생성 및 Webhook URL 획득",
+                "https://www.make.com/ , https://zapier.com/app/zaps",
+            ),
+            "youtube": (
+                "Google Cloud OAuth 클라이언트 발급(client_secrets.json) 및 YouTube 채널 연결",
+                "https://console.cloud.google.com/apis/credentials , https://www.youtube.com/",
+            ),
+        }
+        focus_text, pages = focus_map.get(
+            target, ("초기 설정", "https://aistudio.google.com/app/apikey")
+        )
+        return (
+            f"You are helping configure NewshoppingShorts on {host_os} using computer-use.\n"
+            f"Primary focus: {focus_text}\n\n"
+            "Rules:\n"
+            "1) You handle navigation, page transitions, form fill, and non-sensitive clicks.\n"
+            "2) Ask the human only for login, 2FA, CAPTCHA, legal consent, API-key issuance, or payment.\n"
+            "3) After human-only actions complete, continue automatically from the current page.\n"
+            "4) If you obtain a key/URL/code, tell the user to copy it. This app auto-reads the clipboard.\n"
+            "5) Never perform destructive or irreversible actions.\n\n"
+            f"Start by opening relevant pages: {pages}\n"
+            "Then proceed step-by-step until this setup is complete."
+        )
+
+    def _run_computer_use_prompt(self, prompt: str, label: str) -> None:
+        """Shared Computer Use runner: paid gate → bridge or local Codex CLI.
+
+        Used by the per-integration '자동으로 설정' buttons. Mirrors the gating of
+        _launch_codex_for_current_step but with a caller-supplied prompt/label."""
+        from ui.components.custom_dialog import show_info, show_warning, show_error
+
+        if not self._is_paid_user_for_computer_use(force_refresh=True):
+            show_warning(
+                self,
+                "유료 기능",
+                "Computer Use 자동 설정은 유료 사용자 전용입니다.\n"
+                "무료 사용자는 같은 카드의 수동 설정(붙여넣기) 흐름을 사용해주세요.",
+            )
+            return
+
+        try:
+            cu_settings = get_settings_manager().get_computer_use_settings()
+        except Exception:
+            cu_settings = {"bridge_enabled": False, "bridge_url": "", "bridge_api_key": ""}
+
+        bridge_enabled = bool(cu_settings.get("bridge_enabled", False))
+        bridge_url = str(cu_settings.get("bridge_url", "") or "").strip()
+        bridge_api_key = str(cu_settings.get("bridge_api_key", "") or "").strip()
+        if bridge_enabled and bridge_url:
+            try:
+                result = self._submit_computer_use_bridge_job(bridge_url, bridge_api_key, prompt)
+            except Exception as exc:
+                show_error(self, "브리지 요청 실패", f"서버 브리지 호출 중 오류가 발생했습니다.\n{exc}")
+                return
+            if not result.get("ok"):
+                show_error(
+                    self,
+                    "브리지 요청 실패",
+                    f"HTTP {result.get('status_code')} 응답입니다.\n"
+                    f"URL: {result.get('url')}\n응답: {result.get('body')}",
+                )
+                return
+            body = result.get("body") or {}
+            job_id = str(body.get("job_id", "") or body.get("id", "") or "").strip()
+            self._append_setup_log(f"Computer Use 브리지 작업 요청 완료({label}): {job_id or 'no-id'}")
+            show_info(self, "브리지 작업 접수", f"서버 Computer Use 작업이 접수되었습니다.\njob_id: {job_id or '-'}")
+            return
+
+        status = self._refresh_codex_cli_status(show_dialog=False)
+        if not status.get("available"):
+            show_warning(self, "Codex 실행 불가", "Codex CLI 실행 파일을 찾지 못했습니다. 경로를 확인하세요.")
+            return
+        if not status.get("login_ok"):
+            show_warning(
+                self,
+                "Codex 로그인 필요",
+                "Codex CLI가 로그인되지 않았습니다.\n터미널에서 `codex login` 후 다시 시도하세요.",
+            )
+            return
+        if not status.get("computer_use_ok"):
+            show_warning(
+                self,
+                "computer-use 미준비",
+                "Codex CLI에서 computer-use MCP가 활성화되지 않았습니다.\n`codex mcp list` 결과를 확인하세요.",
+            )
+            return
+
+        try:
+            cli_settings = get_settings_manager().get_codex_cli_settings()
+        except Exception:
+            cli_settings = {"path": "codex", "model": ""}
+
+        codex_path = str(status.get("resolved_path", "") or "").strip()
+        model_name = str(cli_settings.get("model", "") or "").strip()
+        workspace = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+
+        args = [codex_path, "--cd", workspace]
+        if model_name:
+            args.extend(["--model", model_name])
+        args.append(prompt)
+
+        try:
+            self._launch_codex_terminal_process(args=args, workspace=workspace)
+            self._append_setup_log(f"Codex Computer Use 실행: {label}")
+            show_info(
+                self,
+                "Codex 실행 완료",
+                "새 터미널에서 Codex가 시작되었습니다.\n"
+                "로그인/2FA/CAPTCHA/API 키 발급만 직접 처리하고, 나머지는 Codex가 진행하도록 맡기세요.",
+            )
+        except Exception as exc:
+            show_error(self, "Codex 실행 실패", f"터미널 실행 중 오류가 발생했습니다.\n{exc}")
+
     def _launch_codex_for_current_step(self):
         """Open a new terminal and start Codex with a step-scoped computer-use prompt."""
         from ui.components.custom_dialog import show_info, show_warning, show_error
@@ -3716,6 +4021,11 @@ class SettingsTab(QWidget, ThemedMixin):
 
     def focus_api_key_setup(self):
         """Scroll to API key section and focus the most relevant input."""
+        # 'API 키' 탭으로 먼저 전환.
+        try:
+            self.tab_widget.setCurrentIndex(self._tab_index.get("api", 0))
+        except Exception:
+            pass
         try:
             bar = self.scroll_area.verticalScrollBar()
             target_y = max(0, self.api_section.y() - 24)
@@ -3730,6 +4040,43 @@ class SettingsTab(QWidget, ThemedMixin):
             (inp for inp in self.api_key_inputs if not inp.text().strip()),
             self.api_key_inputs[0],
         )
+        target_input.setFocus(Qt.FocusReason.OtherFocusReason)
+        target_input.selectAll()
+
+    def focus_coupang_setup(self):
+        """Reveal the optional Coupang/Linktree advanced fields and focus the
+        first empty Coupang key input, scrolling the section into view."""
+        # '연결 도우미' 탭으로 먼저 전환.
+        try:
+            self.tab_widget.setCurrentIndex(self._tab_index.get("connect", 0))
+        except Exception:
+            pass
+        # 고급 자동화(쿠팡 키) 영역은 기본적으로 접혀 있으므로 먼저 펼친다.
+        try:
+            self._set_link_advanced_visible(True)
+        except Exception:
+            pass
+
+        # 쿠팡 카드(아코디언)도 펼쳐서 입력칸이 바로 보이게 한다.
+        try:
+            header = getattr(self, "_coupang_card_header", None)
+            if header is not None and not header.isChecked():
+                header.setChecked(True)
+        except Exception:
+            pass
+
+        try:
+            bar = self._connect_scroll.verticalScrollBar()
+            target_y = max(0, self.link_automation_section.y() - 24)
+            bar.setValue(target_y)
+        except Exception:
+            pass
+
+        access = getattr(self, "coupang_access_input", None)
+        secret = getattr(self, "coupang_secret_input", None)
+        if access is None:
+            return
+        target_input = access if not access.text().strip() else (secret or access)
         target_input.setFocus(Qt.FocusReason.OtherFocusReason)
         target_input.selectAll()
 

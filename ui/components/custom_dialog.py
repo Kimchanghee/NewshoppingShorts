@@ -138,7 +138,7 @@ class CustomDialog(QDialog):
         # Message
         msg_label = QLabel(message)
         msg_label.setWordWrap(True)
-        msg_label.setStyleSheet(f"color: {self.secondary_text}; font-size: {self.ds.typography.size_sm}px;")
+        msg_label.setStyleSheet(f"color: {self.secondary_text}; font-size: {self.ds.typography.size_sm}px; padding-bottom: 3px;")
         container_layout.addWidget(msg_label)
         
         # Buttons

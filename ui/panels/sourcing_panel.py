@@ -18,7 +18,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
-from ui.design_system_v2 import get_design_system, get_color
+from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 from ui.components.automation_readiness import AutomationReadinessCard
 from utils.logging_config import get_logger
 
@@ -163,14 +163,20 @@ class SourcingPanel(QWidget):
         opts_layout = QHBoxLayout()
         opts_layout.setSpacing(ds.spacing.space_4)
 
-        self.chk_linktree = QCheckBox("링크트리 자동 발행")
+        # 다크 테마에서 기본 팔레트(검정 텍스트)로 렌더링되면 라벨이 보이지 않으므로
+        # 공통 체크박스 스타일(외곽선 박스 + 빨간 체크 표시)을 사용한다.
+        checkbox_style = checkbox_qss()
+
+        self.chk_linktree = QCheckBox("Linktree에 자동 등록")
         self.chk_linktree.setChecked(True)
         self.chk_linktree.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self.chk_linktree.setStyleSheet(checkbox_style)
         opts_layout.addWidget(self.chk_linktree)
 
         self.chk_upload = QCheckBox("YouTube 자동 업로드")
         self.chk_upload.setChecked(True)
         self.chk_upload.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self.chk_upload.setStyleSheet(checkbox_style)
         opts_layout.addWidget(self.chk_upload)
 
         opts_layout.addStretch()
@@ -181,7 +187,7 @@ class SourcingPanel(QWidget):
         match_header = QHBoxLayout()
         match_header.setSpacing(ds.spacing.space_2)
 
-        match_label = QLabel("상품 유사도 기준")
+        match_label = QLabel("상품이 얼마나 비슷해야 통과")
         match_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
         match_header.addWidget(match_label)
 
@@ -191,7 +197,7 @@ class SourcingPanel(QWidget):
         self.match_threshold_spin.setSuffix("%")
         self.match_threshold_spin.setValue(int(match_policy.get("min_similarity_percent", 90)))
         self.match_threshold_spin.setFixedWidth(84)
-        self.match_threshold_spin.setToolTip("이 기준 미만의 소싱 영상은 자동 업로드와 Linktree 발행을 차단합니다.")
+        self.match_threshold_spin.setToolTip("이 기준보다 덜 비슷한 영상은 자동 업로드와 Linktree 등록을 막아요.")
         self.match_threshold_spin.setStyleSheet(f"""
             QSpinBox {{
                 background-color: {get_color('background')};
@@ -206,17 +212,18 @@ class SourcingPanel(QWidget):
         """)
         match_header.addWidget(self.match_threshold_spin)
 
-        self.chk_auto_skip_low_similarity = QCheckBox("기준 미달 시 다음 링크로 자동 이동")
+        self.chk_auto_skip_low_similarity = QCheckBox("기준에 못 미치면 다음 링크로 자동 넘어가기")
         self.chk_auto_skip_low_similarity.setChecked(bool(match_policy.get("auto_skip_low_similarity", False)))
         self.chk_auto_skip_low_similarity.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self.chk_auto_skip_low_similarity.setToolTip("켜면 상품을 못찾았을 때 알림창 대신 아래 다음 링크 목록의 첫 링크로 자동 이동합니다.")
+        self.chk_auto_skip_low_similarity.setStyleSheet(checkbox_style)
+        self.chk_auto_skip_low_similarity.setToolTip("켜면 상품을 못 찾았을 때 알림창을 띄우지 않고, 아래 '다음 쿠팡 링크 목록'의 첫 링크로 자동으로 넘어가요.")
         match_header.addWidget(self.chk_auto_skip_low_similarity)
         match_header.addStretch()
         input_layout.addLayout(match_header)
 
-        match_hint = QLabel("기준을 통과하지 못하면 영상 제작, YouTube 업로드, Linktree 발행을 중지합니다.")
+        match_hint = QLabel("기준을 통과하지 못하면 영상 만들기, YouTube 올리기, Linktree 등록을 멈춰요.")
         match_hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        match_hint.setStyleSheet(f"color: {get_color('text_muted')};")
+        match_hint.setStyleSheet(f"color: {get_color('text_muted')}; padding-bottom: 3px;")
         match_hint.setWordWrap(True)
         input_layout.addWidget(match_hint)
 
@@ -225,7 +232,7 @@ class SourcingPanel(QWidget):
         input_layout.addWidget(next_links_label)
 
         self.next_links_input = QTextEdit()
-        self.next_links_input.setPlaceholderText("자동 건너뛰기용 링크를 줄마다 입력하세요.")
+        self.next_links_input.setPlaceholderText("자동으로 넘어갈 때 쓸 링크를 한 줄에 하나씩 적어 주세요.")
         self.next_links_input.setAcceptRichText(False)
         self.next_links_input.setMaximumHeight(72)
         self.next_links_input.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
@@ -250,7 +257,7 @@ class SourcingPanel(QWidget):
         self.chk_auto_skip_low_similarity.toggled.connect(lambda _checked: self._sync_next_links_enabled())
 
         # Start button
-        self.btn_start = QPushButton("소싱 시작")
+        self.btn_start = QPushButton("자동 만들기 시작")
         self.btn_start.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
         self.btn_start.setMinimumHeight(42)
         self.btn_start.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -303,7 +310,7 @@ class SourcingPanel(QWidget):
         results_title.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         results_layout.addWidget(results_title)
 
-        self.results_label = QLabel("소싱을 시작하면 결과가 여기에 표시됩니다.")
+        self.results_label = QLabel("자동 만들기를 시작하면 여기에 결과가 나와요.")
         self.results_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
         self.results_label.setWordWrap(True)
@@ -318,11 +325,30 @@ class SourcingPanel(QWidget):
         self._refresh_readiness()
 
     def _navigate_to_setup(self, target: str) -> None:
-        """Jump to the settings/upload step (or guided dialog) that fixes a gap."""
+        """Jump to the settings/upload step (or guided dialog) that fixes a gap.
+
+        'linktree_setup', 'ai_key', 'coupang_key'는 정식 페이지 ID가 아니라
+        특정 입력칸으로 바로 데려가는 가상 타깃이다. 일반 step_id는
+        gui._on_step_selected로 위임한다.
+        """
+        gui = self.gui
+
         if target == "linktree_setup":
             self._open_linktree_setup_dialog()
             return
-        gui = self.gui
+        if target == "ai_key" and gui is not None and hasattr(gui, "open_api_key_settings"):
+            try:
+                gui.open_api_key_settings()
+            except Exception as exc:
+                logger.warning("[SourcingPanel] open API key settings failed: %s", exc)
+            return
+        if target == "coupang_key" and gui is not None and hasattr(gui, "open_coupang_settings"):
+            try:
+                gui.open_coupang_settings()
+            except Exception as exc:
+                logger.warning("[SourcingPanel] open Coupang settings failed: %s", exc)
+            return
+
         if gui is not None and hasattr(gui, "_on_step_selected"):
             try:
                 gui._on_step_selected(target)
@@ -463,13 +489,13 @@ class SourcingPanel(QWidget):
         threshold = getattr(pipeline, "min_similarity_score", self._match_threshold_score())
         best = getattr(pipeline, "best_similarity_score", None)
         product_name = ((pipeline.product_info or {}).get("name") or "상품")[:80]
-        reason = getattr(pipeline, "match_error", None) or pipeline.error or "상품을 못찾았습니다."
+        reason = getattr(pipeline, "match_error", None) or pipeline.error or "비슷한 상품을 찾지 못했어요."
         message = (
-            f"상품을 못찾았습니다.\n"
+            f"비슷한 상품을 찾지 못했어요.\n"
             f"상품: {product_name}\n"
-            f"기준: {threshold:.0%}\n"
-            f"최고 유사도: {self._format_similarity(best)}\n\n"
-            "자동 업로드와 Linktree 발행을 중지했습니다."
+            f"통과 기준: {threshold:.0%}\n"
+            f"가장 비슷했던 정도: {self._format_similarity(best)}\n\n"
+            "자동 업로드와 Linktree 등록을 멈췄어요."
         )
 
         if hasattr(self.gui, "state"):
@@ -480,7 +506,7 @@ class SourcingPanel(QWidget):
             if next_url:
                 self.results_label.setText(
                     message
-                    + "\n\n자동 건너뛰기: 다음 링크로 이동합니다.\n"
+                    + "\n\n다음 링크로 자동으로 넘어갈게요.\n"
                     + next_url
                 )
                 self.results_label.setStyleSheet(f"color: {get_color('warning')};")
@@ -489,23 +515,23 @@ class SourcingPanel(QWidget):
                 return
 
             self.results_label.setText(
-                message + "\n\n자동 건너뛰기가 켜져 있지만 다음 링크 목록이 비어 있어 중지했습니다."
+                message + "\n\n자동으로 넘어가기가 켜져 있지만, 다음 링크 목록이 비어 있어 멈췄어요."
             )
             self.results_label.setStyleSheet(f"color: {get_color('warning')};")
             try:
                 from ui.components.custom_dialog import show_warning
 
-                show_warning(self, "상품을 못찾았습니다", message + "\n\n다음 링크 목록이 비어 있습니다.")
+                show_warning(self, "비슷한 상품을 찾지 못했어요", message + "\n\n다음 링크 목록이 비어 있어요.")
             except Exception:
                 pass
             return
 
-        self.results_label.setText(message + f"\n\n상세: {reason}")
+        self.results_label.setText(message + f"\n\n자세히: {reason}")
         self.results_label.setStyleSheet(f"color: {get_color('error')};")
         try:
             from ui.components.custom_dialog import show_warning
 
-            show_warning(self, "상품을 못찾았습니다", message)
+            show_warning(self, "비슷한 상품을 찾지 못했어요", message)
         except Exception:
             pass
 
@@ -546,8 +572,8 @@ class SourcingPanel(QWidget):
             logger.warning("[SourcingPanel] Linktree preflight failed: %s", exc)
             ok = False
             message = (
-                "Linktree 자동 발행 상태를 확인하지 못했습니다. "
-                "설정 > Coupang/Linktree 자동화에서 연결 상태를 확인한 뒤 다시 실행하세요."
+                "Linktree 자동 등록 상태를 확인하지 못했어요. "
+                "설정 > Coupang/Linktree 자동화에서 연결을 확인한 뒤 다시 시작해 주세요."
             )
 
         if ok:
@@ -555,12 +581,19 @@ class SourcingPanel(QWidget):
 
         self.results_label.setText(message)
         self.results_label.setStyleSheet(f"color: {get_color('warning')};")
+        # 단순 경고로 끝내지 않고, 지금 바로 연결할지 물어보고 설정 화면으로 안내한다.
         try:
-            from ui.components.custom_dialog import show_warning
+            from ui.components.custom_dialog import show_question
 
-            show_warning(self, "Linktree 연결 필요", message)
+            go_now = show_question(
+                self,
+                "Linktree 연결이 필요해요",
+                message + "\n\n지금 Linktree를 연결할까요?",
+            )
         except Exception:
-            pass
+            go_now = False
+        if go_now:
+            self._open_linktree_setup_dialog()
         return False
 
     def _validate_youtube_upload_ready(self) -> bool:
@@ -580,15 +613,15 @@ class SourcingPanel(QWidget):
             settings = get_settings_manager()
             if not bool(settings.get_youtube_connected()):
                 message = (
-                    "YouTube 자동 업로드가 켜져 있지만 채널이 연결되지 않았습니다.\n"
-                    "‘업로드 설정’ 탭에서 채널을 연결하거나, YouTube 자동 업로드 체크를 끄고 다시 실행하세요."
+                    "YouTube 자동 업로드가 켜져 있는데 아직 채널이 연결되지 않았어요.\n"
+                    "‘업로드 설정’ 탭에서 채널을 연결하거나, YouTube 자동 업로드 체크를 끄고 다시 시작해 주세요."
                 )
             else:
                 verification = settings.get_youtube_account_verification() or {}
                 if verification.get("required") and not verification.get("ok"):
                     message = str(
                         verification.get("message")
-                        or "YouTube 계정 이메일 검증이 필요합니다. ‘업로드 설정’ 탭에서 확인하세요."
+                        or "올릴 YouTube 계정 이메일 확인이 필요해요. ‘업로드 설정’ 탭에서 확인해 주세요."
                     )
         except Exception as exc:
             logger.warning("[SourcingPanel] YouTube preflight failed: %s", exc)
@@ -600,23 +633,37 @@ class SourcingPanel(QWidget):
 
         self.results_label.setText(message)
         self.results_label.setStyleSheet(f"color: {get_color('warning')};")
+        # 단순 경고로 끝내지 않고, 지금 바로 연결할지 물어보고 업로드 설정 화면으로 안내한다.
         try:
-            from ui.components.custom_dialog import show_warning
+            from ui.components.custom_dialog import show_question
 
-            show_warning(self, "YouTube 연결 필요", message)
+            go_now = show_question(
+                self,
+                "YouTube 연결이 필요해요",
+                message + "\n\n지금 YouTube 채널을 연결할까요?",
+            )
         except Exception:
-            pass
+            go_now = False
+        if go_now:
+            gui = self.gui
+            if gui is not None and hasattr(gui, "open_youtube_connect"):
+                try:
+                    gui.open_youtube_connect()
+                except Exception as exc:
+                    logger.warning("[SourcingPanel] open YouTube connect failed: %s", exc)
+            elif gui is not None and hasattr(gui, "_on_step_selected"):
+                gui._on_step_selected("upload")
         self._refresh_readiness()
         return False
 
     def _on_start_clicked(self):
         url = self.url_input.text().strip()
         if not url:
-            self.results_label.setText("쿠팡 상품 링크를 입력해주세요.")
+            self.results_label.setText("쿠팡 상품 링크를 붙여넣어 주세요.")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if "coupang.com" not in url:
-            self.results_label.setText("유효한 쿠팡 링크를 입력해주세요. (coupang.com)")
+            self.results_label.setText("쿠팡 링크가 맞는지 확인해 주세요. (coupang.com 주소여야 해요)")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if self._running:
@@ -630,13 +677,13 @@ class SourcingPanel(QWidget):
             return
         self._running = True
         self.btn_start.setEnabled(False)
-        self.btn_start.setText("소싱 진행 중...")
+        self.btn_start.setText("자동으로 만드는 중...")
         self._apply_button_style(disabled=True)
 
         # Reset indicators
         for ind in self._step_indicators.values():
             ind.set_state("pending", "")
-        self.results_label.setText("소싱을 시작합니다...")
+        self.results_label.setText("자동 만들기를 시작할게요...")
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
         # Run in background thread
@@ -704,7 +751,7 @@ class SourcingPanel(QWidget):
         """Pipeline finished - update UI and emit results."""
         self._running = False
         self.btn_start.setEnabled(True)
-        self.btn_start.setText("소싱 시작")
+        self.btn_start.setText("자동 만들기 시작")
         self._apply_button_style(disabled=False)
 
         report = pipeline.get_report()
@@ -717,17 +764,17 @@ class SourcingPanel(QWidget):
             # Build results text
             lines = []
             pi = pipeline.product_info or {}
-            lines.append(f"[원본] {pi.get('name', 'N/A')[:50]}")
+            lines.append(f"[원본 상품] {pi.get('name', 'N/A')[:50]}")
             lines.append(f"  링크: {pipeline.coupang_url}")
             if pipeline.deep_link:
-                lines.append(f"  파트너스: {pipeline.deep_link}")
+                lines.append(f"  수수료 추적 링크: {pipeline.deep_link}")
             lines.append("")
             for i, sp in enumerate(pipeline.sourced_products):
                 p = sp["product"]
-                lines.append(f"[소싱 {i+1}] ({sp['source'].upper()}) 유사도: {p.get('score', 0):.1%}")
+                lines.append(f"[찾은 영상 {i+1}] ({sp['source'].upper()}) 비슷한 정도: {p.get('score', 0):.1%}")
                 lines.append(f"  제목: {p.get('title', 'N/A')[:50]}")
                 lines.append(f"  링크: {p.get('url', 'N/A')}")
-                lines.append(f"  영상: {sp['video_file']}")
+                lines.append(f"  영상 파일: {sp['video_file']}")
                 lines.append(f"  크기: {sp['size_mb']}MB")
                 lines.append("")
 
@@ -748,8 +795,8 @@ class SourcingPanel(QWidget):
 
             self.sourcing_completed.emit(report)
         else:
-            error_msg = pipeline.error or "소싱에 실패했습니다."
-            self.results_label.setText(f"소싱 실패: {error_msg}")
+            error_msg = pipeline.error or "자동 만들기에 실패했어요."
+            self.results_label.setText(f"자동 만들기 실패: {error_msg}")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
 
     def _enqueue_sourced_videos(self, pipeline):
@@ -761,7 +808,7 @@ class SourcingPanel(QWidget):
         if not source_items:
             logger.warning("[SourcingPanel] No video files to enqueue")
             self.results_label.setText(
-                self.results_label.text() + "\n\n※ 다운로드된 영상이 없어 큐에 등록하지 못했습니다."
+                self.results_label.text() + "\n\n※ 받아 온 영상이 없어 만들 목록에 담지 못했어요."
             )
             return
 
@@ -774,8 +821,8 @@ class SourcingPanel(QWidget):
                 logger.warning("[SourcingPanel] Auto-upload blocked: only image fallback videos were sourced")
                 self.results_label.setText(
                     self.results_label.text()
-                    + "\n\n※ 실제 상품 시연 영상을 찾지 못해 쿠팡 상품 이미지 폴백만 생성되었습니다."
-                    + "\n※ 품질 검수 없이 YouTube 자동 업로드/Linktree 발행을 진행하지 않습니다."
+                    + "\n\n※ 실제 상품 영상을 찾지 못해, 쿠팡 상품 이미지로만 영상을 만들었어요."
+                    + "\n※ 직접 확인하기 전에는 YouTube 자동 올리기와 Linktree 등록을 하지 않아요."
                 )
                 return
             if len(safe_items) < len(source_items):
@@ -789,7 +836,7 @@ class SourcingPanel(QWidget):
         if not queue_mgr or not hasattr(queue_mgr, 'add_url_to_queue'):
             logger.error("[SourcingPanel] queue_manager not available, cannot enqueue videos")
             self.results_label.setText(
-                self.results_label.text() + "\n\n※ 큐 매니저를 찾을 수 없습니다. 수동으로 영상을 추가해주세요."
+                self.results_label.text() + "\n\n※ 만들 목록 기능을 찾지 못했어요. 영상을 직접 추가해 주세요."
             )
             return
 
@@ -854,7 +901,7 @@ class SourcingPanel(QWidget):
         else:
             logger.warning("[SourcingPanel] No videos were successfully enqueued")
             self.results_label.setText(
-                self.results_label.text() + "\n\n※ 영상 큐 등록에 실패했습니다. 영상 파일을 확인해주세요."
+                self.results_label.text() + "\n\n※ 만들 목록에 담지 못했어요. 영상 파일을 확인해 주세요."
             )
 
     def _enable_youtube_auto_upload_for_pipeline(self):

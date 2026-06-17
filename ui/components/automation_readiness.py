@@ -103,7 +103,7 @@ class AutomationReadinessCard(QFrame):
         helper = QLabel("쿠팡 링크 1개로 영상 제작·발행·업로드까지 자동으로 진행하려면 아래 항목이 준비되어야 합니다.")
         helper.setWordWrap(True)
         helper.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        helper.setStyleSheet(f"color: {get_color('text_muted')};")
+        helper.setStyleSheet(f"color: {get_color('text_muted')}; padding-bottom: 3px;")
         layout.addWidget(helper)
 
         # 항목 행 컨테이너 (refresh 때마다 재생성)
@@ -142,7 +142,7 @@ class AutomationReadinessCard(QFrame):
             "AI 분석 엔진 (Vertex/Gemini)",
             STATUS_READY if ai_ok else STATUS_MISSING,
             ai_detail,
-            None if ai_ok else "settings",
+            None if ai_ok else "ai_key",
         ))
 
         # 2) YouTube 채널 연결 (업로드 옵션 켰을 때만 필요)
@@ -192,7 +192,7 @@ class AutomationReadinessCard(QFrame):
             "쿠팡 파트너스 딥링크 키 (선택)",
             STATUS_READY if cp_ok else STATUS_OPTIONAL,
             cp_detail,
-            None if cp_ok else "settings",
+            None if cp_ok else "coupang_key",
         ))
 
         required_missing = 0
@@ -246,7 +246,7 @@ class AutomationReadinessCard(QFrame):
         detail_label = QLabel(detail)
         detail_label.setWordWrap(True)
         detail_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        detail_label.setStyleSheet(f"color: {self._detail_color(status)};")
+        detail_label.setStyleSheet(f"color: {self._detail_color(status)}; padding-bottom: 3px;")
         text_wrap.addWidget(detail_label)
 
         row_layout.addLayout(text_wrap, 1)

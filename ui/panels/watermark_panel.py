@@ -227,7 +227,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
         content_layout.setSpacing(ds.spacing.space_4)
 
         # ── Section 1: Enable Toggle ──
-        enable_section = self._create_section("워터마크 활성화", "영상에 채널 이름 워터마크를 표시합니다.")
+        enable_section = self._create_section("워터마크 켜기", "영상에 내 채널 이름을 옅게 새겨 넣어요. (이게 워터마크예요)")
         enable_row = QHBoxLayout()
 
         self.enable_btn = QPushButton("꺼짐")
@@ -242,7 +242,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
         content_layout.addWidget(enable_section)
 
         # ── Section 2: Text Input ──
-        text_section = self._create_section("워터마크 텍스트", "영상에 표시할 채널 이름 또는 텍스트를 입력하세요. (최대 50자)")
+        text_section = self._create_section("워터마크 문구", "영상에 새겨 넣을 채널 이름이나 문구를 적어 주세요. (최대 50자)")
 
         self.text_input = QLineEdit()
         self.text_input.setPlaceholderText("예: @내채널이름")
@@ -259,7 +259,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
         content_layout.addWidget(text_section)
 
         # ── Section 3: Position ──
-        position_section = self._create_section("워터마크 위치", "워터마크가 표시될 위치를 선택하세요.")
+        position_section = self._create_section("워터마크 위치", "워터마크를 영상 어디에 넣을지 골라 주세요.")
 
         pos_content = QHBoxLayout()
         pos_content.setSpacing(ds.spacing.space_4)
@@ -289,7 +289,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
         content_layout.addWidget(position_section)
 
         # ── Section 4: Size ──
-        size_section = self._create_section("워터마크 크기", "워터마크 텍스트의 크기를 선택하세요.")
+        size_section = self._create_section("워터마크 크기", "워터마크 글자 크기를 골라 주세요.")
 
         size_row = QHBoxLayout()
         size_row.setSpacing(ds.spacing.space_2)
@@ -310,7 +310,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
         content_layout.addWidget(size_section)
 
         # ── Section 5: Font ──
-        font_section = self._create_section("워터마크 폰트", "워터마크에 사용할 폰트를 선택하세요.")
+        font_section = self._create_section("워터마크 글씨체", "워터마크에 쓸 글씨체를 골라 주세요.")
 
         for opt in WATERMARK_FONT_OPTIONS:
             card = WatermarkFontCard(opt, is_selected=False, theme_manager=self.theme_manager)
@@ -340,7 +340,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
         layout.addWidget(title_label)
 
         desc_label = QLabel(description)
-        desc_label.setStyleSheet("font-size: 12px; color: #888888; background-color: transparent; border: none;")
+        desc_label.setStyleSheet("font-size: 12px; color: #888888; background-color: transparent; border: none; padding-bottom: 3px;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 

@@ -4,8 +4,8 @@ Voice Selection Panel for PyQt6
 import logging
 from typing import Dict, Optional, List
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
-    QScrollArea, QWidget, QGridLayout, QPushButton
+    QVBoxLayout, QHBoxLayout, QLabel, QFrame,
+    QScrollArea, QWidget, QGridLayout, QPushButton, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from ui.components.base_widget import ThemedMixin
@@ -21,6 +21,8 @@ class VoiceCard(QFrame, ThemedMixin):
         super().__init__()
         self.setFrameShape(QFrame.Shape.NoFrame)
         self.setFrameShadow(QFrame.Shadow.Plain)  # Remove shadow
+        # 카드가 세로로 늘어나 빈 공간이 생기지 않도록 내용 높이에 맞춘다.
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
         self.profile = profile
         self.is_selected = is_selected
         self.ds = get_design_system()
@@ -31,31 +33,33 @@ class VoiceCard(QFrame, ThemedMixin):
     def create_widgets(self):
         ds = self.ds
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(ds.spacing.space_3, ds.spacing.space_2, ds.spacing.space_3, ds.spacing.space_2)
-        
+        layout.setContentsMargins(ds.spacing.space_2, ds.spacing.space_2, ds.spacing.space_2, ds.spacing.space_2)
+        layout.setSpacing(ds.spacing.space_1)
+
         top_row = QHBoxLayout()
-        
+        top_row.setSpacing(ds.spacing.space_1)
+
         # Check indicator
         self.check_label = QLabel("✓" if self.is_selected else "")
-        self.check_label.setFixedSize(20, 20)
+        self.check_label.setFixedSize(16, 16)
         self.check_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         top_row.addWidget(self.check_label)
-        
+
         # Gender Icon + Name
         gender_icon = "♀" if self.profile.get("gender") == "female" else "♂"
         icon_color = "#FF6B81" if self.profile.get("gender") == "female" else "#5B9BD5"
         self.name_label = QLabel(f"{gender_icon} {self.profile['label']}")
         self.name_label.setStyleSheet(
-            f"font-weight: {ds.typography.weight_bold}; font-size: 14px; "
+            f"font-weight: {ds.typography.weight_bold}; font-size: 13px; "
             f"color: {icon_color}; background-color: transparent; border: none;"
         )
         top_row.addWidget(self.name_label)
-        
+
         top_row.addStretch()
-        
+
         # Play button
         self.play_btn = QPushButton("▶")
-        self.play_btn.setFixedSize(30, 24)
+        self.play_btn.setFixedSize(26, 22)
         self.play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.play_btn.setStyleSheet(f"""
             QPushButton {{
@@ -63,17 +67,18 @@ class VoiceCard(QFrame, ThemedMixin):
                 color: white;
                 border: none;
                 border-radius: {ds.radius.sm}px;
+                font-size: 11px;
             }}
         """)
         top_row.addWidget(self.play_btn)
-        
+
         layout.addLayout(top_row)
-        
+
         # Description
         self.desc_label = QLabel(self.profile["description"])
         self.desc_label.setWordWrap(True)
         self.desc_label.setStyleSheet(
-            "font-size: 16px; color: #FFFFFF; background-color: transparent; border: none;"
+            "font-size: 12px; color: #C8C8C8; background-color: transparent; border: none; padding-bottom: 3px;"
         )
         layout.addWidget(self.desc_label)
 
@@ -99,17 +104,25 @@ class VoiceCard(QFrame, ThemedMixin):
             }}
         """)
         
-        check_bg = get_color('primary') if self.is_selected else get_color('surface_variant')
-        check_fg = "white" if self.is_selected else "transparent"
-        self.check_label.setStyleSheet(f"""
-            background-color: {check_bg};
-            color: {check_fg};
-            border-radius: {ds.radius.sm}px;
-        """)
-        
-        text_primary = get_color('text_primary')
-        text_secondary = get_color('text_secondary')
-        self.desc_label.setStyleSheet(f"color: #FFFFFF; border: none; font-size: 16px;")
+        # 선택 시: 외곽선 박스 안에 빨간 체크 표시(가득 채우지 않음)
+        if self.is_selected:
+            self.check_label.setStyleSheet(f"""
+                background-color: transparent;
+                color: {get_color('primary')};
+                font-weight: bold;
+                font-size: 13px;
+                border: 1.5px solid {get_color('primary')};
+                border-radius: {ds.radius.sm}px;
+            """)
+        else:
+            self.check_label.setStyleSheet(f"""
+                background-color: {get_color('surface_variant')};
+                color: transparent;
+                border: 1.5px solid {get_color('border_light')};
+                border-radius: {ds.radius.sm}px;
+            """)
+
+        self.desc_label.setStyleSheet("color: #C8C8C8; border: none; font-size: 12px;")
 
 class VoicePanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):
@@ -223,11 +236,15 @@ class VoicePanel(QFrame, ThemedMixin):
             card.clicked.connect(self._on_card_clicked)
             card.play_btn.clicked.connect(lambda _, vid=profile["id"]: self.gui.play_voice_sample(vid))
             
-            row, col = divmod(i, 2)
+            row, col = divmod(i, 3)
             self.grid_layout.addWidget(card, row, col)
             self.voice_cards[profile["id"]] = card
             self.gui.voice_card_frames[profile["id"]] = card
             self.gui.voice_play_buttons[profile["id"]] = card.play_btn
+
+        # 카드들이 위쪽에 모이고 빈 행이 늘어나지 않도록 마지막에 신축 행 추가
+        last_row = (len(profiles) + 2) // 3
+        self.grid_layout.setRowStretch(last_row, 1)
 
         # Update selection count badge
         self._update_count_badge()

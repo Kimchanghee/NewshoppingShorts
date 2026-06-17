@@ -84,7 +84,7 @@ class SubscriptionDialog(QDialog):
             self
         )
         info.setWordWrap(True)
-        info.setStyleSheet(f"QLabel {{ {base_style} }}")
+        info.setStyleSheet(f"QLabel {{ {base_style} padding-bottom: 3px; }}")
         layout.addWidget(info)
 
         # Actions

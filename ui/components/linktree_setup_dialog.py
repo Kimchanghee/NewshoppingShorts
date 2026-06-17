@@ -23,7 +23,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, pyqtSignal, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
 
-from ui.design_system_v2 import get_design_system, get_color
+from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -61,7 +61,7 @@ class LinktreeSetupDialog(QDialog):
     def _build_ui(self) -> None:
         ds = self.ds
         c = get_color
-        self.setWindowTitle("Linktree 자동 발행 간편 설정")
+        self.setWindowTitle("Linktree 자동 등록 간편 설정")
         self.setMinimumWidth(580)
         self.setMinimumHeight(560)
         self.setStyleSheet(
@@ -86,27 +86,27 @@ class LinktreeSetupDialog(QDialog):
         scroll.setWidget(body)
 
         # 헤더
-        title = QLabel("Linktree 자동 발행, 한 번만 연결하면 끝나요")
+        title = QLabel("Linktree 자동 등록, 한 번만 연결하면 끝나요")
         title.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_lg, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {c('text_primary')};")
         layout.addWidget(title)
 
         intro = QLabel(
-            "Linktree에는 공식 자동 등록 기능이 없어, ‘웹훅(Webhook)’이라는 중계 주소를 통해 "
-            "쿠팡 카드가 자동으로 추가됩니다. 아래 3단계만 따라 하시면 됩니다. "
-            "한 번 연결해두면 이후에는 자동으로 발행됩니다."
+            "Linktree에는 자동 등록 기능이 따로 없어, ‘자동 등록 주소(Webhook)’라는 중계 주소를 통해 "
+            "쿠팡 링크 카드가 자동으로 추가돼요. 아래 3단계만 따라 하시면 됩니다. "
+            "한 번 연결해 두면 이후에는 알아서 등록돼요."
         )
         intro.setWordWrap(True)
         intro.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
-        intro.setStyleSheet(f"color: {c('text_muted')};")
+        intro.setStyleSheet(f"color: {c('text_muted')}; padding-bottom: 3px;")
         layout.addWidget(intro)
 
         # STEP 1 — 공개 주소
-        step1 = self._step_box("1단계", "내 Linktree 공개 주소")
+        step1 = self._step_box("1단계", "내 Linktree 주소")
         s1 = step1.body
-        s1_desc = QLabel("영상 설명·검수 화면에서 보여줄 내 Linktree 공개 주소를 입력하세요.")
+        s1_desc = QLabel("영상 설명이나 확인 화면에 보여줄 내 Linktree 주소를 적어 주세요.")
         s1_desc.setWordWrap(True)
-        s1_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent;")
+        s1_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent; padding-bottom: 3px;")
         s1.addWidget(s1_desc)
 
         self.profile_input = QLineEdit()
@@ -122,15 +122,15 @@ class LinktreeSetupDialog(QDialog):
         layout.addWidget(step1)
 
         # STEP 2 — 웹훅 연결
-        step2 = self._step_box("2단계", "자동 발행용 웹훅(Webhook) 연결")
+        step2 = self._step_box("2단계", "자동 등록 주소(Webhook) 연결")
         s2 = step2.body
         s2_desc = QLabel(
-            "Make·Zapier·n8n 같은 서비스에서 ‘Webhook’ 트리거를 만들면 주소(URL)가 하나 생깁니다. "
-            "그 주소를 아래에 붙여넣으세요. 발행 시 그 주소로 아래 예시 형식의 데이터가 전송되며, "
-            "받은 데이터를 Linktree 카드로 추가하도록 시나리오를 구성하면 됩니다."
+            "Make·Zapier·n8n 같은 서비스에서 ‘Webhook’을 만들면 주소가 하나 생겨요. "
+            "그 주소를 아래에 붙여넣으세요. 자동 등록할 때 이 주소로 아래 예시 같은 정보가 전달돼요. "
+            "그 정보를 받아 Linktree 카드로 추가하도록 설정해 두면 됩니다."
         )
         s2_desc.setWordWrap(True)
-        s2_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent;")
+        s2_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent; padding-bottom: 3px;")
         s2.addWidget(s2_desc)
 
         helper_row = QHBoxLayout()
@@ -148,7 +148,7 @@ class LinktreeSetupDialog(QDialog):
         helper_row.addStretch()
         s2.addLayout(helper_row)
 
-        payload_label = QLabel("웹훅이 받는 데이터 예시")
+        payload_label = QLabel("이 주소로 전달되는 정보 예시")
         payload_label.setStyleSheet(f"color: {c('text_secondary')}; font-size: 12px; font-weight: 600; border: none; background: transparent;")
         s2.addWidget(payload_label)
 
@@ -169,7 +169,7 @@ class LinktreeSetupDialog(QDialog):
         copy_btn.clicked.connect(self._copy_payload)
         s2.addWidget(copy_btn, 0, Qt.AlignmentFlag.AlignLeft)
 
-        webhook_label = QLabel("웹훅 URL")
+        webhook_label = QLabel("자동 등록 주소(Webhook)")
         webhook_label.setStyleSheet(f"color: {c('text_secondary')}; font-size: 12px; font-weight: 600; border: none; background: transparent;")
         s2.addWidget(webhook_label)
         self.webhook_input = QLineEdit()
@@ -177,43 +177,39 @@ class LinktreeSetupDialog(QDialog):
         self.webhook_input.setStyleSheet(self._input_style())
         s2.addWidget(self.webhook_input)
 
-        key_label = QLabel("웹훅 인증 키 (선택)")
+        key_label = QLabel("보안 키 (안 넣어도 돼요)")
         key_label.setStyleSheet(f"color: {c('text_secondary')}; font-size: 12px; font-weight: 600; border: none; background: transparent;")
         s2.addWidget(key_label)
         self.api_key_input = QLineEdit()
-        self.api_key_input.setPlaceholderText("선택: 웹훅 보호용 인증 키 (없으면 비워두세요)")
+        self.api_key_input.setPlaceholderText("주소를 보호하는 비밀 키예요. 없으면 비워 두세요.")
         self.api_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.api_key_input.setStyleSheet(self._input_style())
         s2.addWidget(self.api_key_input)
         layout.addWidget(step2)
 
         # STEP 3 — 테스트 & 저장
-        step3 = self._step_box("3단계", "테스트하고 켜기")
+        step3 = self._step_box("3단계", "한번 보내 보고 켜기")
         s3 = step3.body
-        s3_desc = QLabel("입력한 웹훅으로 테스트 카드를 한 번 보내, 연결이 잘 되는지 확인합니다.")
+        s3_desc = QLabel("입력한 주소로 테스트 카드를 한 번 보내, 연결이 잘 되는지 확인해요.")
         s3_desc.setWordWrap(True)
-        s3_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent;")
+        s3_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent; padding-bottom: 3px;")
         s3.addWidget(s3_desc)
 
-        self.auto_publish_checkbox = QCheckBox("쿠팡 링크 생성 시 Linktree로 자동 발행")
+        self.auto_publish_checkbox = QCheckBox("쿠팡 링크가 만들어지면 Linktree에 자동으로 등록하기")
         self.auto_publish_checkbox.setChecked(True)
-        self.auto_publish_checkbox.setStyleSheet(
-            f"QCheckBox {{ color: {c('text_primary')}; spacing: 8px; border: none; background: transparent; }}"
-            f"QCheckBox::indicator {{ width: 18px; height: 18px; border-radius: 4px; border: 2px solid {c('border_light')}; }}"
-            f"QCheckBox::indicator:checked {{ background-color: {c('primary')}; border-color: {c('primary')}; }}"
-        )
+        self.auto_publish_checkbox.setStyleSheet(checkbox_qss())
         s3.addWidget(self.auto_publish_checkbox)
 
         test_row = QHBoxLayout()
         test_row.setSpacing(8)
-        self.test_btn = QPushButton("테스트 발행")
+        self.test_btn = QPushButton("테스트로 보내 보기")
         self.test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.test_btn.setStyleSheet(self._ghost_button_style())
         self.test_btn.clicked.connect(self._on_test_clicked)
         test_row.addWidget(self.test_btn)
         self.test_status = QLabel("")
         self.test_status.setWordWrap(True)
-        self.test_status.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent;")
+        self.test_status.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent; padding-bottom: 3px;")
         test_row.addWidget(self.test_status, 1)
         s3.addLayout(test_row)
         layout.addWidget(step3)
@@ -322,7 +318,7 @@ class LinktreeSetupDialog(QDialog):
     def _copy_payload(self) -> None:
         try:
             QApplication.clipboard().setText(self.payload_view.toPlainText())
-            self.test_status.setText("예시 데이터를 복사했습니다. 웹훅 시나리오에 붙여넣어 매핑하세요.")
+            self.test_status.setText("예시 정보를 복사했어요. 만들어 둔 Webhook 설정에 붙여넣어 연결하세요.")
             self.test_status.setStyleSheet(f"color: {get_color('success')}; font-size: 12px; border: none; background: transparent;")
         except Exception as exc:
             logger.debug("[LinktreeSetup] copy payload failed: %s", exc)
@@ -341,7 +337,7 @@ class LinktreeSetupDialog(QDialog):
             return
         webhook = self.webhook_input.text().strip()
         if not webhook.lower().startswith(("http://", "https://")):
-            self.test_status.setText("먼저 올바른 웹훅 URL(https://...)을 입력하세요.")
+            self.test_status.setText("먼저 올바른 자동 등록 주소(https://...)를 입력하세요.")
             self.test_status.setStyleSheet(f"color: {get_color('warning')}; font-size: 12px; border: none; background: transparent;")
             return
 
@@ -353,8 +349,8 @@ class LinktreeSetupDialog(QDialog):
 
         self._testing = True
         self.test_btn.setEnabled(False)
-        self.test_btn.setText("테스트 중...")
-        self.test_status.setText("테스트 카드를 전송하고 있습니다...")
+        self.test_btn.setText("보내는 중...")
+        self.test_status.setText("테스트 카드를 보내는 중이에요...")
         self.test_status.setStyleSheet(f"color: {get_color('text_muted')}; font-size: 12px; border: none; background: transparent;")
 
         def _run():
@@ -373,12 +369,12 @@ class LinktreeSetupDialog(QDialog):
     def _on_test_finished(self, ok: bool, detail: str) -> None:
         self._testing = False
         self.test_btn.setEnabled(True)
-        self.test_btn.setText("테스트 발행")
+        self.test_btn.setText("테스트로 보내 보기")
         if ok:
-            self.test_status.setText("성공! 웹훅이 정상 동작합니다. ‘저장하고 닫기’를 누르면 자동 발행이 켜집니다.")
+            self.test_status.setText("성공! 연결이 잘 돼요. ‘저장하고 닫기’를 누르면 자동 등록이 켜져요.")
             self.test_status.setStyleSheet(f"color: {get_color('success')}; font-size: 12px; border: none; background: transparent;")
         else:
-            msg = "테스트에 실패했습니다. 웹훅 URL과 시나리오 상태를 확인한 뒤 다시 시도하세요."
+            msg = "테스트에 실패했어요. 자동 등록 주소와 설정 상태를 확인한 뒤 다시 시도하세요."
             if detail:
                 msg += f" (상세: {detail[:120]})"
             self.test_status.setText(msg)
@@ -390,16 +386,16 @@ class LinktreeSetupDialog(QDialog):
         if self.auto_publish_checkbox.isChecked() and not webhook.lower().startswith(("http://", "https://")):
             show_warning(
                 self,
-                "웹훅 URL 필요",
-                "자동 발행을 켜려면 올바른 웹훅 URL이 필요합니다.\n"
-                "웹훅 없이 저장하려면 ‘자동 발행’ 체크를 해제하세요.",
+                "자동 등록 주소가 필요해요",
+                "자동 등록을 켜려면 올바른 자동 등록 주소(Webhook)가 필요해요.\n"
+                "주소 없이 저장하려면 위의 '자동으로 등록하기' 체크를 꺼 주세요.",
             )
             return
         try:
             self._persist()
         except Exception as exc:
             logger.error("[LinktreeSetup] save failed: %s", exc)
-            show_warning(self, "저장 실패", f"설정을 저장하지 못했습니다.\n{exc}")
+            show_warning(self, "저장 실패", f"설정을 저장하지 못했어요.\n{exc}")
             return
 
         if callable(self._on_saved):
@@ -408,5 +404,5 @@ class LinktreeSetupDialog(QDialog):
             except Exception as exc:
                 logger.debug("[LinktreeSetup] on_saved callback failed: %s", exc)
 
-        show_info(self, "저장 완료", "Linktree 자동 발행 설정을 저장했습니다.")
+        show_info(self, "저장 완료", "Linktree 자동 등록 설정을 저장했어요.")
         self.accept()

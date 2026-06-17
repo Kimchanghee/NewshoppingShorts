@@ -107,16 +107,16 @@ class UIInitializer:
 
         # 1. Sidebar (StepNav)
         steps = [
-            ("mode", "모드 선택", "mode"),
-            ("sourcing", "소싱 설정", "sourcing"),       # Mode 3 only
-            ("source", "소스 입력", "source"),             # Mode 1/2 only
-            ("voice", "음성 선택", "voice"),
-            ("cta", "CTA 선택", "cta"),
-            ("font", "폰트 선택", "font"),
+            ("mode", "만들기 방식", "mode"),
+            ("sourcing", "전체 자동 만들기", "sourcing"),   # Mode 3 only
+            ("source", "영상 넣기", "source"),             # Mode 1/2 only
+            ("voice", "목소리 선택", "voice"),
+            ("cta", "마무리 멘트", "cta"),
+            ("font", "글씨체 선택", "font"),
             ("subtitle_settings", "자막 설정", "subtitle_settings"),
             ("watermark", "워터마크", "watermark"),
-            ("upload", "업로드 설정", "upload"),
-            ("queue", "대기/진행", "queue"),
+            # '올리기 설정'은 '설정' 화면의 '영상 올리기' 탭으로 이동했으므로 좌측 메뉴에서 제외.
+            ("queue", "진행 상황", "queue"),
             ("settings", "설정", "settings"),
         ]
         step_nav = StepNav(steps)
@@ -187,18 +187,18 @@ class UIInitializer:
         logger.info("[UI] 모든 패널 생성 완료")
 
         pages = [
-            ("mode", "모드 선택", "영상 제작 방식을 선택하세요.", mode_selection_panel),
-            ("sourcing", "소싱 설정", "쿠팡 상품 링크를 입력하면 자동으로 소싱합니다.", sourcing_panel),
-            ("source", "소스 입력", "숏폼으로 변환할 쇼핑몰 링크나 영상을 추가하세요.", url_input_panel),
-            ("voice", "음성 선택", "AI 성우 목소리와 나레이션 스타일을 선택하세요.", voice_panel),
-            ("cta", "CTA 선택", "영상 마지막 클릭 유도 멘트를 선택하세요.", cta_panel),
-            ("font", "폰트 선택", "자막에 사용할 폰트를 선택하세요.", font_panel),
-            ("subtitle_settings", "자막 설정", "한국어 자막의 위치와 배치 방식을 설정하세요.", subtitle_settings_panel),
-            ("watermark", "워터마크 설정", "영상에 표시할 워터마크를 설정하세요.", watermark_panel),
-            ("upload", "소셜 미디어 업로드 설정", "채널 연결 및 자동 업로드 프롬프트를 설정합니다.", upload_panel),
-            ("queue", "대기/진행", "작업 대기열 및 진행 상황을 관리합니다.", queue_panel),
-            ("settings", "설정", "앱 설정 및 API 키를 관리합니다.", settings_tab),
-            ("subscription", "구독 관리", "구독 상태 및 플랜을 관리합니다.", subscription_panel),
+            ("mode", "만들기 방식 선택", "어떤 방식으로 영상을 만들지 골라 주세요.", mode_selection_panel),
+            ("sourcing", "전체 자동 만들기", "쿠팡 상품 링크만 넣으면 영상 찾기부터 올리기까지 자동으로 진행해요.", sourcing_panel),
+            ("source", "영상 넣기", "숏폼으로 만들 영상 링크나 내 컴퓨터 파일을 넣어 주세요.", url_input_panel),
+            ("voice", "목소리 선택", "영상에 입힐 AI 목소리를 골라 주세요.", voice_panel),
+            ("cta", "마무리 멘트 선택", "영상 끝에 넣을 행동 유도 문구를 골라 주세요.", cta_panel),
+            ("font", "글씨체 선택", "자막에 쓸 글씨체를 골라 주세요.", font_panel),
+            ("subtitle_settings", "자막 설정", "한국어 자막의 위치와 넣는 방식을 정해 주세요.", subtitle_settings_panel),
+            ("watermark", "워터마크 설정", "영상에 옅게 새길 내 채널 이름(워터마크)을 설정해요.", watermark_panel),
+            # 'upload'(올리기 설정)은 settings_tab의 '영상 올리기' 탭으로 편입 → 스택 페이지에서 제외.
+            ("queue", "진행 상황", "만들 목록과 진행 상황을 봐요.", queue_panel),
+            ("settings", "설정", "앱 설정과 API 키를 관리해요.", settings_tab),
+            ("subscription", "구독 관리", "구독 상태와 요금제를 관리해요.", subscription_panel),
         ]
 
         page_index = {}
@@ -206,6 +206,13 @@ class UIInitializer:
             card = self._wrap_card(widget, title, subtitle)
             stack.addWidget(card)
             page_index[sid] = idx
+
+        # '올리기 설정'(UploadPanel)을 '설정' 화면의 '영상 올리기' 탭 안으로 편입.
+        try:
+            if hasattr(settings_tab, "attach_upload_panel"):
+                settings_tab.attach_upload_panel(upload_panel)
+        except Exception as exc:
+            logger.warning("[UI] attach_upload_panel 실패: %s", exc)
 
         # Status bar
         status_bar = StatusBar(gui, gui)

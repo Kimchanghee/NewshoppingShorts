@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
 
-from ui.design_system_v2 import get_design_system
+from ui.design_system_v2 import get_design_system, checkbox_qss
 from ui.components.base_widget import ThemedMixin
 from ui.components.social_auth_card import SocialAuthCard, PLATFORM_CONFIG
 from managers.settings_manager import get_settings_manager
@@ -49,8 +49,8 @@ class _YouTubeOAuthWorker(QObject):
             success = self._youtube_manager.connect_channel(client_secrets_file=installed_json)
             if not success:
                 error_message = self._youtube_manager.get_last_error() or (
-                    "선택한 JSON으로 인증에 실패했습니다.\n"
-                    "OAuth 클라이언트 타입/리디렉션 설정을 확인해주세요."
+                    "고른 인증 파일로 연결하지 못했어요.\n"
+                    "구글 인증 파일의 종류와 주소(리디렉션) 설정이 맞는지 확인해 주세요."
                 )
                 self.finished.emit(False, {}, error_message)
                 return
@@ -62,8 +62,8 @@ class _YouTubeOAuthWorker(QObject):
             self.finished.emit(
                 False,
                 {},
-                "OAuth 파일 저장 권한이 없어 연결에 실패했습니다.\n"
-                "앱을 다시 실행한 뒤 다시 시도해주세요.",
+                "인증 파일을 저장할 권한이 없어 연결하지 못했어요.\n"
+                "앱을 다시 켠 뒤 한 번 더 시도해 주세요.",
             )
         except Exception as e:
             logger.error(f"[UploadPanel] OAuth JSON 연결 워커 실패: {e}")
@@ -98,15 +98,15 @@ class PromptInputGroup(QFrame):
         layout.setSpacing(12)
 
         # Section title
-        title = QLabel("업로드 프롬프트 설정")
+        title = QLabel("올릴 때 쓸 글 만들기 안내문")
         title.setFont(QFont(ds.typography.font_family_primary, 12, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {c.text_primary}; border: none; background: transparent;")
         layout.addWidget(title)
 
-        desc = QLabel("자동 업로드 시 AI가 아래 프롬프트를 참고하여 제목, 게시글, 해시태그를 작성합니다.")
+        desc = QLabel("자동으로 영상을 올릴 때, AI가 아래 안내문(프롬프트, AI에게 주는 지시문)을 보고 제목·게시글·해시태그를 써 줍니다.")
         desc.setWordWrap(True)
         desc.setFont(QFont(ds.typography.font_family_primary, 10))
-        desc.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
+        desc.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent; padding-bottom: 3px;")
         layout.addWidget(desc)
 
         input_style = f"""
@@ -125,22 +125,22 @@ class PromptInputGroup(QFrame):
 
         # Title prompt
         self.title_prompt = self._create_prompt_field(
-            layout, "제목 프롬프트",
-            "예: 쇼핑 꿀템 소개 영상의 제목을 작성해주세요. 궁금증을 유발하는 짧은 제목으로 만들어주세요.",
+            layout, "제목은 이렇게 써 주세요",
+            "예: 쇼핑 꿀템 소개 영상의 제목을 써 주세요. 궁금증을 부르는 짧은 제목으로 만들어 주세요.",
             input_style, max_height=60
         )
 
         # Description prompt
         self.description_prompt = self._create_prompt_field(
-            layout, "게시글(설명) 프롬프트",
-            "예: 상품의 장점을 강조하면서 구매 링크 클릭을 유도하는 설명을 작성해주세요.",
+            layout, "게시글(설명)은 이렇게 써 주세요",
+            "예: 상품의 장점을 알려 주면서 구매 링크를 누르고 싶게 만드는 설명을 써 주세요.",
             input_style, max_height=80
         )
 
         # Hashtag prompt
         self.hashtag_prompt = self._create_prompt_field(
-            layout, "해시태그 프롬프트",
-            "예: 쇼핑, 추천, 꿀템 등 관련 해시태그를 10개 이내로 생성해주세요.",
+            layout, "해시태그는 이렇게 만들어 주세요",
+            "예: 쇼핑, 추천, 꿀템 같은 관련 해시태그를 10개 안쪽으로 만들어 주세요.",
             input_style, max_height=60
         )
 
@@ -148,7 +148,7 @@ class PromptInputGroup(QFrame):
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
-        self.default_btn = QPushButton("기본 프롬프트 불러오기")
+        self.default_btn = QPushButton("기본 안내문 불러오기")
         self.default_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.default_btn.setStyleSheet(f"""
             QPushButton {{
@@ -170,7 +170,7 @@ class PromptInputGroup(QFrame):
 
         btn_row.addStretch()
 
-        self.save_btn = QPushButton("프롬프트 저장")
+        self.save_btn = QPushButton("안내문 저장")
         self.save_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.save_btn.setStyleSheet(f"""
             QPushButton {{
@@ -248,7 +248,7 @@ class PromptInputGroup(QFrame):
         self.title_prompt.setPlainText(defaults.get("title_prompt", ""))
         self.description_prompt.setPlainText(defaults.get("description_prompt", ""))
         self.hashtag_prompt.setPlainText(defaults.get("hashtag_prompt", ""))
-        show_info(self, "기본 프롬프트 적용", "기본 프롬프트를 불러왔습니다. 필요하면 수정 후 저장하세요.")
+        show_info(self, "기본 안내문 적용", "기본 안내문을 불러왔어요. 필요하면 고친 뒤 저장하세요.")
 
     def _save_prompts(self):
         """Save prompts to settings."""
@@ -259,7 +259,7 @@ class PromptInputGroup(QFrame):
             description_prompt=self.description_prompt.toPlainText().strip(),
             hashtag_prompt=self.hashtag_prompt.toPlainText().strip(),
         )
-        show_info(self, "저장 완료", "프롬프트가 저장되었습니다.")
+        show_info(self, "저장 완료", "안내문을 저장했어요.")
 
 
 class YouTubeCommentSection(QFrame):
@@ -291,28 +291,11 @@ class YouTubeCommentSection(QFrame):
         # Checkbox
         self.comment_checkbox = QCheckBox("영상 업로드 후 자동 댓글 달기")
         self.comment_checkbox.setFont(QFont(ds.typography.font_family_primary, 12))
-        self.comment_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                color: {c.text_primary};
-                spacing: 8px;
-                background-color: transparent;
-                border: none;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border: 2px solid {c.border_light};
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: {c.primary};
-                border-color: {c.primary};
-            }}
-        """)
+        self.comment_checkbox.setStyleSheet(checkbox_qss())
         self.comment_checkbox.stateChanged.connect(self._on_checkbox_changed)
         layout.addWidget(self.comment_checkbox)
 
-        desc = QLabel("쿠팡 풀자동 업로드는 상품 설명, 구매 링크, Linktree 링크 댓글을 기본으로 남깁니다. 체크하면 댓글 문구를 직접 조정할 수 있습니다.")
+        desc = QLabel("쿠팡 전체 자동으로 올릴 때는 상품 설명·구매 링크·Linktree 링크 댓글이 기본으로 달려요. 체크하면 댓글 문구를 직접 손볼 수 있어요.")
         desc.setWordWrap(True)
         desc.setFont(QFont(ds.typography.font_family_primary, 10))
         desc.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
@@ -324,7 +307,7 @@ class YouTubeCommentSection(QFrame):
         prompt_layout.setContentsMargins(0, 4, 0, 0)
         prompt_layout.setSpacing(6)
 
-        prompt_label = QLabel("댓글 프롬프트")
+        prompt_label = QLabel("댓글은 이렇게 써 주세요")
         prompt_label.setFont(QFont(ds.typography.font_family_primary, 11, QFont.Weight.Medium))
         prompt_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
         prompt_layout.addWidget(prompt_label)
@@ -350,14 +333,14 @@ class YouTubeCommentSection(QFrame):
         self.comment_prompt.setAcceptRichText(False)
         prompt_layout.addWidget(self.comment_prompt)
 
-        link_label = QLabel("쿠팡 원상품 링크 (선택)")
+        link_label = QLabel("쿠팡 원래 상품 링크 (안 넣어도 돼요)")
         link_label.setFont(QFont(ds.typography.font_family_primary, 11, QFont.Weight.Medium))
         link_label.setStyleSheet(f"color: {c.text_secondary}; border: none; background: transparent;")
         prompt_layout.addWidget(link_label)
 
         self.manual_product_link_input = QLineEdit()
         self.manual_product_link_input.setPlaceholderText(
-            "비워두면 현재 작업의 쿠팡 원상품 링크를 자동으로 댓글에 넣습니다."
+            "비워두면 지금 작업하는 쿠팡 원래 상품 링크가 댓글에 자동으로 들어가요."
         )
         self.manual_product_link_input.setStyleSheet(f"""
             QLineEdit {{
@@ -374,7 +357,7 @@ class YouTubeCommentSection(QFrame):
         """)
         prompt_layout.addWidget(self.manual_product_link_input)
 
-        link_desc = QLabel("자동 댓글 하단에 '원상품 링크' 항목으로 자연스럽게 포함됩니다.")
+        link_desc = QLabel("자동 댓글 맨 아래에 '원래 상품 링크' 항목으로 자연스럽게 들어가요.")
         link_desc.setWordWrap(True)
         link_desc.setFont(QFont(ds.typography.font_family_primary, 10))
         link_desc.setStyleSheet(f"color: {c.text_muted}; border: none; background: transparent;")
@@ -427,7 +410,7 @@ class YouTubeCommentSection(QFrame):
         self.settings.set_youtube_comment_manual_product_link(
             self.manual_product_link_input.text().strip()
         )
-        show_info(self, "저장 완료", "댓글 설정이 저장되었습니다.")
+        show_info(self, "저장 완료", "댓글 설정을 저장했어요.")
 
 
 class YouTubeUploadSettingsSection(QFrame):
@@ -459,24 +442,7 @@ class YouTubeUploadSettingsSection(QFrame):
         # Auto-upload toggle
         self.auto_upload_checkbox = QCheckBox("자동 업로드 활성화")
         self.auto_upload_checkbox.setFont(QFont(ds.typography.font_family_primary, 12))
-        self.auto_upload_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                color: {c.text_primary};
-                spacing: 8px;
-                background-color: transparent;
-                border: none;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border-radius: 4px;
-                border: 2px solid {c.border_light};
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: {c.primary};
-                border-color: {c.primary};
-            }}
-        """)
+        self.auto_upload_checkbox.setStyleSheet(checkbox_qss())
         self.auto_upload_checkbox.setChecked(self.settings.get_youtube_auto_upload())
         self.auto_upload_checkbox.stateChanged.connect(self._on_auto_upload_changed)
         layout.addWidget(self.auto_upload_checkbox)
@@ -705,7 +671,7 @@ class UploadWorkflowSection(QFrame):
         desc_label = QLabel(description)
         desc_label.setWordWrap(True)
         desc_label.setFont(QFont(ds.typography.font_family_primary, 10))
-        desc_label.setStyleSheet(f"color: {c.text_muted}; background-color: transparent; border: none;")
+        desc_label.setStyleSheet(f"color: {c.text_muted}; background-color: transparent; border: none; padding-bottom: 3px;")
         title_desc_layout.addWidget(desc_label)
 
         header_row.addWidget(title_desc_wrap, 1)
@@ -779,7 +745,8 @@ class UploadPanel(QFrame, ThemedMixin):
         self._channel_tabs: Dict[str, QPushButton] = {}
         self._channel_index: Dict[str, int] = {}
         self._active_channel: str = "youtube"
-        self._platform_order = ["youtube", "tiktok", "instagram", "threads", "x"]
+        # 틱톡 비활성화: 채널 탭 목록에서 제외(페이지도 생성하지 않음).
+        self._platform_order = ["youtube", "instagram", "threads", "x"]
         body_layout.addWidget(self._create_channel_sidebar(main_body))
 
         self._channel_stack = QStackedWidget(main_body)
@@ -807,10 +774,7 @@ class UploadPanel(QFrame, ThemedMixin):
         self._channel_index["youtube"] = self._channel_stack.count()
         self._channel_stack.addWidget(yt_page)
 
-        # TikTok page (real OAuth flow)
-        tiktok_page = self._build_tiktok_channel_page(parent=content)
-        self._channel_index["tiktok"] = self._channel_stack.count()
-        self._channel_stack.addWidget(tiktok_page)
+        # TikTok 페이지는 비활성화로 생성하지 않는다(틱톡 전면 비활성화).
 
         # Instagram / Threads pages (computer-use assisted manual connection)
         for platform_id in ["instagram", "threads"]:
@@ -855,12 +819,12 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.setContentsMargins(16, 14, 16, 14)
         layout.setSpacing(8)
 
-        title = QLabel("소셜 미디어 업로드 설정")
+        title = QLabel("SNS에 영상 올리기 설정")
         title.setFont(QFont(ds.typography.font_family_primary, 15, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {c.text_primary}; background-color: transparent; border: none;")
         layout.addWidget(title)
 
-        subtitle = QLabel("왼쪽에서 채널을 고르고, 오른쪽에서 연결 → 자동 업로드 → 프롬프트 순서로 설정하세요.")
+        subtitle = QLabel("YouTube는 연결만 하면 자동으로 올라가요. 인스타그램·스레드는 지금은 안내문 저장만 되고, 자동 올리기는 준비 중(지원예정)이에요.")
         subtitle.setWordWrap(True)
         subtitle.setFont(QFont(ds.typography.font_family_primary, 11))
         subtitle.setStyleSheet(f"color: {c.text_muted}; background-color: transparent; border: none;")
@@ -872,7 +836,7 @@ class UploadPanel(QFrame, ThemedMixin):
         flow_steps = [
             ("1", "채널 연결"),
             ("2", "자동 업로드"),
-            ("3", "프롬프트 저장"),
+            ("3", "안내문 저장"),
         ]
         for num, text in flow_steps:
             pill = QLabel(f"{num}. {text}")
@@ -918,7 +882,7 @@ class UploadPanel(QFrame, ThemedMixin):
         title.setStyleSheet(f"color: {c.text_primary};")
         layout.addWidget(title)
 
-        helper = QLabel("채널을 클릭하면 해당 설정으로 즉시 전환됩니다.")
+        helper = QLabel("채널을 누르면 그 채널 설정 화면으로 바로 바뀌어요.")
         helper.setWordWrap(True)
         helper.setFont(QFont(ds.typography.font_family_primary, 10))
         helper.setStyleSheet(f"color: {c.text_muted};")
@@ -995,7 +959,7 @@ class UploadPanel(QFrame, ThemedMixin):
         desc_label = QLabel(description)
         desc_label.setWordWrap(True)
         desc_label.setFont(QFont(ds.typography.font_family_primary, 10))
-        desc_label.setStyleSheet(f"color: {c.text_muted};")
+        desc_label.setStyleSheet(f"color: {c.text_muted}; padding-bottom: 3px;")
         layout.addWidget(desc_label)
 
         return banner
@@ -1016,7 +980,7 @@ class UploadPanel(QFrame, ThemedMixin):
             self._create_channel_banner(
                 "youtube",
                 "유튜브 채널 설정",
-                "채널 연결 후 자동 업로드와 프롬프트를 설정하면 상품별 게시글이 자동 생성됩니다.",
+                "채널을 연결하고 자동 업로드와 안내문을 설정해 두면, 상품마다 게시글이 자동으로 만들어져요.",
                 parent=page,
             )
         )
@@ -1045,7 +1009,7 @@ class UploadPanel(QFrame, ThemedMixin):
         account_layout.setContentsMargins(12, 10, 12, 10)
         account_layout.setSpacing(8)
 
-        account_title = QLabel("YouTube 계정 이메일 검증")
+        account_title = QLabel("올릴 YouTube 계정 확인")
         account_title.setFont(QFont(self.ds.typography.font_family_primary, 11, QFont.Weight.Bold))
         account_title.setStyleSheet(f"color: {c.text_primary};")
         account_layout.addWidget(account_title)
@@ -1055,7 +1019,7 @@ class UploadPanel(QFrame, ThemedMixin):
         self.youtube_expected_email_input = QLineEdit()
         self.youtube_expected_email_input.setPlaceholderText("예: ympartners.uk@gmail.com")
         self.youtube_expected_email_input.setText(self.settings.get_youtube_expected_account_email())
-        self.youtube_expected_email_input.setToolTip("이 이메일과 OAuth 계정 이메일이 일치할 때만 자동 업로드를 허용합니다.")
+        self.youtube_expected_email_input.setToolTip("여기 적은 이메일과 연결된 구글 계정 이메일이 같을 때만 자동으로 영상을 올려요.")
         account_row.addWidget(self.youtube_expected_email_input, 1)
 
         save_expected_btn = QPushButton("저장")
@@ -1083,7 +1047,7 @@ class UploadPanel(QFrame, ThemedMixin):
         connect_section = UploadWorkflowSection(
             "1단계",
             "채널 연결",
-            "채널명을 입력할 필요 없이 OAuth JSON 파일만 업로드하면 자동으로 연결됩니다.",
+            "채널 이름을 적을 필요 없이, 구글 인증 파일(JSON)만 올리면 자동으로 연결돼요.",
             parent=page,
         )
         connect_section.add_widget(self.youtube_card)
@@ -1094,7 +1058,7 @@ class UploadPanel(QFrame, ThemedMixin):
         upload_section = UploadWorkflowSection(
             "2단계",
             "자동 업로드 설정",
-            "업로드 간격과 자동 업로드 활성화 여부를 설정하세요.",
+            "영상을 얼마 간격으로 올릴지, 자동으로 올릴지 여부를 정해 주세요.",
             parent=page,
         )
         upload_section.add_widget(self._yt_upload_settings)
@@ -1103,8 +1067,8 @@ class UploadPanel(QFrame, ThemedMixin):
         self._yt_prompts = PromptInputGroup("youtube", parent=page)
         prompt_section = UploadWorkflowSection(
             "3단계",
-            "업로드 프롬프트 설정",
-            "제목, 게시글, 해시태그 기본 프롬프트를 작성하고 저장하세요.",
+            "올릴 때 쓸 글 안내문 설정",
+            "제목·게시글·해시태그를 어떻게 써 줬으면 하는지 적어서 저장하세요.",
             parent=page,
         )
         prompt_section.add_widget(self._yt_prompts)
@@ -1114,7 +1078,7 @@ class UploadPanel(QFrame, ThemedMixin):
         comment_section = UploadWorkflowSection(
             "4단계(선택)",
             "자동 댓글 설정",
-            "영상 업로드 후 자동으로 달릴 댓글 문구를 설정하세요.",
+            "영상을 올린 뒤 자동으로 달릴 댓글 문구를 정해 주세요.",
             parent=page,
         )
         comment_section.add_widget(self._yt_comment)
@@ -1133,7 +1097,7 @@ class UploadPanel(QFrame, ThemedMixin):
         expected = verification.get("expected") or ""
         actual = verification.get("actual") or ""
         if not expected:
-            label.setText("기대 계정 이메일을 저장하면 해당 Google 계정에서만 자동 업로드를 허용합니다.")
+            label.setText("올릴 계정 이메일을 저장해 두면, 그 구글 계정으로만 영상을 자동으로 올려요.")
         elif verification.get("ok"):
             label.setText(f"계정 확인 완료: {actual}")
         else:
@@ -1146,11 +1110,11 @@ class UploadPanel(QFrame, ThemedMixin):
 
         email = self.youtube_expected_email_input.text().strip()
         if email and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", email):
-            show_warning(self, "이메일 형식 확인", "YouTube 기대 계정 이메일 형식을 확인해주세요.")
+            show_warning(self, "이메일 형식 확인", "이메일 주소 형식이 맞는지 확인해 주세요.")
             return
         self.settings.set_youtube_expected_account_email(email)
         self._refresh_youtube_account_status()
-        show_info(self, "저장 완료", "YouTube 기대 계정 이메일을 저장했습니다.")
+        show_info(self, "저장 완료", "올릴 YouTube 계정 이메일을 저장했어요.")
 
     def _create_coupang_verification_card(self, parent: Optional[QWidget] = None) -> QFrame:
         """Create Coupang Partners verification helper for the connected channel."""
@@ -1174,13 +1138,13 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(8)
 
-        title = QLabel("쿠팡 파트너스 인증 신청")
+        title = QLabel("쿠팡 파트너스 인증 자료 만들기")
         title.setFont(QFont(ds.typography.font_family_primary, 11, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {c.text_primary};")
         layout.addWidget(title)
 
         description = QLabel(
-            "연결된 YouTube 채널 URL, Linktree Profile, 대가성 문구 체크리스트를 재신청 자료로 생성합니다."
+            "연결된 YouTube 채널 주소, 내 Linktree 주소, 그리고 꼭 넣어야 하는 안내 문구 점검표를 인증 신청용 자료로 만들어 줘요."
         )
         description.setWordWrap(True)
         description.setFont(QFont(ds.typography.font_family_primary, 10))
@@ -1219,8 +1183,8 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addWidget(
             self._create_channel_banner(
                 "tiktok",
-                "틱톡 채널 설정",
-                "OAuth 인증으로 계정을 연결하면 업로드 파이프라인에서 틱톡 채널 상태를 함께 검증합니다.",
+                "틱톡 채널 설정 (지원예정)",
+                "틱톡 자동 업로드는 곧 지원될 예정입니다. 지금은 미리 프롬프트만 저장해두면, 오픈 시 바로 사용할 수 있습니다.",
                 parent=page,
             )
         )
@@ -1237,7 +1201,7 @@ class UploadPanel(QFrame, ThemedMixin):
             platform_id="tiktok",
             is_connected=tiktok_connected,
             channel_info={"name": account_name or "틱톡 계정"},
-            coming_soon=False,
+            coming_soon=True,
             parent=page,
         )
         self.tiktok_card.connect_clicked.connect(self._connect_tiktok)
@@ -1245,8 +1209,8 @@ class UploadPanel(QFrame, ThemedMixin):
 
         connect_section = UploadWorkflowSection(
             "1단계",
-            "채널 연결",
-            "인증 페이지를 열어 권한 승인 후 code를 입력하면 즉시 연결됩니다.",
+            "채널 연결 (지원예정)",
+            "틱톡 연결/자동 업로드 기능은 현재 준비 중입니다. 오픈 시 인증 페이지에서 권한 승인 후 바로 연결할 수 있습니다.",
             parent=page,
         )
         connect_section.add_widget(self.tiktok_card)
@@ -1254,8 +1218,8 @@ class UploadPanel(QFrame, ThemedMixin):
 
         helper_section = UploadWorkflowSection(
             "2단계",
-            "컴퓨터 유즈 보조",
-            "로그인/2FA가 필요한 경우 설정 탭의 자동 설정 도우미를 열어 단계별로 진행하세요.",
+            "자동 설정 도우미",
+            "로그인이나 2단계 인증이 필요하면, 설정 탭의 자동 설정 도우미를 열어 안내대로 따라 하세요.",
             parent=page,
         )
         helper_section.add_widget(self._create_setup_assistant_shortcut_card("tiktok", page))
@@ -1263,8 +1227,8 @@ class UploadPanel(QFrame, ThemedMixin):
 
         prompt_section = UploadWorkflowSection(
             "3단계",
-            "업로드 프롬프트 설정",
-            "틱톡 업로드용 제목/설명/해시태그 프롬프트를 저장하세요.",
+            "올릴 때 쓸 글 안내문 설정",
+            "틱톡에 올릴 제목·설명·해시태그를 어떻게 써 줬으면 하는지 적어서 저장하세요.",
             parent=page,
         )
         prompt_section.add_widget(PromptInputGroup("tiktok", parent=page))
@@ -1289,8 +1253,8 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addWidget(
             self._create_channel_banner(
                 platform_id,
-                f"{cfg.get('name', platform_id.title())} 채널 설정",
-                "로그인/승인은 웹에서 진행하고, 계정 식별자를 입력해 연결 상태를 저장합니다.",
+                f"{cfg.get('name', platform_id.title())} 채널 설정 (지원예정)",
+                f"{cfg.get('name', platform_id.title())} 자동 올리기는 곧 열려요. 지금 글 안내문만 미리 저장해 두면, 열리는 날 바로 쓸 수 있어요.",
                 parent=page,
             )
         )
@@ -1309,7 +1273,7 @@ class UploadPanel(QFrame, ThemedMixin):
             platform_id=platform_id,
             is_connected=connected,
             channel_info={"name": account_name or f"{cfg.get('name', platform_id.title())} 계정"},
-            coming_soon=False,
+            coming_soon=True,
             parent=page,
         )
         if platform_id == "instagram":
@@ -1323,26 +1287,17 @@ class UploadPanel(QFrame, ThemedMixin):
 
         connect_section = UploadWorkflowSection(
             "1단계",
-            "채널 연결",
-            "컴퓨터 유즈 보조 창으로 로그인 후 계정명을 확인하고 저장하세요.",
+            "채널 연결 (지원예정)",
+            "연결과 자동 올리기는 지금 준비 중이에요. 열리면 로그인한 뒤 계정 이름을 저장해 바로 쓸 수 있어요.",
             parent=page,
         )
         connect_section.add_widget(card)
         layout.addWidget(connect_section)
 
-        helper_section = UploadWorkflowSection(
-            "2단계",
-            "컴퓨터 유즈 보조",
-            "설정 탭 자동 설정 도우미에서 해당 플랫폼 단독 모드로 진행할 수 있습니다.",
-            parent=page,
-        )
-        helper_section.add_widget(self._create_setup_assistant_shortcut_card(platform_id, page))
-        layout.addWidget(helper_section)
-
         prompt_section = UploadWorkflowSection(
-            "3단계",
-            "업로드 프롬프트 설정",
-            "채널 운영 톤에 맞는 문구를 미리 저장해두세요.",
+            "2단계",
+            "올릴 때 쓸 글 안내문 미리 저장",
+            "내 채널 분위기에 맞는 문구를 미리 저장해 두면, 기능이 열린 뒤 바로 쓸 수 있어요.",
             parent=page,
         )
         prompt_section.add_widget(PromptInputGroup(platform_id, parent=page))
@@ -1365,8 +1320,8 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addWidget(
             self._create_channel_banner(
                 platform_id,
-                f"{config.get('name', platform_id.title())} 업로드 설정",
-                "해당 채널 연결 기능은 준비 중입니다.",
+                f"{config.get('name', platform_id.title())} 올리기 설정",
+                "이 채널 연결 기능은 준비 중이에요.",
                 parent=page,
             )
         )
@@ -1374,7 +1329,7 @@ class UploadPanel(QFrame, ThemedMixin):
         coming_soon_section = UploadWorkflowSection(
             "1단계",
             "채널 연결",
-            "해당 채널 연결 기능은 현재 준비 중입니다.",
+            "이 채널 연결 기능은 지금 준비 중이에요.",
             parent=page,
         )
         coming_soon_section.add_widget(PlatformComingSoonCard(platform_id, parent=page))
@@ -1382,8 +1337,8 @@ class UploadPanel(QFrame, ThemedMixin):
 
         prompt_section = UploadWorkflowSection(
             "2단계",
-            "업로드 프롬프트 설정",
-            "미리 프롬프트를 저장해두면 기능 오픈 후 바로 사용할 수 있습니다.",
+            "올릴 때 쓸 글 안내문 설정",
+            "글 안내문을 미리 저장해 두면 기능이 열린 뒤 바로 쓸 수 있어요.",
             parent=page,
         )
         prompt_section.add_widget(PromptInputGroup(platform_id, parent=page))
@@ -1411,7 +1366,7 @@ class UploadPanel(QFrame, ThemedMixin):
         if platform_id == "youtube":
             return "연결됨" if self.settings.get_youtube_connected() else "연결 필요"
         if platform_id in {"tiktok", "instagram", "threads"}:
-            return "연결됨" if self.settings.get_social_connection_status(platform_id) else "연결 필요"
+            return "지원예정"
         if self.settings.get_social_connection_status(platform_id):
             return "연결됨"
         return "준비중"
@@ -1442,13 +1397,13 @@ class UploadPanel(QFrame, ThemedMixin):
 
         c = self.ds.colors
         if connected:
-            self._yt_connection_state.setText("현재 상태: 채널 연결 완료. 자동 업로드 기능을 사용할 수 있습니다.")
+            self._yt_connection_state.setText("지금 상태: 채널이 연결됐어요. 자동 업로드를 쓸 수 있어요.")
             self._yt_connection_state.setStyleSheet(
                 f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
             )
             return
 
-        self._yt_connection_state.setText("현재 상태: 채널 미연결. 먼저 1단계 채널 연결을 완료하세요.")
+        self._yt_connection_state.setText("지금 상태: 아직 채널이 연결되지 않았어요. 먼저 1단계에서 채널을 연결해 주세요.")
         self._yt_connection_state.setStyleSheet(
             f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
         )
@@ -1520,8 +1475,8 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addWidget(title)
 
         desc = QLabel(
-            "설정 탭의 자동 설정 도우미에서 로그인/승인/code 입력까지 순서대로 안내합니다. "
-            "필요 시 웹페이지를 자동으로 열고 상태를 검증합니다."
+            "설정 탭의 자동 설정 도우미가 로그인부터 승인, 인증 코드 입력까지 순서대로 안내해 줘요. "
+            "필요하면 웹페이지를 자동으로 열고 잘 됐는지 확인해 줍니다."
         )
         desc.setWordWrap(True)
         desc.setFont(QFont(ds.typography.font_family_primary, 10))
@@ -1628,20 +1583,13 @@ class UploadPanel(QFrame, ThemedMixin):
         return text
 
     def _update_tiktok_state_hint(self, connected: bool):
-        """Update TikTok helper text."""
+        """Update TikTok helper text. 틱톡 자동 업로드는 현재 지원예정 상태."""
         if not hasattr(self, "_tiktok_state_label"):
             return
         c = self.ds.colors
-        if connected:
-            account_name = self.settings.get_social_account_name("tiktok") or "틱톡 계정"
-            self._tiktok_state_label.setText(f"현재 상태: 채널 연결 완료 ({account_name})")
-            self._tiktok_state_label.setStyleSheet(
-                f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
-            )
-            return
-        self._tiktok_state_label.setText("현재 상태: 채널 미연결. OAuth 인증 후 code를 입력해 연결하세요.")
+        self._tiktok_state_label.setText("지금 상태: 지원예정 — 틱톡 자동 올리기 기능은 준비 중이에요.")
         self._tiktok_state_label.setStyleSheet(
-            f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
+            f"color: {c.text_muted}; background-color: transparent; border: none; padding: 2px 0;"
         )
 
     def _update_manual_state_hint(self, platform_id: str):
@@ -1653,18 +1601,10 @@ class UploadPanel(QFrame, ThemedMixin):
 
         cfg = PLATFORM_CONFIG.get(platform_id, {})
         name = cfg.get("name", platform_id.title())
-        connected = self.settings.get_social_connection_status(platform_id)
-        account_name = self.settings.get_social_account_name(platform_id)
         c = self.ds.colors
-        if connected:
-            label.setText(f"현재 상태: 연결 완료 ({account_name or name})")
-            label.setStyleSheet(
-                f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
-            )
-            return
-        label.setText("현재 상태: 미연결. 로그인 후 계정명을 입력해 연결 상태를 저장하세요.")
+        label.setText(f"지금 상태: 지원예정 — {name} 자동 올리기 기능은 준비 중이에요.")
         label.setStyleSheet(
-            f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
+            f"color: {c.text_muted}; background-color: transparent; border: none; padding: 2px 0;"
         )
 
     def _apply_social_connected_state(self, platform_id: str, account_name: str):
@@ -1723,7 +1663,7 @@ class UploadPanel(QFrame, ThemedMixin):
         if not account:
             cfg = PLATFORM_CONFIG.get(platform_id, {})
             platform_name = cfg.get("name", platform_id.title())
-            return False, f"{platform_name} 계정명을 입력해주세요."
+            return False, f"{platform_name} 계정 이름을 적어 주세요."
 
         self._apply_social_connected_state(platform_id, account)
         return True, account
@@ -1763,13 +1703,13 @@ class UploadPanel(QFrame, ThemedMixin):
             show_info(
                 self,
                 "인증 자료 생성 완료",
-                "쿠팡 파트너스 채널 인증 재신청 체크리스트를 생성했습니다.\n\n"
+                "쿠팡 파트너스 채널 인증을 다시 신청할 때 쓸 점검표를 만들었어요.\n\n"
                 f"{guide_path}\n\n"
-                "YouTube 채널 URL과 대가성 문구가 보이는 스크린샷을 함께 등록하세요.",
+                "YouTube 채널 주소와, 광고 안내 문구가 보이는 화면 캡처를 함께 올려 주세요.",
             )
         except Exception as exc:
             logger.error("[UploadPanel] Coupang verification guide failed: %s", exc)
-            show_error(self, "인증 자료 생성 실패", str(exc))
+            show_error(self, "인증 자료를 만들지 못했어요", str(exc))
 
     def _connect_youtube(self, platform_id: str):
         """Connect YouTube channel via OAuth."""
@@ -1779,7 +1719,7 @@ class UploadPanel(QFrame, ThemedMixin):
             self._show_youtube_json_connect()
         except Exception as e:
             logger.error(f"[UploadPanel] YouTube 연결 실패: {e}")
-            show_error(self, "연결 실패", f"유튜브 채널 연결에 실패했습니다.\n\n{e}")
+            show_error(self, "연결 실패", f"유튜브 채널을 연결하지 못했어요.\n\n{e}")
 
     def _show_youtube_json_connect(self):
         """Upload OAuth client JSON and connect YouTube channel."""
@@ -1802,10 +1742,10 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.setContentsMargins(24, 20, 24, 20)
 
         inst = QLabel(
-            "채널명을 직접 입력할 필요 없이 OAuth JSON 파일만 업로드하면 됩니다.\n\n"
-            "1. 구글 클라우드 콘솔에서 OAuth 클라이언트 ID를 생성하세요.\n"
-            "2. 다운로드한 client_secrets.json 파일을 선택하세요.\n"
-            "3. 파일은 사용자 프로필 보안 경로(내 계정 전용)에 복사되어 보관됩니다."
+            "채널 이름을 직접 적을 필요 없이, 구글 인증 파일(JSON)만 올리면 돼요.\n\n"
+            "1. 구글 클라우드 콘솔에서 인증 파일을 만드세요.\n"
+            "2. 내려받은 client_secrets.json 파일을 골라 주세요.\n"
+            "3. 이 파일은 내 계정만 쓸 수 있는 안전한 곳에 복사되어 보관돼요."
         )
         inst.setWordWrap(True)
         inst.setFont(QFont(ds.typography.font_family_primary, 11))
@@ -1814,7 +1754,7 @@ class UploadPanel(QFrame, ThemedMixin):
 
         guide_link = QLabel(
             '<a href="https://shoppingshorts.store/notice/youtube-google-cloud-oauth-screenshots" '
-            'style="color: #3B82F6; text-decoration: none;">Google Cloud 실제 캡쳐 OAuth 가이드 보기 →</a>'
+            'style="color: #3B82F6; text-decoration: none;">구글 인증 파일 만드는 법 (캡처 가이드) 보기 →</a>'
         )
         guide_link.setOpenExternalLinks(True)
         guide_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
@@ -1822,13 +1762,13 @@ class UploadPanel(QFrame, ThemedMixin):
         guide_link.setStyleSheet("border: none; background: transparent;")
         layout.addWidget(guide_link)
 
-        file_info = QLabel("선택된 파일: 없음")
+        file_info = QLabel("고른 파일: 아직 없음")
         file_info.setWordWrap(True)
         file_info.setFont(QFont(ds.typography.font_family_primary, 10))
         file_info.setStyleSheet(f"color: {c.text_muted};")
         layout.addWidget(file_info)
 
-        select_btn = QPushButton("OAuth JSON 파일 선택")
+        select_btn = QPushButton("구글 인증 파일(JSON) 고르기")
         select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         select_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1894,7 +1834,7 @@ class UploadPanel(QFrame, ThemedMixin):
 
         def on_cancel():
             if connection_state["running"]:
-                status_label.setText("연결 처리 중입니다. 완료 후 다시 시도해주세요.")
+                status_label.setText("연결하는 중이에요. 끝난 뒤 다시 눌러 주세요.")
                 return
             dialog.reject()
 
@@ -1905,14 +1845,14 @@ class UploadPanel(QFrame, ThemedMixin):
                 return
             file_path, _ = QFileDialog.getOpenFileName(
                 dialog,
-                "OAuth JSON 파일 선택",
+                "구글 인증 파일(JSON) 고르기",
                 "",
                 "JSON 파일 (*.json)"
             )
             if not file_path:
                 return
             selected_file["path"] = file_path
-            file_info.setText(f"선택된 파일: {file_path}")
+            file_info.setText(f"고른 파일: {file_path}")
             connect_btn.setEnabled(True)
 
         def on_connect_finished(success: bool, channel_info_obj: object, error_message: str):
@@ -1924,12 +1864,12 @@ class UploadPanel(QFrame, ThemedMixin):
                 channel_info = channel_info_obj if isinstance(channel_info_obj, dict) else {}
                 channel_name = self._apply_youtube_connected_state(channel_info)
                 dialog.accept()
-                show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'이(가) 연결되었습니다.")
+                show_info(self, "연결 성공", f"유튜브 채널 '{channel_name}'을(를) 연결했어요.")
                 return
 
             detail = error_message or (
-                "선택한 JSON으로 인증에 실패했습니다.\n"
-                "OAuth 클라이언트 타입/리디렉션 설정을 확인해주세요."
+                "고른 인증 파일로 연결하지 못했어요.\n"
+                "구글 인증 파일의 종류와 주소(리디렉션) 설정이 맞는지 확인해 주세요."
             )
             show_error(self, "연결 실패", detail)
 
@@ -1940,10 +1880,10 @@ class UploadPanel(QFrame, ThemedMixin):
                 return
 
             if not (self.gui and hasattr(self.gui, 'youtube_manager') and self.gui.youtube_manager):
-                show_error(self, "연결 실패", "YouTube 매니저를 초기화하지 못했습니다.")
+                show_error(self, "연결 실패", "지금 연결을 시작할 수 없어요. 앱을 다시 켠 뒤 시도해 주세요.")
                 return
 
-            set_connecting(True, "OAuth 인증을 진행 중입니다. 브라우저 승인 후 잠시만 기다려주세요.")
+            set_connecting(True, "구글 계정 연결 중이에요. 브라우저에서 허용을 누른 뒤 잠시만 기다려 주세요.")
             yt_manager = self.gui.youtube_manager
 
             worker = _YouTubeOAuthWorker(yt_manager, selected_file["path"])
@@ -2002,7 +1942,7 @@ class UploadPanel(QFrame, ThemedMixin):
         """Disconnect YouTube channel."""
         from ui.components.custom_dialog import show_question, show_info
 
-        if not show_question(self, "연결 해제", "유튜브 채널 연결을 해제하시겠습니까?\n자동 업로드가 중지됩니다."):
+        if not show_question(self, "연결 해제", "유튜브 채널 연결을 끊을까요?\n끊으면 자동 업로드도 멈춰요."):
             return
 
         self.settings.set_youtube_connected(False, "", "")
@@ -2196,9 +2136,9 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.setSpacing(10)
 
         inst = QLabel(
-            "1) 로그인 페이지 열기를 눌러 웹에서 로그인/승인을 완료하세요.\n"
-            "2) 계정명(username) 또는 프로필 URL을 입력하고 연결을 누르세요.\n"
-            "3) 더 자세한 단계는 설정 탭 자동 설정 도우미를 사용하세요."
+            "1) '로그인 페이지 열기'를 눌러 웹에서 로그인하고 허용까지 끝내세요.\n"
+            "2) 계정 이름(@아이디)이나 프로필 주소를 적고 '연결'을 누르세요.\n"
+            "3) 더 자세한 안내가 필요하면 설정 탭의 자동 설정 도우미를 쓰세요."
         )
         inst.setWordWrap(True)
         inst.setFont(QFont(ds.typography.font_family_primary, 11))
@@ -2206,7 +2146,7 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addWidget(inst)
 
         account_input = QLineEdit()
-        account_input.setPlaceholderText(f"{platform_name} 계정명 또는 프로필 URL")
+        account_input.setPlaceholderText(f"{platform_name} 계정 이름(@아이디) 또는 프로필 주소")
         account_input.setText(self.settings.get_social_account_name(platform_id))
         account_input.setStyleSheet(f"""
             QLineEdit {{
@@ -2266,7 +2206,7 @@ class UploadPanel(QFrame, ThemedMixin):
             account = result
             account_input.setText(account)
             dialog.accept()
-            show_info(self, "연결 완료", f"{platform_name} 계정 '{account}' 연결 상태를 저장했습니다.")
+            show_info(self, "연결 완료", f"{platform_name} 계정 '{account}'을(를) 저장했어요.")
 
         connect_btn.clicked.connect(do_connect)
         action_row.addWidget(connect_btn)

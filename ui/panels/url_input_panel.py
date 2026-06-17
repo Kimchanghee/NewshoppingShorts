@@ -56,7 +56,7 @@ class MixURLEntry(QFrame):
 
         # URL input
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText(f"영상 URL #{self.index + 1} 입력...")
+        self.url_input.setPlaceholderText(f"{self.index + 1}번째 영상 링크를 붙여넣어 주세요")
         self.url_input.setStyleSheet(self._get_input_style())
         self.url_input.textChanged.connect(lambda text: self.url_changed.emit(self.index, text))
         layout.addWidget(self.url_input, 1)
@@ -114,7 +114,7 @@ class MixURLEntry(QFrame):
         """인덱스 업데이트 (재정렬 후)"""
         self.index = new_index
         self.index_label.setText(f"{self.index + 1}")
-        self.url_input.setPlaceholderText(f"영상 URL #{self.index + 1} 입력...")
+        self.url_input.setPlaceholderText(f"{self.index + 1}번째 영상 링크를 붙여넣어 주세요")
         self.remove_btn.setVisible(self.index > 0)
 
 
@@ -133,7 +133,7 @@ class URLInputPanel(QWidget):
         # Main vertical layout
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self.main_layout.setSpacing(ds.spacing.space_5)
+        self.main_layout.setSpacing(ds.spacing.space_4)
 
         # Mode indicator
         self.mode_indicator = QFrame()
@@ -144,7 +144,7 @@ class URLInputPanel(QWidget):
         self.mode_icon.setFont(QFont("Segoe UI Symbol", 16))
         mode_layout.addWidget(self.mode_icon)
 
-        self.mode_label = QLabel("단일 영상 모드")
+        self.mode_label = QLabel("단일 영상 만들기")
         self.mode_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         self.mode_label.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
         mode_layout.addWidget(self.mode_label)
@@ -181,20 +181,21 @@ class URLInputPanel(QWidget):
         left_url_layout.setContentsMargins(0, 0, 0, 0)
         left_url_layout.setSpacing(ds.spacing.space_2)
 
-        lbl = QLabel("URL 링크 입력")
+        lbl = QLabel("영상 링크 붙여넣기")
         lbl.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         lbl.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
         left_url_layout.addWidget(lbl)
 
         self.gui.url_entry = QTextEdit()
-        self.gui.url_entry.setFixedHeight(120)
+        self.gui.url_entry.setMinimumHeight(140)
+        self.gui.url_entry.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.gui.url_entry.setPlaceholderText(
             "https://v.douyin.com/xxxxx/\nhttps://www.xiaohongshu.com/explore/xxxxxxxx..."
         )
         self.gui.url_entry.setStyleSheet(self._get_input_style())
         left_url_layout.addWidget(self.gui.url_entry)
 
-        hint = QLabel("💡 여러 링크를 붙여넣으면 자동 분리됩니다.")
+        hint = QLabel("💡 링크 여러 개를 한꺼번에 붙여넣어도 알아서 나눠 줘요.")
         hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
         hint.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
         left_url_layout.addWidget(hint)
@@ -203,13 +204,13 @@ class URLInputPanel(QWidget):
         single_url_action = QHBoxLayout()
         single_url_action.setSpacing(ds.spacing.space_2)
 
-        self.add_btn = QPushButton("목록에 추가")
+        self.add_btn = QPushButton("만들 목록에 담기")
         self.add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_btn.setStyleSheet(self._get_button_style("primary", "sm"))
         self.add_btn.clicked.connect(self.gui.add_url_from_entry)
         single_url_action.addWidget(self.add_btn)
 
-        self.clipboard_btn = QPushButton("클립보드 붙여넣기")
+        self.clipboard_btn = QPushButton("복사한 링크 붙여넣기")
         self.clipboard_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clipboard_btn.setStyleSheet(self._get_button_style("secondary", "sm"))
         self.clipboard_btn.clicked.connect(self.gui.paste_and_extract)
@@ -232,14 +233,15 @@ class URLInputPanel(QWidget):
         right_local_layout.setContentsMargins(0, 0, 0, 0)
         right_local_layout.setSpacing(ds.spacing.space_2)
 
-        local_lbl = QLabel("로컬 영상 파일 선택")
+        local_lbl = QLabel("내 컴퓨터에서 영상 고르기")
         local_lbl.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         local_lbl.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
         right_local_layout.addWidget(local_lbl)
 
         # Drop zone / file display area
         self.single_local_drop_zone = QFrame()
-        self.single_local_drop_zone.setFixedHeight(120)
+        self.single_local_drop_zone.setMinimumHeight(140)
+        self.single_local_drop_zone.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.single_local_drop_zone.setStyleSheet(self._get_drop_zone_style())
         drop_zone_layout = QVBoxLayout(self.single_local_drop_zone)
         drop_zone_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -250,16 +252,16 @@ class URLInputPanel(QWidget):
         self.single_local_icon.setStyleSheet("background-color: transparent; border: none;")
         drop_zone_layout.addWidget(self.single_local_icon)
 
-        self.single_local_file_label = QLabel("파일을 선택하세요")
+        self.single_local_file_label = QLabel("여기에서 영상을 골라 주세요")
         self.single_local_file_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self.single_local_file_label.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
+        self.single_local_file_label.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none; padding-bottom: 3px;")
         self.single_local_file_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.single_local_file_label.setWordWrap(True)
         drop_zone_layout.addWidget(self.single_local_file_label)
 
         right_local_layout.addWidget(self.single_local_drop_zone)
 
-        local_hint = QLabel("💡 MP4, AVI, MOV 등 영상 파일 지원")
+        local_hint = QLabel("💡 MP4, AVI, MOV 같은 영상 파일을 쓸 수 있어요")
         local_hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
         local_hint.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
         right_local_layout.addWidget(local_hint)
@@ -268,13 +270,13 @@ class URLInputPanel(QWidget):
         single_local_action = QHBoxLayout()
         single_local_action.setSpacing(ds.spacing.space_2)
 
-        self.single_browse_btn = QPushButton("파일 찾기")
+        self.single_browse_btn = QPushButton("영상 파일 찾기")
         self.single_browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.single_browse_btn.setStyleSheet(self._get_button_style("primary", "sm"))
         self.single_browse_btn.clicked.connect(lambda: self._select_local_file("single"))
         single_local_action.addWidget(self.single_browse_btn)
 
-        self.single_local_add_btn = QPushButton("목록에 추가")
+        self.single_local_add_btn = QPushButton("만들 목록에 담기")
         self.single_local_add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.single_local_add_btn.setStyleSheet(self._get_button_style("secondary", "sm"))
         self.single_local_add_btn.clicked.connect(lambda: self._add_local_file_to_queue("single"))
@@ -286,8 +288,8 @@ class URLInputPanel(QWidget):
 
         single_split.addWidget(right_local_widget, 1)
 
-        single_layout.addLayout(single_split)
-        self.main_layout.addWidget(self.single_mode_container)
+        single_layout.addLayout(single_split, 1)
+        self.main_layout.addWidget(self.single_mode_container, 1)
 
         # ========== Mix Mode Container ==========
         self.mix_mode_container = QWidget()
@@ -295,9 +297,9 @@ class URLInputPanel(QWidget):
         mix_layout.setContentsMargins(0, 0, 0, 0)
         mix_layout.setSpacing(ds.spacing.space_3)
 
-        mix_desc = QLabel("동일 상품의 여러 영상을 입력하면 랜덤으로 장면을 믹스하여 새로운 영상을 만듭니다.")
+        mix_desc = QLabel("같은 상품 영상을 여러 개 넣으면 장면을 자동으로 섞어서 새 영상을 만들어 줍니다.")
         mix_desc.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        mix_desc.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
+        mix_desc.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none; padding-bottom: 3px;")
         mix_desc.setWordWrap(True)
         mix_layout.addWidget(mix_desc)
 
@@ -311,7 +313,7 @@ class URLInputPanel(QWidget):
         left_mix_layout.setContentsMargins(0, 0, 0, 0)
         left_mix_layout.setSpacing(ds.spacing.space_2)
 
-        mix_url_header = QLabel("URL 입력 (최대 5개)")
+        mix_url_header = QLabel("영상 링크 붙여넣기 (최대 5개)")
         mix_url_header.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         mix_url_header.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
         left_mix_layout.addWidget(mix_url_header)
@@ -325,7 +327,7 @@ class URLInputPanel(QWidget):
 
         # Add URL button
         add_url_layout = QHBoxLayout()
-        self.add_url_btn = QPushButton("+ URL 추가")
+        self.add_url_btn = QPushButton("+ 영상 링크 추가")
         self.add_url_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.add_url_btn.setStyleSheet(self._get_button_style("secondary", "sm"))
         self.add_url_btn.clicked.connect(self._add_mix_entry)
@@ -343,7 +345,7 @@ class URLInputPanel(QWidget):
         mix_action = QHBoxLayout()
         mix_action.setSpacing(ds.spacing.space_2)
 
-        self.mix_add_btn = QPushButton("대기열에 추가")
+        self.mix_add_btn = QPushButton("만들 목록에 담기")
         self.mix_add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mix_add_btn.setStyleSheet(self._get_button_style("primary", "sm"))
         self.mix_add_btn.clicked.connect(self._add_mix_to_queue)
@@ -372,7 +374,7 @@ class URLInputPanel(QWidget):
         right_mix_local_layout.setContentsMargins(0, 0, 0, 0)
         right_mix_local_layout.setSpacing(ds.spacing.space_2)
 
-        mix_local_header = QLabel("로컬 영상 파일 선택")
+        mix_local_header = QLabel("내 컴퓨터에서 영상 고르기")
         mix_local_header.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
         mix_local_header.setStyleSheet(f"color: {get_color('text_primary')}; background-color: transparent; border: none;")
         right_mix_local_layout.addWidget(mix_local_header)
@@ -390,9 +392,9 @@ class URLInputPanel(QWidget):
         self.mix_local_icon.setStyleSheet("background-color: transparent; border: none;")
         mix_drop_layout.addWidget(self.mix_local_icon)
 
-        self.mix_local_file_label = QLabel("파일을 선택하세요")
+        self.mix_local_file_label = QLabel("여기에서 영상을 골라 주세요")
         self.mix_local_file_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self.mix_local_file_label.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none;")
+        self.mix_local_file_label.setStyleSheet(f"color: {get_color('text_muted')}; background-color: transparent; border: none; padding-bottom: 3px;")
         self.mix_local_file_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.mix_local_file_label.setWordWrap(True)
         mix_drop_layout.addWidget(self.mix_local_file_label)
@@ -402,7 +404,7 @@ class URLInputPanel(QWidget):
         # Selected files list for mix
         self.mix_local_files_list = QLabel("")
         self.mix_local_files_list.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self.mix_local_files_list.setStyleSheet(f"color: {get_color('text_secondary')}; background-color: transparent; border: none;")
+        self.mix_local_files_list.setStyleSheet(f"color: {get_color('text_secondary')}; background-color: transparent; border: none; padding-bottom: 3px;")
         self.mix_local_files_list.setWordWrap(True)
         right_mix_local_layout.addWidget(self.mix_local_files_list)
 
@@ -410,13 +412,13 @@ class URLInputPanel(QWidget):
         mix_local_action = QHBoxLayout()
         mix_local_action.setSpacing(ds.spacing.space_2)
 
-        self.mix_local_browse_btn = QPushButton("파일 추가")
+        self.mix_local_browse_btn = QPushButton("영상 파일 추가")
         self.mix_local_browse_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mix_local_browse_btn.setStyleSheet(self._get_button_style("primary", "sm"))
         self.mix_local_browse_btn.clicked.connect(lambda: self._select_local_file("mix"))
         mix_local_action.addWidget(self.mix_local_browse_btn)
 
-        self.mix_local_add_btn = QPushButton("대기열에 추가")
+        self.mix_local_add_btn = QPushButton("만들 목록에 담기")
         self.mix_local_add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.mix_local_add_btn.setStyleSheet(self._get_button_style("secondary", "sm"))
         self.mix_local_add_btn.clicked.connect(lambda: self._add_local_file_to_queue("mix"))
@@ -434,12 +436,10 @@ class URLInputPanel(QWidget):
 
         mix_split.addWidget(right_mix_local, 1)
 
-        mix_layout.addLayout(mix_split)
+        mix_layout.addLayout(mix_split, 1)
 
         self.mix_mode_container.setVisible(False)
-        self.main_layout.addWidget(self.mix_mode_container)
-
-        self.main_layout.addStretch()
+        self.main_layout.addWidget(self.mix_mode_container, 1)
 
         # Local file state
         self._single_local_path = ""  # Selected local file for single mode
@@ -460,12 +460,12 @@ class URLInputPanel(QWidget):
 
         if mode == "mix":
             self.mode_icon.setText("🎞️")
-            self.mode_label.setText("믹스 모드")
+            self.mode_label.setText("믹스 모드 (영상 섞기)")
             self.single_mode_container.setVisible(False)
             self.mix_mode_container.setVisible(True)
         else:
             self.mode_icon.setText("🎬")
-            self.mode_label.setText("단일 영상 모드")
+            self.mode_label.setText("단일 영상 만들기")
             self.single_mode_container.setVisible(True)
             self.mix_mode_container.setVisible(False)
 
@@ -526,7 +526,7 @@ class URLInputPanel(QWidget):
         if count >= MAX_MIX_URLS:
             self.add_url_btn.setText(f"최대 {MAX_MIX_URLS}개")
         else:
-            self.add_url_btn.setText("+ URL 추가")
+            self.add_url_btn.setText("+ 영상 링크 추가")
 
     def _add_mix_to_queue(self):
         """Add a mix job to the queue."""
@@ -534,7 +534,7 @@ class URLInputPanel(QWidget):
 
         if len(urls) < MIN_MIX_URLS:
             from ui.components.custom_dialog import show_warning
-            show_warning(self, "URL 부족", f"믹스 모드는 최소 {MIN_MIX_URLS}개 이상의 영상 URL이 필요합니다.")
+            show_warning(self, "영상이 더 필요해요", f"믹스 모드는 영상 링크가 최소 {MIN_MIX_URLS}개 이상 필요합니다.")
             return
 
         if hasattr(self.gui, "state"):
@@ -543,18 +543,18 @@ class URLInputPanel(QWidget):
         queue_manager = getattr(self.gui, "queue_manager", None)
         if queue_manager is None or not hasattr(queue_manager, "add_mix_job"):
             from ui.components.custom_dialog import show_warning
-            show_warning(self, "오류", "믹스 작업을 등록할 수 없습니다.")
+            show_warning(self, "잠시 문제가 생겼어요", "믹스 작업을 등록할 수 없습니다.")
             return
 
         try:
             queue_manager.add_mix_job(urls)
         except Exception as exc:
             from ui.components.custom_dialog import show_warning
-            show_warning(self, "오류", f"믹스 대기열 추가 실패: {exc}")
+            show_warning(self, "잠시 문제가 생겼어요", f"믹스 목록에 담지 못했어요: {exc}")
             return
 
         from ui.components.custom_dialog import show_success
-        show_success(self, "추가 완료", f"{len(urls)}개 영상을 믹스 대기열에 추가했습니다.")
+        show_success(self, "담았어요", f"영상 {len(urls)}개를 믹스 목록에 담았습니다.")
 
         self._clear_mix_entries()
 
@@ -595,7 +595,7 @@ class URLInputPanel(QWidget):
         if mode == "mix":
             # Allow multiple file selection for mix mode
             files, _ = QFileDialog.getOpenFileNames(
-                self, "로컬 영상 파일 선택", "",
+                self, "내 컴퓨터에서 영상 고르기", "",
                 LOCAL_VIDEO_EXTENSIONS
             )
             if files:
@@ -607,7 +607,7 @@ class URLInputPanel(QWidget):
         else:
             # Single file selection
             file_path, _ = QFileDialog.getOpenFileName(
-                self, "로컬 영상 파일 선택", "",
+                self, "내 컴퓨터에서 영상 고르기", "",
                 LOCAL_VIDEO_EXTENSIONS
             )
             if file_path:
@@ -627,8 +627,8 @@ class URLInputPanel(QWidget):
 
         if mode == "mix":
             if len(self._mix_local_paths) < MIN_MIX_URLS:
-                show_warning(self, "파일 부족",
-                             f"믹스 모드는 최소 {MIN_MIX_URLS}개 이상의 영상 파일이 필요합니다.")
+                show_warning(self, "영상이 더 필요해요",
+                             f"믹스 모드는 영상 파일이 최소 {MIN_MIX_URLS}개 이상 필요합니다.")
                 return
 
             # Set state for local processing
@@ -642,17 +642,17 @@ class URLInputPanel(QWidget):
                 local_urls = [f"local://{p}" for p in self._mix_local_paths]
                 try:
                     queue_manager.add_mix_job(local_urls)
-                    show_success(self, "추가 완료",
-                                 f"{len(self._mix_local_paths)}개 로컬 영상을 믹스 대기열에 추가했습니다.")
+                    show_success(self, "담았어요",
+                                 f"내 컴퓨터 영상 {len(self._mix_local_paths)}개를 믹스 목록에 담았습니다.")
                     self._clear_mix_local_files()
                 except Exception as exc:
-                    show_warning(self, "오류", f"대기열 추가 실패: {exc}")
+                    show_warning(self, "잠시 문제가 생겼어요", f"목록에 담지 못했어요: {exc}")
             else:
-                show_warning(self, "오류", "대기열 관리자를 찾을 수 없습니다.")
+                show_warning(self, "잠시 문제가 생겼어요", "목록을 관리하는 기능을 찾지 못했어요.")
         else:
             # Single mode
             if not self._single_local_path or not os.path.isfile(self._single_local_path):
-                show_warning(self, "안내", "로컬 영상 파일을 먼저 선택해주세요.")
+                show_warning(self, "안내", "먼저 내 컴퓨터에서 영상을 골라 주세요.")
                 return
 
             # Set state for local processing
@@ -666,8 +666,8 @@ class URLInputPanel(QWidget):
                 local_url = f"local://{self._single_local_path}"
                 added = queue_manager.add_url_to_queue(local_url)
                 if added:
-                    show_success(self, "추가 완료",
-                                 f"로컬 영상이 대기열에 추가되었습니다.\n{os.path.basename(self._single_local_path)}")
+                    show_success(self, "담았어요",
+                                 f"내 컴퓨터 영상을 만들 목록에 담았습니다.\n{os.path.basename(self._single_local_path)}")
                     self._reset_single_local()
                 else:
                     show_warning(
@@ -676,12 +676,12 @@ class URLInputPanel(QWidget):
                         "Cannot add this file. It is duplicate or another waiting/processing item already exists.",
                     )
             else:
-                show_warning(self, "오류", "대기열 관리자를 찾을 수 없습니다.")
+                show_warning(self, "잠시 문제가 생겼어요", "목록을 관리하는 기능을 찾지 못했어요.")
 
     def _reset_single_local(self):
         """Reset single mode local file selection."""
         self._single_local_path = ""
-        self.single_local_file_label.setText("파일을 선택하세요")
+        self.single_local_file_label.setText("여기에서 영상을 골라 주세요")
         self.single_local_file_label.setStyleSheet(
             f"color: {get_color('text_muted')}; background-color: transparent; border: none;"
         )
@@ -693,7 +693,7 @@ class URLInputPanel(QWidget):
         """Update mix mode local file display."""
         count = len(self._mix_local_paths)
         if count == 0:
-            self.mix_local_file_label.setText("파일을 선택하세요")
+            self.mix_local_file_label.setText("여기에서 영상을 골라 주세요")
             self.mix_local_file_label.setStyleSheet(
                 f"color: {get_color('text_muted')}; background-color: transparent; border: none;"
             )
@@ -702,7 +702,7 @@ class URLInputPanel(QWidget):
             self.mix_local_drop_zone.setStyleSheet(self._get_drop_zone_style())
             self.mix_local_files_list.setText("")
         else:
-            self.mix_local_file_label.setText(f"{count}개 파일 선택됨")
+            self.mix_local_file_label.setText(f"영상 {count}개를 골랐어요")
             self.mix_local_file_label.setStyleSheet(
                 f"color: {get_color('text_primary')}; background-color: transparent; border: none;"
             )

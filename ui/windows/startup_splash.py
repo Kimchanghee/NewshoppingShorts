@@ -152,7 +152,7 @@ class StartupSplash(QWidget):
         self.title_label.setWordWrap(True)
         self.title_label.setContentsMargins(0, 0, 0, 0)
         self.title_label.setStyleSheet(
-            f"color: {self.COLORS['primary']}; background: transparent; border: none;"
+            f"color: {self.COLORS['primary']}; background: transparent; border: none; padding-bottom: 3px;"
         )
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.title_label)

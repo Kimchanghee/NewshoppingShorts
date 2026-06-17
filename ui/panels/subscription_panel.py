@@ -552,6 +552,7 @@ class PlanCard(QFrame):
             #plan_description {{
                 color: {ds.colors.text_secondary};
                 font-size: {ds.typography.size_xs}px;
+                padding-bottom: 3px;
             }}
 
             #feature_check {{
@@ -568,12 +569,14 @@ class PlanCard(QFrame):
             #feature_text {{
                 color: {ds.colors.text_primary};
                 font-size: {ds.typography.size_xs}px;
+                padding-bottom: 3px;
             }}
 
             #feature_text_disabled {{
                 color: {ds.colors.text_muted};
                 font-size: {ds.typography.size_xs}px;
                 text-decoration: line-through;
+                padding-bottom: 3px;
             }}
             
             #select_button {{
@@ -1186,6 +1189,7 @@ class PaymentForm(QWidget):
                 color: {ds.colors.text_primary};
                 font-size: {ds.typography.size_sm}px;
                 font-weight: {ds.typography.weight_semibold};
+                padding-bottom: 3px;
             }}
 
             #form_separator {{
@@ -1222,6 +1226,7 @@ class PaymentForm(QWidget):
             #info_label {{
                 color: {ds.colors.text_secondary};
                 font-size: {ds.typography.size_sm}px;
+                padding-bottom: 3px;
             }}
 
             #status_label {{

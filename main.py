@@ -322,12 +322,31 @@ class VideoAnalyzerGUI(
 
     def _on_step_selected(self, step_id: str):
         """Handle step navigation."""
-        idx = self.page_index.get(step_id, 0)
+        # '올리기 설정'(upload)은 '설정' 화면의 '영상 올리기' 탭으로 편입됨.
+        # 과거 'upload' 타깃으로 들어오는 내비게이션은 설정 화면 + 해당 탭으로 보낸다.
+        if step_id == "upload":
+            settings_idx = self.page_index.get("settings")
+            if settings_idx is not None:
+                self.stack.setCurrentIndex(settings_idx)
+                self.step_nav.set_active("settings")
+                st = getattr(self, "settings_tab", None)
+                if st is not None and hasattr(st, "select_upload_tab"):
+                    QTimer.singleShot(0, st.select_upload_tab)
+                if hasattr(self, "upload_panel"):
+                    try:
+                        self.upload_panel.refresh()
+                    except Exception:
+                        pass
+            return
+        if step_id not in self.page_index:
+            # 알 수 없는 step_id로 인해 사용자가 0번(모드 선택) 화면으로 조용히
+            # 튕기는 것을 방지한다. (예: 'linktree_setup' 같은 가상 타깃이 폴백 경로로
+            # 흘러들어오는 경우) 호출부에서 별도 처리해야 하므로 여기서는 무시한다.
+            logger.warning("[Nav] 알 수 없는 step_id '%s' 무시 (페이지 이동 안 함)", step_id)
+            return
+        idx = self.page_index[step_id]
         self.stack.setCurrentIndex(idx)
         self.step_nav.set_active(step_id)
-
-        if step_id == "upload" and hasattr(self, 'upload_panel'):
-            self.upload_panel.refresh()
 
         try:
             from caller.rest import log_user_action
@@ -341,6 +360,25 @@ class VideoAnalyzerGUI(
         settings_tab = getattr(self, "settings_tab", None)
         if settings_tab and hasattr(settings_tab, "focus_api_key_setup"):
             QTimer.singleShot(0, settings_tab.focus_api_key_setup)
+
+    def open_coupang_settings(self) -> None:
+        """Move to Settings tab and reveal/focus the Coupang Partners key fields."""
+        self._on_step_selected("settings")
+        settings_tab = getattr(self, "settings_tab", None)
+        if settings_tab and hasattr(settings_tab, "focus_coupang_setup"):
+            QTimer.singleShot(0, settings_tab.focus_coupang_setup)
+
+    def open_youtube_connect(self) -> None:
+        """Go to the Upload Settings page and start the YouTube channel connect flow."""
+        self._on_step_selected("upload")
+        panel = getattr(self, "upload_panel", None)
+        if panel is None:
+            return
+        for name in ("start_youtube_connect", "_show_youtube_json_connect"):
+            fn = getattr(panel, name, None)
+            if callable(fn):
+                QTimer.singleShot(0, fn)
+                return
 
     def refresh_settings_from_manager(self) -> None:
         """Apply synced SettingsManager values to live panels and managers."""

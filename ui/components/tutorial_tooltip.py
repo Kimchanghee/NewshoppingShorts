@@ -70,7 +70,7 @@ class TutorialTooltip(QFrame):
         self.desc_label = QLabel()
         self.desc_label.setFixedHeight(80)
         self.desc_label.setFont(QFont(self.ds.typography.font_family_primary, 12))
-        self.desc_label.setStyleSheet(f"color: {c.text_secondary}; background: transparent;")
+        self.desc_label.setStyleSheet(f"color: {c.text_secondary}; background: transparent; padding-bottom: 3px;")
         self.desc_label.setWordWrap(True)
         self.desc_label.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(self.desc_label)

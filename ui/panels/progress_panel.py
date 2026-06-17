@@ -73,8 +73,8 @@ class ProgressPanel(QFrame, ThemedMixin):
         overall_layout.addWidget(self.gui.overall_numeric_label)
 
         # Witty message
-        self.gui.overall_witty_label = QLabel("큐를 채우면 제작이 시작됩니다")
-        self.gui.overall_witty_label.setStyleSheet("font-size: 10px; color: #64748B; background: transparent; border: none;")
+        self.gui.overall_witty_label = QLabel("만들 목록을 채우면 제작이 시작돼요")
+        self.gui.overall_witty_label.setStyleSheet("font-size: 10px; color: #64748B; background: transparent; border: none; padding-bottom: 3px;")
         self.gui.overall_witty_label.setWordWrap(True)
         overall_layout.addWidget(self.gui.overall_witty_label)
 
@@ -155,16 +155,16 @@ class ProgressPanel(QFrame, ThemedMixin):
         steps_layout.setContentsMargins(0, 4, 0, 0)
 
         step_definitions = [
-            ("다운로드", 'download', "⬇"),
+            ("영상 받기", 'download', "⬇"),
             ("AI 분석", 'analysis', "🤖"),
-            ("자막 분석", 'ocr_analysis', "📝"),
+            ("자막 읽기", 'ocr_analysis', "📝"),
             ("번역", 'translation', "🌐"),
-            ("TTS 생성", 'tts', "🔊"),
-            ("블러 처리", 'subtitle', "🔲"),
-            ("오디오 싱크", 'audio_analysis', "🎵"),
-            ("자막 오버레이", 'subtitle_overlay', "💬"),
-            ("영상 합성", 'video', "🎬"),
-            ("완료 처리", 'finalize', "✅"),
+            ("목소리 만들기", 'tts', "🔊"),
+            ("원본 자막 가리기", 'subtitle', "🔲"),
+            ("소리 맞추기", 'audio_analysis', "🎵"),
+            ("자막 입히기", 'subtitle_overlay', "💬"),
+            ("영상 만들기", 'video', "🎬"),
+            ("마무리", 'finalize', "✅"),
         ]
 
         self.gui.step_indicators = {}

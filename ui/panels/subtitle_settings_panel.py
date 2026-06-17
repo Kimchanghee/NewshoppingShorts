@@ -11,7 +11,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QPainter, QColor, QPen
 from ui.components.base_widget import ThemedMixin
 from managers.settings_manager import get_settings_manager
-from ui.design_system_v2 import get_design_system, get_color
+from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 
 logger = logging.getLogger(__name__)
 
@@ -256,11 +256,11 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
 
         # ── Section 1: Overlay on Chinese subtitle ──
         overlay_section = self._create_section(
-            "중국어 자막 위 배치",
-            "한국어 자막을 중국어 자막 바로 위에 배치합니다."
+            "중국어 자막 바로 위에 넣기",
+            "원본 영상에 중국어 자막이 있으면, 한국어 자막을 그 바로 위에 자동으로 넣어 줘요."
         )
 
-        self.overlay_checkbox = QCheckBox("중국어 자막 위에 한국어 자막 배치")
+        self.overlay_checkbox = QCheckBox("중국어 자막 바로 위에 한국어 자막 넣기")
         self.overlay_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.overlay_checkbox.stateChanged.connect(self._on_overlay_changed)
         overlay_section.layout().addWidget(self.overlay_checkbox)
@@ -269,8 +269,8 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
 
         # ── Section 2: Manual position selection ──
         self.position_section, self.pos_title_label, self.pos_desc_label = self._create_section(
-            "자막 위치 선택",
-            "한국어 자막이 표시될 위치를 선택하세요. '직접 선택' 시 프리뷰를 드래그하여 배치할 수 있습니다.",
+            "자막 위치 고르기",
+            "한국어 자막을 어디에 보여줄지 골라 주세요. '직접 선택'을 누르면 오른쪽 미리보기에서 자막을 끌어 원하는 위치에 둘 수 있어요.",
             return_labels=True
         )
 
@@ -351,7 +351,7 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
         layout.addWidget(title_label)
 
         desc_label = QLabel(description)
-        desc_label.setStyleSheet("font-size: 12px; color: #888888; background-color: transparent; border: none;")
+        desc_label.setStyleSheet("font-size: 12px; color: #888888; background-color: transparent; border: none; padding-bottom: 3px;")
         desc_label.setWordWrap(True)
         layout.addWidget(desc_label)
 
@@ -448,14 +448,14 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
 
         if overlay:
             self.notice_label.setText(
-                "※ 중국어 자막이 감지되면 한국어 자막을 중국어 자막 바로 위에 배치합니다.\n"
-                "※ 중국어 자막이 없는 영상의 경우, 현재 설정된 위치에 자막이 표시됩니다."
+                "※ 원본에 중국어 자막이 있으면 한국어 자막을 그 바로 위에 넣어 줘요.\n"
+                "※ 중국어 자막이 없는 영상은 지금 정해 둔 위치에 자막이 나와요."
             )
         else:
             pos_name = self._get_position_name()
             self.notice_label.setText(
-                f"※ 중국어 자막이 없는 영상에서는 '{pos_name}' 위치에 자막이 표시됩니다.\n"
-                "※ 중국어 자막이 있는 영상에서도 선택한 위치에 자막이 고정됩니다."
+                f"※ 중국어 자막이 없는 영상은 '{pos_name}' 위치에 자막이 나와요.\n"
+                "※ 중국어 자막이 있는 영상도 골라 둔 위치에 자막이 고정돼요."
             )
 
     def _get_position_name(self):
@@ -527,25 +527,5 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
         self.setStyleSheet(f"background-color: {bg}; border: none;")
         self.scroll_content.setStyleSheet("background-color: transparent; border: none;")
 
-        # Checkbox styling
-        primary = get_color('primary')
-        self.overlay_checkbox.setStyleSheet(f"""
-            QCheckBox {{
-                color: #FFFFFF;
-                font-size: 13px;
-                spacing: 8px;
-                background-color: transparent;
-                border: none;
-            }}
-            QCheckBox::indicator {{
-                width: 18px;
-                height: 18px;
-                border: 2px solid {get_color('border_light')};
-                border-radius: 4px;
-                background-color: {get_color('surface_variant')};
-            }}
-            QCheckBox::indicator:checked {{
-                background-color: {primary};
-                border-color: {primary};
-            }}
-        """)
+        # Checkbox styling (외곽선 박스 + 빨간 체크 표시)
+        self.overlay_checkbox.setStyleSheet(checkbox_qss())

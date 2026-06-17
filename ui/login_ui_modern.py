@@ -281,7 +281,7 @@ class ModernLoginUi:
         self.titleLabel = QLabel(self.leftFrame)
         self.titleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.titleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_lg, QFont.Weight.Bold))
-        self.titleLabel.setStyleSheet("color: white; background: transparent;")
+        self.titleLabel.setStyleSheet("color: white; background: transparent; padding-bottom: 3px;")
         self.titleLabel.setWordWrap(True)
         self.titleLabel.setText("쇼핑 숏폼 메이커")
         left_layout.addWidget(self.titleLabel)
@@ -289,7 +289,7 @@ class ModernLoginUi:
         self.subtitleLabel = QLabel(self.leftFrame)
         self.subtitleLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.subtitleLabel.setStyleSheet("color: rgba(255,255,255,0.85); background: transparent;")
+        self.subtitleLabel.setStyleSheet("color: rgba(255,255,255,0.85); background: transparent; padding-bottom: 3px;")
         self.subtitleLabel.setWordWrap(True)
         self.subtitleLabel.setText("쇼핑 영상을 숏폼 콘텐츠로 자동 변환합니다")
         left_layout.addWidget(self.subtitleLabel)
@@ -523,7 +523,7 @@ class RegistrationRequestDialog(QWidget):
 
         self.subtitleLabel = QLabel(self)
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.subtitleLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.subtitleLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent; padding-bottom: 3px;")
         self.subtitleLabel.setWordWrap(True)
         self.subtitleLabel.setText("정보를 입력한 뒤 회원가입 요청을 제출하세요.")
         title_layout.addWidget(self.subtitleLabel)
@@ -611,7 +611,7 @@ class RegistrationRequestDialog(QWidget):
 
         self.usernameStatusLabel = QLabel(form_container)
         self.usernameStatusLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent; padding-bottom: 3px;")
         self.usernameStatusLabel.setWordWrap(True)
         self.usernameStatusLabel.setText("")
         form_layout.addWidget(self.usernameStatusLabel)
@@ -629,7 +629,7 @@ class RegistrationRequestDialog(QWidget):
 
         self.passwordHintLabel = QLabel(form_container)
         self.passwordHintLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.passwordHintLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.passwordHintLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent; padding-bottom: 3px;")
         self.passwordHintLabel.setWordWrap(True)
         self.passwordHintLabel.setText("영문+숫자 포함 8자 이상")
         form_layout.addWidget(self.passwordHintLabel)
@@ -647,7 +647,7 @@ class RegistrationRequestDialog(QWidget):
 
         self.passwordMatchLabel = QLabel(form_container)
         self.passwordMatchLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.passwordMatchLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.passwordMatchLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent; padding-bottom: 3px;")
         self.passwordMatchLabel.setWordWrap(True)
         self.passwordMatchLabel.setText("")
         form_layout.addWidget(self.passwordMatchLabel)
@@ -722,24 +722,24 @@ class RegistrationRequestDialog(QWidget):
                 pw_issues.append("숫자 포함")
             if pw_issues:
                 self.passwordHintLabel.setText(f"※ 필요: {', '.join(pw_issues)}")
-                self.passwordHintLabel.setStyleSheet(f"color: {login_color('error')}; background: transparent;")
+                self.passwordHintLabel.setStyleSheet(f"color: {login_color('error')}; background: transparent; padding-bottom: 3px;")
             else:
                 self.passwordHintLabel.setText("※ 사용 가능한 비밀번호입니다")
-                self.passwordHintLabel.setStyleSheet(f"color: {login_color('success')}; background: transparent;")
+                self.passwordHintLabel.setStyleSheet(f"color: {login_color('success')}; background: transparent; padding-bottom: 3px;")
         else:
             self.passwordHintLabel.setText("※ 영문+숫자 포함 8자 이상 필수")
-            self.passwordHintLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+            self.passwordHintLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent; padding-bottom: 3px;")
 
         if password_confirm:
             if password != password_confirm:
                 self.passwordMatchLabel.setText("비밀번호가 일치하지 않습니다.")
                 self.passwordMatchLabel.setStyleSheet(
-                    f"color: {login_color('error')}; background: transparent;"
+                    f"color: {login_color('error')}; background: transparent; padding-bottom: 3px;"
                 )
             else:
                 self.passwordMatchLabel.setText("비밀번호가 일치합니다.")
                 self.passwordMatchLabel.setStyleSheet(
-                    f"color: {login_color('success')}; background: transparent;"
+                    f"color: {login_color('success')}; background: transparent; padding-bottom: 3px;"
                 )
         else:
             self.passwordMatchLabel.setText("")
@@ -808,7 +808,7 @@ class RegistrationRequestDialog(QWidget):
     def _on_username_changed(self, text):
         self._username_available = False
         self.usernameStatusLabel.setText("")
-        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent; padding-bottom: 3px;")
         # 아이디 변경 시 폼 재검증 (중복확인 필요 상태로 변경됨)
         self._validate_form()
 
@@ -832,7 +832,7 @@ class RegistrationRequestDialog(QWidget):
         self.checkUsernameBtn.setEnabled(False)
         self.checkUsernameBtn.setText("확인중...")
         self.usernameStatusLabel.setText("확인 중...")
-        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent;")
+        self.usernameStatusLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent; padding-bottom: 3px;")
 
         self._username_worker = UsernameCheckWorker(username)
         self._username_worker.finished.connect(self._on_username_check_done)
@@ -845,16 +845,16 @@ class RegistrationRequestDialog(QWidget):
         if available:
             self._username_available = True
             self.usernameStatusLabel.setText("✓ 사용 가능한 아이디입니다")
-            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('success')}; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('success')}; background: transparent; padding-bottom: 3px;")
         elif "네트워크" in message or "실패" in message:
             self._username_available = False
             self.usernameStatusLabel.setText(message)
-            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('warning')}; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('warning')}; background: transparent; padding-bottom: 3px;")
         else:
             self._username_available = False
             # Show the actual message from the server (e.g. "Pending approval", "Server error", etc.)
             self.usernameStatusLabel.setText(f"✗ {message}")
-            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('error')}; background: transparent;")
+            self.usernameStatusLabel.setStyleSheet(f"color: {login_color('error')}; background: transparent; padding-bottom: 3px;")
         logger.info(
             "[UI] Username check result | available=%s message=%s",
             available,

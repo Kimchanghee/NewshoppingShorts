@@ -140,7 +140,7 @@ class ApiKeyErrorDialog(QDialog):
                 "2. 또는 OAuth 인증 방식으로 전환\n"
                 "3. 또는 '작업 중지'를 눌러 해당 URL을 건너뛰기"
             )
-            info_text.setStyleSheet("color: #9A3412; background: transparent; border: none;")
+            info_text.setStyleSheet("color: #9A3412; background: transparent; border: none; padding-bottom: 3px;")
         else:
             # Standard message for quota errors
             info_frame.setStyleSheet(
@@ -150,7 +150,7 @@ class ApiKeyErrorDialog(QDialog):
                 "설정에서 새 API 키를 추가한 후 '작업 계속하기'를 누르면\n"
                 "남은 작업을 이어서 진행할 수 있습니다."
             )
-            info_text.setStyleSheet("color: #1E40AF; background: transparent; border: none;")
+            info_text.setStyleSheet("color: #1E40AF; background: transparent; border: none; padding-bottom: 3px;")
 
         info_text.setFont(QFont("Pretendard", 10))
         info_text.setWordWrap(True)
@@ -234,7 +234,7 @@ class ApiKeyErrorDialog(QDialog):
 
         value = QLabel(value_text)
         value.setFont(QFont("Pretendard", 10))
-        value.setStyleSheet("color: #6B7280;")
+        value.setStyleSheet("color: #6B7280; padding-bottom: 3px;")
         value.setWordWrap(True)
 
         row.addWidget(label, 0, Qt.AlignmentFlag.AlignTop)
