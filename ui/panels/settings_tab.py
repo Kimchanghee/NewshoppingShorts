@@ -43,6 +43,11 @@ INSTAGRAM_LOGIN_URL = "https://www.instagram.com/accounts/login/"
 THREADS_LOGIN_URL = "https://www.threads.com/login"
 META_APPS_URL = "https://developers.facebook.com/apps/"
 SETUP_NOTICE_BASE_URL = "https://shoppingshorts.store/notice"
+
+# 유료 구독자 Computer Use를 처리하는 서버(브리지) 기본 주소.
+# 서버에 올린 Codex CLI가 POST {URL}/v1/computer-use/jobs 를 받아 실행한다.
+# 서버 주소가 바뀌면 이 한 줄만 수정하면 된다. (사용자 설정값이 있으면 그게 우선)
+DEFAULT_COMPUTER_USE_BRIDGE_URL = "https://13-124-7-65.nip.io"
 logger = get_logger(__name__)
 
 
@@ -535,6 +540,13 @@ class SettingsTab(QWidget, ThemedMixin):
         )
         self.linktree_setup_section.content_layout.addWidget(self.linktree_setup_panel)
         connect_layout.addWidget(self.linktree_setup_section)
+        # 웹훅 등 직접 입력은 평소 숨김 — '고급 설정' 토글을 켤 때만 보이게 한다.
+        # (setup_advanced_toggle은 위 _build_setup_assistant_section에서 이미 생성됨)
+        if hasattr(self, "setup_advanced_toggle"):
+            self.linktree_setup_section.setVisible(self.setup_advanced_toggle.isChecked())
+            self.setup_advanced_toggle.toggled.connect(self.linktree_setup_section.setVisible)
+        else:
+            self.linktree_setup_section.setVisible(False)
 
         # =================== SECTION: Coupang + Linktree Automation ===================
         self.link_automation_section = SettingsSection("고급 설정 (쿠팡 키 · 직접 입력)")
@@ -1194,6 +1206,26 @@ class SettingsTab(QWidget, ThemedMixin):
         # setup_start_all_btn 객체는 다른 버튼들의 스타일 소스로만 유지(레이아웃 미추가).
         self.setup_start_all_btn.clicked.connect(lambda: self._start_setup_assistant("all"))
 
+        # 유료 구독자용: 버튼 한 번 → 서버(브리지)의 Codex가 자동으로 설정. 가장 눈에 띄게 맨 앞에.
+        self.setup_auto_btn = QPushButton("🤖 한 번에 자동 설정")
+        self.setup_auto_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_auto_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.primary};
+                color: {c.text_on_primary};
+                border: 1px solid {c.primary};
+                border-radius: {ds.radius.sm}px;
+                padding: 9px 18px;
+                font-weight: 700;
+                font-size: 13px;
+            }}
+            QPushButton:hover {{ background-color: {c.primary_hover}; border-color: {c.primary_hover}; }}
+            QPushButton:disabled {{ background-color: {c.surface_variant}; color: {c.text_muted}; border-color: {c.border_light}; }}
+        """)
+        self.setup_auto_btn.setToolTip("유료 구독자는 버튼 한 번이면 서버가 알아서 설정해 드려요.")
+        self.setup_auto_btn.clicked.connect(self._run_full_auto_setup)
+        start_row.addWidget(self.setup_auto_btn)
+
         self.setup_start_youtube_btn = QPushButton("YouTube 설정")
         self.setup_start_youtube_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_start_youtube_btn.setStyleSheet(f"""
@@ -1398,12 +1430,13 @@ class SettingsTab(QWidget, ThemedMixin):
 
         # '소셜 인증 입력'은 컴퓨터 자동조작(Codex)·브리지 등 고급/개발자용 항목이라
         # 초보자가 겁먹지 않도록 기본 숨김 처리하고, 토글로만 펼치게 한다.
-        self.setup_advanced_toggle = QCheckBox("고급 설정 보기 (개발자용 · 평소엔 안 건드려도 됩니다)")
+        self.setup_advanced_toggle = QCheckBox("고급 설정 (평소엔 안 봐도 돼요)")
         self.setup_advanced_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_advanced_toggle.setStyleSheet(
             f"color: {c.text_muted}; spacing: 8px; border: none; background: transparent; font-size: 11px;"
         )
         self.setup_advanced_toggle.toggled.connect(setup_input_wrap.setVisible)
+        # (Linktree 수동 패널 숨김/토글 연결은 섹션 생성 직후에서 처리 — 실행 순서상 여기선 아직 없음)
         self.setup_assistant_section.content_layout.addWidget(self.setup_advanced_toggle)
 
         setup_input_wrap.setVisible(False)
@@ -2907,22 +2940,18 @@ class SettingsTab(QWidget, ThemedMixin):
         is_paid = self._is_paid_user_for_computer_use(force_refresh=False)
         allowed = (not paid_only) or is_paid
 
-        if hasattr(self, "setup_codex_launch_btn"):
-            self.setup_codex_launch_btn.setEnabled(bool(allowed))
-            self.setup_codex_launch_btn.setToolTip(
-                "" if allowed else "유료계정 전용 기능입니다. 무료계정은 수동 설정을 사용하세요."
-            )
-        if hasattr(self, "setup_codex_check_btn"):
-            self.setup_codex_check_btn.setEnabled(bool(allowed))
-            self.setup_codex_check_btn.setToolTip(
-                "" if allowed else "유료계정 전용 기능입니다. 무료계정은 수동 설정을 사용하세요."
-            )
+        tip_locked = "유료 구독자 전용이에요. 구독하시면 버튼 한 번으로 자동 설정됩니다."
+        for _name in ("setup_auto_btn", "setup_codex_launch_btn", "setup_codex_check_btn"):
+            btn = getattr(self, _name, None)
+            if btn is not None:
+                btn.setEnabled(bool(allowed))
+                btn.setToolTip("" if allowed else tip_locked)
 
-        if not allowed and paid_only:
-            self._set_codex_status_text("Computer Use: 유료계정 전용", level="warn")
-            return
-
-        self._refresh_codex_cli_status(show_dialog=False)
+        if allowed:
+            # 유료: 서버가 처리하므로 로컬 Codex 점검 안내는 띄우지 않음(혼란 방지).
+            self._set_codex_status_text("자동 설정 사용 가능 (유료)", level="info")
+        elif paid_only:
+            self._set_codex_status_text("자동 설정: 유료 구독 시 사용 가능", level="warn")
 
     def _refresh_codex_cli_status(self, show_dialog: bool = False) -> Dict[str, Any]:
         """Run Codex CLI health checks: binary, login, and computer-use MCP."""
@@ -3183,6 +3212,29 @@ class SettingsTab(QWidget, ThemedMixin):
             "Then proceed step-by-step until this setup is complete."
         )
 
+    def _run_full_auto_setup(self):
+        """'🤖 한 번에 자동 설정' — 전체 설정을 서버(브리지) Codex로 한 번에 처리."""
+        if os.name == "nt":
+            host_os = "Windows"
+        elif sys.platform == "darwin":
+            host_os = "macOS"
+        else:
+            host_os = "Linux"
+        prompt = (
+            f"You are setting up NewshoppingShorts for a non-technical Korean user on {host_os} using computer-use.\n"
+            "Set up everything needed for full automation, step by step:\n"
+            "1) Gemini API key — https://aistudio.google.com/app/apikey\n"
+            "2) YouTube channel connection (Google Cloud OAuth client_secrets.json, then connect) — "
+            "https://console.cloud.google.com/apis/credentials , https://www.youtube.com/\n"
+            "3) Linktree auto-publish — https://linktr.ee/admin\n\n"
+            "Rules:\n"
+            "1) You handle navigation, page transitions, form fill, non-sensitive clicks.\n"
+            "2) Ask the human only for login, 2FA, CAPTCHA, consent, payment.\n"
+            "3) If you obtain a key/URL/code, the app auto-reads the clipboard.\n"
+            "4) Never perform destructive or irreversible actions."
+        )
+        self._run_computer_use_prompt(prompt, "한 번에 자동 설정")
+
     def _run_computer_use_prompt(self, prompt: str, label: str) -> None:
         """Shared Computer Use runner: paid gate → bridge or local Codex CLI.
 
@@ -3194,39 +3246,45 @@ class SettingsTab(QWidget, ThemedMixin):
             show_warning(
                 self,
                 "유료 기능",
-                "Computer Use 자동 설정은 유료 사용자 전용입니다.\n"
-                "무료 사용자는 같은 카드의 수동 설정(붙여넣기) 흐름을 사용해주세요.",
+                "자동 설정은 유료 구독자 전용 기능이에요.\n"
+                "구독하시면 버튼 한 번으로 자동 설정을 사용할 수 있어요.",
             )
             return
 
+        # 유료 구독자: 서버(브리지)에 올려둔 Codex가 대신 처리한다.
+        # 사용자 설정값이 있으면 우선, 없으면 기본 서버 주소 사용 → 사용자는 아무것도 설정할 필요 없음.
         try:
             cu_settings = get_settings_manager().get_computer_use_settings()
         except Exception:
-            cu_settings = {"bridge_enabled": False, "bridge_url": "", "bridge_api_key": ""}
+            cu_settings = {}
+        bridge_url = str((cu_settings or {}).get("bridge_url", "") or "").strip() or DEFAULT_COMPUTER_USE_BRIDGE_URL
+        bridge_api_key = str((cu_settings or {}).get("bridge_api_key", "") or "").strip()
 
-        bridge_enabled = bool(cu_settings.get("bridge_enabled", False))
-        bridge_url = str(cu_settings.get("bridge_url", "") or "").strip()
-        bridge_api_key = str(cu_settings.get("bridge_api_key", "") or "").strip()
-        if bridge_enabled and bridge_url:
+        if bridge_url:
             try:
                 result = self._submit_computer_use_bridge_job(bridge_url, bridge_api_key, prompt)
             except Exception as exc:
-                show_error(self, "브리지 요청 실패", f"서버 브리지 호출 중 오류가 발생했습니다.\n{exc}")
+                show_error(self, "연결 오류", f"자동 설정 서버에 연결하지 못했어요.\n잠시 후 다시 시도해주세요.\n\n({exc})")
                 return
             if not result.get("ok"):
                 show_error(
                     self,
-                    "브리지 요청 실패",
-                    f"HTTP {result.get('status_code')} 응답입니다.\n"
-                    f"URL: {result.get('url')}\n응답: {result.get('body')}",
+                    "자동 설정 실패",
+                    "자동 설정 요청이 처리되지 않았어요. 잠시 후 다시 시도해주세요.\n"
+                    f"(코드 {result.get('status_code')})",
                 )
                 return
             body = result.get("body") or {}
             job_id = str(body.get("job_id", "") or body.get("id", "") or "").strip()
-            self._append_setup_log(f"Computer Use 브리지 작업 요청 완료({label}): {job_id or 'no-id'}")
-            show_info(self, "브리지 작업 접수", f"서버 Computer Use 작업이 접수되었습니다.\njob_id: {job_id or '-'}")
+            self._append_setup_log(f"자동 설정 요청 전송({label}): {job_id or 'no-id'}")
+            show_info(
+                self,
+                "자동 설정 시작",
+                f"{label} 자동 설정을 시작했어요.\n잠시 기다리시면 자동으로 처리됩니다.",
+            )
             return
 
+        # (브리지 주소가 비어 있는 예외적 경우에만) 로컬 Codex로 폴백
         status = self._refresh_codex_cli_status(show_dialog=False)
         if not status.get("available"):
             show_warning(self, "Codex 실행 불가", "Codex CLI 실행 파일을 찾지 못했습니다. 경로를 확인하세요.")
@@ -3273,102 +3331,12 @@ class SettingsTab(QWidget, ThemedMixin):
             show_error(self, "Codex 실행 실패", f"터미널 실행 중 오류가 발생했습니다.\n{exc}")
 
     def _launch_codex_for_current_step(self):
-        """Open a new terminal and start Codex with a step-scoped computer-use prompt."""
-        from ui.components.custom_dialog import show_info, show_warning, show_error
-
-        if not self._is_paid_user_for_computer_use(force_refresh=True):
-            show_warning(
-                self,
-                "유료 기능",
-                "Computer Use 자동화는 유료 사용자 전용입니다.\n"
-                "무료 사용자는 기존 수동 설정 흐름을 사용해주세요.",
-            )
-            return
-
-        try:
-            cu_settings = get_settings_manager().get_computer_use_settings()
-        except Exception:
-            cu_settings = {"bridge_enabled": False, "bridge_url": "", "bridge_api_key": ""}
-
+        """현재 단계를 서버(브리지)에 올린 Codex computer-use로 자동 처리한다.
+        유료 게이트·브리지 호출은 공통 러너(_run_computer_use_prompt)가 담당."""
         prompt = self._build_codex_prompt_for_current_step()
-
-        bridge_enabled = bool(cu_settings.get("bridge_enabled", False))
-        bridge_url = str(cu_settings.get("bridge_url", "") or "").strip()
-        bridge_api_key = str(cu_settings.get("bridge_api_key", "") or "").strip()
-        if bridge_enabled and bridge_url:
-            try:
-                result = self._submit_computer_use_bridge_job(bridge_url, bridge_api_key, prompt)
-            except Exception as exc:
-                show_error(self, "브리지 요청 실패", f"서버 브리지 호출 중 오류가 발생했습니다.\n{exc}")
-                return
-
-            if not result.get("ok"):
-                show_error(
-                    self,
-                    "브리지 요청 실패",
-                    f"HTTP {result.get('status_code')} 응답입니다.\n"
-                    f"URL: {result.get('url')}\n"
-                    f"응답: {result.get('body')}",
-                )
-                return
-
-            body = result.get("body") or {}
-            job_id = str(body.get("job_id", "") or body.get("id", "") or "").strip()
-            self._append_setup_log(f"Computer Use 브리지 작업 요청 완료: {job_id or 'no-id'}")
-            show_info(
-                self,
-                "브리지 작업 접수",
-                "서버 공용 Computer Use 작업이 접수되었습니다.\n"
-                f"job_id: {job_id or '-'}",
-            )
-            return
-
-        status = self._refresh_codex_cli_status(show_dialog=False)
-        if not status.get("available"):
-            show_warning(self, "Codex 실행 불가", "Codex CLI 실행 파일을 찾지 못했습니다. 경로를 확인하세요.")
-            return
-        if not status.get("login_ok"):
-            show_warning(
-                self,
-                "Codex 로그인 필요",
-                "Codex CLI가 로그인되지 않았습니다.\n터미널에서 `codex login` 후 다시 시도하세요.",
-            )
-            return
-        if not status.get("computer_use_ok"):
-            show_warning(
-                self,
-                "computer-use 미준비",
-                "Codex CLI에서 computer-use MCP가 활성화되지 않았습니다.\n`codex mcp list` 결과를 확인하세요.",
-            )
-            return
-
-        try:
-            cli_settings = get_settings_manager().get_codex_cli_settings()
-        except Exception:
-            cli_settings = {"path": "codex", "model": ""}
-
-        codex_path = str(status.get("resolved_path", "") or "").strip()
-        model_name = str(cli_settings.get("model", "") or "").strip()
-        workspace = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
-
-        args = [codex_path, "--cd", workspace]
-        if model_name:
-            args.extend(["--model", model_name])
-        args.append(prompt)
-
-        try:
-            self._launch_codex_terminal_process(args=args, workspace=workspace)
-            step_id = self._get_active_setup_step_id()
-            step_title = self.SETUP_STEP_DEFS.get(step_id, {}).get("title", "수동 설정 지원")
-            self._append_setup_log(f"Codex Computer Use 실행: {step_title}")
-            show_info(
-                self,
-                "Codex 실행 완료",
-                "새 터미널에서 Codex가 시작되었습니다.\n"
-                "로그인/2FA/CAPTCHA/API 키 발급만 직접 처리하고, 나머지는 Codex가 진행하도록 맡기세요.",
-            )
-        except Exception as exc:
-            show_error(self, "Codex 실행 실패", f"터미널 실행 중 오류가 발생했습니다.\n{exc}")
+        step_id = self._get_active_setup_step_id()
+        label = self.SETUP_STEP_DEFS.get(step_id, {}).get("title", "자동 설정")
+        self._run_computer_use_prompt(prompt, label)
 
     def _on_setup_done_clicked(self):
         """Handle '완료했어요' click for waiting-user steps."""
@@ -3634,11 +3602,16 @@ class SettingsTab(QWidget, ThemedMixin):
             logger.debug("[Settings] reload after inline Linktree save skipped: %s", exc)
 
     def _open_linktree_setup_guide(self):
-        """예전에는 단계별 설정 팝업을 띄웠으나, 이제 같은 3단계 안내가 '연결 도우미'
-        탭에 인라인으로 항상 표시된다. 따라서 팝업을 열지 않고, 해당 탭으로 전환하고
-        Linktree 패널이 보이도록 스크롤만 한다."""
+        """'연결 도우미' 탭으로 전환한다. Linktree 수동 등록 패널은 평소 숨겨져 있으므로,
+        사용자가 직접 이 경로로 들어온 경우에는 '고급 설정'을 펼쳐서 보이게 한 뒤 스크롤한다."""
         try:
             self.tab_widget.setCurrentIndex(self._tab_index.get("connect", 0))
+        except Exception:
+            pass
+        # 숨겨진 Linktree 수동 패널을 펼친다(고급 설정 토글 ON).
+        try:
+            if hasattr(self, "setup_advanced_toggle") and not self.setup_advanced_toggle.isChecked():
+                self.setup_advanced_toggle.setChecked(True)
         except Exception:
             pass
         try:
