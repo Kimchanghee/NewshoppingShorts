@@ -20,6 +20,7 @@ import re
 import time
 import secrets
 import subprocess
+import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
@@ -29,6 +30,41 @@ from utils.korean_text_processor import process_korean_script
 from caller import ui_controller
 
 logger = get_logger(__name__)
+
+
+def _run_coro_in_isolated_loop(coro):
+    """Run a coroutine even when the current thread already has a running loop."""
+    import asyncio
+
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return asyncio.run(coro)
+
+    result: Dict[str, Any] = {}
+
+    def _runner():
+        loop = asyncio.new_event_loop()
+        try:
+            asyncio.set_event_loop(loop)
+            result["value"] = loop.run_until_complete(coro)
+        except Exception as exc:  # pragma: no cover - re-raised in caller thread
+            result["error"] = exc
+        finally:
+            try:
+                loop.run_until_complete(loop.shutdown_asyncgens())
+            except Exception:
+                pass
+            asyncio.set_event_loop(None)
+            loop.close()
+
+    thread = threading.Thread(target=_runner, name="edge-tts-loop", daemon=True)
+    thread.start()
+    thread.join()
+
+    if "error" in result:
+        raise result["error"]
+    return result.get("value")
 
 # ============================================================
 # 선택적 의존성 임포트 (런타임에 없을 수 있음)
@@ -598,8 +634,6 @@ class AudioPipeline:
 
     def _generate_edge_tts_wav(self, text: str, output_path: str) -> None:
         """Generate a Korean TTS WAV file with edge-tts as a runtime fallback."""
-        import asyncio
-
         try:
             import edge_tts
         except ImportError as exc:
@@ -614,14 +648,7 @@ class AudioPipeline:
             communicate = edge_tts.Communicate(text, voice=voice)
             await communicate.save(mp3_path)
 
-        try:
-            asyncio.run(_save())
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            try:
-                loop.run_until_complete(_save())
-            finally:
-                loop.close()
+        _run_coro_in_isolated_loop(_save())
 
         if not os.path.exists(mp3_path) or os.path.getsize(mp3_path) == 0:
             raise RuntimeError("Edge TTS fallback did not create audio.")
