@@ -5,6 +5,7 @@ import json
 import os
 import re
 import sys
+import time
 from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
@@ -45,8 +46,32 @@ def now_local() -> str:
     return datetime.now().astimezone().isoformat(timespec="seconds")
 
 
+def now_datetime() -> datetime:
+    return datetime.now().astimezone()
+
+
+def parse_scheduled_datetime(raw: Any) -> Optional[datetime]:
+    text = str(raw or "").strip()
+    if not text:
+        return None
+    try:
+        value = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=now_datetime().tzinfo)
+    return value
+
+
+def is_item_due(item: Dict[str, Any], *, now: Optional[datetime] = None) -> bool:
+    scheduled_at = parse_scheduled_datetime(item.get("scheduled_at"))
+    if scheduled_at is None:
+        return True
+    return scheduled_at <= (now or now_datetime())
+
+
 def load_queue() -> Dict[str, Any]:
-    return json.loads(QUEUE_PATH.read_text(encoding="utf-8"))
+    return json.loads(QUEUE_PATH.read_text(encoding="utf-8-sig"))
 
 
 def save_queue(payload: Dict[str, Any]) -> None:
@@ -252,27 +277,41 @@ def verify_youtube(upload_item: Dict[str, Any], uploaded: Dict[str, Any]) -> Dic
         "has_purchase_url": str(upload_item["coupang_deep_link"]) in desc,
     }
 
-    comments_response = yt._youtube_service.commentThreads().list(
-        part="snippet",
-        videoId=video_id,
-        textFormat="plainText",
-        maxResults=20,
-    ).execute()
-    comments = [
-        row.get("snippet", {})
-        .get("topLevelComment", {})
-        .get("snippet", {})
-        .get("textDisplay", "")
-        for row in comments_response.get("items", [])
-    ]
-    comment_verification = {
-        "checked_comments": len(comments),
-        "has_number": any(marker in text for text in comments),
-        "has_linktree": any(DEFAULT_LINKTREE_PROFILE_URL in text for text in comments),
-        "has_disclosure": any(COUPANG_AFFILIATE_DISCLOSURE in text for text in comments),
-        "has_purchase_url": any(str(upload_item["coupang_deep_link"]) in text for text in comments),
-        "sample": comments[0] if comments else "",
-    }
+    comment_verification: Dict[str, Any] = {}
+    for attempt in range(1, 7):
+        comments_response = yt._youtube_service.commentThreads().list(
+            part="snippet",
+            videoId=video_id,
+            textFormat="plainText",
+            maxResults=20,
+        ).execute()
+        comments = [
+            row.get("snippet", {})
+            .get("topLevelComment", {})
+            .get("snippet", {})
+            .get("textDisplay", "")
+            for row in comments_response.get("items", [])
+        ]
+        comment_verification = {
+            "checked_comments": len(comments),
+            "has_number": any(marker in text for text in comments),
+            "has_linktree": any(DEFAULT_LINKTREE_PROFILE_URL in text for text in comments),
+            "has_disclosure": any(COUPANG_AFFILIATE_DISCLOSURE in text for text in comments),
+            "has_purchase_url": any(str(upload_item["coupang_deep_link"]) in text for text in comments),
+            "sample": comments[0] if comments else "",
+            "attempts": attempt,
+        }
+        if all(
+            [
+                comment_verification["has_number"],
+                comment_verification["has_linktree"],
+                comment_verification["has_disclosure"],
+                comment_verification["has_purchase_url"],
+            ]
+        ):
+            break
+        if attempt < 6:
+            time.sleep(10)
     return {
         "metadata": metadata,
         "comment": comment_verification,
@@ -446,6 +485,24 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
     if not pending:
         return {"processed": False, "reason": "no_pending_items"}
 
+    now = now_datetime()
+    due_pending = [item for item in pending if is_item_due(item, now=now)]
+    if not due_pending:
+        next_scheduled_at = min(
+            (
+                str(item.get("scheduled_at") or "")
+                for item in pending
+                if str(item.get("scheduled_at") or "").strip()
+            ),
+            default="",
+        )
+        return {
+            "processed": False,
+            "reason": "no_due_items",
+            "pending_count": len(pending),
+            "next_scheduled_at": next_scheduled_at,
+        }
+
     min_similarity = float(
         (queue_payload.get("automation_policy") or {}).get("min_similarity_score", DEFAULT_MIN_SIMILARITY)
     )
@@ -453,7 +510,7 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
         (queue_payload.get("automation_policy") or {}).get("youtube_privacy", "unlisted")
     ).strip() or "unlisted"
 
-    for item in pending:
+    for item in due_pending:
         update_item_attempt(item)
         save_queue(queue_payload)
 
@@ -586,6 +643,8 @@ def main() -> int:
     if summary.get("status") in SUCCESS_FINAL_STATUSES:
         return 0
     if summary.get("reason") == "no_pending_items":
+        return 0
+    if summary.get("reason") == "no_due_items":
         return 0
     if summary.get("reason") == "all_pending_items_skipped_low_similarity":
         return 0
