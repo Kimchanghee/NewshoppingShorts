@@ -123,8 +123,10 @@ class SourcingPanel(QWidget):
 
         # ── Input Section ──
         input_frame = QFrame()
+        input_frame.setObjectName("SourcingInputFrame")
+        input_frame.setMinimumHeight(520)
         input_frame.setStyleSheet(f"""
-            QFrame {{
+            QFrame#SourcingInputFrame {{
                 background-color: {get_color('surface')};
                 border: 1px solid {get_color('border_light')};
                 border-radius: {ds.radius.md}px;
@@ -182,6 +184,58 @@ class SourcingPanel(QWidget):
         opts_layout.addStretch()
         input_layout.addLayout(opts_layout)
 
+        timer_frame = QFrame()
+        timer_frame.setObjectName("UploadTimerFrame")
+        timer_frame.setMinimumHeight(44)
+        timer_frame.setStyleSheet(f"""
+            QFrame#UploadTimerFrame {{
+                background-color: {get_color('background')};
+                border: 1px solid {get_color('border_light')};
+                border-radius: {ds.radius.sm}px;
+            }}
+            QFrame#UploadTimerFrame QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        timer_layout = QHBoxLayout(timer_frame)
+        timer_layout.setContentsMargins(10, 8, 10, 8)
+        timer_layout.setSpacing(ds.spacing.space_2)
+
+        timer_title = QLabel("업로드 타이머")
+        timer_title.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
+        timer_title.setStyleSheet(f"color: {get_color('text_primary')};")
+        timer_layout.addWidget(timer_title)
+
+        self.upload_interval_spin = QSpinBox()
+        self.upload_interval_spin.setRange(1, 4)
+        self.upload_interval_spin.setSingleStep(1)
+        self.upload_interval_spin.setSuffix("시간")
+        self.upload_interval_spin.setValue(self._load_upload_interval_hours())
+        self.upload_interval_spin.setFixedWidth(92)
+        self.upload_interval_spin.setToolTip("각 Coupang 링크로 만든 영상의 YouTube 자동 업로드 간격입니다.")
+        self.upload_interval_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {get_color('surface')};
+                color: {get_color('text_primary')};
+                border: 1px solid {get_color('border_light')};
+                border-radius: {ds.radius.sm}px;
+                padding: 4px 6px;
+            }}
+            QSpinBox:focus {{
+                border-color: {get_color('primary')};
+            }}
+        """)
+        timer_layout.addWidget(self.upload_interval_spin)
+
+        self.upload_timer_summary = QLabel("")
+        self.upload_timer_summary.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self.upload_timer_summary.setStyleSheet(f"color: {get_color('text_muted')};")
+        self.upload_timer_summary.setWordWrap(True)
+        timer_layout.addWidget(self.upload_timer_summary, 1)
+
+        input_layout.addWidget(timer_frame)
+
         # Product match guard
         match_policy = self._load_match_policy()
         match_header = QHBoxLayout()
@@ -229,12 +283,20 @@ class SourcingPanel(QWidget):
 
         next_links_label = QLabel("다음 쿠팡 링크 목록")
         next_links_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
-        input_layout.addWidget(next_links_label)
+        next_links_header = QHBoxLayout()
+        next_links_header.addWidget(next_links_label)
+        next_links_header.addStretch()
+        self.next_links_count_label = QLabel("총 0개 · 다음 0개")
+        self.next_links_count_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
+        self.next_links_count_label.setStyleSheet(f"color: {get_color('text_secondary')};")
+        next_links_header.addWidget(self.next_links_count_label)
+        input_layout.addLayout(next_links_header)
 
         self.next_links_input = QTextEdit()
         self.next_links_input.setPlaceholderText("자동으로 넘어갈 때 쓸 링크를 한 줄에 하나씩 적어 주세요.")
         self.next_links_input.setAcceptRichText(False)
-        self.next_links_input.setMaximumHeight(72)
+        self.next_links_input.setMinimumHeight(150)
+        self.next_links_input.setMaximumHeight(220)
         self.next_links_input.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
         self._next_links_input_style = f"""
             QTextEdit {{
@@ -251,7 +313,12 @@ class SourcingPanel(QWidget):
         self.next_links_input.setStyleSheet(self._next_links_input_style)
         input_layout.addWidget(self.next_links_input)
         self._sync_next_links_enabled()
+        self._sync_upload_timer_enabled()
+        self._update_next_links_count()
 
+        self.url_input.textChanged.connect(lambda _text: self._update_next_links_count())
+        self.next_links_input.textChanged.connect(self._update_next_links_count)
+        self.upload_interval_spin.valueChanged.connect(self._on_upload_interval_changed)
         self.match_threshold_spin.valueChanged.connect(self._save_match_policy)
         self.chk_auto_skip_low_similarity.toggled.connect(self._save_match_policy)
         self.chk_auto_skip_low_similarity.toggled.connect(lambda _checked: self._sync_next_links_enabled())
@@ -321,6 +388,7 @@ class SourcingPanel(QWidget):
 
         # Refresh readiness when automation options toggle, and paint once now.
         self.chk_upload.toggled.connect(lambda _checked=False: self._refresh_readiness())
+        self.chk_upload.toggled.connect(lambda _checked=False: self._sync_upload_timer_enabled())
         self.chk_linktree.toggled.connect(lambda _checked=False: self._refresh_readiness())
         self._refresh_readiness()
 
@@ -442,6 +510,86 @@ class SourcingPanel(QWidget):
             return max(0.0, min(1.0, self.match_threshold_spin.value() / 100.0))
         return float(self._load_match_policy().get("min_similarity_score", 0.9))
 
+    def _load_upload_interval_hours(self) -> int:
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            minutes = int(get_settings_manager().get_youtube_upload_interval())
+        except Exception as exc:
+            logger.warning("[SourcingPanel] Failed to load upload interval: %s", exc)
+            minutes = 240
+        return max(1, min(4, int(round(minutes / 60)) or 1))
+
+    def _on_upload_interval_changed(self, hours: int):
+        interval_minutes = max(1, min(4, int(hours))) * 60
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            get_settings_manager().set_youtube_upload_interval(interval_minutes)
+        except Exception as exc:
+            logger.warning("[SourcingPanel] Failed to save upload interval: %s", exc)
+
+        yt_manager = getattr(self.gui, "youtube_manager", None)
+        if yt_manager and hasattr(yt_manager, "set_upload_interval"):
+            try:
+                yt_manager.set_upload_interval(interval_minutes)
+            except Exception as exc:
+                logger.warning("[SourcingPanel] YouTube interval sync failed: %s", exc)
+
+        if hasattr(self.gui, "state"):
+            try:
+                self.gui.state.youtube_upload_interval_minutes = interval_minutes
+            except Exception:
+                pass
+        self._update_upload_timer_summary()
+
+    def _sync_upload_timer_enabled(self):
+        enabled = bool(
+            hasattr(self, "chk_upload")
+            and self.chk_upload.isChecked()
+        )
+        if hasattr(self, "upload_interval_spin"):
+            self.upload_interval_spin.setEnabled(enabled)
+        if hasattr(self, "upload_timer_summary"):
+            self.upload_timer_summary.setEnabled(enabled)
+        self._update_upload_timer_summary()
+
+    def _current_coupang_link_count(self) -> int:
+        if not hasattr(self, "url_input"):
+            return 0
+        return 1 if "coupang.com" in self.url_input.text().strip() else 0
+
+    def _update_next_links_count(self):
+        next_count = len(self._extract_next_links())
+        total_count = self._current_coupang_link_count() + next_count
+        if hasattr(self, "next_links_count_label"):
+            self.next_links_count_label.setText(f"총 {total_count}개 · 다음 {next_count}개")
+        self._update_upload_timer_summary()
+
+    def _update_upload_timer_summary(self):
+        if not hasattr(self, "upload_timer_summary"):
+            return
+        hours = (
+            self.upload_interval_spin.value()
+            if hasattr(self, "upload_interval_spin")
+            else self._load_upload_interval_hours()
+        )
+        next_count = len(self._extract_next_links())
+        total_count = self._current_coupang_link_count() + next_count
+        if not (hasattr(self, "chk_upload") and self.chk_upload.isChecked()):
+            self.upload_timer_summary.setText("YouTube 자동 업로드를 켜면 링크마다 타이머가 적용됩니다.")
+            return
+        if total_count <= 0:
+            self.upload_timer_summary.setText(f"링크를 넣으면 각 업로드가 {hours}시간 간격으로 예약됩니다.")
+            return
+        if total_count == 1:
+            self.upload_timer_summary.setText(f"현재 링크 1개 · 업로드 간격 {hours}시간")
+            return
+        last_after_hours = (total_count - 1) * hours
+        self.upload_timer_summary.setText(
+            f"링크마다 {hours}시간 간격 · 총 {total_count}개면 마지막 업로드까지 약 {last_after_hours}시간"
+        )
+
     def _sync_next_links_enabled(self):
         enabled = bool(
             hasattr(self, "chk_auto_skip_low_similarity")
@@ -451,6 +599,7 @@ class SourcingPanel(QWidget):
             self.next_links_input.setEnabled(enabled)
             if hasattr(self, "_next_links_input_style"):
                 self.next_links_input.setStyleSheet(self._next_links_input_style)
+        self._update_next_links_count()
 
     def _extract_next_links(self) -> List[str]:
         if not hasattr(self, "next_links_input"):
@@ -473,6 +622,7 @@ class SourcingPanel(QWidget):
             self.next_links_input.blockSignals(True)
             self.next_links_input.setPlainText("\n".join(remaining))
             self.next_links_input.blockSignals(False)
+        self._update_next_links_count()
         return next_url
 
     @staticmethod

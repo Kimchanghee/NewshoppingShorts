@@ -21,7 +21,8 @@ from __future__ import annotations
 from typing import Callable, List, Optional, Tuple
 
 from PyQt6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton, QWidget
+    QFrame, QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QPushButton,
+    QSizePolicy, QWidget,
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -52,7 +53,7 @@ class AutomationReadinessCard(QFrame):
         self._on_navigate = on_navigate
         self.ds = get_design_system()
         self._rows_container: Optional[QWidget] = None
-        self._rows_layout: Optional[QVBoxLayout] = None
+        self._rows_layout: Optional[QGridLayout] = None
         self._summary_label: Optional[QLabel] = None
         self._setup_ui()
         # 최초 1회는 두 옵션 모두 필요한 것으로 가정해 그린다.
@@ -109,9 +110,12 @@ class AutomationReadinessCard(QFrame):
         # 항목 행 컨테이너 (refresh 때마다 재생성)
         self._rows_container = QWidget()
         self._rows_container.setStyleSheet("background: transparent; border: none;")
-        self._rows_layout = QVBoxLayout(self._rows_container)
+        self._rows_layout = QGridLayout(self._rows_container)
         self._rows_layout.setContentsMargins(0, 2, 0, 0)
-        self._rows_layout.setSpacing(6)
+        self._rows_layout.setHorizontalSpacing(8)
+        self._rows_layout.setVerticalSpacing(8)
+        for column in range(4):
+            self._rows_layout.setColumnStretch(column, 1)
         layout.addWidget(self._rows_container)
 
     # ------------------------------------------------------------- refresh
@@ -196,10 +200,14 @@ class AutomationReadinessCard(QFrame):
         ))
 
         required_missing = 0
-        for key, title, status, detail, target in rows:
+        for index, (key, title, status, detail, target) in enumerate(rows):
             if status == STATUS_MISSING:
                 required_missing += 1
-            self._rows_layout.addWidget(self._build_row(title, status, detail, target))
+            self._rows_layout.addWidget(
+                self._build_row(title, status, detail, target),
+                0,
+                index,
+            )
 
         self._update_summary(required_missing)
 
@@ -216,15 +224,21 @@ class AutomationReadinessCard(QFrame):
     def _build_row(self, title: str, status: str, detail: str, target: Optional[str]) -> QWidget:
         ds = self.ds
         row = QFrame()
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        row.setMinimumHeight(116)
         row.setStyleSheet(
             f"QFrame {{ background-color: {get_color('surface_variant')}; "
             f"border: 1px solid {get_color('border_light')}; "
             f"border-radius: {ds.radius.sm}px; }} "
             f"QFrame QLabel {{ background: transparent; border: none; }}"
         )
-        row_layout = QHBoxLayout(row)
+        row_layout = QVBoxLayout(row)
         row_layout.setContentsMargins(10, 8, 10, 8)
-        row_layout.setSpacing(10)
+        row_layout.setSpacing(6)
+
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.setSpacing(6)
 
         icon_char, icon_color = self._status_icon(status)
         icon = QLabel(icon_char)
@@ -232,25 +246,25 @@ class AutomationReadinessCard(QFrame):
         icon.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter)
         icon.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
         icon.setStyleSheet(f"color: {icon_color};")
-        row_layout.addWidget(icon)
-
-        text_wrap = QVBoxLayout()
-        text_wrap.setContentsMargins(0, 0, 0, 0)
-        text_wrap.setSpacing(1)
+        header.addWidget(icon)
 
         title_label = QLabel(title)
-        title_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm, QFont.Weight.Bold))
+        title_label.setWordWrap(True)
+        title_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
         title_label.setStyleSheet(f"color: {get_color('text_primary')};")
-        text_wrap.addWidget(title_label)
+        header.addWidget(title_label, 1)
+        row_layout.addLayout(header)
 
         detail_label = QLabel(detail)
         detail_label.setWordWrap(True)
+        detail_label.setMinimumHeight(34)
         detail_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        detail_label.setStyleSheet(f"color: {self._detail_color(status)}; padding-bottom: 3px;")
-        text_wrap.addWidget(detail_label)
+        detail_label.setStyleSheet(f"color: {self._detail_color(status)};")
+        row_layout.addWidget(detail_label, 1)
 
-        row_layout.addLayout(text_wrap, 1)
-
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.addStretch()
         if target and status in (STATUS_MISSING, STATUS_OPTIONAL, STATUS_SKIPPED):
             action_btn = QPushButton("설정하기")
             action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -263,7 +277,7 @@ class AutomationReadinessCard(QFrame):
                         color: {get_color('text_on_primary')};
                         border: none;
                         border-radius: {ds.radius.sm}px;
-                        padding: 4px 14px;
+                        padding: 4px 12px;
                         font-weight: 700;
                         font-size: 12px;
                     }}
@@ -276,19 +290,20 @@ class AutomationReadinessCard(QFrame):
                         color: {get_color('text_secondary')};
                         border: 1px solid {get_color('border_light')};
                         border-radius: {ds.radius.sm}px;
-                        padding: 4px 14px;
+                        padding: 4px 12px;
                         font-weight: 600;
                         font-size: 12px;
                     }}
                     QPushButton:hover {{ background-color: {get_color('surface')}; color: {get_color('text_primary')}; }}
                 """)
             action_btn.clicked.connect(lambda _checked=False, t=target: self._navigate(t))
-            row_layout.addWidget(action_btn, 0, Qt.AlignmentFlag.AlignVCenter)
+            footer.addWidget(action_btn)
         else:
             done = QLabel("확인됨")
             done.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
             done.setStyleSheet(f"color: {get_color('success')};")
-            row_layout.addWidget(done, 0, Qt.AlignmentFlag.AlignVCenter)
+            footer.addWidget(done)
+        row_layout.addLayout(footer)
 
         return row
 
