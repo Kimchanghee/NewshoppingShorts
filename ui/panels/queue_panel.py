@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
     QTreeWidget, QTreeWidgetItem, QHeaderView
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from ui.components.rounded_widgets import create_rounded_button
 from ui.components.base_widget import ThemedMixin
 
@@ -16,6 +16,7 @@ class QueuePanel(QFrame, ThemedMixin):
         self.__init_themed__(theme_manager)
         self.create_widgets()
         self.apply_theme()
+        self._start_auto_refresh()
 
     def create_widgets(self):
         self.main_layout = QVBoxLayout(self)
@@ -29,6 +30,28 @@ class QueuePanel(QFrame, ThemedMixin):
         self.subtitle_label = QLabel("대기 | 완료 | 실패 건수를 자동으로 추적합니다.")
         self.subtitle_label.setStyleSheet("font-size: 11px;")
         self.main_layout.addWidget(self.subtitle_label)
+
+        self.title_label.setText("제작 대기열")
+        self.subtitle_label.setText("풀자동화 예약, YouTube 연결, 다음 업로드 시간을 실제 큐 기준으로 표시합니다.")
+
+        status_layout = QHBoxLayout()
+        status_layout.setSpacing(8)
+        self.gui.summer_status_interval = QLabel("자동 업로드\n확인 중")
+        self.gui.summer_status_youtube = QLabel("YouTube\n확인 중")
+        self.gui.summer_status_queue = QLabel("작업 큐\n확인 중")
+        self.gui.summer_status_next = QLabel("다음 업로드\n확인 중")
+        self._status_chips = [
+            self.gui.summer_status_interval,
+            self.gui.summer_status_youtube,
+            self.gui.summer_status_queue,
+            self.gui.summer_status_next,
+        ]
+        for label in self._status_chips:
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            label.setWordWrap(True)
+            label.setMinimumHeight(54)
+            status_layout.addWidget(label, 1)
+        self.main_layout.addLayout(status_layout)
         
         # Control Buttons
         control_layout = QHBoxLayout()
@@ -92,6 +115,30 @@ class QueuePanel(QFrame, ThemedMixin):
         
         self.main_layout.addLayout(count_layout)
 
+    def _start_auto_refresh(self):
+        self._refresh_timer = QTimer(self)
+        self._refresh_timer.setInterval(30000)
+        self._refresh_timer.timeout.connect(self._refresh_queue_view)
+        self._refresh_timer.start()
+        QTimer.singleShot(0, self._refresh_queue_view)
+
+    def _refresh_queue_view(self):
+        updater = getattr(self.gui, "update_url_listbox", None)
+        if callable(updater):
+            try:
+                updater()
+                return
+            except Exception:
+                pass
+
+        manager = getattr(self.gui, "queue_manager", None)
+        update = getattr(manager, "update_url_listbox", None)
+        if callable(update):
+            try:
+                update()
+            except Exception:
+                pass
+
     def apply_theme(self):
         bg = self.get_color("bg_card")
         border = self.get_color("border_light")
@@ -101,6 +148,17 @@ class QueuePanel(QFrame, ThemedMixin):
         self.setStyleSheet(f"background-color: {bg}; border: 1px solid {border}; border-radius: 8px;")
         self.title_label.setStyleSheet(f"color: {text_primary}; font-weight: bold; border: none;")
         self.subtitle_label.setStyleSheet(f"color: {text_secondary}; border: none;")
+        chip_style = (
+            f"background-color: {self.get_color('bg_input')};"
+            f"color: {text_primary};"
+            f"border: 1px solid {border};"
+            "border-radius: 6px;"
+            "padding: 7px 8px;"
+            "font-size: 12px;"
+            "font-weight: 600;"
+        )
+        for label in getattr(self, "_status_chips", []):
+            label.setStyleSheet(chip_style)
         
         self.gui.url_listbox.setStyleSheet(f"""
             QTreeWidget {{

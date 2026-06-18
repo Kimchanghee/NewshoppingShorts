@@ -45,6 +45,18 @@ if TYPE_CHECKING:
     from main import VideoAnalyzerGUI
 
 
+class CurrentPageStack(QStackedWidget):
+    """QStackedWidget that sizes from the visible page, not hidden pages."""
+
+    def sizeHint(self):
+        current = self.currentWidget()
+        return current.sizeHint() if current is not None else super().sizeHint()
+
+    def minimumSizeHint(self):
+        current = self.currentWidget()
+        return current.minimumSizeHint() if current is not None else super().minimumSizeHint()
+
+
 class UIInitializer:
     """Handles UI construction for VideoAnalyzerGUI."""
 
@@ -127,8 +139,8 @@ class UIInitializer:
 
         # 3. Log Panel (ProgressPanel) - Bottom left, takes remaining space
         progress_panel = ProgressPanel(gui, gui, theme_manager=self.theme_manager)
-        progress_panel.setMinimumHeight(360)
-        progress_panel.setMaximumHeight(600)
+        progress_panel.setMinimumHeight(140)
+        progress_panel.setMaximumHeight(300)
         progress_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         left_layout.addWidget(progress_panel, stretch=1)
 
@@ -157,12 +169,12 @@ class UIInitializer:
         content_layout.setSpacing(0)
 
         # Stacked Pages
-        stack = QStackedWidget()
+        stack = CurrentPageStack()
 
         # Add padding around the stack for better visual balance
         stack_wrapper = QWidget()
         stack_layout = QVBoxLayout(stack_wrapper)
-        stack_layout.setContentsMargins(20, 16, 20, 16)
+        stack_layout.setContentsMargins(14, 10, 14, 10)
         stack_layout.addWidget(stack)
 
         content_layout.addWidget(stack_wrapper)
@@ -275,8 +287,8 @@ class UIInitializer:
         """)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(32, 32, 32, 32)
-        card_layout.setSpacing(d.spacing.section)
+        card_layout.setContentsMargins(20, 20, 20, 20)
+        card_layout.setSpacing(12)
 
         header_layout = QVBoxLayout()
         header_layout.setSpacing(d.spacing.space_2)

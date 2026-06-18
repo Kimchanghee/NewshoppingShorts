@@ -13,6 +13,7 @@ from uuid import uuid4
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
 from managers.settings_manager import get_settings_manager
+from managers.summer_coupang_queue_status import build_summer_coupang_queue_snapshot
 from ui.components.custom_dialog import show_info, show_question, show_warning
 from utils.logging_config import get_logger
 
@@ -31,6 +32,7 @@ class QueueManager:
 
     def __init__(self, gui):
         self.gui = gui
+        self._last_summer_coupang_snapshot = None
         self._ensure_mix_store()
 
     # ----------------------- mix helpers -----------------------
@@ -491,6 +493,20 @@ class QueueManager:
             )
             tree.addTopLevelItem(item)
 
+        summer_snapshot = build_summer_coupang_queue_snapshot()
+        self._last_summer_coupang_snapshot = summer_snapshot
+        for row in summer_snapshot.get("rows", []):
+            item = QTreeWidgetItem(
+                [
+                    str(row.get("order", "")),
+                    str(row.get("url", "")),
+                    str(row.get("status", "")),
+                    str(row.get("upload", "")),
+                    str(row.get("remarks", "")),
+                ]
+            )
+            tree.addTopLevelItem(item)
+
         keep = set(self.gui.url_queue).union(self.gui.url_status.keys())
         self._prune_mix_jobs(keep)
         self.update_queue_count()
@@ -509,6 +525,19 @@ class QueueManager:
             if status in counts:
                 counts[status] += 1
 
+        summer_snapshot = getattr(self, "_last_summer_coupang_snapshot", None)
+        if summer_snapshot is None:
+            summer_snapshot = build_summer_coupang_queue_snapshot()
+            self._last_summer_coupang_snapshot = summer_snapshot
+
+        summer_counts = summer_snapshot.get("counts", {}) if isinstance(summer_snapshot, dict) else {}
+        counts["processing"] += int(summer_counts.get("processing", 0) or 0)
+        counts["waiting"] += int(summer_counts.get("waiting", 0) or 0)
+        counts["completed"] += int(summer_counts.get("completed", 0) or 0)
+        counts["skipped"] += int(summer_counts.get("skipped", 0) or 0)
+        counts["failed"] += int(summer_counts.get("failed", 0) or 0)
+        self._update_summer_coupang_status_labels(summer_snapshot)
+
         count_labels = [
             ("count_processing", f"진행 {counts['processing']}"),
             ("count_waiting", f"대기 {counts['waiting']}"),
@@ -521,12 +550,57 @@ class QueueManager:
             if label is not None:
                 label.setText(text)
 
-        total = len(url_status)
+        total = sum(counts.values())
         completed = counts["completed"]
         overall_label = getattr(self.gui, "overall_numeric_label", None)
         if overall_label is not None:
             percent = (completed / total * 100) if total else 0
             overall_label.setText(f"{completed}/{total} ({percent:.0f}%)")
+
+        witty_label = getattr(self.gui, "overall_witty_label", None)
+        if witty_label is not None and isinstance(summer_snapshot, dict) and summer_snapshot.get("total"):
+            next_time = summer_snapshot.get("next_scheduled_display") or "-"
+            interval = int(summer_snapshot.get("interval_minutes") or 0)
+            interval_text = f"{interval // 60}시간" if interval and interval % 60 == 0 else f"{interval}분"
+            witty_label.setText(f"풀자동화 {completed}/{total} 처리 / {interval_text} 간격 / 다음 {next_time}")
+
+    def _update_summer_coupang_status_labels(self, snapshot):
+        if not self.gui or not isinstance(snapshot, dict):
+            return
+
+        counts = snapshot.get("counts", {}) if isinstance(snapshot.get("counts"), dict) else {}
+        total = int(snapshot.get("total") or 0)
+        completed = int(counts.get("completed", 0) or 0)
+        waiting = int(counts.get("waiting", 0) or 0)
+        next_time = snapshot.get("next_scheduled_display") or "-"
+        next_number = snapshot.get("next_planned_number") or ""
+        interval = int(snapshot.get("interval_minutes") or 0)
+        if interval and interval % 60 == 0:
+            interval_text = f"{interval // 60}시간 간격"
+        elif interval:
+            interval_text = f"{interval}분 간격"
+        else:
+            interval_text = "확인 중"
+
+        labels = {
+            "summer_status_interval": f"자동 업로드\n{interval_text}",
+            "summer_status_queue": f"작업 큐\n{completed}/{total} 완료, {waiting} 대기",
+            "summer_status_next": f"다음 업로드\n{next_number} {next_time}".strip(),
+        }
+
+        try:
+            settings = get_settings_manager()
+            yt_connected = bool(settings.get_youtube_connected())
+            channel = (settings.get_youtube_channel_info() or {}).get("channel_name") or ""
+            youtube_text = f"YouTube\n연결됨 {channel}".strip() if yt_connected else "YouTube\n연결 필요"
+            labels["summer_status_youtube"] = youtube_text
+        except Exception:
+            labels["summer_status_youtube"] = "YouTube\n확인 실패"
+
+        for attr, text in labels.items():
+            label = getattr(self.gui, attr, None)
+            if label is not None:
+                label.setText(text)
 
     def update_queue_status(self, url: str, status: str, message: str = ""):
         normalized_status = self._normalize_status(status)

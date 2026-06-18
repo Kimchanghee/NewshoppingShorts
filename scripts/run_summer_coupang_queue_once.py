@@ -642,6 +642,8 @@ def main() -> int:
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
     if summary.get("status") in SUCCESS_FINAL_STATUSES:
         return 0
+    if summary.get("status") in SKIP_STATUSES:
+        return 0
     if summary.get("reason") == "no_pending_items":
         return 0
     if summary.get("reason") == "no_due_items":

@@ -78,3 +78,31 @@ def test_process_pending_items_skips_items_scheduled_for_later(monkeypatch):
     assert result["next_scheduled_at"] == "2026-06-18T20:26:26+09:00"
     assert payload["items"][0]["status"] == "pending"
     assert payload["items"][0]["attempts"] == 0
+
+
+def test_main_returns_success_for_policy_skip(monkeypatch, capsys):
+    payload = {
+        "items": [
+            {"planned_number": "[032]", "status": "pending", "attempts": 0, "result": {}},
+        ]
+    }
+
+    async def policy_skip(_payload):
+        return {
+            "processed": True,
+            "status": "skipped_low_similarity",
+            "planned_number": "[032]",
+            "reason": "no safe matching video found",
+        }
+
+    monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
+    monkeypatch.setattr(
+        queue_runner,
+        "youtube_upload_ready",
+        lambda: {"ok": True},
+    )
+    monkeypatch.setattr(queue_runner, "process_pending_items", policy_skip)
+
+    assert queue_runner.main() == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == "skipped_low_similarity"

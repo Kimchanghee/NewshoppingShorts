@@ -782,8 +782,79 @@ class SettingsManager:
     def _normalize_account_email(email: str) -> str:
         return str(email or "").strip().lower()
 
+    def _sync_youtube_connection_from_disk(self) -> None:
+        """Refresh UI YouTube state from the token/channel files used by uploads."""
+        if self.settings_file != "ui_preferences.json":
+            return
+
+        try:
+            settings_dir = self._get_settings_dir()
+            token_path = os.path.join(settings_dir, "youtube_token.json")
+            token_exists = os.path.exists(token_path) and os.path.getsize(token_path) > 0
+
+            channel: Dict[str, Any] = {}
+            upload_settings: Dict[str, Any] = {}
+            youtube_settings_path = os.path.join(settings_dir, "youtube_settings.json")
+            if os.path.exists(youtube_settings_path):
+                with open(youtube_settings_path, "r", encoding="utf-8-sig") as f:
+                    payload = json.load(f)
+                if isinstance(payload, dict):
+                    raw_channel = payload.get("channel")
+                    raw_upload = payload.get("upload_settings")
+                    if isinstance(raw_channel, dict):
+                        channel = raw_channel
+                    if isinstance(raw_upload, dict):
+                        upload_settings = raw_upload
+
+            with self._lock:
+                current_channel_id = str(self._settings.get("youtube_channel_id", "") or "").strip()
+                current_channel_name = str(self._settings.get("youtube_channel_name", "") or "").strip()
+                current_email = self._normalize_account_email(
+                    self._settings.get("youtube_account_email", "")
+                )
+
+            channel_id = str(channel.get("channel_id") or current_channel_id).strip()
+            channel_name = str(channel.get("channel_name") or current_channel_name).strip()
+            account_email = self._normalize_account_email(
+                channel.get("account_email") or current_email
+            )
+            connected = bool(token_exists and channel_id)
+
+            changed = False
+            with self._lock:
+                if connected:
+                    updates = {
+                        "youtube_connected": True,
+                        "youtube_channel_id": channel_id,
+                        "youtube_channel_name": channel_name,
+                        "youtube_account_email": account_email,
+                    }
+                    if account_email and not self._settings.get("youtube_expected_account_email"):
+                        updates["youtube_expected_account_email"] = account_email
+                    if "enabled" in upload_settings:
+                        updates["youtube_auto_upload"] = bool(upload_settings.get("enabled"))
+                    interval = upload_settings.get("interval_minutes")
+                    if interval:
+                        try:
+                            updates["youtube_upload_interval"] = int(interval)
+                        except (TypeError, ValueError):
+                            pass
+                    for key, value in updates.items():
+                        if self._settings.get(key) != value:
+                            self._settings[key] = value
+                            changed = True
+                elif self._settings.get("youtube_connected") and not token_exists:
+                    self._settings["youtube_connected"] = False
+                    changed = True
+
+            if changed:
+                self._save_settings(sync_remote=False)
+        except Exception as exc:
+            logger.debug("[SettingsManager] YouTube disk sync skipped: %s", exc)
+
     def get_youtube_connected(self) -> bool:
         """Get YouTube connection status"""
+        self._sync_youtube_connection_from_disk()
         return self._settings.get("youtube_connected", False)
 
     def set_youtube_connected(
@@ -806,6 +877,7 @@ class SettingsManager:
 
     def get_youtube_channel_info(self) -> Dict[str, str]:
         """Get YouTube channel info"""
+        self._sync_youtube_connection_from_disk()
         return {
             "channel_id": self._settings.get("youtube_channel_id", ""),
             "channel_name": self._settings.get("youtube_channel_name", ""),
@@ -815,6 +887,7 @@ class SettingsManager:
 
     def get_youtube_account_email(self) -> str:
         """Get the verified Google account email used by YouTube OAuth."""
+        self._sync_youtube_connection_from_disk()
         return self._normalize_account_email(self._settings.get("youtube_account_email", ""))
 
     def set_youtube_account_email(self, email: str) -> bool:
@@ -862,6 +935,7 @@ class SettingsManager:
 
     def get_youtube_auto_upload(self) -> bool:
         """Get YouTube auto-upload enabled status"""
+        self._sync_youtube_connection_from_disk()
         return self._settings.get("youtube_auto_upload", False)
 
     def set_youtube_auto_upload(self, enabled: bool) -> bool:
@@ -872,6 +946,7 @@ class SettingsManager:
 
     def get_youtube_upload_interval(self) -> int:
         """Get YouTube upload interval in minutes"""
+        self._sync_youtube_connection_from_disk()
         return self._settings.get("youtube_upload_interval", 60)
 
     def set_youtube_upload_interval(self, interval_minutes: int) -> bool:

@@ -36,7 +36,7 @@ class StepButton(QPushButton):
         self.step_id = step_id
         self.setCheckable(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(48)  # STITCH: 48px 유지
+        self.setFixedHeight(34)
 
         # Design System
         self.ds = get_design_system()
@@ -44,10 +44,10 @@ class StepButton(QPushButton):
         # Layout - STITCH: 간격 최적화
         layout = QHBoxLayout(self)
         layout.setContentsMargins(
-            self.ds.spacing.space_4,  # 16px (STITCH 디자인)
-            self.ds.spacing.space_3,  # 12px
             self.ds.spacing.space_4,  # 16px
-            self.ds.spacing.space_3   # 12px
+            self.ds.spacing.space_2,  # 8px
+            self.ds.spacing.space_4,  # 16px
+            self.ds.spacing.space_2   # 8px
         )
         layout.setSpacing(self.ds.spacing.space_3)  # 12px 간격
 
