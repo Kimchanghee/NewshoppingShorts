@@ -114,6 +114,45 @@ def test_similarity_gate_ignores_coupang_image_fallback_as_match():
     assert pipeline.match_status == "not_found"
 
 
+def test_scraped_product_info_uses_queue_fallback_for_null_name_and_generic_image():
+    pipeline = SourcingPipeline(
+        coupang_url="https://www.coupang.com/vp/products/12345",
+        output_dir=".",
+        fallback_product_name="KINSCOTER ???? neck fan",
+        fallback_category="neck_fan",
+    )
+    pipeline.product_info = {
+        "name": "null -",
+        "image": "https://image10.coupangcdn.com/image/mobile/v3/img_fb_like.png",
+        "url": "https://www.coupang.com/vp/products/12345",
+    }
+
+    pipeline._repair_scraped_product_info()
+
+    assert pipeline.product_info["name"] == "KINSCOTER neck fan"
+    assert pipeline.product_info["name_source"] == "queue_fallback"
+    assert pipeline.product_info["image"] == ""
+    assert pipeline.product_info["image_source"] == "discarded_generic_coupang_image"
+
+
+def test_scraped_product_info_falls_back_to_category_when_queue_name_is_mojibake():
+    pipeline = SourcingPipeline(
+        coupang_url="https://www.coupang.com/vp/products/12345",
+        output_dir=".",
+        fallback_product_name="???? ???",
+        fallback_category="desk_camping_fan",
+    )
+    pipeline.product_info = {
+        "name": "null -",
+        "image": "",
+        "url": "https://www.coupang.com/vp/products/12345",
+    }
+
+    pipeline._repair_scraped_product_info()
+
+    assert pipeline.product_info["name"] == "desk camping fan"
+
+
 def test_cached_marketplace_video_reuses_nested_safe_report(tmp_path, monkeypatch):
     cache_root = tmp_path / "cache"
     report_dir = cache_root / "old_run" / "01"

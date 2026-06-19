@@ -526,7 +526,11 @@ class LogCapture:
                 self.original_stdout.flush()  # 즉시 출력
             except (UnicodeEncodeError, UnicodeDecodeError):
                 # 인코딩 오류 시 대체 문자로 출력
-                safe_text = text.encode("utf-8", errors="replace").decode("utf-8")
+                encoding = getattr(self.original_stdout, "encoding", None) or "utf-8"
+                safe_text = text.encode(encoding, errors="replace").decode(
+                    encoding,
+                    errors="replace",
+                )
                 self.original_stdout.write(safe_text)
                 self.original_stdout.flush()
             except Exception:

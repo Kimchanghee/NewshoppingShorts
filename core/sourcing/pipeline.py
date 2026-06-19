@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -72,6 +73,8 @@ class SourcingPipeline:
         gemini_client: Optional[Any] = None,
         min_similarity_score: Optional[float] = None,
         enforce_min_similarity: bool = True,
+        fallback_product_name: str = "",
+        fallback_category: str = "",
     ):
         """
         Args:
@@ -91,6 +94,8 @@ class SourcingPipeline:
             min_similarity_score = self._load_default_min_similarity_score()
         self.min_similarity_score = self._normalize_similarity_score(min_similarity_score)
         self.enforce_min_similarity = bool(enforce_min_similarity)
+        self.fallback_product_name = str(fallback_product_name or "").strip()
+        self.fallback_category = str(fallback_category or "").strip()
 
         # Results populated during run
         self.product_info: Optional[Dict] = None
@@ -102,6 +107,39 @@ class SourcingPipeline:
         self.best_similarity_score: Optional[float] = None
         self.match_status: str = "not_checked"
         self.match_error: Optional[str] = None
+
+    @staticmethod
+    def _is_bad_scraped_product_name(name: Any) -> bool:
+        text = str(name or "").strip()
+        normalized = re.sub(r"[\s_-]+", " ", text).strip().lower()
+        return not normalized or normalized in {"null", "null empty"} or normalized.startswith("null ")
+
+    @staticmethod
+    def _is_bad_scraped_product_image(image_url: Any) -> bool:
+        text = str(image_url or "").strip().lower()
+        return "img_fb_like" in text or text.endswith("/img_fb_like.png")
+
+    @staticmethod
+    def _clean_fallback_text(text: str) -> str:
+        return re.sub(r"\s+", " ", str(text or "").replace("?", " ")).strip()
+
+    def _fallback_product_label(self) -> str:
+        name = self._clean_fallback_text(self.fallback_product_name)
+        category = self._clean_fallback_text(self.fallback_category.replace("_", " "))
+        if category and category.lower() not in name.lower():
+            return " ".join(part for part in (name, category) if part).strip()
+        return name or category
+
+    def _repair_scraped_product_info(self) -> None:
+        if not self.product_info:
+            return
+        fallback_name = self._fallback_product_label()
+        if fallback_name and self._is_bad_scraped_product_name(self.product_info.get("name")):
+            self.product_info["name"] = fallback_name
+            self.product_info["name_source"] = "queue_fallback"
+        if self._is_bad_scraped_product_image(self.product_info.get("image")):
+            self.product_info["image"] = ""
+            self.product_info["image_source"] = "discarded_generic_coupang_image"
 
     @staticmethod
     def _normalize_similarity_score(value: Any) -> float:
@@ -424,6 +462,7 @@ class SourcingPipeline:
             # ── Step 1: Product analysis ──
             self._progress("product_analysis", "쿠팡 상품 페이지 접속 중...", 0.0)
             self.product_info = await scrape_product(browser, self.coupang_url)
+            self._repair_scraped_product_info()
             if not self.product_info or not self.product_info.get("name"):
                 self.error = "쿠팡 상품 정보를 추출할 수 없습니다."
                 self._progress("product_analysis", self.error, 0.0)
@@ -1417,7 +1456,7 @@ class SourcingPipeline:
             image = Image.open(BytesIO(response.content)).convert("RGB")
 
             width, height = 720, 1280
-            fps, duration = 24, 8
+            fps, duration = 24, 12
             frame_count = fps * duration
 
             bg = ImageOps.fit(image, (width, height), method=Image.Resampling.LANCZOS)

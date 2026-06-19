@@ -32,6 +32,7 @@ from scripts import render_program_pipeline_upload as renderer
 
 QUEUE_PATH = Path(r"C:\Users\HOME\.ssmaker\summer_coupang_autosourcing_queue_20260603.json")
 DEFAULT_MIN_SIMILARITY = 0.9
+DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN = 2
 AUTOMATION_LABEL = "summer_coupang_queue"
 SUCCESS_FINAL_STATUSES = {
     "completed",
@@ -117,18 +118,45 @@ def write_json(path: Path, payload: Dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
 
 
-def select_safe_marketplace_item(report: Dict[str, Any], min_similarity: float) -> Optional[Dict[str, Any]]:
-    if report.get("match_status") != "matched":
-        return None
+def _item_similarity(item: Dict[str, Any]) -> Optional[float]:
+    raw = (item.get("product") or {}).get("score")
+    if raw is None:
+        raw = item.get("similarity")
     try:
-        best = float(report.get("best_similarity") or 0)
+        return float(raw)
     except (TypeError, ValueError):
         return None
-    if best < min_similarity:
-        return None
-    for item in report.get("sourced_products") or []:
-        if item.get("auto_publish_safe") and item.get("video_file"):
-            return item
+
+
+def _is_publishable_coupang_image_fallback(item: Dict[str, Any], min_similarity: float) -> bool:
+    source = str(item.get("source") or (item.get("product") or {}).get("source") or "").lower()
+    if source != "coupang_image":
+        return False
+    if not item.get("video_file"):
+        return False
+    similarity = _item_similarity(item)
+    if similarity is not None and similarity < min_similarity:
+        return False
+    return str(item.get("fallback_reason") or "").lower() == "no_marketplace_video"
+
+
+def select_safe_marketplace_item(report: Dict[str, Any], min_similarity: float) -> Optional[Dict[str, Any]]:
+    sourced_items = report.get("sourced_products") or []
+    if report.get("match_status") == "matched":
+        for item in sourced_items:
+            if item.get("auto_publish_safe") and item.get("video_file"):
+                return item
+
+    # If strict marketplace search fails, the pipeline may still produce a
+    # video from the exact Coupang product image. Use it as the final fallback
+    # instead of draining the scheduled queue with repeated "not found" skips.
+    for item in sourced_items:
+        if _is_publishable_coupang_image_fallback(item, min_similarity):
+            fallback = dict(item)
+            fallback["auto_publish_safe"] = True
+            fallback["requires_review"] = False
+            fallback["fallback_used_for_publish"] = True
+            return fallback
     return None
 
 
@@ -142,6 +170,8 @@ async def run_sourcing(item: Dict[str, Any], run_dir: Path, min_similarity: floa
         gemini_client=get_gemini_client(),
         min_similarity_score=min_similarity,
         enforce_min_similarity=True,
+        fallback_product_name=str(item.get("product_name") or ""),
+        fallback_category=str(item.get("category") or ""),
     )
     success = False
     try:
@@ -364,6 +394,19 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
             "blocking_reason": "" if ok and public_check.get("ok") else "Linktree webhook publish did not verify on the public page.",
         }
 
+    public_check = verify_linktree_public_card(marker, purchase_url)
+    if public_check.get("ok"):
+        return {
+            "ok": True,
+            "method": "public_existing",
+            "title": title,
+            "number": marker,
+            "purchase_url": purchase_url,
+            "profile_url": manager.get_profile_url(),
+            "public_verification": public_check,
+            "blocking_reason": "",
+        }
+
     return {
         "ok": False,
         "method": "blocked",
@@ -371,7 +414,7 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
         "number": marker,
         "purchase_url": purchase_url,
         "profile_url": manager.get_profile_url(),
-        "public_verification": {},
+        "public_verification": public_check,
         "blocking_reason": (
             "Linktree webhook URL is not configured, and this session has no callable authenticated "
             "Linktree browser/computer-use editing path. Public-page Playwright access is available, "
@@ -509,13 +552,24 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
     privacy = str(
         (queue_payload.get("automation_policy") or {}).get("youtube_privacy", "unlisted")
     ).strip() or "unlisted"
+    try:
+        max_candidates = int(
+            (queue_payload.get("automation_policy") or {}).get(
+                "max_candidate_items_per_run",
+                DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN,
+            )
+            or DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN
+        )
+    except (TypeError, ValueError):
+        max_candidates = DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN
+    max_candidates = max(1, max_candidates)
 
     first_due_item = due_pending[0]
     first_due_index = next(
         (idx for idx, item in enumerate(pending) if item is first_due_item),
         0,
     )
-    candidate_items = pending[first_due_index:]
+    candidate_items = pending[first_due_index : first_due_index + max_candidates]
     skipped_items: List[Dict[str, Any]] = []
 
     for item in candidate_items:
