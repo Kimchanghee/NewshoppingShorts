@@ -139,8 +139,8 @@ class UIInitializer:
 
         # 3. Log Panel (ProgressPanel) - Bottom left, takes remaining space
         progress_panel = ProgressPanel(gui, gui, theme_manager=self.theme_manager)
-        progress_panel.setMinimumHeight(140)
-        progress_panel.setMaximumHeight(300)
+        progress_panel.setMinimumHeight(360)
+        progress_panel.setMaximumHeight(520)
         progress_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         left_layout.addWidget(progress_panel, stretch=1)
 

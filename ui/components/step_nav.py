@@ -131,7 +131,7 @@ class StepNav(QFrame):
         self._buttons = {}
 
         self.setObjectName("StepNav")
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Maximum)
         self.setFixedWidth(280)  # STITCH: 280px (240px → 280px)
         
         # Main Layout

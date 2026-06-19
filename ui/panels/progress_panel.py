@@ -31,8 +31,8 @@ class ProgressPanel(QFrame, ThemedMixin):
     def create_widgets(self):
         ds = self.ds
         self.main_layout = QVBoxLayout(self)
-        self.main_layout.setContentsMargins(12, 12, 12, 12)
-        self.main_layout.setSpacing(6)
+        self.main_layout.setContentsMargins(8, 8, 8, 8)
+        self.main_layout.setSpacing(5)
 
         # ══════════════════════════════════════════════
         # Section 1: 전체 영상 진행률 (Overall Queue Progress)
@@ -46,8 +46,8 @@ class ProgressPanel(QFrame, ThemedMixin):
             }
         """)
         overall_layout = QVBoxLayout(overall_section)
-        overall_layout.setContentsMargins(12, 10, 12, 10)
-        overall_layout.setSpacing(4)
+        overall_layout.setContentsMargins(10, 8, 10, 8)
+        overall_layout.setSpacing(2)
 
         # Section header
         overall_header = QHBoxLayout()
@@ -63,10 +63,10 @@ class ProgressPanel(QFrame, ThemedMixin):
         # Progress value (X/Y (Z%))
         self.gui.overall_numeric_label = QLabel("0/0 (0%)")
         self.gui.overall_numeric_label.setStyleSheet("""
-            font-size: 20px;
+            font-size: 18px;
             font-weight: bold;
             color: #22C55E;
-            padding: 2px 0;
+            padding: 1px 0;
             background: transparent;
             border: none;
         """)
@@ -74,7 +74,7 @@ class ProgressPanel(QFrame, ThemedMixin):
 
         # Witty message
         self.gui.overall_witty_label = QLabel("만들 목록을 채우면 제작이 시작돼요")
-        self.gui.overall_witty_label.setStyleSheet("font-size: 10px; color: #64748B; background: transparent; border: none; padding-bottom: 3px;")
+        self.gui.overall_witty_label.setStyleSheet("font-size: 9px; color: #64748B; background: transparent; border: none; padding-bottom: 1px;")
         self.gui.overall_witty_label.setWordWrap(True)
         overall_layout.addWidget(self.gui.overall_witty_label)
 
@@ -92,8 +92,8 @@ class ProgressPanel(QFrame, ThemedMixin):
             }
         """)
         current_layout = QVBoxLayout(current_section)
-        current_layout.setContentsMargins(12, 10, 12, 10)
-        current_layout.setSpacing(4)
+        current_layout.setContentsMargins(10, 8, 10, 8)
+        current_layout.setSpacing(3)
 
         # Section header with status icon
         current_header = QHBoxLayout()
@@ -112,10 +112,10 @@ class ProgressPanel(QFrame, ThemedMixin):
         # Current task label
         self.gui.current_task_label = QLabel("대기 중...")
         self.gui.current_task_label.setStyleSheet("""
-            font-size: 12px;
+            font-size: 11px;
             font-weight: bold;
             color: #F1F5F9;
-            padding: 2px 0;
+            padding: 1px 0;
             background: transparent;
             border: none;
         """)
@@ -132,6 +132,8 @@ class ProgressPanel(QFrame, ThemedMixin):
         self.steps_scroll = QScrollArea()
         self.steps_scroll.setWidgetResizable(True)
         self.steps_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.steps_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.steps_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.steps_scroll.setStyleSheet("""
             QScrollArea {
                 background: transparent;
@@ -151,8 +153,8 @@ class ProgressPanel(QFrame, ThemedMixin):
         self.steps_container = QWidget()
         self.steps_container.setStyleSheet("background: transparent; border: none;")
         steps_layout = QVBoxLayout(self.steps_container)
-        steps_layout.setSpacing(1)
-        steps_layout.setContentsMargins(0, 4, 0, 0)
+        steps_layout.setSpacing(0)
+        steps_layout.setContentsMargins(0, 2, 0, 0)
 
         step_definitions = [
             ("영상 받기", 'download', "⬇"),
@@ -172,34 +174,35 @@ class ProgressPanel(QFrame, ThemedMixin):
 
         for idx, (title, key, icon) in enumerate(step_definitions):
             row = QFrame()
+            row.setFixedHeight(18)
             row.setStyleSheet("""
                 QFrame {
                     background-color: transparent;
                     border: none;
                     border-radius: 4px;
-                    padding: 2px;
+                    padding: 0px;
                 }
             """)
             row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(6, 2, 6, 2)
-            row_layout.setSpacing(6)
+            row_layout.setContentsMargins(4, 0, 4, 0)
+            row_layout.setSpacing(4)
 
             # Status indicator
             status_ico = QLabel("○")
-            status_ico.setFixedWidth(14)
-            status_ico.setStyleSheet("font-size: 10px; color: #475569;")
+            status_ico.setFixedWidth(12)
+            status_ico.setStyleSheet("font-size: 9px; color: #475569;")
             row_layout.addWidget(status_ico)
 
             # Step title
             title_lbl = QLabel(title)
-            title_lbl.setStyleSheet("font-size: 11px; color: #94A3B8;")
+            title_lbl.setStyleSheet("font-size: 9px; color: #94A3B8;")
             row_layout.addWidget(title_lbl)
 
             row_layout.addStretch()
 
             # Progress label
             prog_lbl = QLabel("")
-            prog_lbl.setStyleSheet("font-size: 10px; font-weight: bold; color: #475569;")
+            prog_lbl.setStyleSheet("font-size: 9px; font-weight: bold; color: #475569;")
             row_layout.addWidget(prog_lbl)
 
             steps_layout.addWidget(row)
@@ -213,7 +216,6 @@ class ProgressPanel(QFrame, ThemedMixin):
                 'index': idx
             }
 
-        steps_layout.addStretch()
         self.steps_scroll.setWidget(self.steps_container)
         current_layout.addWidget(self.steps_scroll, stretch=1)
 
@@ -240,8 +242,8 @@ class ProgressPanel(QFrame, ThemedMixin):
         icon, icon_color, text_color, bg_color = status_config.get(status, status_config['pending'])
 
         indicator['status_label'].setText(icon)
-        indicator['status_label'].setStyleSheet(f"font-size: 11px; color: {icon_color}; font-weight: bold;")
-        indicator['title_label'].setStyleSheet(f"font-size: 12px; color: {text_color};")
+        indicator['status_label'].setStyleSheet(f"font-size: 9px; color: {icon_color}; font-weight: bold;")
+        indicator['title_label'].setStyleSheet(f"font-size: 9px; color: {text_color};")
         indicator['row_frame'].setStyleSheet(f"""
             QFrame {{
                 background-color: {bg_color};
@@ -255,22 +257,22 @@ class ProgressPanel(QFrame, ThemedMixin):
                 # 100% 도달 시 자동으로 completed 상태로 전환
                 icon, icon_color, text_color, bg_color = status_config['completed']
                 indicator['status_label'].setText(icon)
-                indicator['status_label'].setStyleSheet(f"font-size: 11px; color: {icon_color}; font-weight: bold;")
-                indicator['title_label'].setStyleSheet(f"font-size: 12px; color: {text_color};")
+                indicator['status_label'].setStyleSheet(f"font-size: 9px; color: {icon_color}; font-weight: bold;")
+                indicator['title_label'].setStyleSheet(f"font-size: 9px; color: {text_color};")
                 indicator['progress_label'].setText("100%")
-                indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
+                indicator['progress_label'].setStyleSheet(f"font-size: 9px; font-weight: bold; color: {icon_color};")
                 # 블링크 중이면 중지
                 if self._blink_step == step_key:
                     self.stop_blink()
             else:
                 indicator['progress_label'].setText(f"{progress}%")
-                indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
+                indicator['progress_label'].setStyleSheet(f"font-size: 9px; font-weight: bold; color: {icon_color};")
         elif status == 'completed':
             indicator['progress_label'].setText("100%")
-            indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
+            indicator['progress_label'].setStyleSheet(f"font-size: 9px; font-weight: bold; color: {icon_color};")
         elif status == 'active':
             indicator['progress_label'].setText("진행중")
-            indicator['progress_label'].setStyleSheet(f"font-size: 11px; font-weight: bold; color: {icon_color};")
+            indicator['progress_label'].setStyleSheet(f"font-size: 9px; font-weight: bold; color: {icon_color};")
         else:
             indicator['progress_label'].setText("")
 
@@ -341,10 +343,10 @@ class ProgressPanel(QFrame, ThemedMixin):
 
         if self._blink_visible:
             indicator['status_label'].setText("●")
-            indicator['status_label'].setStyleSheet("font-size: 11px; color: #FACC15; font-weight: bold;")
+            indicator['status_label'].setStyleSheet("font-size: 9px; color: #FACC15; font-weight: bold;")
         else:
             indicator['status_label'].setText("○")
-            indicator['status_label'].setStyleSheet("font-size: 11px; color: #FACC15; font-weight: bold;")
+            indicator['status_label'].setStyleSheet("font-size: 9px; color: #FACC15; font-weight: bold;")
 
     # -----------------------------------------------------------------
     # Theme

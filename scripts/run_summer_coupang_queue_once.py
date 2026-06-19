@@ -510,7 +510,15 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
         (queue_payload.get("automation_policy") or {}).get("youtube_privacy", "unlisted")
     ).strip() or "unlisted"
 
-    for item in due_pending:
+    first_due_item = due_pending[0]
+    first_due_index = next(
+        (idx for idx, item in enumerate(pending) if item is first_due_item),
+        0,
+    )
+    candidate_items = pending[first_due_index:]
+    skipped_items: List[Dict[str, Any]] = []
+
+    for item in candidate_items:
         update_item_attempt(item)
         save_queue(queue_payload)
 
@@ -534,12 +542,13 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
                 },
             )
             save_queue(queue_payload)
-            return {
-                "processed": True,
-                "status": "skipped_low_similarity",
-                "planned_number": item.get("planned_number"),
-                "reason": reason,
-            }
+            skipped_items.append(
+                {
+                    "planned_number": item.get("planned_number"),
+                    "reason": reason,
+                }
+            )
+            continue
 
         purchase_url = determine_purchase_url(item, report)
         job = {
@@ -586,13 +595,17 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
                 },
             )
             save_queue(queue_payload)
-            return {
+            summary = {
                 "processed": True,
                 "status": final_status,
                 "planned_number": item.get("planned_number"),
                 "youtube_url": uploaded.get("video_url", ""),
                 "linktree_ok": linktree_result.get("ok", False),
             }
+            if skipped_items:
+                summary["skipped_before"] = skipped_items
+                summary["skip_count"] = len(skipped_items)
+            return summary
         except Exception as exc:
             attach_result(
                 item,
@@ -613,6 +626,15 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
                 "planned_number": item.get("planned_number"),
                 "error": str(exc),
             }
+
+    if skipped_items:
+        return {
+            "processed": True,
+            "status": "skipped_low_similarity",
+            "reason": "all_candidate_items_skipped_low_similarity",
+            "skip_count": len(skipped_items),
+            "skipped_items": skipped_items,
+        }
 
     return {"processed": False, "reason": "all_pending_items_skipped_low_similarity"}
 
