@@ -433,7 +433,10 @@ class SourcingPipeline:
         Video creation / upload is handled separately by the batch pipeline.
         """
         from core.sourcing.coupang_scraper import scrape_product
-        from core.sourcing.keyword_converter import convert_keywords_gemini
+        from core.sourcing.keyword_converter import (
+            convert_keywords_gemini,
+            convert_keywords_rule_based,
+        )
         from core.sourcing.gemini_computer_use import (
             build_gemini_computer_use_queries,
         )
@@ -496,6 +499,21 @@ class SourcingPipeline:
             )
             cn_kw = (self.keywords or {}).get("chinese", "").strip()
             en_kw = (self.keywords or {}).get("english", "").strip()
+            fallback_keyword_name = self._fallback_product_label()
+            if fallback_keyword_name and (not cn_kw or not en_kw):
+                fallback_keywords = convert_keywords_rule_based(fallback_keyword_name)
+                fallback_cn = (fallback_keywords or {}).get("chinese", "").strip()
+                fallback_en = (fallback_keywords or {}).get("english", "").strip()
+                if fallback_cn and not cn_kw:
+                    cn_kw = fallback_cn
+                if fallback_en and not en_kw:
+                    en_kw = fallback_en
+                if cn_kw or en_kw:
+                    self.keywords = {
+                        "chinese": cn_kw,
+                        "english": en_kw,
+                        "fallback_source": fallback_keyword_name,
+                    }
             if not cn_kw and not en_kw:
                 # Both empty → cannot search either marketplace. Most common cause:
                 # no Gemini client configured AND no rule-based / Latin tokens in the title.

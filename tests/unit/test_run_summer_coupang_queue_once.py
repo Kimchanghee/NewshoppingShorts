@@ -12,6 +12,40 @@ def test_load_queue_accepts_utf8_bom(monkeypatch, tmp_path):
     assert queue_runner.load_queue() == {"items": []}
 
 
+def test_build_upload_item_uses_problem_hook_metadata_title():
+    item = {
+        "planned_number": "[047]",
+        "category": "cooling_bedding",
+        "coupang_url": "https://www.coupang.com/vp/products/9455176108",
+    }
+    rendered = {
+        "product_name": "cooling bedding product",
+        "final_video": "final.mp4",
+        "render_integrity": {"ok": True},
+    }
+    report = {"_report_path": "report.json"}
+
+    upload_item = queue_runner.build_upload_item(
+        rendered,
+        item,
+        report,
+        "https://www.coupang.com/vp/products/9455176108",
+        "public",
+    )
+    expected_title = queue_runner.YouTubeManager.ensure_coupang_title_compliance(
+        queue_runner.SUMMER_UPLOAD_METADATA["cooling_bedding"]["title"],
+        marker_position="suffix",
+    )
+
+    assert upload_item["title"] == expected_title
+    assert not upload_item["title"].startswith(queue_runner.COUPANG_PAID_PROMOTION_TITLE_MARKER)
+    assert upload_item["title"].endswith(queue_runner.COUPANG_PAID_PROMOTION_TITLE_MARKER)
+    assert upload_item["paid_marker_position"] == "suffix"
+    assert "[047]" in upload_item["description"]
+    assert "Linktree" in upload_item["description"]
+    assert upload_item["summer_upload_metadata"]["tags"] == queue_runner.SUMMER_UPLOAD_METADATA["cooling_bedding"]["tags"]
+
+
 def test_youtube_preflight_block_does_not_consume_pending(monkeypatch, capsys):
     payload = {
         "items": [
@@ -78,6 +112,51 @@ def test_process_pending_items_skips_items_scheduled_for_later(monkeypatch):
     assert result["next_scheduled_at"] == "2026-06-18T20:26:26+09:00"
     assert payload["items"][0]["status"] == "pending"
     assert payload["items"][0]["attempts"] == 0
+
+
+def test_process_pending_items_force_run_now_processes_future_item(monkeypatch, tmp_path):
+    payload = {
+        "items": [
+            {
+                "planned_number": "[031]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-18T20:26:26+09:00",
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+                "result": {},
+            }
+        ]
+    }
+    calls = []
+
+    monkeypatch.setenv(queue_runner.FORCE_RUN_NOW_ENV, "1")
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 18, 7, 26, 26, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(queue_runner, "build_run_dir", lambda _item: tmp_path / "run")
+
+    async def fake_run_sourcing(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "best_similarity": 0.0,
+            "match_error": "not found",
+            "match_status": "not_found",
+            "_report_path": str(tmp_path / "report.json"),
+            "product_info": {"name": "future item"},
+        }
+
+    monkeypatch.setattr(queue_runner, "run_sourcing", fake_run_sourcing)
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[031]"]
+    assert result["processed"] is True
+    assert result["status"] == "skipped_low_similarity"
+    assert payload["items"][0]["status"] == "skipped_low_similarity"
+    assert payload["items"][0]["attempts"] == 1
 
 
 def test_process_pending_items_continues_after_product_not_found_skip(monkeypatch, tmp_path):
@@ -154,6 +233,7 @@ def test_process_pending_items_continues_after_product_not_found_skip(monkeypatc
         lambda *_args, **_kwargs: {
             "render_ok": True,
             "final_video": str(tmp_path / "final.mp4"),
+            "upload_quality": {"ok": True, "reasons": []},
             "_render_result_path": str(tmp_path / "render.json"),
         },
     )
@@ -183,7 +263,240 @@ def test_process_pending_items_continues_after_product_not_found_skip(monkeypatc
     assert payload["items"][1]["attempts"] == 1
 
 
-def test_select_safe_item_accepts_coupang_image_fallback():
+def test_process_pending_items_continues_after_render_quality_skip(monkeypatch, tmp_path):
+    payload = {
+        "automation_policy": {
+            "min_similarity_score": 0.9,
+            "youtube_privacy": "unlisted",
+        },
+        "items": [
+            {
+                "planned_number": "[032]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-19T00:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+                "result": {},
+            },
+            {
+                "planned_number": "[033]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-19T04:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/2",
+                "result": {},
+            },
+        ],
+    }
+    calls = []
+    render_calls = []
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 19, 4, 1, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(
+        queue_runner,
+        "build_run_dir",
+        lambda item: tmp_path / str(item.get("planned_number")).strip("[]"),
+    )
+
+    async def fake_run_sourcing(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "best_similarity": 1.0,
+            "match_status": "matched",
+            "_report_path": str(tmp_path / f"{item['planned_number']}.json"),
+            "product_info": {"name": f"good item {item['planned_number']}"},
+            "sourced_products": [
+                {
+                    "source": "aliexpress",
+                    "similarity": 1.0,
+                    "video_file": str(tmp_path / "source.mp4"),
+                    "auto_publish_safe": True,
+                    "requires_review": False,
+                }
+            ],
+        }
+
+    def fake_render(job, _run_dir):
+        render_calls.append(job["index"])
+        if job["index"] == 32:
+            return {
+                "render_ok": True,
+                "final_video": str(tmp_path / "too-short.mp4"),
+                "upload_quality": {"ok": False, "reasons": ["duration_too_short"]},
+                "_render_result_path": str(tmp_path / "render-032.json"),
+            }
+        return {
+            "render_ok": True,
+            "final_video": str(tmp_path / "final.mp4"),
+            "upload_quality": {"ok": True, "reasons": []},
+            "_render_result_path": str(tmp_path / "render-033.json"),
+        }
+
+    monkeypatch.setattr(queue_runner, "run_sourcing", fake_run_sourcing)
+    monkeypatch.setattr(queue_runner, "render_single_item", fake_render)
+    monkeypatch.setattr(queue_runner, "build_upload_item", lambda *_args, **_kwargs: {"upload": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "upload_verified_render",
+        lambda *_args, **_kwargs: {"video_url": "https://youtu.be/next"},
+    )
+    monkeypatch.setattr(queue_runner, "verify_youtube", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "publish_linktree_if_possible",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[032]", "[033]"]
+    assert render_calls == [32, 33]
+    assert result["status"] == "completed"
+    assert result["planned_number"] == "[033]"
+    assert result["skip_count"] == 1
+    assert payload["items"][0]["status"] == "skipped_quality_gate"
+    assert payload["items"][1]["status"] == "completed"
+
+
+def test_process_pending_items_stops_on_sourcing_system_blocker(monkeypatch, tmp_path):
+    payload = {
+        "automation_policy": {
+            "min_similarity_score": 0.9,
+            "youtube_privacy": "unlisted",
+        },
+        "items": [
+            {
+                "planned_number": "[032]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-19T00:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+                "result": {},
+            },
+            {
+                "planned_number": "[033]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-19T04:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/2",
+                "result": {},
+            },
+        ],
+    }
+    calls = []
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 19, 0, 1, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(queue_runner, "build_run_dir", lambda _item: tmp_path / "run")
+
+    async def fake_run_sourcing(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "best_similarity": None,
+            "error": "키워드 변환에 실패했습니다. Gemini API 키를 설정해주세요.",
+            "match_status": "keyword_convert_failed",
+            "_report_path": str(tmp_path / "report.json"),
+            "product_info": {"name": "blocked item"},
+        }
+
+    monkeypatch.setattr(queue_runner, "run_sourcing", fake_run_sourcing)
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[032]"]
+    assert result["status"] == "failed"
+    assert result["blocking_type"] == "sourcing_system_blocker"
+    assert payload["items"][0]["status"] == "failed"
+    assert payload["items"][0]["attempts"] == 1
+    assert payload["items"][1]["status"] == "pending"
+    assert payload["items"][1]["attempts"] == 0
+
+
+def test_process_pending_items_retries_prior_system_skip(monkeypatch, tmp_path):
+    payload = {
+        "automation_policy": {
+            "min_similarity_score": 0.9,
+            "youtube_privacy": "unlisted",
+        },
+        "items": [
+            {
+                "planned_number": "[032]",
+                "status": "skipped_low_similarity",
+                "attempts": 1,
+                "scheduled_at": "2026-06-19T00:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+                "result": {
+                    "blocking_reason": "상품을 못찾았습니다. 해외 마켓에서 실제 시연 영상이 있는 동일 상품을 찾지 못했습니다.",
+                },
+            },
+            {
+                "planned_number": "[040]",
+                "status": "skipped_low_similarity",
+                "attempts": 1,
+                "scheduled_at": "2026-06-20T08:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/2",
+                "result": {
+                    "blocking_reason": "키워드 변환에 실패했습니다. Gemini API 키를 설정해주세요.",
+                    "match_status": "not_checked",
+                },
+            },
+            {
+                "planned_number": "[041]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-20T12:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/3",
+                "result": {},
+            },
+        ],
+    }
+    calls = []
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 20, 8, 1, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(
+        queue_runner,
+        "build_run_dir",
+        lambda item: tmp_path / str(item.get("planned_number")).strip("[]"),
+    )
+
+    async def fake_run_sourcing(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "best_similarity": 0.0,
+            "match_error": "not found",
+            "match_status": "not_found",
+            "_report_path": str(tmp_path / f"{item['planned_number']}.json"),
+            "product_info": {"name": "skip item"},
+        }
+
+    monkeypatch.setattr(queue_runner, "run_sourcing", fake_run_sourcing)
+
+    assert queue_runner.pending_item_count(payload) == 2
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[040]", "[041]"]
+    assert result["status"] == "skipped_low_similarity"
+    assert result["skip_count"] == 2
+    assert payload["items"][0]["attempts"] == 1
+    assert payload["items"][1]["attempts"] == 2
+    assert payload["items"][2]["attempts"] == 1
+
+
+def test_select_safe_item_rejects_coupang_image_fallback():
     report = {
         "match_status": "not_found",
         "best_similarity": None,
@@ -203,11 +516,75 @@ def test_select_safe_item_accepts_coupang_image_fallback():
 
     item = queue_runner.select_safe_marketplace_item(report, 0.9)
 
+    assert item is None
+
+
+def test_select_safe_item_accepts_verified_marketplace_demo():
+    report = {
+        "match_status": "matched",
+        "best_similarity": 0.96,
+        "sourced_products": [
+            {
+                "source": "aliexpress",
+                "title": "Wearable neck fan demo",
+                "url": "https://www.aliexpress.com/item/1.html",
+                "similarity": 0.96,
+                "video_file": "demo.mp4",
+                "auto_publish_safe": True,
+                "requires_review": False,
+            }
+        ],
+    }
+
+    item = queue_runner.select_safe_marketplace_item(report, 0.9)
+
     assert item is not None
-    assert item["source"] == "coupang_image"
-    assert item["auto_publish_safe"] is True
-    assert item["requires_review"] is False
-    assert item["fallback_used_for_publish"] is True
+    assert item["source"] == "aliexpress"
+
+
+def test_select_safe_item_rejects_unknown_similarity():
+    report = {
+        "match_status": "matched",
+        "best_similarity": None,
+        "sourced_products": [
+            {
+                "source": "aliexpress",
+                "title": "Unknown score demo",
+                "url": "https://www.aliexpress.com/item/1.html",
+                "video_file": "demo.mp4",
+                "auto_publish_safe": True,
+                "requires_review": False,
+            }
+        ],
+    }
+
+    item = queue_runner.select_safe_marketplace_item(report, 0.9)
+
+    assert item is None
+
+
+def test_validate_render_upload_quality_blocks_short_non_vertical_video(tmp_path):
+    final_video = tmp_path / "short.mp4"
+    final_video.write_bytes(b"x" * 128)
+
+    result = queue_runner.validate_render_upload_quality(
+        {
+            "final_video": str(final_video),
+            "render_ok": True,
+            "tts_segment_count": 1,
+            "video_probe": {
+                "duration": 3.0,
+                "has_audio": True,
+                "is_vertical_1080x1920": False,
+            },
+            "render_integrity": {"ok": True},
+        }
+    )
+
+    assert result["ok"] is False
+    assert "duration_too_short" in result["reasons"]
+    assert "not_vertical_1080x1920" in result["reasons"]
+    assert "final_video_too_small" in result["reasons"]
 
 
 def test_publish_linktree_accepts_existing_public_card(monkeypatch):
@@ -246,7 +623,7 @@ def test_publish_linktree_accepts_existing_public_card(monkeypatch):
     assert result["blocking_reason"] == ""
 
 
-def test_process_pending_items_does_not_drain_many_future_items(monkeypatch, tmp_path):
+def test_process_pending_items_continues_skips_until_no_candidates_remain(monkeypatch, tmp_path):
     payload = {
         "automation_policy": {
             "min_similarity_score": 0.9,
@@ -307,13 +684,13 @@ def test_process_pending_items_does_not_drain_many_future_items(monkeypatch, tmp
 
     result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
 
-    assert calls == ["[032]", "[033]"]
+    assert calls == ["[032]", "[033]", "[034]"]
     assert result["status"] == "skipped_low_similarity"
-    assert result["skip_count"] == 2
+    assert result["skip_count"] == 3
     assert payload["items"][0]["status"] == "skipped_low_similarity"
     assert payload["items"][1]["status"] == "skipped_low_similarity"
-    assert payload["items"][2]["status"] == "pending"
-    assert payload["items"][2]["attempts"] == 0
+    assert payload["items"][2]["status"] == "skipped_low_similarity"
+    assert payload["items"][2]["attempts"] == 1
 
 
 def test_main_returns_success_for_policy_skip(monkeypatch, capsys):
@@ -323,7 +700,7 @@ def test_main_returns_success_for_policy_skip(monkeypatch, capsys):
         ]
     }
 
-    async def policy_skip(_payload):
+    async def policy_skip(_payload, **_kwargs):
         return {
             "processed": True,
             "status": "skipped_low_similarity",

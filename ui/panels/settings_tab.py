@@ -149,6 +149,19 @@ class SettingsTab(QWidget, ThemedMixin):
         self._setup_clipboard_timer = QTimer(self)
         self._setup_clipboard_timer.setInterval(1200)
         self._setup_clipboard_timer.timeout.connect(self._poll_setup_clipboard)
+        self._computer_use_job_id = ""
+        self._computer_use_job_bridge_url = ""
+        self._computer_use_job_api_key = ""
+        self._computer_use_job_status = ""
+        self._computer_use_job_poll_timer = QTimer(self)
+        self._computer_use_job_poll_timer.setInterval(3000)
+        self._computer_use_job_poll_timer.timeout.connect(self._poll_computer_use_bridge_job)
+        self._local_computer_use_process: Optional[subprocess.Popen] = None
+        self._local_computer_use_label = ""
+        self._local_computer_use_started_at = 0.0
+        self._local_computer_use_poll_timer = QTimer(self)
+        self._local_computer_use_poll_timer.setInterval(3000)
+        self._local_computer_use_poll_timer.timeout.connect(self._poll_local_computer_use_process)
         self._codex_status_summary = "Codex 상태: 미확인"
         self._computer_use_paid_cache_value = False
         self._computer_use_paid_cache_ts = 0.0
@@ -1210,7 +1223,7 @@ class SettingsTab(QWidget, ThemedMixin):
         self.setup_start_all_btn.clicked.connect(lambda: self._start_setup_assistant("all"))
 
         # 유료 구독자용: 버튼 한 번 → 서버(브리지)의 Codex가 자동으로 설정. 가장 눈에 띄게 맨 앞에.
-        self.setup_auto_btn = QPushButton("🤖 한 번에 자동 설정")
+        self.setup_auto_btn = QPushButton("YouTube + Instagram 자동 설정 시작")
         self.setup_auto_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setup_auto_btn.setStyleSheet(f"""
             QPushButton {{
@@ -1225,7 +1238,10 @@ class SettingsTab(QWidget, ThemedMixin):
             QPushButton:hover {{ background-color: {c.primary_hover}; border-color: {c.primary_hover}; }}
             QPushButton:disabled {{ background-color: {c.surface_variant}; color: {c.text_muted}; border-color: {c.border_light}; }}
         """)
-        self.setup_auto_btn.setToolTip("유료 구독자는 버튼 한 번이면 서버가 알아서 설정해 드려요.")
+        self.setup_auto_btn.setToolTip(
+            "유료 구독자는 버튼 한 번으로 Computer Use 자동 설정을 시작합니다. "
+            "로그인, 2FA, CAPTCHA, API/OAuth 최종 승인만 모니터 안내에 따라 직접 처리합니다."
+        )
         self.setup_auto_btn.clicked.connect(self._run_full_auto_setup)
         start_row.addWidget(self.setup_auto_btn)
 
@@ -1314,9 +1330,9 @@ class SettingsTab(QWidget, ThemedMixin):
         self.setup_open_instagram_btn.clicked.connect(self._assistant_open_instagram_setup)
         insta_input_row.addWidget(self.setup_open_instagram_btn)
         setup_input_layout.addLayout(insta_input_row)
-        # Instagram은 지원예정 — 입력·버튼 비활성화
-        self.setup_instagram_handle_input.setEnabled(False)
-        self.setup_open_instagram_btn.setEnabled(False)
+        # Instagram is handled by the setup assistant / Computer Use handoff.
+        self.setup_instagram_handle_input.setEnabled(True)
+        self.setup_open_instagram_btn.setEnabled(True)
 
         threads_input_row = QHBoxLayout()
         threads_input_row.setSpacing(8)
@@ -1539,7 +1555,27 @@ class SettingsTab(QWidget, ThemedMixin):
 
         self.setup_assistant_section.add_row("현재 해야 할 일", action_wrap)
 
-        # 5) Live logs
+        # 5) Compact Computer Use monitor
+        self.setup_monitor = QTextEdit()
+        self.setup_monitor.setReadOnly(True)
+        self.setup_monitor.setMinimumHeight(72)
+        self.setup_monitor.setMaximumHeight(104)
+        self.setup_monitor.setPlainText(
+            "대기 중입니다. 자동 설정을 시작하면 Computer Use 진행 상황과 사용자 확인이 필요한 지점을 표시합니다."
+        )
+        self.setup_monitor.setStyleSheet(f"""
+            QTextEdit {{
+                background-color: {c.surface_variant};
+                color: {c.text_secondary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px;
+                font-size: 11px;
+            }}
+        """)
+        self.setup_assistant_section.add_row("자동 설정 모니터", self.setup_monitor)
+
+        # 6) Live logs
         self.setup_log = QTextEdit()
         self.setup_log.setReadOnly(True)
         self.setup_log.setMinimumHeight(120)
@@ -1632,6 +1668,22 @@ class SettingsTab(QWidget, ThemedMixin):
         ts = datetime.now().strftime("%H:%M:%S")
         self.setup_log.append(f"[{ts}] {message}")
         self.setup_log.verticalScrollBar().setValue(self.setup_log.verticalScrollBar().maximum())
+
+    def _append_setup_monitor(self, message: str):
+        """Append one compact Computer Use monitor line."""
+        if not hasattr(self, "setup_monitor"):
+            return
+        ts = datetime.now().strftime("%H:%M:%S")
+        self.setup_monitor.append(f"[{ts}] {message}")
+        self.setup_monitor.verticalScrollBar().setValue(
+            self.setup_monitor.verticalScrollBar().maximum()
+        )
+
+    def _set_setup_monitor(self, message: str):
+        """Replace the compact monitor text."""
+        if not hasattr(self, "setup_monitor"):
+            return
+        self.setup_monitor.setPlainText(str(message or "").strip())
 
     def _set_setup_current_action(
         self,
@@ -2182,6 +2234,8 @@ class SettingsTab(QWidget, ThemedMixin):
         self._setup_running = False
         self._setup_waiting_user = False
         self._append_setup_log("도우미 중단")
+        self._stop_computer_use_job_monitor("사용자가 설정 도우미를 중단했습니다.")
+        self._stop_local_computer_use_process_monitor("로컬 Codex Computer Use 모니터링을 중단했습니다.")
         self._set_setup_current_action(
             title="중단됨",
             description="사용자가 도우미를 중단했습니다. 다시 시작 버튼으로 재개할 수 있습니다.",
@@ -2867,9 +2921,13 @@ class SettingsTab(QWidget, ThemedMixin):
         text = str(mcp_list_output or "")
         for raw_line in text.splitlines():
             line = raw_line.strip().lower()
-            if not line or "computer-use" not in line:
+            if not line:
                 continue
-            if "enabled" in line:
+            if "computer-use" in line and "enabled" in line:
+                return True
+            if "node_repl" in line and "enabled" in line and (
+                "sky_cua_native_pipe" in line or "cua_node" in line
+            ):
                 return True
         return False
 
@@ -2919,6 +2977,156 @@ class SettingsTab(QWidget, ThemedMixin):
             return token
         except Exception:
             return ""
+
+    def _computer_use_bridge_headers(self, api_key: str = "") -> Dict[str, str]:
+        """Build authenticated headers for Computer Use bridge calls."""
+        login_token = self._extract_logged_in_token()
+        if not login_token:
+            raise ValueError("로그인 토큰이 없어 자동 설정 서버에 요청할 수 없습니다.")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {login_token}",
+        }
+        bridge_token = str(api_key or "").strip()
+        if bridge_token:
+            headers["X-Bridge-API-Key"] = bridge_token
+        return headers
+
+    def _start_computer_use_job_monitor(self, bridge_url: str, api_key: str, job_id: str, label: str) -> None:
+        """Start polling one bridge job and reflect status in the compact monitor."""
+        self._computer_use_job_id = str(job_id or "").strip()
+        self._computer_use_job_bridge_url = str(bridge_url or "").strip().rstrip("/")
+        self._computer_use_job_api_key = str(api_key or "").strip()
+        self._computer_use_job_status = "queued"
+        self._set_setup_monitor(
+            f"자동 설정 요청됨: {label}\n"
+            f"작업 ID: {self._computer_use_job_id or '확인 중'}\n"
+            "상태: 대기 중\n"
+            "로그인, 2FA, CAPTCHA, OAuth 최종 승인 화면이 뜨면 사용자가 직접 처리해야 합니다."
+        )
+        if self._computer_use_job_id and self._computer_use_job_bridge_url:
+            self._computer_use_job_poll_timer.start()
+
+    def _stop_computer_use_job_monitor(self, message: str = "") -> None:
+        """Stop bridge polling without cancelling the remote job."""
+        if self._computer_use_job_poll_timer.isActive():
+            self._computer_use_job_poll_timer.stop()
+        if message:
+            self._append_setup_monitor(message)
+
+    def _fetch_computer_use_bridge_job_status(
+        self,
+        bridge_url: str,
+        api_key: str,
+        job_id: str,
+    ) -> Dict[str, Any]:
+        """Fetch one bridge job status."""
+        base = str(bridge_url or "").strip().rstrip("/")
+        jid = str(job_id or "").strip()
+        if not base or not jid:
+            raise ValueError("자동 설정 작업 ID가 없습니다.")
+        response = requests.get(
+            f"{base}/v1/computer-use/jobs/{jid}",
+            headers=self._computer_use_bridge_headers(api_key),
+            timeout=6,
+        )
+        try:
+            body = response.json()
+        except Exception:
+            body = {"raw": response.text[:500]}
+        return {
+            "ok": 200 <= response.status_code < 300,
+            "status_code": response.status_code,
+            "body": body,
+        }
+
+    def _poll_computer_use_bridge_job(self) -> None:
+        """Poll the active Computer Use bridge job."""
+        if not self._computer_use_job_id:
+            self._stop_computer_use_job_monitor()
+            return
+        try:
+            result = self._fetch_computer_use_bridge_job_status(
+                self._computer_use_job_bridge_url,
+                self._computer_use_job_api_key,
+                self._computer_use_job_id,
+            )
+        except Exception as exc:
+            self._append_setup_monitor(f"상태 확인 실패: {exc}")
+            return
+        if not result.get("ok"):
+            self._append_setup_monitor(f"상태 확인 실패: HTTP {result.get('status_code')}")
+            return
+
+        body = result.get("body") or {}
+        status = str(body.get("status") or "").strip().lower() or "unknown"
+        if status != self._computer_use_job_status:
+            self._computer_use_job_status = status
+            status_label = {
+                "queued": "대기 중",
+                "processing": "Computer Use가 브라우저/웹사이트를 조작 중",
+                "succeeded": "완료",
+                "failed": "실패",
+                "cancelled": "취소됨",
+            }.get(status, status)
+            self._append_setup_monitor(f"상태 변경: {status_label}")
+
+        if status in {"succeeded", "failed", "cancelled"}:
+            summary = str(body.get("result_summary") or body.get("error_message") or "").strip()
+            if summary:
+                self._append_setup_monitor(summary[:900])
+            self._stop_computer_use_job_monitor("자동 설정 작업이 종료되었습니다.")
+            self._refresh_setup_assistant_status()
+
+    def _start_local_computer_use_process_monitor(
+        self,
+        process: Optional[subprocess.Popen],
+        label: str,
+    ) -> None:
+        """Track a locally launched Codex terminal from the compact monitor."""
+        self._local_computer_use_process = process
+        self._local_computer_use_label = str(label or "Codex Computer Use").strip()
+        self._local_computer_use_started_at = time.time()
+        pid = getattr(process, "pid", "") if process is not None else ""
+        self._set_setup_monitor(
+            f"로컬 Codex Computer Use 실행 중: {self._local_computer_use_label}\n"
+            f"PID: {pid or '외부 터미널'}\n"
+            "상태: 새 터미널에서 브라우저/웹사이트 조작을 진행합니다.\n"
+            "사용자 필요 작업: 로그인, 2FA, CAPTCHA, API/OAuth 최종 승인, 공개 게시 최종 제출"
+        )
+        if process is not None:
+            self._local_computer_use_poll_timer.start()
+
+    def _stop_local_computer_use_process_monitor(self, message: str = "") -> None:
+        """Stop local Codex process polling without killing the terminal."""
+        if self._local_computer_use_poll_timer.isActive():
+            self._local_computer_use_poll_timer.stop()
+        self._local_computer_use_process = None
+        self._local_computer_use_label = ""
+        self._local_computer_use_started_at = 0.0
+        if message:
+            self._append_setup_monitor(message)
+
+    def _poll_local_computer_use_process(self) -> None:
+        """Reflect local Codex terminal liveness in the compact monitor."""
+        process = self._local_computer_use_process
+        if process is None:
+            self._stop_local_computer_use_process_monitor()
+            return
+        code = process.poll()
+        elapsed = int(max(0, time.time() - self._local_computer_use_started_at))
+        pid = getattr(process, "pid", "")
+        if code is None:
+            self._set_setup_monitor(
+                f"로컬 Codex Computer Use 실행 중: {self._local_computer_use_label}\n"
+                f"PID: {pid or '-'} / 경과: {elapsed // 60}분 {elapsed % 60}초\n"
+                "상태: 터미널에서 자동 설정을 진행 중입니다.\n"
+                "로그인, 2FA, CAPTCHA, API/OAuth 최종 승인 화면이 나오면 사용자가 직접 완료해야 합니다."
+            )
+            return
+        self._append_setup_monitor(f"로컬 Codex Computer Use 종료: 코드 {code}")
+        self._stop_local_computer_use_process_monitor()
+        self._refresh_setup_assistant_status()
 
     def _is_computer_use_paid_only(self) -> bool:
         """Return whether computer-use feature is restricted to paid users."""
@@ -3103,8 +3311,8 @@ class SettingsTab(QWidget, ThemedMixin):
             f"Primary focus: {focus_text}\n\n"
             "Rules:\n"
             "1) You handle all navigation, page transitions, form fill, and non-sensitive clicks.\n"
-            "2) Ask the human only for login, 2FA, CAPTCHA, legal consent, API-key issuance, or payment decisions.\n"
-            "3) After human-only actions complete, continue automatically from the current page.\n"
+            "2) Ask the human only for login, 2FA, CAPTCHA, legal consent, API/OAuth final key creation, payment decisions, or final public post submission.\n"
+            "3) When human action is needed, state the exact site/account/action and wait; after it is complete, continue automatically from the current page.\n"
             "4) If you obtain callback URL/code/API key/profile URL, tell the user to copy it. This app auto-reads clipboard.\n"
             "5) Never perform destructive or irreversible actions.\n\n"
             f"Start by opening relevant pages: {pages}\n"
@@ -3114,9 +3322,6 @@ class SettingsTab(QWidget, ThemedMixin):
     def _submit_computer_use_bridge_job(self, bridge_url: str, api_key: str, prompt: str) -> Dict[str, Any]:
         """Submit one computer-use job to a remote bridge server."""
         user_id = self._extract_logged_in_user_id()
-        login_token = self._extract_logged_in_token()
-        if not login_token:
-            raise ValueError("로그인 토큰이 없어 브리지 요청을 보낼 수 없습니다.")
         step_id = self._get_active_setup_step_id()
         payload = {
             "user_id": user_id,
@@ -3125,17 +3330,15 @@ class SettingsTab(QWidget, ThemedMixin):
             "step_title": self.SETUP_STEP_DEFS.get(step_id, {}).get("title", ""),
             "prompt": prompt,
         }
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {login_token}",
-        }
-        token = str(api_key or "").strip()
-        if token:
-            headers["X-Bridge-API-Key"] = token
 
         base = str(bridge_url or "").strip().rstrip("/")
         url = f"{base}/v1/computer-use/jobs"
-        response = requests.post(url, json=payload, headers=headers, timeout=20)
+        response = requests.post(
+            url,
+            json=payload,
+            headers=self._computer_use_bridge_headers(api_key),
+            timeout=20,
+        )
         try:
             body = response.json()
         except Exception:
@@ -3153,7 +3356,7 @@ class SettingsTab(QWidget, ThemedMixin):
         """Escape shell command text for AppleScript string literal."""
         return str(raw_text or "").replace("\\", "\\\\").replace("\"", "\\\"")
 
-    def _launch_codex_terminal_process(self, args: List[str], workspace: str) -> None:
+    def _launch_codex_terminal_process(self, args: List[str], workspace: str) -> Optional[subprocess.Popen]:
         """
         Launch Codex in a new terminal window according to host OS.
 
@@ -3164,12 +3367,11 @@ class SettingsTab(QWidget, ThemedMixin):
         if os.name == "nt":
             windows_cmd = subprocess.list2cmdline(args)
             creation_flags = int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-            subprocess.Popen(
+            return subprocess.Popen(
                 ["cmd.exe", "/k", windows_cmd],
                 cwd=workspace,
                 creationflags=creation_flags,
             )
-            return
 
         posix_cmd = " ".join(shlex.quote(part) for part in args)
         if sys.platform == "darwin":
@@ -3183,9 +3385,9 @@ class SettingsTab(QWidget, ThemedMixin):
             for line in apple_script_lines:
                 osa_args.extend(["-e", line])
             subprocess.run(["osascript", *osa_args], check=True, timeout=8)
-            return
+            return None
 
-        subprocess.Popen(
+        return subprocess.Popen(
             ["x-terminal-emulator", "-e", "bash", "-lc", posix_cmd],
             cwd=workspace,
         )
@@ -3215,6 +3417,10 @@ class SettingsTab(QWidget, ThemedMixin):
             "youtube": (
                 "Google Cloud OAuth 클라이언트 발급(client_secrets.json) 및 YouTube 채널 연결",
                 "https://console.cloud.google.com/apis/credentials , https://www.youtube.com/",
+            ),
+            "instagram": (
+                "Instagram 로그인, 프로필 확인, 업로드 화면 동작 확인",
+                "https://www.instagram.com/accounts/login/ , https://www.instagram.com/",
             ),
         }
         focus_text, pages = focus_map.get(
@@ -3247,14 +3453,17 @@ class SettingsTab(QWidget, ThemedMixin):
             "1) Gemini API key — https://aistudio.google.com/app/apikey\n"
             "2) YouTube channel connection (Google Cloud OAuth client_secrets.json, then connect) — "
             "https://console.cloud.google.com/apis/credentials , https://www.youtube.com/\n"
-            "3) Linktree auto-publish — https://linktr.ee/admin\n\n"
+            "3) Instagram web upload readiness — log in, confirm the target profile, and verify the create/upload flow. "
+            "Do not submit a public post without explicit final confirmation.\n"
+            "4) Linktree auto-publish — https://linktr.ee/admin\n\n"
             "Rules:\n"
             "1) You handle navigation, page transitions, form fill, non-sensitive clicks.\n"
-            "2) Ask the human only for login, 2FA, CAPTCHA, consent, payment.\n"
-            "3) If you obtain a key/URL/code, the app auto-reads the clipboard.\n"
-            "4) Never perform destructive or irreversible actions."
+            "2) Ask the human only for login, 2FA, CAPTCHA, consent, payment, API/OAuth final key creation, or final public post submission.\n"
+            "3) When human action is needed, state the exact account/site/action and wait; after completion, continue automatically.\n"
+            "4) If you obtain a key/URL/code, the app auto-reads the clipboard.\n"
+            "5) Never perform destructive or irreversible actions."
         )
-        self._run_computer_use_prompt(prompt, "한 번에 자동 설정")
+        self._run_computer_use_prompt(prompt, "YouTube + Instagram 자동 설정")
 
     def _run_computer_use_prompt(self, prompt: str, label: str) -> None:
         """Shared Computer Use runner: paid gate → bridge or local Codex CLI.
@@ -3272,16 +3481,20 @@ class SettingsTab(QWidget, ThemedMixin):
             )
             return
 
-        # 유료 구독자: 서버(브리지)에 올려둔 Codex가 대신 처리한다.
-        # 사용자 설정값이 있으면 우선, 없으면 기본 서버 주소 사용 → 사용자는 아무것도 설정할 필요 없음.
+        # 공용 브리지를 명시적으로 켠 경우에만 서버 job으로 보낸다.
+        # 기본은 로컬 Codex CLI 실행이다. 그래야 사용자 PC의 로그인된 브라우저를 조작할 수 있다.
         try:
             cu_settings = get_settings_manager().get_computer_use_settings()
         except Exception:
             cu_settings = {}
-        bridge_url = str((cu_settings or {}).get("bridge_url", "") or "").strip() or DEFAULT_COMPUTER_USE_BRIDGE_URL
+        bridge_enabled = bool((cu_settings or {}).get("bridge_enabled", False))
+        bridge_url = (
+            str((cu_settings or {}).get("bridge_url", "") or "").strip()
+            or DEFAULT_COMPUTER_USE_BRIDGE_URL
+        ) if bridge_enabled else ""
         bridge_api_key = str((cu_settings or {}).get("bridge_api_key", "") or "").strip()
 
-        if bridge_url:
+        if bridge_enabled and bridge_url:
             try:
                 result = self._submit_computer_use_bridge_job(bridge_url, bridge_api_key, prompt)
             except Exception as exc:
@@ -3298,6 +3511,7 @@ class SettingsTab(QWidget, ThemedMixin):
             body = result.get("body") or {}
             job_id = str(body.get("job_id", "") or body.get("id", "") or "").strip()
             self._append_setup_log(f"자동 설정 요청 전송({label}): {job_id or 'no-id'}")
+            self._start_computer_use_job_monitor(bridge_url, bridge_api_key, job_id, label)
             show_info(
                 self,
                 "자동 설정 시작",
@@ -3305,7 +3519,7 @@ class SettingsTab(QWidget, ThemedMixin):
             )
             return
 
-        # (브리지 주소가 비어 있는 예외적 경우에만) 로컬 Codex로 폴백
+        # 로컬 Codex 실행
         status = self._refresh_codex_cli_status(show_dialog=False)
         if not status.get("available"):
             show_warning(self, "Codex 실행 불가", "Codex CLI 실행 파일을 찾지 못했습니다. 경로를 확인하세요.")
@@ -3340,8 +3554,9 @@ class SettingsTab(QWidget, ThemedMixin):
         args.append(prompt)
 
         try:
-            self._launch_codex_terminal_process(args=args, workspace=workspace)
+            process = self._launch_codex_terminal_process(args=args, workspace=workspace)
             self._append_setup_log(f"Codex Computer Use 실행: {label}")
+            self._start_local_computer_use_process_monitor(process, label)
             show_info(
                 self,
                 "Codex 실행 완료",

@@ -25,6 +25,16 @@ class _DummyGUI:
         self.output_folder_path = ""
 
 
+class _FakeProcess:
+    pid = 12345
+
+    def __init__(self):
+        self.returncode = None
+
+    def poll(self):
+        return self.returncode
+
+
 def main() -> int:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QApplication([])
@@ -84,12 +94,32 @@ def main() -> int:
             "Name          Command\n"
             "computer-use  /tmp/SkyComputerUseClient mcp disabled\n"
         )
+        bundled_cua_sample = (
+            "Name            Command\n"
+            "node_repl       C:\\Users\\HOME\\AppData\\Local\\OpenAI\\Codex\\runtimes\\cua_node\\bin\\node_repl.exe  "
+            "SKY_CUA_NATIVE_PIPE=*****  enabled\n"
+        )
         if not SettingsTab._has_enabled_computer_use_mcp(enabled_sample):
             print("ERROR: enabled mcp parsing failed")
             return 9
         if SettingsTab._has_enabled_computer_use_mcp(disabled_sample):
             print("ERROR: disabled mcp parsing failed")
             return 10
+        if not SettingsTab._has_enabled_computer_use_mcp(bundled_cua_sample):
+            print("ERROR: bundled CUA node_repl parsing failed")
+            return 12
+
+        fake_process = _FakeProcess()
+        tab._start_local_computer_use_process_monitor(fake_process, "Demo setup")  # noqa: SLF001
+        monitor_text = tab.setup_monitor.toPlainText()
+        if "PID: 12345" not in monitor_text:
+            print("ERROR: local computer use monitor did not show process id")
+            return 13
+        fake_process.returncode = 0
+        tab._poll_local_computer_use_process()  # noqa: SLF001
+        if "코드 0" not in tab.setup_monitor.toPlainText():
+            print("ERROR: local computer use monitor did not show exit code")
+            return 14
 
         # paid_only=True + no login user => launch/check controls must be disabled
         tab._refresh_computer_use_access_ui()

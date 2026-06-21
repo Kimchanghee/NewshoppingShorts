@@ -67,3 +67,85 @@ def test_build_snapshot_maps_scheduled_queue_rows(tmp_path):
     assert snapshot["rows"][0]["status"] == "완료"
     assert snapshot["rows"][1]["status"] == "완료(Linktree 보류)"
     assert snapshot["rows"][2]["upload"] == "예약됨"
+    assert snapshot["rows"][2]["order"] == "[032]"
+
+
+def test_build_snapshot_compacts_quality_gate_rows(tmp_path):
+    queue_path = tmp_path / "summer_queue.json"
+    queue_path.write_text(
+        json.dumps(
+            {
+                "automation_policy": {"interval_minutes": 240},
+                "items": [
+                    {
+                        "planned_number": "[054]",
+                        "status": "skipped_quality_gate",
+                        "coupang_url": "https://www.coupang.com/vp/products/9521551893",
+                        "scheduled_at": "2026-06-21T20:26:26+09:00",
+                        "scheduled_order": 1,
+                        "attempts": 1,
+                        "result": {
+                            "blocking_reason": "Render upload quality gate failed: duration_too_short",
+                        },
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8-sig",
+    )
+
+    snapshot = build_summer_coupang_queue_snapshot(queue_path)
+
+    assert snapshot["counts"]["skipped"] == 1
+    assert snapshot["rows"][0]["order"] == "[054]"
+    assert snapshot["rows"][0]["status"] == "품질보류"
+    assert "duration_too_short" in snapshot["rows"][0]["remarks"]
+
+
+def test_build_snapshot_treats_system_skip_as_retry_waiting(tmp_path):
+    queue_path = tmp_path / "summer_queue.json"
+    queue_path.write_text(
+        json.dumps(
+            {
+                "automation_policy": {"interval_minutes": 240},
+                "items": [
+                    {
+                        "planned_number": "[032]",
+                        "status": "skipped_low_similarity",
+                        "coupang_url": "https://www.coupang.com/vp/products/1",
+                        "scheduled_at": "2026-06-19T00:26:26+09:00",
+                        "scheduled_order": 1,
+                        "attempts": 1,
+                        "result": {
+                            "blocking_reason": "상품을 못찾았습니다. 해외 마켓에서 실제 시연 영상이 있는 동일 상품을 찾지 못했습니다.",
+                            "match_status": "not_found",
+                        },
+                    },
+                    {
+                        "planned_number": "[040]",
+                        "status": "skipped_low_similarity",
+                        "coupang_url": "https://www.coupang.com/vp/products/2",
+                        "scheduled_at": "2026-06-20T08:26:26+09:00",
+                        "scheduled_order": 2,
+                        "attempts": 1,
+                        "result": {
+                            "blocking_reason": "키워드 변환에 실패했습니다. Gemini API 키를 설정해주세요.",
+                            "match_status": "not_checked",
+                        },
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8-sig",
+    )
+
+    snapshot = build_summer_coupang_queue_snapshot(queue_path)
+
+    assert snapshot["counts"]["skipped"] == 1
+    assert snapshot["counts"]["waiting"] == 1
+    assert snapshot["next_planned_number"] == "[040]"
+    assert snapshot["rows"][1]["status"] == "재시도 대기"
+    assert snapshot["rows"][1]["upload"] == "재시도 대기"
+    assert snapshot["rows"][1]["retriable_system_skip"] == "true"

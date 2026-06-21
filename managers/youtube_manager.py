@@ -1029,7 +1029,11 @@ class YouTubeManager:
         return desc.strip()
 
     @staticmethod
-    def ensure_coupang_title_compliance(title: str, max_length: int = 100) -> str:
+    def ensure_coupang_title_compliance(
+        title: str,
+        max_length: int = 100,
+        marker_position: str = "prefix",
+    ) -> str:
         """Ensure Shorts title carries a visible paid-promotion marker."""
         clean_title = " ".join(str(title or "").split()) or "쇼핑 추천 영상"
         lowered = clean_title.lower()
@@ -1040,6 +1044,21 @@ class YouTubeManager:
             "광고 포함",
             "유료광고 포함",
         )
+        if str(marker_position or "").strip().lower() == "suffix":
+            for marker in paid_markers:
+                clean_title = re.sub(
+                    rf"(^|\s){re.escape(marker)}(\s|$)",
+                    " ",
+                    clean_title,
+                    flags=re.IGNORECASE,
+                )
+            clean_title = " ".join(clean_title.split()).strip() or "쇼핑 추천 영상"
+            suffix = f" {COUPANG_PAID_PROMOTION_TITLE_MARKER}"
+            available = max(1, max_length - len(suffix))
+            if len(clean_title) > available:
+                clean_title = clean_title[: max(1, available - 3)].rstrip() + "..."
+            return f"{clean_title}{suffix}".strip()
+
         if any(marker.lower() in lowered for marker in paid_markers):
             return clean_title[:max_length].rstrip()
 
@@ -1422,7 +1441,10 @@ class YouTubeManager:
                 item.get("coupang_deep_link") or item.get("source_url") or ""
             )
             if self._is_coupang_url(purchase_link):
-                safe_title = self.ensure_coupang_title_compliance(safe_title)
+                safe_title = self.ensure_coupang_title_compliance(
+                    safe_title,
+                    marker_position=str(item.get("paid_marker_position") or "prefix"),
+                )
                 description = self.ensure_coupang_affiliate_compliance(description, purchase_link)
             item["title"] = safe_title
             if hashtag_str:

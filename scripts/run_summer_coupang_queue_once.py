@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import asyncio
 import json
 import os
@@ -26,13 +27,22 @@ from managers.linktree_manager import (
     LinktreeManager,
     get_linktree_manager,
 )
-from managers.youtube_manager import YouTubeManager, get_youtube_manager
+from managers.youtube_manager import (
+    COUPANG_PAID_PROMOTION_TITLE_MARKER,
+    YouTubeManager,
+    get_youtube_manager,
+)
 from scripts import render_program_pipeline_upload as renderer
 
 
 QUEUE_PATH = Path(r"C:\Users\HOME\.ssmaker\summer_coupang_autosourcing_queue_20260603.json")
 DEFAULT_MIN_SIMILARITY = 0.9
-DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN = 2
+DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN = 50
+DEFAULT_CONTINUE_AFTER_SKIP_UNTIL_COMPLETED = True
+MIN_FINAL_VIDEO_SECONDS = 8.0
+MAX_FINAL_VIDEO_SECONDS = 60.0
+MIN_FINAL_VIDEO_BYTES = 1_000_000
+FORCE_RUN_NOW_ENV = "SSMAKER_SUMMER_COUPANG_RUN_NOW"
 AUTOMATION_LABEL = "summer_coupang_queue"
 SUCCESS_FINAL_STATUSES = {
     "completed",
@@ -40,6 +50,139 @@ SUCCESS_FINAL_STATUSES = {
 }
 SKIP_STATUSES = {
     "skipped_low_similarity",
+    "skipped_quality_gate",
+}
+SYSTEM_BLOCKER_MARKERS = (
+    "api key expired",
+    "api key not valid",
+    "api_key_invalid",
+    "gemini api key",
+    "gemini api 키",
+    "invalid_argument",
+    "키워드 변환에 실패",
+    "api 키를 설정",
+)
+SUMMER_UPLOAD_METADATA: Dict[str, Dict[str, Any]] = {
+    "mini_air_cooler": {
+        "title": "에어컨 틀기 전 10초 쿨링템, 미니냉풍기 체감 #shorts",
+        "line": "방 안 더울 때 바로 쓰는 미니냉풍기",
+        "situation": "방 안이 답답하게 더울 때 에어컨을 바로 틀기 전 보조 쿨링템으로 확인하기 좋습니다.",
+        "tags": ["냉풍기", "미니냉풍기", "여름가전", "자취템", "쿠팡추천"],
+    },
+    "cooling_handheld_fan": {
+        "title": "출근길 땀 식히는 손풍기, 이 정도면 충분함 #shorts",
+        "line": "차 안/출근길 더위 버티는 손풍기",
+        "situation": "출근길, 차 안, 야외 대기처럼 잠깐씩 더위를 버텨야 하는 순간에 쓰기 좋은 여름템입니다.",
+        "tags": ["손풍기", "휴대용선풍기", "여름꿀템", "출근템", "쿠팡추천"],
+    },
+    "portable_cooling_fan": {
+        "title": "밖에서 바로 식히는 휴대용 냉각팬, 더운 날 필수템 #shorts",
+        "line": "더운 날 가방에 넣는 휴대용 냉각팬",
+        "situation": "야외 이동이 많은 날 가방에 넣어 두고 바로 꺼내 쓰는 쿨링 아이템입니다.",
+        "tags": ["휴대용선풍기", "냉각팬", "여름필수템", "야외템", "쿠팡추천"],
+    },
+    "mist_fan": {
+        "title": "분사까지 되는 손풍기, 야외 더위 체감이 다름 #shorts",
+        "line": "물분사로 더 시원한 휴대용 선풍기",
+        "situation": "그냥 바람만으로 부족한 야외 더위에 분사 기능까지 같이 쓰는 제품군입니다.",
+        "tags": ["미스트선풍기", "손풍기", "여름꿀템", "야외템", "쿠팡추천"],
+    },
+    "neck_fan": {
+        "title": "목에 걸면 양손이 비는 넥팬, 더운 날 이게 편함 #shorts",
+        "line": "하이킹/출근길에 쓰는 넥밴드 선풍기",
+        "situation": "손에 들 필요 없이 목에 걸어 쓰는 방식이라 이동 중 더위 대응에 편합니다.",
+        "tags": ["넥팬", "목선풍기", "휴대용선풍기", "여름꿀템", "쿠팡추천"],
+    },
+    "desk_camping_fan": {
+        "title": "캠핑장에서 조용하게 쓰는 무선 선풍기 #여름꿀템",
+        "line": "캠핑/책상 위에 두는 저소음 선풍기",
+        "situation": "캠핑장, 책상, 침대 옆처럼 가까운 곳에 두고 쓰는 무선 선풍기입니다.",
+        "tags": ["캠핑선풍기", "탁상용선풍기", "무선선풍기", "여름캠핑", "쿠팡추천"],
+    },
+    "camping_fan": {
+        "title": "캠핑 더위 버티는 무선 선풍기, 텐트 안 필수템 #shorts",
+        "line": "텐트 안 더위 줄이는 캠핑 선풍기",
+        "situation": "텐트 안, 차박, 야외 테이블에서 더운 공기를 식히는 캠핑용 여름템입니다.",
+        "tags": ["캠핑선풍기", "무선선풍기", "차박템", "여름캠핑", "쿠팡추천"],
+    },
+    "clip_fan": {
+        "title": "유모차부터 책상까지 집는 클립 선풍기 #여름꿀템",
+        "line": "어디든 집어서 쓰는 클립 선풍기",
+        "situation": "유모차, 책상, 선반처럼 세워두기 애매한 곳에 고정해서 쓰는 선풍기입니다.",
+        "tags": ["클립선풍기", "휴대용선풍기", "여름꿀템", "육아템", "쿠팡추천"],
+    },
+    "uv_umbrella": {
+        "title": "햇빛 강한 날 얼굴 온도 줄이는 초경량 양산 #shorts",
+        "line": "출근길 햇빛 막는 UV 차단 양산",
+        "situation": "한낮 햇빛이 강할 때 가방에 넣어 두고 바로 꺼내 쓰는 UV 차단 아이템입니다.",
+        "tags": ["양산추천", "자외선차단", "여름필수템", "출근템", "쿠팡추천"],
+    },
+    "uv_parasol": {
+        "title": "한낮 햇빛 피하려면 양산 하나는 있어야 함 #shorts",
+        "line": "강한 햇빛 막는 UV 차단 파라솔",
+        "situation": "야외 이동이 많은 날 직사광선과 체감 더위를 줄이는 용도입니다.",
+        "tags": ["양산추천", "UV차단", "여름필수템", "야외템", "쿠팡추천"],
+    },
+    "cooling_towel": {
+        "title": "목에 두르면 바로 시원한 여름 쿨타올 #shorts",
+        "line": "운동/캠핑 때 바로 식히는 쿨타올",
+        "situation": "운동, 캠핑, 산책처럼 땀이 빨리 나는 순간에 목 주변을 식히기 좋습니다.",
+        "tags": ["쿨타올", "쿨스카프", "캠핑템", "운동템", "여름필수템"],
+    },
+    "cooling_arm_sleeves": {
+        "title": "운전할 때 팔 타는 사람, 냉감 쿨토시 써야 하는 이유 #shorts",
+        "line": "운전/자전거 탈 때 쓰는 냉감 쿨토시",
+        "situation": "운전, 자전거, 야외 작업처럼 팔이 햇빛에 오래 노출될 때 쓰는 여름템입니다.",
+        "tags": ["쿨토시", "냉감토시", "운전템", "자외선차단", "여름꿀템"],
+    },
+    "cooling_arm_sleeve": {
+        "title": "운전할 때 팔 타는 사람, 냉감 쿨토시 써야 하는 이유 #shorts",
+        "line": "운전/자전거 탈 때 쓰는 냉감 쿨토시",
+        "situation": "운전, 자전거, 야외 작업처럼 팔이 햇빛에 오래 노출될 때 쓰는 여름템입니다.",
+        "tags": ["쿨토시", "냉감토시", "운전템", "자외선차단", "여름꿀템"],
+    },
+    "cooling_clothing": {
+        "title": "땀 많은 날 옷부터 시원해야 버팀, 냉감 의류 체크 #shorts",
+        "line": "더운 날 입는 냉감 여름 의류",
+        "situation": "땀이 많은 날 출근, 운동, 야외 활동 전에 먼저 확인할 냉감 의류입니다.",
+        "tags": ["냉감의류", "여름옷", "쿨링템", "출근템", "쿠팡추천"],
+    },
+    "waterproof_phone_pouch": {
+        "title": "물놀이 갈 때 폰 살리는 방수팩 체크포인트 #shorts",
+        "line": "물놀이 전에 폰 방수부터 챙기는 방수팩",
+        "situation": "워터파크, 바다, 계곡처럼 휴대폰 침수가 걱정되는 날 먼저 챙길 제품군입니다.",
+        "tags": ["방수팩", "물놀이", "여름휴가", "여름필수템", "쿠팡추천"],
+    },
+    "cooling_bedding": {
+        "title": "밤새 뒤척이면 침대부터 시원하게, 여름 냉감침구 #shorts",
+        "line": "열대야에 쓰는 냉감 침구",
+        "situation": "밤새 덥고 뒤척이는 열대야에는 침대부터 시원하게 바꾸는 것이 체감이 큽니다.",
+        "tags": ["냉감침구", "쿨매트", "열대야", "여름침구", "쿠팡추천"],
+    },
+    "mosquito_trap": {
+        "title": "모기랑 전쟁하는 사람, 여름 벌레템 하나는 필요함 #shorts",
+        "line": "여름밤 모기 줄이는 모기트랩",
+        "situation": "잠들기 전 모기 소리나 캠핑장 벌레가 신경 쓰이는 사람에게 맞는 제품군입니다.",
+        "tags": ["모기퇴치", "모기트랩", "여름꿀템", "캠핑템", "쿠팡추천"],
+    },
+    "mosquito_repellent_band": {
+        "title": "야외에서 모기 물리기 싫으면 팔찌부터 챙김 #shorts",
+        "line": "캠핑/산책 때 쓰는 모기 기피 밴드",
+        "situation": "산책, 캠핑, 야외 놀이처럼 오래 밖에 있을 때 챙기는 모기 기피 아이템입니다.",
+        "tags": ["모기팔찌", "모기퇴치", "캠핑템", "여름필수템", "쿠팡추천"],
+    },
+    "mosquito_swatter": {
+        "title": "모기 보이면 바로 끝내는 전기 모기채 #shorts",
+        "line": "여름밤 바로 쓰는 전기 모기채",
+        "situation": "자취방이나 침실에서 모기가 보일 때 바로 대응하기 좋은 여름 방충템입니다.",
+        "tags": ["전기모기채", "모기퇴치", "여름꿀템", "자취템", "쿠팡추천"],
+    },
+}
+DEFAULT_SUMMER_UPLOAD_METADATA = {
+    "title": "더운 날 바로 쓰는 여름 생활꿀템 #shorts",
+    "line": "여름 불편을 줄이는 생활 꿀템",
+    "situation": "더운 날 반복되는 생활 불편을 줄이는 여름 추천템입니다.",
+    "tags": ["생활꿀템", "여름꿀템", "쿠팡추천", "가성비템", "shorts"],
 }
 
 
@@ -69,6 +212,43 @@ def is_item_due(item: Dict[str, Any], *, now: Optional[datetime] = None) -> bool
     if scheduled_at is None:
         return True
     return scheduled_at <= (now or now_datetime())
+
+
+def force_run_now_enabled() -> bool:
+    return str(os.environ.get(FORCE_RUN_NOW_ENV, "")).strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "y",
+        "on",
+    }
+
+
+def is_system_sourcing_blocker(report: Dict[str, Any], reason: str = "") -> bool:
+    text = " ".join(
+        str(part or "")
+        for part in (
+            reason,
+            report.get("error"),
+            report.get("match_error"),
+            report.get("match_status"),
+        )
+    ).lower()
+    return any(marker in text for marker in SYSTEM_BLOCKER_MARKERS)
+
+
+def is_retriable_system_skip(item: Dict[str, Any]) -> bool:
+    status = str(item.get("status") or "").strip().lower()
+    if status not in SKIP_STATUSES:
+        return False
+    result = item.get("result") if isinstance(item.get("result"), dict) else {}
+    reason = str(result.get("blocking_reason") or result.get("error") or "").strip()
+    return is_system_sourcing_blocker(result, reason)
+
+
+def is_processable_queue_item(item: Dict[str, Any]) -> bool:
+    status = str(item.get("status") or "").strip().lower()
+    return status == "pending" or is_retriable_system_skip(item)
 
 
 def load_queue() -> Dict[str, Any]:
@@ -128,36 +308,89 @@ def _item_similarity(item: Dict[str, Any]) -> Optional[float]:
         return None
 
 
-def _is_publishable_coupang_image_fallback(item: Dict[str, Any], min_similarity: float) -> bool:
+def _source_label(item: Dict[str, Any]) -> str:
     source = str(item.get("source") or (item.get("product") or {}).get("source") or "").lower()
-    if source != "coupang_image":
+    return source.strip()
+
+
+def is_verified_marketplace_demo_item(item: Dict[str, Any], min_similarity: float) -> bool:
+    source = _source_label(item)
+    if source in {"", "coupang", "coupang_image"}:
         return False
     if not item.get("video_file"):
         return False
     similarity = _item_similarity(item)
-    if similarity is not None and similarity < min_similarity:
+    if similarity is None or similarity < min_similarity:
         return False
-    return str(item.get("fallback_reason") or "").lower() == "no_marketplace_video"
+    if str(item.get("fallback_reason") or "").strip():
+        return False
+    if item.get("requires_review"):
+        return False
+    return bool(item.get("auto_publish_safe"))
 
 
 def select_safe_marketplace_item(report: Dict[str, Any], min_similarity: float) -> Optional[Dict[str, Any]]:
     sourced_items = report.get("sourced_products") or []
     if report.get("match_status") == "matched":
         for item in sourced_items:
-            if item.get("auto_publish_safe") and item.get("video_file"):
+            if is_verified_marketplace_demo_item(item, min_similarity):
                 return item
 
-    # If strict marketplace search fails, the pipeline may still produce a
-    # video from the exact Coupang product image. Use it as the final fallback
-    # instead of draining the scheduled queue with repeated "not found" skips.
-    for item in sourced_items:
-        if _is_publishable_coupang_image_fallback(item, min_similarity):
-            fallback = dict(item)
-            fallback["auto_publish_safe"] = True
-            fallback["requires_review"] = False
-            fallback["fallback_used_for_publish"] = True
-            return fallback
     return None
+
+
+def validate_render_upload_quality(rendered: Dict[str, Any]) -> Dict[str, Any]:
+    final_video = str(rendered.get("final_video") or "")
+    probe = dict(rendered.get("video_probe") or {})
+    reasons: List[str] = []
+
+    if not final_video or not Path(final_video).exists():
+        reasons.append("final_video_missing")
+        file_size = 0
+    else:
+        file_size = Path(final_video).stat().st_size
+        if file_size < MIN_FINAL_VIDEO_BYTES:
+            reasons.append("final_video_too_small")
+
+    if not rendered.get("render_ok"):
+        reasons.append("render_ok_false")
+
+    if not probe and final_video and Path(final_video).exists():
+        try:
+            probe = renderer.verify_video(final_video)
+        except Exception as exc:
+            probe = {"error": str(exc)}
+            reasons.append("video_probe_failed")
+
+    duration = 0.0
+    try:
+        duration = float(probe.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration < MIN_FINAL_VIDEO_SECONDS:
+        reasons.append("duration_too_short")
+    if duration > MAX_FINAL_VIDEO_SECONDS:
+        reasons.append("duration_too_long")
+    if not probe.get("has_audio"):
+        reasons.append("missing_audio")
+    if not probe.get("is_vertical_1080x1920"):
+        reasons.append("not_vertical_1080x1920")
+    if int(rendered.get("tts_segment_count") or 0) <= 0:
+        reasons.append("missing_tts_segments")
+
+    integrity = rendered.get("render_integrity") if isinstance(rendered.get("render_integrity"), dict) else {}
+    if integrity and not integrity.get("ok"):
+        reasons.append("render_integrity_failed")
+
+    return {
+        "ok": not reasons,
+        "reasons": reasons,
+        "probe": probe,
+        "file_size_bytes": file_size,
+        "min_duration_seconds": MIN_FINAL_VIDEO_SECONDS,
+        "max_duration_seconds": MAX_FINAL_VIDEO_SECONDS,
+        "min_file_size_bytes": MIN_FINAL_VIDEO_BYTES,
+    }
 
 
 async def run_sourcing(item: Dict[str, Any], run_dir: Path, min_similarity: float) -> Dict[str, Any]:
@@ -205,10 +438,27 @@ def render_single_item(job: Dict[str, Any], run_dir: Path) -> Dict[str, Any]:
     if not rendered:
         raise RuntimeError("Render pipeline did not produce a result.")
     result = dict(rendered[0])
+    result["upload_quality"] = validate_render_upload_quality(result)
     result_path = run_dir / "rendered" / "render_result.json"
     write_json(result_path, result)
     result["_render_result_path"] = str(result_path)
     return result
+
+
+def _metadata_from_queue_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    metadata = item.get("upload_metadata")
+    if isinstance(metadata, dict):
+        return {key: deepcopy(value) for key, value in metadata.items()}
+    return {}
+
+
+def build_summer_upload_metadata(item: Dict[str, Any]) -> Dict[str, Any]:
+    category = str(item.get("category") or "").strip()
+    base = deepcopy(SUMMER_UPLOAD_METADATA.get(category) or DEFAULT_SUMMER_UPLOAD_METADATA)
+    base.update({key: value for key, value in _metadata_from_queue_item(item).items() if value})
+    tags = base.get("tags") or DEFAULT_SUMMER_UPLOAD_METADATA["tags"]
+    base["tags"] = [str(tag).strip().lstrip("#") for tag in tags if str(tag).strip()]
+    return base
 
 
 def build_upload_item(
@@ -224,40 +474,56 @@ def build_upload_item(
 
     product_name = str(rendered["product_name"])
     product_title = YouTubeManager.apply_upload_number_to_product_text(product_name, upload_number, limit=220)
-    base_title = f"[광고] {product_name[:70]} #shorts"
-    title = YouTubeManager.apply_upload_number_to_title(
-        YouTubeManager.ensure_coupang_title_compliance(base_title),
-        upload_number,
+    marker = YouTubeManager.format_upload_number(upload_number)
+    metadata = build_summer_upload_metadata(item)
+    title = YouTubeManager.ensure_coupang_title_compliance(
+        str(metadata.get("title") or DEFAULT_SUMMER_UPLOAD_METADATA["title"]),
+        marker_position="suffix",
     )
     linktree_url = DEFAULT_LINKTREE_PROFILE_URL
+    summary_line = str(metadata.get("line") or DEFAULT_SUMMER_UPLOAD_METADATA["line"]).strip()
+    situation = str(metadata.get("situation") or DEFAULT_SUMMER_UPLOAD_METADATA["situation"]).strip()
+    summary_product_line = "상품: " + YouTubeManager.apply_upload_number_to_product_text(
+        summary_line or product_name,
+        upload_number,
+        limit=220,
+    )
     desc_lines = [
-        COUPANG_AFFILIATE_DISCLOSURE,
-        "",
-        f"상품: {product_title}",
+        f"{marker} {summary_line}".strip(),
+        summary_product_line,
+        f"구매 링크는 프로필 Linktree에서 {marker} 검색하면 바로 확인할 수 있습니다.",
         f"링크 모음: {linktree_url}",
         f"구매 링크: {purchase_url}",
+        COUPANG_AFFILIATE_DISCLOSURE,
+        "",
+        situation,
+        f"원상품명: {product_title}",
     ]
     description = YouTubeManager.apply_upload_number_to_description(
         YouTubeManager.ensure_coupang_affiliate_compliance("\n".join(desc_lines), purchase_url),
         upload_number,
-        product_text=product_name,
+        product_text=summary_line or product_name,
     )
+    tags = metadata.get("tags") or DEFAULT_SUMMER_UPLOAD_METADATA["tags"]
 
     return {
         "video_path": rendered["final_video"],
         "title": title,
         "description": description,
-        "tags": ["shorts", "여름템", "쿠팡추천", "쇼핑쇼츠", "automation"],
+        "tags": tags,
         "product_info": product_name,
-        "product_description": product_name,
+        "product_description": summary_line or product_name,
         "product_name": product_name,
         "source_url": str(item.get("coupang_url") or ""),
         "coupang_deep_link": purchase_url,
         "linktree_url": linktree_url,
         "upload_number": upload_number,
+        "paid_marker_position": "suffix",
+        "summer_upload_metadata": metadata,
         "privacy": privacy,
         "render_integrity": rendered.get("render_integrity") or {},
         "render_integrity_required": True,
+        "upload_quality": rendered.get("upload_quality") or {},
         "report_path": report.get("_report_path", ""),
     }
 
@@ -301,6 +567,8 @@ def verify_youtube(upload_item: Dict[str, Any], uploaded: Dict[str, Any]) -> Dic
         "title": title,
         "privacy": status.get("privacyStatus", ""),
         "has_number_title": marker in title,
+        "has_problem_hook_title": not title.strip().startswith(COUPANG_PAID_PROMOTION_TITLE_MARKER),
+        "has_paid_marker_title": COUPANG_PAID_PROMOTION_TITLE_MARKER in title,
         "has_number_description": marker in desc,
         "has_linktree": DEFAULT_LINKTREE_PROFILE_URL in desc,
         "has_disclosure": COUPANG_AFFILIATE_DISCLOSURE in desc,
@@ -347,7 +615,8 @@ def verify_youtube(upload_item: Dict[str, Any], uploaded: Dict[str, Any]) -> Dic
         "comment": comment_verification,
         "ok": all(
             [
-                metadata["has_number_title"],
+                metadata["has_problem_hook_title"],
+                metadata["has_paid_marker_title"],
                 metadata["has_number_description"],
                 metadata["has_linktree"],
                 metadata["has_disclosure"],
@@ -464,7 +733,7 @@ def update_item_attempt(item: Dict[str, Any]) -> None:
 
 def pending_item_count(queue_payload: Dict[str, Any]) -> int:
     items: List[Dict[str, Any]] = queue_payload.get("items") or []
-    return sum(1 for item in items if str(item.get("status")) == "pending")
+    return sum(1 for item in items if is_processable_queue_item(item))
 
 
 def youtube_upload_ready() -> Dict[str, Any]:
@@ -522,14 +791,21 @@ def attach_result(
     item["result"] = result
 
 
-async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]:
+async def process_pending_items(
+    queue_payload: Dict[str, Any],
+    *,
+    force_run_now: Optional[bool] = None,
+) -> Dict[str, Any]:
     items: List[Dict[str, Any]] = queue_payload.get("items") or []
-    pending = [item for item in items if str(item.get("status")) == "pending"]
+    pending = [item for item in items if is_processable_queue_item(item)]
     if not pending:
         return {"processed": False, "reason": "no_pending_items"}
 
+    run_now = force_run_now_enabled() if force_run_now is None else bool(force_run_now)
     now = now_datetime()
     due_pending = [item for item in pending if is_item_due(item, now=now)]
+    if not due_pending and run_now:
+        due_pending = [pending[0]]
     if not due_pending:
         next_scheduled_at = min(
             (
@@ -552,9 +828,16 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
     privacy = str(
         (queue_payload.get("automation_policy") or {}).get("youtube_privacy", "unlisted")
     ).strip() or "unlisted"
+    policy = queue_payload.get("automation_policy") or {}
+    continue_after_skip = bool(
+        policy.get(
+            "continue_after_skip_until_completed",
+            DEFAULT_CONTINUE_AFTER_SKIP_UNTIL_COMPLETED,
+        )
+    )
     try:
         max_candidates = int(
-            (queue_payload.get("automation_policy") or {}).get(
+            policy.get(
                 "max_candidate_items_per_run",
                 DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN,
             )
@@ -562,13 +845,15 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
         )
     except (TypeError, ValueError):
         max_candidates = DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN
-    max_candidates = max(1, max_candidates)
-
     first_due_item = due_pending[0]
     first_due_index = next(
         (idx for idx, item in enumerate(pending) if item is first_due_item),
         0,
     )
+    if continue_after_skip:
+        max_candidates = max(1, len(pending) - first_due_index)
+    else:
+        max_candidates = max(1, max_candidates)
     candidate_items = pending[first_due_index : first_due_index + max_candidates]
     skipped_items: List[Dict[str, Any]] = []
 
@@ -584,6 +869,33 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
 
         if not safe_item:
             reason = str(report.get("match_error") or report.get("error") or "No safe marketplace video matched the threshold.")
+            if is_system_sourcing_blocker(report, reason):
+                attach_result(
+                    item,
+                    status="failed",
+                    similarity=similarity,
+                    blocking_reason=reason,
+                    extra={
+                        "match_status": report.get("match_status"),
+                        "report_path": report.get("_report_path", ""),
+                        "purchase_url": determine_purchase_url(item, report),
+                        "run_dir": str(run_dir),
+                    },
+                )
+                save_queue(queue_payload)
+                summary = {
+                    "processed": True,
+                    "status": "failed",
+                    "planned_number": item.get("planned_number"),
+                    "error": reason,
+                    "blocking_type": "sourcing_system_blocker",
+                }
+                if skipped_items:
+                    summary["skipped_before"] = skipped_items
+                    summary["skip_count"] = len(skipped_items)
+                if run_now:
+                    summary["run_now"] = True
+                return summary
             attach_result(
                 item,
                 status="skipped_low_similarity",
@@ -620,8 +932,34 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
 
         try:
             rendered = render_single_item(job, run_dir)
-            if not rendered.get("render_ok"):
-                raise RuntimeError("Render verification failed.")
+            upload_quality = rendered.get("upload_quality") or validate_render_upload_quality(rendered)
+            if not rendered.get("render_ok") or not upload_quality.get("ok"):
+                reason = "Render upload quality gate failed: " + ", ".join(
+                    upload_quality.get("reasons") or ["render_ok_false"]
+                )
+                attach_result(
+                    item,
+                    status="skipped_quality_gate",
+                    similarity=similarity,
+                    render_path=str(rendered.get("final_video") or ""),
+                    blocking_reason=reason,
+                    extra={
+                        "match_status": report.get("match_status"),
+                        "report_path": report.get("_report_path", ""),
+                        "render_result_path": rendered.get("_render_result_path", ""),
+                        "purchase_url": purchase_url,
+                        "upload_quality": upload_quality,
+                        "run_dir": str(run_dir),
+                    },
+                )
+                save_queue(queue_payload)
+                skipped_items.append(
+                    {
+                        "planned_number": item.get("planned_number"),
+                        "reason": reason,
+                    }
+                )
+                continue
 
             upload_item = build_upload_item(rendered, item, report, purchase_url, privacy)
             uploaded = upload_verified_render(upload_item, privacy)
@@ -645,6 +983,7 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
                     "purchase_url": purchase_url,
                     "youtube": uploaded,
                     "youtube_verification": youtube_verification,
+                    "upload_quality": upload_quality,
                     "run_dir": str(run_dir),
                 },
             )
@@ -656,6 +995,8 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
                 "youtube_url": uploaded.get("video_url", ""),
                 "linktree_ok": linktree_result.get("ok", False),
             }
+            if run_now:
+                summary["run_now"] = True
             if skipped_items:
                 summary["skipped_before"] = skipped_items
                 summary["skip_count"] = len(skipped_items)
@@ -670,6 +1011,7 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
                 extra={
                     "report_path": report.get("_report_path", ""),
                     "purchase_url": purchase_url,
+                    "upload_quality": locals().get("upload_quality", {}),
                     "run_dir": str(run_dir),
                 },
             )
@@ -679,6 +1021,7 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
                 "status": "failed",
                 "planned_number": item.get("planned_number"),
                 "error": str(exc),
+                **({"run_now": True} if run_now else {}),
             }
 
     if skipped_items:
@@ -688,12 +1031,24 @@ async def process_pending_items(queue_payload: Dict[str, Any]) -> Dict[str, Any]
             "reason": "all_candidate_items_skipped_low_similarity",
             "skip_count": len(skipped_items),
             "skipped_items": skipped_items,
+            **({"run_now": True} if run_now else {}),
         }
 
     return {"processed": False, "reason": "all_pending_items_skipped_low_similarity"}
 
 
-def main() -> int:
+def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Run one Summer Coupang queue cycle.")
+    parser.add_argument(
+        "--run-now",
+        action="store_true",
+        help="Process the first pending item immediately, even if its scheduled_at is in the future.",
+    )
+    return parser.parse_args(argv)
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    args = parse_args([] if argv is None else argv)
     queue_payload = load_queue()
     pending_count = pending_item_count(queue_payload)
     if pending_count:
@@ -714,7 +1069,7 @@ def main() -> int:
             )
             return 0
 
-    summary = asyncio.run(process_pending_items(queue_payload))
+    summary = asyncio.run(process_pending_items(queue_payload, force_run_now=args.run_now or None))
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
     if summary.get("status") in SUCCESS_FINAL_STATUSES:
         return 0
@@ -730,4 +1085,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(main(sys.argv[1:]))

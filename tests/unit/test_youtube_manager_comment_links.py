@@ -1,4 +1,8 @@
-from managers.youtube_manager import COUPANG_AFFILIATE_DISCLOSURE, YouTubeManager
+from managers.youtube_manager import (
+    COUPANG_AFFILIATE_DISCLOSURE,
+    COUPANG_PAID_PROMOTION_TITLE_MARKER,
+    YouTubeManager,
+)
 
 
 class _DummySettings:
@@ -221,3 +225,12 @@ def test_coupang_title_does_not_duplicate_paid_promotion_marker():
     title = YouTubeManager.ensure_coupang_title_compliance("[광고] 꿀템 발견! 주방 선반")
 
     assert title == "[광고] 꿀템 발견! 주방 선반"
+
+
+def test_coupang_title_can_place_paid_marker_after_hook():
+    title = YouTubeManager.ensure_coupang_title_compliance(
+        "commute heat relief fan #shorts",
+        marker_position="suffix",
+    )
+
+    assert title == f"commute heat relief fan #shorts {COUPANG_PAID_PROMOTION_TITLE_MARKER}"

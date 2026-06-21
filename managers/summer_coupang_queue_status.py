@@ -16,7 +16,17 @@ DEFAULT_QUEUE_PATH = (
 )
 
 SUCCESS_STATUSES = {"completed", "completed_linktree_blocked"}
-SKIPPED_STATUSES = {"skipped_low_similarity", "skipped"}
+SKIPPED_STATUSES = {"skipped_low_similarity", "skipped_quality_gate", "skipped"}
+SYSTEM_BLOCKER_MARKERS = (
+    "api key expired",
+    "api key not valid",
+    "api_key_invalid",
+    "gemini api key",
+    "gemini api 키",
+    "invalid_argument",
+    "키워드 변환에 실패",
+    "api 키를 설정",
+)
 
 STATUS_LABELS = {
     "pending": "예약 대기",
@@ -24,6 +34,7 @@ STATUS_LABELS = {
     "completed": "완료",
     "completed_linktree_blocked": "완료(Linktree 보류)",
     "skipped_low_similarity": "건너뜀",
+    "skipped_quality_gate": "품질보류",
     "skipped": "건너뜀",
     "failed": "실패",
 }
@@ -89,8 +100,36 @@ def _status_bucket(status: str) -> str:
     return "waiting"
 
 
+def _is_system_sourcing_blocker(result: Dict[str, Any]) -> bool:
+    text = " ".join(
+        str(part or "")
+        for part in (
+            result.get("blocking_reason"),
+            result.get("error"),
+            result.get("match_error"),
+            result.get("match_status"),
+        )
+    ).lower()
+    return any(marker in text for marker in SYSTEM_BLOCKER_MARKERS)
+
+
+def _is_retriable_system_skip(item: Dict[str, Any]) -> bool:
+    status = str(item.get("status") or "").strip().lower()
+    if status not in SKIPPED_STATUSES:
+        return False
+    result = item.get("result") if isinstance(item.get("result"), dict) else {}
+    return _is_system_sourcing_blocker(result)
+
+
+def _status_bucket_for_item(item: Dict[str, Any]) -> str:
+    if _is_retriable_system_skip(item):
+        return "waiting"
+    return _status_bucket(str(item.get("status") or "pending"))
+
+
 def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
     status = str(item.get("status") or "pending").strip().lower()
+    retriable_system_skip = _is_retriable_system_skip(item)
     planned = str(item.get("planned_number") or "").strip()
     scheduled_at = format_datetime(item.get("scheduled_at"))
     attempts = int(item.get("attempts") or 0)
@@ -107,6 +146,8 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
 
     if youtube_url:
         upload_text = f"YouTube 완료: {youtube_url}"
+    elif retriable_system_skip:
+        upload_text = "재시도 대기"
     elif status == "pending":
         upload_text = "예약됨"
     elif status == "failed":
@@ -127,14 +168,15 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
     elif blocking_reason:
         remarks_parts.append(blocking_reason)
 
-    status_label = STATUS_LABELS.get(status, status or "대기")
+    status_label = "재시도 대기" if retriable_system_skip else STATUS_LABELS.get(status, status or "대기")
     return {
-        "order": f"{planned} {status_label}".strip(),
+        "order": planned or status_label,
         "url": str(item.get("coupang_url") or item.get("purchase_url") or "").strip(),
         "status": status_label,
         "upload": upload_text,
         "remarks": " / ".join(part for part in remarks_parts if part),
         "raw_status": status,
+        "retriable_system_skip": "true" if retriable_system_skip else "",
         "planned_number": planned,
         "scheduled_at": scheduled_at,
         "youtube_url": youtube_url,
@@ -158,14 +200,14 @@ def build_summer_coupang_queue_snapshot(
     for item in items:
         if not isinstance(item, dict):
             continue
-        bucket = _status_bucket(str(item.get("status") or "pending"))
+        bucket = _status_bucket_for_item(item)
         counts[bucket] = counts.get(bucket, 0) + 1
 
     pending_items = [
         item
         for item in items
         if isinstance(item, dict)
-        and _status_bucket(str(item.get("status") or "pending")) == "waiting"
+        and _status_bucket_for_item(item) == "waiting"
     ]
     pending_items.sort(
         key=lambda item: (

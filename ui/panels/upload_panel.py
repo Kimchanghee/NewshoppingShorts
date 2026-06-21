@@ -747,8 +747,8 @@ class UploadPanel(QFrame, ThemedMixin):
         self._active_channel: str = "youtube"
         # 틱톡 비활성화: 채널 탭 목록에서 제외(페이지도 생성하지 않음).
         self._platform_order = ["youtube", "instagram", "threads", "x"]
-        # 인스타그램·스레드·X는 아직 지원예정 → 채널 버튼 자체를 비활성화한다.
-        self._coming_soon_channels = {"instagram", "threads", "x"}
+        # Instagram is assisted through Computer Use; Threads/X remain disabled.
+        self._coming_soon_channels = {"threads", "x"}
         body_layout.addWidget(self._create_channel_sidebar(main_body))
 
         self._channel_stack = QStackedWidget(main_body)
@@ -826,7 +826,7 @@ class UploadPanel(QFrame, ThemedMixin):
         title.setStyleSheet(f"color: {c.text_primary}; background-color: transparent; border: none;")
         layout.addWidget(title)
 
-        subtitle = QLabel("지금은 YouTube만 연결하면 자동으로 올라가요. 인스타그램·스레드·X는 준비 중(지원예정)이라 아직 선택할 수 없어요.")
+        subtitle = QLabel("YouTube는 API로 자동 업로드하고, Instagram은 Computer Use가 로그인/업로드 준비를 안내합니다. Threads·X는 준비 중입니다.")
         subtitle.setWordWrap(True)
         subtitle.setFont(QFont(ds.typography.font_family_primary, 11))
         subtitle.setStyleSheet(f"color: {c.text_muted}; background-color: transparent; border: none;")
@@ -1257,12 +1257,19 @@ class UploadPanel(QFrame, ThemedMixin):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(12)
+        is_instagram = platform_id == "instagram"
+        title_suffix = "채널 설정" if is_instagram else "채널 설정 (지원예정)"
+        banner_desc = (
+            "Instagram은 Computer Use가 로그인 상태와 업로드 화면을 확인하도록 돕습니다. 로그인, 2FA, CAPTCHA, 최종 게시 제출은 직접 처리해야 합니다."
+            if is_instagram
+            else f"{cfg.get('name', platform_id.title())} 자동 올리기는 곧 열려요. 지금 글 안내문만 미리 저장해 두면, 열리는 날 바로 쓸 수 있어요."
+        )
 
         layout.addWidget(
             self._create_channel_banner(
                 platform_id,
-                f"{cfg.get('name', platform_id.title())} 채널 설정 (지원예정)",
-                f"{cfg.get('name', platform_id.title())} 자동 올리기는 곧 열려요. 지금 글 안내문만 미리 저장해 두면, 열리는 날 바로 쓸 수 있어요.",
+                f"{cfg.get('name', platform_id.title())} {title_suffix}",
+                banner_desc,
                 parent=page,
             )
         )
@@ -1281,7 +1288,7 @@ class UploadPanel(QFrame, ThemedMixin):
             platform_id=platform_id,
             is_connected=connected,
             channel_info={"name": account_name or f"{cfg.get('name', platform_id.title())} 계정"},
-            coming_soon=True,
+            coming_soon=not is_instagram,
             parent=page,
         )
         if platform_id == "instagram":
@@ -1295,8 +1302,10 @@ class UploadPanel(QFrame, ThemedMixin):
 
         connect_section = UploadWorkflowSection(
             "1단계",
-            "채널 연결 (지원예정)",
-            "연결과 자동 올리기는 지금 준비 중이에요. 열리면 로그인한 뒤 계정 이름을 저장해 바로 쓸 수 있어요.",
+            "채널 연결" if is_instagram else "채널 연결 (지원예정)",
+            "Computer Use 자동 설정에서 Instagram 로그인/프로필 확인을 진행하고, 계정명을 저장합니다."
+            if is_instagram
+            else "연결과 자동 올리기는 지금 준비 중이에요. 열리면 로그인한 뒤 계정 이름을 저장해 바로 쓸 수 있어요.",
             parent=page,
         )
         connect_section.add_widget(card)
@@ -1304,12 +1313,14 @@ class UploadPanel(QFrame, ThemedMixin):
 
         prompt_section = UploadWorkflowSection(
             "2단계",
-            "올릴 때 쓸 글 안내문 (지원예정)",
-            "이 채널은 아직 준비 중이라 지금은 사용할 수 없어요. 기능이 열리면 여기서 설정할 수 있어요.",
+            "올릴 때 쓸 글 안내문" if is_instagram else "올릴 때 쓸 글 안내문 (지원예정)",
+            "Instagram 게시 화면에서 사용할 제목/설명/해시태그 안내문을 미리 저장합니다."
+            if is_instagram
+            else "이 채널은 아직 준비 중이라 지금은 사용할 수 없어요. 기능이 열리면 여기서 설정할 수 있어요.",
             parent=page,
         )
         manual_pig = PromptInputGroup(platform_id, parent=page)
-        manual_pig.setEnabled(False)  # 지원예정: 입력·버튼 비활성화
+        manual_pig.setEnabled(is_instagram)
         prompt_section.add_widget(manual_pig)
         layout.addWidget(prompt_section)
 
@@ -1377,7 +1388,9 @@ class UploadPanel(QFrame, ThemedMixin):
         """Get short status text for channel tab."""
         if platform_id == "youtube":
             return "연결됨" if self.settings.get_youtube_connected() else "연결 필요"
-        if platform_id in {"tiktok", "instagram", "threads", "x"}:
+        if platform_id == "instagram":
+            return "연결됨" if self.settings.get_social_connection_status("instagram") else "연결 필요"
+        if platform_id in {"tiktok", "threads", "x"}:
             return "지원예정"
         if self.settings.get_social_connection_status(platform_id):
             return "연결됨"
@@ -1634,6 +1647,22 @@ class UploadPanel(QFrame, ThemedMixin):
         cfg = PLATFORM_CONFIG.get(platform_id, {})
         name = cfg.get("name", platform_id.title())
         c = self.ds.colors
+        if platform_id == "instagram":
+            connected = self.settings.get_social_connection_status("instagram")
+            account = self.settings.get_social_account_name("instagram")
+            if connected:
+                label.setText(f"지금 상태: 연결됨 — @{account or 'instagram'} 계정을 자동 설정 흐름에서 사용할 수 있어요.")
+                label.setStyleSheet(
+                    f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
+                )
+                return
+            label.setText(
+                "지금 상태: 연결 필요 — 자동 설정 버튼을 누르면 Computer Use가 Instagram 로그인/프로필 확인을 안내합니다."
+            )
+            label.setStyleSheet(
+                f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
+            )
+            return
         label.setText(f"지금 상태: 지원예정 — {name} 자동 올리기 기능은 준비 중이에요.")
         label.setStyleSheet(
             f"color: {c.text_muted}; background-color: transparent; border: none; padding: 2px 0;"

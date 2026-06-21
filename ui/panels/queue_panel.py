@@ -75,13 +75,7 @@ class QueuePanel(QFrame, ThemedMixin):
         self.gui.url_listbox = QTreeWidget()
         self.gui.url_listbox.setColumnCount(5)
         self.gui.url_listbox.setHeaderLabels(["구분", "URL", "상태", "자동 업로드", "비고"])
-        self.gui.url_listbox.header().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        self.gui.url_listbox.header().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        self.gui.url_listbox.header().setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.gui.url_listbox.header().resizeSection(2, 80)
-        self.gui.url_listbox.header().setSectionResizeMode(3, QHeaderView.ResizeMode.Fixed)
-        self.gui.url_listbox.header().resizeSection(3, 90)
-        self.gui.url_listbox.header().setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        self._configure_queue_table_columns()
         self.main_layout.addWidget(self.gui.url_listbox)
         
         # Action Buttons
@@ -114,6 +108,25 @@ class QueuePanel(QFrame, ThemedMixin):
         self.gui.count_failed.setStyleSheet(self.gui.count_failed.styleSheet() + "background-color: #991B1B;")
         
         self.main_layout.addLayout(count_layout)
+
+    def _configure_queue_table_columns(self):
+        tree = self.gui.url_listbox
+        header = tree.header()
+        header.setMinimumSectionSize(44)
+        header.setStretchLastSection(True)
+        header.setSectionsMovable(False)
+
+        compact_widths = {
+            0: 74,
+            1: 316,  # Coupang product URL; full value stays available via selection/copy.
+            2: 72,
+            3: 88,
+        }
+        for column, width in compact_widths.items():
+            header.setSectionResizeMode(column, QHeaderView.ResizeMode.Fixed)
+            header.resizeSection(column, width)
+        header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
+        tree.setTextElideMode(Qt.TextElideMode.ElideRight)
 
     def _start_auto_refresh(self):
         self._refresh_timer = QTimer(self)
