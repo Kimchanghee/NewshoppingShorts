@@ -43,6 +43,10 @@ INSTAGRAM_LOGIN_URL = "https://www.instagram.com/accounts/login/"
 THREADS_LOGIN_URL = "https://www.threads.com/login"
 META_APPS_URL = "https://developers.facebook.com/apps/"
 SETUP_NOTICE_BASE_URL = "https://shoppingshorts.store/notice"
+COUPANG_DEEPLINK_WEBHOOK_NOTICE_URL = (
+    "https://github.com/Kimchanghee/NewshoppingShorts/blob/main/docs/notices/"
+    "coupang-partners-deeplink-api-linktree-webhook.md"
+)
 
 # 유료 구독자 Computer Use를 처리하는 서버(브리지) 기본 주소.
 # 서버에 올린 Codex CLI가 POST {URL}/v1/computer-use/jobs 를 받아 실행한다.
@@ -643,6 +647,8 @@ class SettingsTab(QWidget, ThemedMixin):
 
         setup_notice_links = QLabel(
             f'<a href="{SETUP_NOTICE_BASE_URL}/linktree-signup-link-setup" style="color: #3B82F6; text-decoration: none;">Linktree 세팅 가이드</a>'
+            f'<span style="color: {c.text_muted};">  |  </span>'
+            f'<a href="{COUPANG_DEEPLINK_WEBHOOK_NOTICE_URL}" style="color: #3B82F6; text-decoration: none;">쿠팡 딥링크 API·웹훅 설명</a>'
         )
         setup_notice_links.setWordWrap(True)
         setup_notice_links.setOpenExternalLinks(True)
@@ -834,6 +840,26 @@ class SettingsTab(QWidget, ThemedMixin):
             "원본 coupang.com 링크를 파트너스 딥링크로 자동 변환할 때만 필요합니다.",
         )
 
+        coupang_api_desc = QLabel(
+            "쿠팡 파트너스 딥링크 API는 원본 쿠팡 상품 URL을 파트너스 추적 링크로 바꾸는 기능입니다. "
+            "키가 없어도 영상 제작과 업로드는 원본 쿠팡 URL로 계속 진행됩니다. "
+            "클릭/정산 추적을 파트너스 링크로 정확히 남기고 싶을 때 Access Key와 Secret Key를 입력하세요. "
+            "일반적으로 쿠팡 파트너스 최종 승인 후 파트너스 API 메뉴에서 발급받을 수 있습니다."
+        )
+        coupang_api_desc.setWordWrap(True)
+        coupang_api_desc.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px; padding-bottom: 3px;"
+        )
+        cp_body.addWidget(coupang_api_desc)
+
+        coupang_api_notice_link = QLabel(
+            f'<a href="{COUPANG_DEEPLINK_WEBHOOK_NOTICE_URL}" style="color: #3B82F6; text-decoration: none;">딥링크 API가 필요한 경우와 발급 시점 보기 →</a>'
+        )
+        coupang_api_notice_link.setOpenExternalLinks(True)
+        coupang_api_notice_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        coupang_api_notice_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
+        cp_body.addWidget(coupang_api_notice_link)
+
         self.coupang_access_input = QLineEdit()
         self.coupang_access_input.setPlaceholderText("선택: 원본 쿠팡 URL 자동 딥링크용 Access Key")
         self.coupang_access_input.setEchoMode(QLineEdit.EchoMode.Password)
@@ -866,13 +892,33 @@ class SettingsTab(QWidget, ThemedMixin):
 
         # ── Card 3: Webhook 자동 발행 ──
         wh_body = make_card(
-            "Webhook 자동 발행 (선택)",
-            "Make/Zapier/n8n Webhook으로 Linktree 카드를 자동 추가합니다.",
+            "Linktree 웹훅 자동 발행 (선택)",
+            "Make/Zapier/n8n 같은 자동화 서비스의 Webhook URL로 Linktree 카드를 자동 추가합니다.",
         )
 
+        webhook_desc = QLabel(
+            "여기서 말하는 웹훅은 SSMaker가 새 쿠팡 링크 정보를 POST로 보내는 자동화 주소입니다. "
+            "Linktree가 직접 제공하는 단순 API가 아니라, 사용자가 만든 Make/Zapier/n8n 시나리오가 이 요청을 받아 "
+            "Linktree 관리자 계정에 새 링크 카드를 추가하는 구조입니다. "
+            "Webhook URL이 없으면 자동 발행은 꺼두고, 공개 Linktree 주소만 사용하거나 관리자 화면에서 수동으로 추가하면 됩니다."
+        )
+        webhook_desc.setWordWrap(True)
+        webhook_desc.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px; padding-bottom: 3px;"
+        )
+        wh_body.addWidget(webhook_desc)
+
+        webhook_notice_link = QLabel(
+            f'<a href="{COUPANG_DEEPLINK_WEBHOOK_NOTICE_URL}" style="color: #3B82F6; text-decoration: none;">웹훅 자동 발행 구조 자세히 보기 →</a>'
+        )
+        webhook_notice_link.setOpenExternalLinks(True)
+        webhook_notice_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        webhook_notice_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
+        wh_body.addWidget(webhook_notice_link)
+
         self.linktree_webhook_input = QLineEdit()
-        self.linktree_webhook_input.setPlaceholderText("선택: 자동 발행용 Webhook URL (https://...)")
-        self.linktree_webhook_input.setToolTip("Linktree 카드를 프로그램이 자동으로 추가하려면 Webhook URL이 필요합니다.")
+        self.linktree_webhook_input.setPlaceholderText("선택: Make/Zapier/n8n에서 만든 Webhook URL (https://...)")
+        self.linktree_webhook_input.setToolTip("SSMaker가 title, url, description을 보내면 자동화 시나리오가 Linktree 링크 카드를 추가합니다.")
         self.linktree_webhook_input.setStyleSheet(automation_input_style)
         self.linktree_webhook_input.textChanged.connect(self._update_link_automation_status)
         add_row(wh_body, "Webhook URL", self.linktree_webhook_input)
@@ -887,17 +933,17 @@ class SettingsTab(QWidget, ThemedMixin):
         checkbox_container.setStyleSheet("background: transparent; border: none;")
         checkbox_layout = QHBoxLayout(checkbox_container)
         checkbox_layout.setContentsMargins(0, 0, 0, 0)
-        self.linktree_auto_checkbox = QCheckBox("쿠팡 링크 생성 시 Linktree 자동 업로드")
-        self.linktree_auto_checkbox.setToolTip("Webhook URL이 있어야 실제 자동 업로드가 됩니다.")
+        self.linktree_auto_checkbox = QCheckBox("쿠팡 링크 생성 시 Linktree 웹훅으로 자동 발행")
+        self.linktree_auto_checkbox.setToolTip("Webhook URL이 있어야 실제 자동 발행이 됩니다. 없으면 공개 Linktree 주소만 안내에 사용합니다.")
         self.linktree_auto_checkbox.setStyleSheet(
             f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
         )
         self.linktree_auto_checkbox.stateChanged.connect(self._update_link_automation_status)
         checkbox_layout.addWidget(self.linktree_auto_checkbox)
         checkbox_layout.addStretch()
-        add_row(wh_body, "자동 업로드", checkbox_container)
+        add_row(wh_body, "웹훅 발행", checkbox_container)
 
-        self.linktree_test_btn = QPushButton("테스트 업로드")
+        self.linktree_test_btn = QPushButton("테스트 발행")
         self.linktree_test_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.linktree_test_btn.setStyleSheet(automation_button_style)
         self.linktree_test_btn.clicked.connect(self._test_linktree_publish)
@@ -1029,6 +1075,33 @@ class SettingsTab(QWidget, ThemedMixin):
         etc_row.addWidget(sub_section, 1)
         etc_row.addWidget(contact_section, 1)
         etc_layout.addLayout(etc_row)
+
+        benefits_section = SettingsSection("구독하면 제공되는 것")
+        benefits_intro = QLabel(
+            "구독 상태에서는 반복 업로드 운영에 필요한 자동화와 검증 기능을 계속 사용할 수 있습니다."
+        )
+        benefits_intro.setWordWrap(True)
+        benefits_intro.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px;"
+        )
+        benefits_section.content_layout.addWidget(benefits_intro)
+
+        benefit_items = [
+            ("자동화 작업량 확대", "무료/체험 제한보다 더 많은 영상 생성, 예약, 업로드 작업을 이어갈 수 있습니다."),
+            ("Computer Use 설정 도우미", "YouTube, Instagram, Linktree처럼 로그인·2FA·API 설정이 섞인 연결을 단계별로 안내합니다."),
+            ("풀자동화 예약 실행", "쿠팡 링크 큐, 4시간 간격 예약, 건너뜀·품질보류·중복보류 흐름을 운영할 수 있습니다."),
+            ("업로드 검증", "YouTube 설명/댓글과 공개 Linktree 카드 연결 상태를 자동화 흐름에서 확인합니다."),
+            ("업데이트와 문의 대응", "릴리즈 업데이트와 오류 재현, 계정 연결 문제 확인을 더 빠르게 받을 수 있습니다."),
+        ]
+        for title, body in benefit_items:
+            benefit_label = QLabel(f"<b>{title}</b><br>{body}")
+            benefit_label.setWordWrap(True)
+            benefit_label.setStyleSheet(
+                f"color: {c.text_primary}; border: none; background: transparent; font-size: 12px;"
+            )
+            benefits_section.content_layout.addWidget(benefit_label)
+
+        etc_layout.addWidget(benefits_section)
 
         # ── '영상 올리기' 탭: 안내 + 업로드 패널이 들어갈 자리(나중에 attach) ──
         upload_tab_intro = QLabel("YouTube 등 채널 연결과 자동 올리기 설정을 여기서 관리해요.")
@@ -1162,6 +1235,14 @@ class SettingsTab(QWidget, ThemedMixin):
             lambda: self._open_external_url(f"{SETUP_NOTICE_BASE_URL}/linktree-signup-link-setup")
         )
         help_row.addWidget(self.setup_linktree_help_btn)
+
+        self.setup_coupang_deeplink_help_btn = QPushButton("쿠팡 딥링크/API가 왜 필요해?")
+        self.setup_coupang_deeplink_help_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setup_coupang_deeplink_help_btn.setStyleSheet(self.setup_linktree_help_btn.styleSheet())
+        self.setup_coupang_deeplink_help_btn.clicked.connect(
+            lambda: self._open_external_url(COUPANG_DEEPLINK_WEBHOOK_NOTICE_URL)
+        )
+        help_row.addWidget(self.setup_coupang_deeplink_help_btn)
         help_row.addStretch()
         self.setup_assistant_section.content_layout.addLayout(help_row)
 
@@ -3889,8 +3970,8 @@ class SettingsTab(QWidget, ThemedMixin):
             show_warning(
                 self,
                 "Webhook 필요",
-                "Linktree 자동 업로드를 켜려면 Webhook URL이 필요합니다.\n"
-                "처음이라면 자동 업로드 체크를 끄고 Profile URL만 먼저 저장해도 됩니다.",
+                "Linktree 웹훅 자동 발행을 켜려면 Make/Zapier/n8n 등에서 만든 Webhook URL이 필요합니다.\n"
+                "처음이라면 웹훅 발행 체크를 끄고 Profile URL만 먼저 저장해도 됩니다.",
             )
             return
 
@@ -3922,7 +4003,7 @@ class SettingsTab(QWidget, ThemedMixin):
             show_warning(
                 self,
                 "Webhook 필요",
-                "테스트 업로드는 Webhook URL이 있어야 보낼 수 있습니다.\n"
+                "테스트 발행은 Webhook URL이 있어야 보낼 수 있습니다.\n"
                 "처음 사용자는 위의 'Linktree 가입/로그인'과 '관리자 열기'로 수동 카드 추가부터 확인하세요.",
             )
             return
@@ -3945,12 +4026,12 @@ class SettingsTab(QWidget, ThemedMixin):
                 manager = get_linktree_manager()
 
             if manager.test_connection():
-                show_info(self, "테스트 성공", "Linktree 테스트 업로드 요청을 전송했습니다.")
+                show_info(self, "테스트 성공", "Linktree 웹훅 테스트 발행 요청을 전송했습니다.")
             else:
-                show_warning(self, "테스트 실패", "테스트 업로드에 실패했습니다. Webhook URL/API Key를 확인하세요.")
+                show_warning(self, "테스트 실패", "테스트 발행에 실패했습니다. Webhook URL/API Key를 확인하세요.")
         except Exception as exc:
             logger.error("[Settings] Linktree test publish failed: %s", exc)
-            show_error(self, "테스트 실패", f"링크트리 테스트 업로드 중 오류가 발생했습니다.\n{exc}")
+            show_error(self, "테스트 실패", f"링크트리 테스트 발행 중 오류가 발생했습니다.\n{exc}")
 
     @staticmethod
     def _resolve_creator_level(used_count: int):
