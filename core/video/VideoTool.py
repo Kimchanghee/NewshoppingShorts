@@ -179,6 +179,12 @@ def _create_single_line_subtitle(
                     os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
                     os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
                 ],
+                "noto_sans_kr": [
+                    os.path.join(project_fonts_dir, "NotoSansKR-Variable.ttf"),
+                ],
+                "suit": [
+                    os.path.join(project_fonts_dir, "SUIT-Heavy.ttf"),
+                ],
                 "paperlogy": [
                     os.path.join(project_fonts_dir, "Paperlogy-9Black.ttf"),
                     os.path.join(project_fonts_dir, "Paperlogy-8ExtraBold.ttf"),
@@ -453,6 +459,12 @@ def _create_watermark_clip(
                 os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
                 os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
             ],
+            "noto_sans_kr": [
+                os.path.join(project_fonts_dir, "NotoSansKR-Variable.ttf"),
+            ],
+            "suit": [
+                os.path.join(project_fonts_dir, "SUIT-Heavy.ttf"),
+            ],
             "seoul_hangang": [
                 os.path.join(project_fonts_dir, "SeoulHangangB.ttf"),
                 os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
@@ -474,6 +486,8 @@ def _create_watermark_clip(
         fallback_fonts = [
             os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
             os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
+            os.path.join(project_fonts_dir, "NotoSansKR-Variable.ttf"),
+            os.path.join(project_fonts_dir, "SUIT-Heavy.ttf"),
             os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
             os.path.join(project_fonts_dir, "GmarketSansTTFMedium.ttf"),
         ]

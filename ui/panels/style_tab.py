@@ -143,6 +143,8 @@ class CompactFontPanel(QFrame):
         font_options = [
             {"name": "서울 한강체", "id": "seoul_hangang", "description": "모던하고 깔끔한"},
             {"name": "프리텐다드", "id": "pretendard", "description": "세련된 현대적"},
+            {"name": "Noto Sans KR", "id": "noto_sans_kr", "description": "깔끔한 범용"},
+            {"name": "SUIT", "id": "suit", "description": "요즘 UI 감성"},
             {"name": "G마켓 산스", "id": "gmarketsans", "description": "인기 있는 고품질"},
             {"name": "페이퍼로지", "id": "paperlogy", "description": "부드러운 곡선"},
             {"name": "유앤피플", "id": "unpeople_gothic", "description": "부드럽고 가독성"},
@@ -201,6 +203,7 @@ class CompactFontCard(QFrame):
         # Description
         self.desc_label = QLabel(self.option["description"])
         self.desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.desc_label.setWordWrap(True)
         layout.addWidget(self.desc_label)
         
         # Selection indicator
@@ -209,7 +212,7 @@ class CompactFontCard(QFrame):
         layout.addWidget(self.indicator)
         
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedWidth(100)
+        self.setMinimumWidth(92)
         self.setFixedHeight(80)
 
     def mousePressEvent(self, event):

@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QWidget, QGridLayout, QPushButton, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from ui.components.base_widget import ThemedMixin
 from ui.design_system_v2 import get_design_system, get_color
 
@@ -23,6 +23,7 @@ class VoiceCard(QFrame, ThemedMixin):
         self.setFrameShadow(QFrame.Shadow.Plain)  # Remove shadow
         # 카드가 세로로 늘어나 빈 공간이 생기지 않도록 내용 높이에 맞춘다.
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self.setMinimumWidth(160)
         self.profile = profile
         self.is_selected = is_selected
         self.ds = get_design_system()
@@ -48,11 +49,18 @@ class VoiceCard(QFrame, ThemedMixin):
         # Gender Icon + Name
         gender_icon = "♀" if self.profile.get("gender") == "female" else "♂"
         icon_color = "#FF6B81" if self.profile.get("gender") == "female" else "#5B9BD5"
-        self.name_label = QLabel(f"{gender_icon} {self.profile['label']}")
+        self.gender_label = QLabel(gender_icon)
+        self.gender_label.setFixedWidth(18)
+        self.gender_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.gender_label.setStyleSheet("background-color: transparent; border: none;")
+        top_row.addWidget(self.gender_label)
+
+        self.name_label = QLabel(self.profile["label"])
         self.name_label.setStyleSheet(
             f"font-weight: {ds.typography.weight_bold}; font-size: 13px; "
             f"color: {icon_color}; background-color: transparent; border: none;"
         )
+        self.name_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         top_row.addWidget(self.name_label)
 
         top_row.addStretch()
@@ -122,6 +130,14 @@ class VoiceCard(QFrame, ThemedMixin):
                 border-radius: {ds.radius.sm}px;
             """)
 
+        icon_color = "#FF6B81" if self.profile.get("gender") == "female" else "#5B9BD5"
+        self.gender_label.setStyleSheet(
+            f"color: {icon_color}; background-color: transparent; border: none; font-size: 13px;"
+        )
+        self.name_label.setStyleSheet(
+            f"color: {icon_color}; background-color: transparent; border: none; "
+            f"font-weight: {ds.typography.weight_bold}; font-size: 13px;"
+        )
         self.desc_label.setStyleSheet("color: #C8C8C8; border: none; font-size: 12px;")
 
 class VoicePanel(QFrame, ThemedMixin):
@@ -130,6 +146,7 @@ class VoicePanel(QFrame, ThemedMixin):
         self.gui = gui
         self.gender_filter = "all"
         self.voice_cards = {}
+        self._current_columns = 0
         self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         self.create_widgets()
@@ -236,14 +253,19 @@ class VoicePanel(QFrame, ThemedMixin):
             card.clicked.connect(self._on_card_clicked)
             card.play_btn.clicked.connect(lambda _, vid=profile["id"]: self.gui.play_voice_sample(vid))
             
-            row, col = divmod(i, 3)
+            columns = self._column_count()
+            self._current_columns = columns
+            row, col = divmod(i, columns)
             self.grid_layout.addWidget(card, row, col)
             self.voice_cards[profile["id"]] = card
             self.gui.voice_card_frames[profile["id"]] = card
             self.gui.voice_play_buttons[profile["id"]] = card.play_btn
 
         # 카드들이 위쪽에 모이고 빈 행이 늘어나지 않도록 마지막에 신축 행 추가
-        last_row = (len(profiles) + 2) // 3
+        columns = self._column_count()
+        for col in range(columns):
+            self.grid_layout.setColumnStretch(col, 1)
+        last_row = (len(profiles) + columns - 1) // columns
         self.grid_layout.setRowStretch(last_row, 1)
 
         # Update selection count badge
@@ -323,3 +345,17 @@ class VoicePanel(QFrame, ThemedMixin):
         self.tab_all.setStyleSheet(tab_style)
         self.tab_female.setStyleSheet(tab_style)
         self.tab_male.setStyleSheet(tab_style)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        columns = self._column_count()
+        if columns != self._current_columns:
+            QTimer.singleShot(0, self.rebuild_grid)
+
+    def _column_count(self) -> int:
+        width = self.width()
+        if width < 420:
+            return 1
+        if width < 700:
+            return 2
+        return 3

@@ -20,6 +20,8 @@ logger = logging.getLogger(__name__)
 WATERMARK_FONT_OPTIONS = [
     {"name": "프리텐다드", "id": "pretendard", "description": "세련된 현대적 고딕체"},
     {"name": "서울 한강체", "id": "seoul_hangang", "description": "모던하고 깔끔한 서울시 공식 폰트"},
+    {"name": "Noto Sans KR", "id": "noto_sans_kr", "description": "상업 이용 가능한 구글 Noto 한글 폰트"},
+    {"name": "SUIT", "id": "suit", "description": "요즘 서비스 UI에 잘 맞는 모던 고딕체"},
     {"name": "G마켓 산스", "id": "gmarketsans", "description": "인기 있는 고품질 무료 폰트"},
     {"name": "페이퍼로지", "id": "paperlogy", "description": "부드러운 곡선이 매력적인 폰트"},
     {"name": "유앤피플", "id": "unpeople_gothic", "description": "부드럽고 가독성 좋은 고딕체"},

@@ -5,7 +5,7 @@ Modernized with Design System V2 - Clean icon-based design.
 from __future__ import annotations
 
 from PyQt6.QtWidgets import (
-    QFrame, QVBoxLayout, QPushButton, QSizePolicy, 
+    QFrame, QVBoxLayout, QSizePolicy,
     QLabel, QHBoxLayout, QWidget
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QSize
@@ -29,14 +29,19 @@ STEP_ICONS = {
 }
 
 
-class StepButton(QPushButton):
+class StepButton(QFrame):
     """Custom styled navigation button - STITCH 디자인 적용"""
+    clicked = pyqtSignal(bool)
+
     def __init__(self, step_id, label, icon_key, parent=None):
         super().__init__(parent)
         self.step_id = step_id
-        self.setCheckable(True)
+        self._checked = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedHeight(34)
+        self.setMinimumHeight(34)
+        self.setMaximumHeight(42)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setAccessibleName(label)
 
         # Design System
         self.ds = get_design_system()
@@ -44,20 +49,21 @@ class StepButton(QPushButton):
         # Layout - STITCH: 간격 최적화
         layout = QHBoxLayout(self)
         layout.setContentsMargins(
-            self.ds.spacing.space_4,  # 16px
+            self.ds.spacing.space_3,  # 12px
             self.ds.spacing.space_2,  # 8px
-            self.ds.spacing.space_4,  # 16px
+            self.ds.spacing.space_3,  # 12px
             self.ds.spacing.space_2   # 8px
         )
-        layout.setSpacing(self.ds.spacing.space_3)  # 12px 간격
+        layout.setSpacing(self.ds.spacing.space_2)
 
         # Icon
         icon_char = STEP_ICONS.get(icon_key, "•")
         self.icon_label = QLabel(icon_char)
         self.icon_label.setFont(QFont("Segoe UI Symbol", 11))
         self.icon_label.setStyleSheet("background: transparent; border: none;")
-        self.icon_label.setFixedWidth(18)
+        self.icon_label.setFixedWidth(22)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
 
         # Text
         menu_font_size = max(9, int(round(self.ds.typography.size_sm * 0.7)))
@@ -68,6 +74,9 @@ class StepButton(QPushButton):
             QFont.Weight.Medium
         ))
         self.text_label.setStyleSheet("background: transparent; border: none;")
+        self.text_label.setWordWrap(False)
+        self.text_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.text_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         
         layout.addWidget(self.icon_label)
         layout.addWidget(self.text_label)
@@ -77,8 +86,16 @@ class StepButton(QPushButton):
         self.update_style(False)
 
     def setChecked(self, checked):
-        super().setChecked(checked)
+        self._checked = bool(checked)
         self.update_style(checked)
+
+    def isChecked(self):
+        return self._checked
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(True)
+        super().mousePressEvent(event)
 
     def update_style(self, checked):
         """STITCH 디자인 스타일 적용"""
@@ -105,8 +122,6 @@ class StepButton(QPushButton):
                 border: none;
                 border-left: {border};
                 border-radius: {border_radius}px;
-                text-align: left;
-                padding-left: 0px;
             }}
             StepButton:hover {{
                 background-color: rgba(255, 255, 255, 0.03);

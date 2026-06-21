@@ -220,6 +220,10 @@ try {
     "fonts\Pretendard-ExtraBold.ttf",
     "fonts\Pretendard-Bold.ttf",
     "fonts\Pretendard-SemiBold.ttf",
+    "fonts\NotoSansKR-Variable.ttf",
+    "fonts\SUIT-Heavy.ttf",
+    "fonts\LICENSE-NotoSansKR.txt",
+    "fonts\LICENSE-SUIT.txt",
     "fonts\GmarketSansTTFBold.ttf",
     "fonts\SpoqaHanSansNeo-Bold.ttf",
     "fonts\Paperlogy-9Black.ttf",
@@ -261,10 +265,20 @@ try {
     "certifi"
   )
 
+  $requiredFontItems = @(
+    "fonts\NotoSansKR-Variable.ttf",
+    "fonts\SUIT-Heavy.ttf",
+    "fonts\LICENSE-NotoSansKR.txt",
+    "fonts\LICENSE-SUIT.txt"
+  )
+
   foreach ($item in $mustContain) {
     $found = $allFiles | Where-Object { $_ -like "*$item*" }
     if (-not $found) {
       if ($item -like "fonts\*") {
+        if ($requiredFontItems -contains $item) {
+          throw "Missing required bundled font in dist\ssmaker\: ${item}"
+        }
         Write-Warning "Optional font missing in dist\\ssmaker\\: ${item}"
         continue
       }

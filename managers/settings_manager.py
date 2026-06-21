@@ -699,12 +699,21 @@ class SettingsManager:
         Save the watermark font ID.
 
         Args:
-            font_id: One of 'seoul_hangang', 'pretendard', 'gmarketsans', 'paperlogy', 'unpeople_gothic'
+            font_id: One of 'seoul_hangang', 'pretendard', 'noto_sans_kr', 'suit',
+                'gmarketsans', 'paperlogy', 'unpeople_gothic'
 
         Returns:
             True if save was successful
         """
-        valid_fonts = ("seoul_hangang", "pretendard", "gmarketsans", "paperlogy", "unpeople_gothic")
+        valid_fonts = (
+            "seoul_hangang",
+            "pretendard",
+            "noto_sans_kr",
+            "suit",
+            "gmarketsans",
+            "paperlogy",
+            "unpeople_gothic",
+        )
         if font_id not in valid_fonts:
             font_id = "pretendard"
         with self._lock:

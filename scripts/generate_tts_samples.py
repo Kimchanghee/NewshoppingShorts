@@ -4,6 +4,7 @@ Reads voice profiles from voice_profiles.py and generates WAV samples
 for each voice using its sample_text.
 """
 import os
+import re
 import sys
 import time
 import wave
@@ -34,6 +35,9 @@ def get_api_keys():
         key = SecretsManager.get_api_key(f"gemini_api_{i}")
         if key and key not in keys:
             keys.append(key)
+    legacy_key = SecretsManager.get_api_key("gemini")
+    if legacy_key and legacy_key not in keys:
+        keys.append(legacy_key)
     return keys
 
 
@@ -63,7 +67,7 @@ def generate_samples():
     print(f"Found {len(api_keys)} API key(s)")
 
     # Create clients for each key (rotate to avoid per-key rate limits)
-    clients = [genai.Client(api_key=k) for k in api_keys]
+    clients = [{"index": i + 1, "client": genai.Client(api_key=k)} for i, k in enumerate(api_keys)]
 
     pending = []
     for profile in VOICE_PROFILES:
@@ -75,15 +79,27 @@ def generate_samples():
 
     print(f"Generating {len(pending)} voice samples in {VOICE_DIR}")
 
-    for idx, profile in enumerate(pending):
+    generated_count = 0
+    pending_index = 0
+    retry_counts = {}
+    while pending_index < len(pending):
+        if not clients:
+            print("ERROR: All configured Gemini API keys were rejected. Add a valid key and rerun this script.")
+            break
+
+        profile = pending[pending_index]
         voice_id = profile["id"]
         voice_name = profile["voice_name"]
-        sample_text = profile["sample_text"]
+        sample_text = (
+            "Say in Korean with a natural shopping-shorts narrator voice: "
+            f"{profile['sample_text']}"
+        )
         label = profile["label"]
         filepath = os.path.join(VOICE_DIR, f"{voice_id}.wav")
 
-        client = clients[idx % len(clients)]
-        print(f"  [{voice_id}] {label} ({voice_name}) - generating... (key {idx % len(clients) + 1})")
+        client_slot = clients[generated_count % len(clients)]
+        client = client_slot["client"]
+        print(f"  [{voice_id}] {label} ({voice_name}) - generating... (key {client_slot['index']})")
 
         try:
             response = client.models.generate_content(
@@ -105,14 +121,37 @@ def generate_samples():
                 audio_bytes = response.candidates[0].content.parts[0].inline_data.data
                 save_wav(filepath, audio_bytes)
                 print(f"  [{voice_id}] OK ({len(audio_bytes)} bytes)")
+                generated_count += 1
+                pending_index += 1
             else:
                 print(f"  [{voice_id}] FAIL - no audio in response")
+                retry_counts[voice_id] = retry_counts.get(voice_id, 0) + 1
+                if retry_counts[voice_id] <= 2:
+                    print(f"  [{voice_id}] retrying after empty audio response...")
+                    time.sleep(RATE_LIMIT_WAIT)
+                    continue
+                pending_index += 1
 
         except Exception as e:
             print(f"  [{voice_id}] ERROR - {e}")
+            if "API_KEY_INVALID" in str(e) or "API key expired" in str(e) or "API key not valid" in str(e):
+                print(f"  [{voice_id}] key {client_slot['index']} disabled for this run")
+                clients = [slot for slot in clients if slot is not client_slot]
+                continue
+            if "RESOURCE_EXHAUSTED" in str(e) or "429" in str(e):
+                retry_counts[voice_id] = retry_counts.get(voice_id, 0) + 1
+                if retry_counts[voice_id] <= 4:
+                    retry_delay = RATE_LIMIT_WAIT
+                    match = re.search(r"retryDelay': '(\d+)s'", str(e))
+                    if match:
+                        retry_delay = max(retry_delay, int(match.group(1)) + 2)
+                    print(f"  [{voice_id}] quota wait {retry_delay}s then retry")
+                    time.sleep(retry_delay)
+                    continue
+            pending_index += 1
 
         # Wait between requests to avoid rate limiting
-        if idx < len(pending) - 1:
+        if pending_index < len(pending) and clients:
             print(f"  ... waiting {RATE_LIMIT_WAIT}s (rate limit)...")
             time.sleep(RATE_LIMIT_WAIT)
 

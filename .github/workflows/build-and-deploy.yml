@@ -84,6 +84,9 @@ jobs:
         }
         & $tesseractExe --version
 
+    - name: Download fonts
+      run: python scripts/download_all_fonts_final.py
+
     - name: Run Desktop Test Suite
       run: pytest -q
 
@@ -92,9 +95,6 @@ jobs:
       run: |
         $env:APP_VERSION_UPDATE_API_KEY = "test_update_api_key_for_ci_abcdefghijklmnopqrstuvwxyz123456"
         pytest -q backend/tests
-
-    - name: Download fonts
-      run: python scripts/download_all_fonts_final.py
 
     - name: Download Whisper models
       run: python scripts/download_whisper_models.py

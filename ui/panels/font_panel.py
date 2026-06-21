@@ -181,6 +181,8 @@ class FontPanel(QFrame, ThemedMixin):
         font_options = [
             {"name": "서울 한강체", "id": "seoul_hangang", "preview": "쇼핑 숏폼 자막", "description": "모던하고 깔끔한 서울시 공식 폰트", "font_paths": [os.path.join(fonts_dir, "SeoulHangangB.ttf")]},
             {"name": "프리텐다드", "id": "pretendard", "preview": "쇼핑 숏폼 자막", "description": "세련된 현대적 고딕체", "font_paths": [os.path.join(fonts_dir, "Pretendard-ExtraBold.ttf")]},
+            {"name": "Noto Sans KR", "id": "noto_sans_kr", "preview": "쇼핑 숏폼 자막", "description": "상업 이용 가능한 구글 Noto 한글 폰트", "font_paths": [os.path.join(fonts_dir, "NotoSansKR-Variable.ttf")]},
+            {"name": "SUIT", "id": "suit", "preview": "쇼핑 숏폼 자막", "description": "요즘 서비스 UI에 잘 맞는 모던 고딕체", "font_paths": [os.path.join(fonts_dir, "SUIT-Heavy.ttf")]},
             {"name": "G마켓 산스", "id": "gmarketsans", "preview": "쇼핑 숏폼 자막", "description": "인기 있는 고품질 무료 폰트", "font_paths": [os.path.join(fonts_dir, "GmarketSansTTFBold.ttf")]},
             {"name": "페이퍼로지", "id": "paperlogy", "preview": "쇼핑 숏폼 자막", "description": "부드러운 곡선이 매력적인 폰트", "font_paths": [os.path.join(fonts_dir, "Paperlogy-9Black.ttf")]},
             {"name": "유앤피플", "id": "unpeople_gothic", "preview": "쇼핑 숏폼 자막", "description": "부드럽고 가독성 좋은 고딕체", "font_paths": [os.path.join(fonts_dir, "UnPeople.ttf")]}

@@ -5,7 +5,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QWidget, QGridLayout, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from ui.components.base_widget import ThemedMixin
 from managers.settings_manager import get_settings_manager
 from ui.design_system_v2 import get_design_system, get_color
@@ -18,7 +18,6 @@ CTA_OPTIONS = [
     {"name": "버튼형", "id": "option4", "description": "제품 보기 버튼을 누르게 하는 안내 문구", "lines": ["영상 속 핫템 정보는", "왼쪽 하단 버튼에서", "확인 가능합니다!"]},
     {"name": "프로필 링크형", "id": "option5", "description": "프로필에 있는 링크를 보게 하는 문구", "lines": ["더 많은 제품 정보는", "프로필 링크를", "참고해 주세요!"]},
     {"name": "한정형", "id": "option6", "description": "수량이 얼마 없다고 알려 서두르게 하는 문구", "lines": ["수량 한정 상품!", "품절 전에", "서두르세요!"]},
-    {"name": "후기형", "id": "option7", "description": "실제 후기를 보게 하는 문구", "lines": ["실제 구매 후기가", "궁금하다면", "댓글을 확인하세요!"]},
     {"name": "질문형", "id": "option8", "description": "댓글을 달고 싶게 만드는 문구", "lines": ["이 제품 어떠세요?", "의견을 댓글로", "남겨주세요!"]},
     {"name": "팔로우형", "id": "option9", "description": "팔로우하게 만드는 문구", "lines": ["더 많은 추천템은", "팔로우하고", "확인하세요!"]},
 ]
@@ -32,6 +31,7 @@ class CTACard(QFrame, ThemedMixin):
         self.setFrameShadow(QFrame.Shadow.Plain)  # Remove shadow
         # 카드가 세로로 늘어나 빈 공간이 생기지 않도록 내용 높이에 맞춘다.
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Maximum)
+        self.setMinimumWidth(150)
         self.option = option
         self.is_selected = is_selected
         self.ds = get_design_system()
@@ -47,12 +47,19 @@ class CTACard(QFrame, ThemedMixin):
 
         # Header
         header = QHBoxLayout()
-        icon_text = "📍" if self.option["id"] == "default" else "📝" if self.option["id"] == "option1" else "🔥"
-        self.title_label = QLabel(f"{icon_text} {self.option['name']}")
+        icon_text = "●" if self.option["id"] == "default" else "◆" if self.option["id"] == "option1" else "▶"
+        self.icon_label = QLabel(icon_text)
+        self.icon_label.setFixedWidth(18)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.icon_label.setStyleSheet("background-color: transparent; border: none;")
+        header.addWidget(self.icon_label)
+
+        self.title_label = QLabel(self.option["name"])
         self.title_label.setStyleSheet(
             f"font-weight: {ds.typography.weight_bold}; font-size: 13px; color: #FFFFFF; "
             "background-color: transparent; border: none;"
         )
+        self.title_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         header.addWidget(self.title_label)
         header.addStretch()
         layout.addLayout(header)
@@ -66,6 +73,7 @@ class CTACard(QFrame, ThemedMixin):
         for line in self.option["lines"]:
             lbl = QLabel(line)
             lbl.setStyleSheet("font-size: 11px; color: #FFFFFF; background-color: transparent; border: none;")
+            lbl.setWordWrap(True)
             preview_layout.addWidget(lbl)
 
         layout.addWidget(self.preview_box)
@@ -117,6 +125,10 @@ class CTACard(QFrame, ThemedMixin):
             f"color: {primary_color if self.is_selected else '#FFFFFF'}; border: none; "
             f"font-weight: {ds.typography.weight_bold}; font-size: 14px; background-color: transparent;"
         )
+        self.icon_label.setStyleSheet(
+            f"color: {primary_color if self.is_selected else '#B8B8B8'}; border: none; "
+            "font-weight: bold; font-size: 12px; background-color: transparent;"
+        )
         self.desc_label.setStyleSheet(
             "color: #B8B8B8; border: none; font-size: 12px; background-color: transparent;"
         )
@@ -126,6 +138,7 @@ class CTAPanel(QFrame, ThemedMixin):
         super().__init__(parent)
         self.gui = gui
         self.cards = {}
+        self._current_columns = 0
         self.ds = get_design_system()
         self.__init_themed__(theme_manager)
         self.create_widgets()
@@ -199,19 +212,28 @@ class CTAPanel(QFrame, ThemedMixin):
             self.grid_layout.itemAt(i).widget().setParent(None)
             
         self.cards = {}
+        valid_ids = {option["id"] for option in CTA_OPTIONS}
         selected_id = getattr(self.gui, 'selected_cta_id', 'default')
+        if selected_id not in valid_ids:
+            selected_id = CTA_OPTIONS[0]["id"]
+            self.gui.selected_cta_id = selected_id
+            get_settings_manager().set_cta_id(selected_id)
+        columns = self._column_count()
+        self._current_columns = columns
         
         for i, option in enumerate(CTA_OPTIONS):
             is_selected = option["id"] == selected_id
             card = CTACard(option, is_selected=is_selected, theme_manager=self.theme_manager)
             card.clicked.connect(self._on_card_clicked)
             
-            row, col = divmod(i, 3)
+            row, col = divmod(i, columns)
             self.grid_layout.addWidget(card, row, col)
             self.cards[option["id"]] = card
 
         # 카드들이 위쪽에 모이도록 마지막에 신축 행 추가
-        last_row = (len(CTA_OPTIONS) + 2) // 3
+        for col in range(columns):
+            self.grid_layout.setColumnStretch(col, 1)
+        last_row = (len(CTA_OPTIONS) + columns - 1) // columns
         self.grid_layout.setRowStretch(last_row, 1)
 
     def _on_card_clicked(self, cta_id):
@@ -227,6 +249,20 @@ class CTAPanel(QFrame, ThemedMixin):
         bg = get_color('surface')
         self.setStyleSheet(f"background-color: {bg}; border: none;")
         self.grid_widget.setStyleSheet("background-color: transparent; border: none;")
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        columns = self._column_count()
+        if columns != self._current_columns:
+            QTimer.singleShot(0, self.rebuild_cards)
+
+    def _column_count(self) -> int:
+        width = self.width()
+        if width < 390:
+            return 1
+        if width < 620:
+            return 2
+        return 3
 
 def get_selected_cta_lines(gui) -> list:
     selected_id = getattr(gui, 'selected_cta_id', 'default')

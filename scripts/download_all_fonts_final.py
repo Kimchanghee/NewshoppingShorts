@@ -48,6 +48,26 @@ FONT_SOURCES = [
         ]
     },
     {
+        "id": "noto_sans_kr",
+        "name": "NotoSansKR-Variable.ttf",
+        "urls": ["https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf"]
+    },
+    {
+        "id": "suit",
+        "name": "SUIT-Heavy.ttf",
+        "urls": ["https://raw.githubusercontent.com/sun-typeface/SUIT/main/fonts/static/ttf/SUIT-Heavy.ttf"]
+    },
+    {
+        "id": "noto_sans_kr_license",
+        "name": "LICENSE-NotoSansKR.txt",
+        "urls": ["https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt"]
+    },
+    {
+        "id": "suit_license",
+        "name": "LICENSE-SUIT.txt",
+        "urls": ["https://raw.githubusercontent.com/sun-typeface/SUIT/main/LICENSE"]
+    },
+    {
         "id": "ibm_plex",
         "name": "IBMPlexSansKR-Bold.ttf",
         "urls": ["https://github.com/google/fonts/raw/main/ofl/ibmplexsanskr/IBMPlexSansKR-Bold.ttf"]
