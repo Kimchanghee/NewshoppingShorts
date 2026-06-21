@@ -16,7 +16,12 @@ DEFAULT_QUEUE_PATH = (
 )
 
 SUCCESS_STATUSES = {"completed", "completed_linktree_blocked"}
-SKIPPED_STATUSES = {"skipped_low_similarity", "skipped_quality_gate", "skipped"}
+SKIPPED_STATUSES = {
+    "skipped_low_similarity",
+    "skipped_quality_gate",
+    "skipped_duplicate_product",
+    "skipped",
+}
 SYSTEM_BLOCKER_MARKERS = (
     "api key expired",
     "api key not valid",
@@ -35,6 +40,7 @@ STATUS_LABELS = {
     "completed_linktree_blocked": "완료(Linktree 보류)",
     "skipped_low_similarity": "건너뜀",
     "skipped_quality_gate": "품질보류",
+    "skipped_duplicate_product": "중복보류",
     "skipped": "건너뜀",
     "failed": "실패",
 }

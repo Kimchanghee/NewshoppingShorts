@@ -363,6 +363,135 @@ def test_process_pending_items_continues_after_render_quality_skip(monkeypatch, 
     assert payload["items"][1]["status"] == "completed"
 
 
+def test_process_pending_items_skips_duplicate_fan_family_before_sourcing(monkeypatch, tmp_path):
+    payload = {
+        "automation_policy": {
+            "min_similarity_score": 0.9,
+            "youtube_privacy": "unlisted",
+        },
+        "items": [
+            {
+                "planned_number": "[033]",
+                "status": "completed",
+                "category": "cooling_handheld_fan",
+                "product_name": "portable handheld fan",
+                "coupang_url": "https://www.coupang.com/vp/products/100",
+                "result": {"youtube_url": "https://youtu.be/already"},
+            },
+            {
+                "planned_number": "[055]",
+                "status": "pending",
+                "category": "clip_fan",
+                "product_name": "portable clip fan stroller desk fan",
+                "attempts": 0,
+                "scheduled_at": "2026-06-21T20:26:26+09:00",
+                "coupang_url": "https://www.coupang.com/vp/products/200",
+                "result": {},
+            },
+            {
+                "planned_number": "[056]",
+                "status": "pending",
+                "category": "mosquito_trap",
+                "product_name": "mosquito trap",
+                "attempts": 0,
+                "scheduled_at": "2026-06-22T00:26:26+09:00",
+                "coupang_url": "https://www.coupang.com/vp/products/300",
+                "result": {},
+            },
+        ],
+    }
+    calls = []
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 22, 0, 30, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(
+        queue_runner,
+        "build_run_dir",
+        lambda item: tmp_path / str(item.get("planned_number")).strip("[]"),
+    )
+
+    async def fake_run_sourcing(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "best_similarity": 1.0,
+            "match_status": "matched",
+            "_report_path": str(tmp_path / f"{item['planned_number']}.json"),
+            "product_info": {"name": item["product_name"]},
+            "sourced_products": [
+                {
+                    "source": "aliexpress",
+                    "similarity": 1.0,
+                    "video_file": str(tmp_path / "source.mp4"),
+                    "auto_publish_safe": True,
+                    "requires_review": False,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(queue_runner, "run_sourcing", fake_run_sourcing)
+    monkeypatch.setattr(
+        queue_runner,
+        "render_single_item",
+        lambda *_args, **_kwargs: {
+            "render_ok": True,
+            "final_video": str(tmp_path / "final.mp4"),
+            "upload_quality": {"ok": True, "reasons": []},
+            "_render_result_path": str(tmp_path / "render.json"),
+        },
+    )
+    monkeypatch.setattr(queue_runner, "build_upload_item", lambda *_args, **_kwargs: {"upload": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "upload_verified_render",
+        lambda *_args, **_kwargs: {"video_url": "https://youtu.be/next"},
+    )
+    monkeypatch.setattr(queue_runner, "verify_youtube", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "publish_linktree_if_possible",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[056]"]
+    assert payload["items"][1]["status"] == "skipped_duplicate_product"
+    assert payload["items"][1]["attempts"] == 0
+    assert "family 'fan'" in payload["items"][1]["result"]["blocking_reason"]
+    assert result["status"] == "completed"
+    assert result["planned_number"] == "[056]"
+    assert result["skip_count"] == 1
+
+
+def test_duplicate_upload_reason_blocks_same_normalized_product_name():
+    payload = {
+        "items": [
+            {
+                "planned_number": "[047]",
+                "status": "completed",
+                "category": "cooling_bedding",
+                "product_name": "Cooling Bedding Pad Summer Cool Mat",
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+            },
+            {
+                "planned_number": "[061]",
+                "status": "pending",
+                "category": "cooling_bedding",
+                "product_name": "cooling bedding pad summer cool mat",
+                "coupang_url": "https://www.coupang.com/vp/products/2",
+            },
+        ]
+    }
+
+    reason = queue_runner.duplicate_upload_reason(payload["items"][1], payload)
+
+    assert "Duplicate product name" in reason
+
+
 def test_process_pending_items_stops_on_sourcing_system_blocker(monkeypatch, tmp_path):
     payload = {
         "automation_policy": {

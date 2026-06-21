@@ -51,6 +51,19 @@ SUCCESS_FINAL_STATUSES = {
 SKIP_STATUSES = {
     "skipped_low_similarity",
     "skipped_quality_gate",
+    "skipped_duplicate_product",
+}
+PRODUCT_FAMILY_BY_CATEGORY = {
+    "cooling_handheld_fan": "fan",
+    "portable_cooling_fan": "fan",
+    "mist_fan": "fan",
+    "neck_fan": "fan",
+    "desk_camping_fan": "fan",
+    "camping_fan": "fan",
+    "clip_fan": "fan",
+}
+DEFAULT_DUPLICATE_FAMILY_LIMITS = {
+    "fan": 1,
 }
 SYSTEM_BLOCKER_MARKERS = (
     "api key expired",
@@ -239,7 +252,7 @@ def is_system_sourcing_blocker(report: Dict[str, Any], reason: str = "") -> bool
 
 def is_retriable_system_skip(item: Dict[str, Any]) -> bool:
     status = str(item.get("status") or "").strip().lower()
-    if status not in SKIP_STATUSES:
+    if status not in SKIP_STATUSES or status == "skipped_duplicate_product":
         return False
     result = item.get("result") if isinstance(item.get("result"), dict) else {}
     reason = str(result.get("blocking_reason") or result.get("error") or "").strip()
@@ -249,6 +262,104 @@ def is_retriable_system_skip(item: Dict[str, Any]) -> bool:
 def is_processable_queue_item(item: Dict[str, Any]) -> bool:
     status = str(item.get("status") or "").strip().lower()
     return status == "pending" or is_retriable_system_skip(item)
+
+
+def normalize_duplicate_text(value: Any) -> str:
+    text = str(value or "").lower()
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"[^0-9a-z가-힣]+", " ", text)
+    tokens = [
+        token
+        for token in text.split()
+        if len(token) > 1 and token not in {"usb", "with", "and", "for", "the"}
+    ]
+    return " ".join(tokens)
+
+
+def coupang_product_id(value: Any) -> str:
+    match = re.search(r"/products/(\d+)", str(value or ""))
+    return match.group(1) if match else ""
+
+
+def product_family(item: Dict[str, Any]) -> str:
+    return PRODUCT_FAMILY_BY_CATEGORY.get(str(item.get("category") or "").strip(), "")
+
+
+def duplicate_policy(queue_payload: Dict[str, Any]) -> Dict[str, Any]:
+    policy = queue_payload.get("automation_policy") if isinstance(queue_payload.get("automation_policy"), dict) else {}
+    raw_limits = policy.get("duplicate_product_family_limits")
+    limits = dict(DEFAULT_DUPLICATE_FAMILY_LIMITS)
+    if isinstance(raw_limits, dict):
+        for key, value in raw_limits.items():
+            try:
+                limits[str(key)] = max(0, int(value))
+            except (TypeError, ValueError):
+                continue
+    return {
+        "family_limits": limits,
+        "skip_same_normalized_product_name": bool(
+            policy.get("skip_same_normalized_product_name", True)
+        ),
+    }
+
+
+def completed_duplicate_index(
+    queue_payload: Dict[str, Any],
+    *,
+    current_item: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    index: Dict[str, Any] = {
+        "coupang_ids": {},
+        "product_names": {},
+        "family_counts": {},
+    }
+    for item in queue_payload.get("items") or []:
+        if item is current_item:
+            continue
+        if str(item.get("status") or "").strip().lower() not in SUCCESS_FINAL_STATUSES:
+            continue
+        planned = str(item.get("planned_number") or "").strip()
+        product_id = coupang_product_id(item.get("coupang_url") or item.get("purchase_url"))
+        if product_id:
+            index["coupang_ids"][product_id] = planned
+
+        name_key = normalize_duplicate_text(item.get("product_name"))
+        if name_key:
+            index["product_names"][name_key] = planned
+
+        family = product_family(item)
+        if family:
+            index["family_counts"][family] = int(index["family_counts"].get(family, 0)) + 1
+    return index
+
+
+def duplicate_upload_reason(
+    item: Dict[str, Any],
+    queue_payload: Dict[str, Any],
+    *,
+    product_name: str = "",
+) -> str:
+    policy = duplicate_policy(queue_payload)
+    index = completed_duplicate_index(queue_payload, current_item=item)
+
+    product_id = coupang_product_id(item.get("coupang_url") or item.get("purchase_url"))
+    if product_id and product_id in index["coupang_ids"]:
+        return f"Duplicate Coupang product id {product_id} already uploaded as {index['coupang_ids'][product_id]}."
+
+    if policy["skip_same_normalized_product_name"]:
+        for raw_name in (product_name, item.get("product_name")):
+            name_key = normalize_duplicate_text(raw_name)
+            if name_key and name_key in index["product_names"]:
+                return f"Duplicate product name already uploaded as {index['product_names'][name_key]}."
+
+    family = product_family(item)
+    if family:
+        limit = int(policy["family_limits"].get(family, 999999))
+        existing_count = int(index["family_counts"].get(family, 0))
+        if existing_count >= limit:
+            return f"Duplicate product family '{family}' already has {existing_count} completed upload(s)."
+
+    return ""
 
 
 def load_queue() -> Dict[str, Any]:
@@ -858,6 +969,27 @@ async def process_pending_items(
     skipped_items: List[Dict[str, Any]] = []
 
     for item in candidate_items:
+        duplicate_reason = duplicate_upload_reason(item, queue_payload)
+        if duplicate_reason:
+            attach_result(
+                item,
+                status="skipped_duplicate_product",
+                blocking_reason=duplicate_reason,
+                extra={
+                    "duplicate_policy": duplicate_policy(queue_payload),
+                    "purchase_url": determine_purchase_url(item, {}),
+                },
+            )
+            save_queue(queue_payload)
+            skipped_items.append(
+                {
+                    "planned_number": item.get("planned_number"),
+                    "status": "skipped_duplicate_product",
+                    "reason": duplicate_reason,
+                }
+            )
+            continue
+
         update_item_attempt(item)
         save_queue(queue_payload)
 
@@ -866,6 +998,31 @@ async def process_pending_items(
         safe_item = select_safe_marketplace_item(report, min_similarity)
         similarity = report.get("best_similarity")
         product_name = str((report.get("product_info") or {}).get("name") or item.get("product_name") or "").strip()
+
+        duplicate_reason = duplicate_upload_reason(item, queue_payload, product_name=product_name)
+        if duplicate_reason:
+            attach_result(
+                item,
+                status="skipped_duplicate_product",
+                similarity=similarity,
+                blocking_reason=duplicate_reason,
+                extra={
+                    "match_status": report.get("match_status"),
+                    "report_path": report.get("_report_path", ""),
+                    "purchase_url": determine_purchase_url(item, report),
+                    "run_dir": str(run_dir),
+                    "duplicate_policy": duplicate_policy(queue_payload),
+                },
+            )
+            save_queue(queue_payload)
+            skipped_items.append(
+                {
+                    "planned_number": item.get("planned_number"),
+                    "status": "skipped_duplicate_product",
+                    "reason": duplicate_reason,
+                }
+            )
+            continue
 
         if not safe_item:
             reason = str(report.get("match_error") or report.get("error") or "No safe marketplace video matched the threshold.")
@@ -911,6 +1068,7 @@ async def process_pending_items(
             skipped_items.append(
                 {
                     "planned_number": item.get("planned_number"),
+                    "status": "skipped_low_similarity",
                     "reason": reason,
                 }
             )
@@ -956,6 +1114,7 @@ async def process_pending_items(
                 skipped_items.append(
                     {
                         "planned_number": item.get("planned_number"),
+                        "status": "skipped_quality_gate",
                         "reason": reason,
                     }
                 )
@@ -1025,10 +1184,19 @@ async def process_pending_items(
             }
 
     if skipped_items:
+        skipped_statuses = {
+            str(item.get("status") or "skipped_low_similarity")
+            for item in skipped_items
+        }
+        final_skip_status = (
+            "skipped_duplicate_product"
+            if skipped_statuses == {"skipped_duplicate_product"}
+            else "skipped_low_similarity"
+        )
         return {
             "processed": True,
-            "status": "skipped_low_similarity",
-            "reason": "all_candidate_items_skipped_low_similarity",
+            "status": final_skip_status,
+            "reason": "all_candidate_items_skipped",
             "skip_count": len(skipped_items),
             "skipped_items": skipped_items,
             **({"run_now": True} if run_now else {}),

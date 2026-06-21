@@ -103,6 +103,39 @@ def test_build_snapshot_compacts_quality_gate_rows(tmp_path):
     assert "duration_too_short" in snapshot["rows"][0]["remarks"]
 
 
+def test_build_snapshot_labels_duplicate_product_rows(tmp_path):
+    queue_path = tmp_path / "summer_queue.json"
+    queue_path.write_text(
+        json.dumps(
+            {
+                "automation_policy": {"interval_minutes": 240},
+                "items": [
+                    {
+                        "planned_number": "[055]",
+                        "status": "skipped_duplicate_product",
+                        "coupang_url": "https://www.coupang.com/vp/products/8837884814",
+                        "scheduled_at": "2026-06-21T20:26:26+09:00",
+                        "scheduled_order": 1,
+                        "attempts": 0,
+                        "result": {
+                            "blocking_reason": "Duplicate product family 'fan' already has 4 completed upload(s).",
+                        },
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8-sig",
+    )
+
+    snapshot = build_summer_coupang_queue_snapshot(queue_path)
+
+    assert snapshot["counts"]["skipped"] == 1
+    assert snapshot["rows"][0]["order"] == "[055]"
+    assert snapshot["rows"][0]["status"] == "중복보류"
+    assert "Duplicate product family" in snapshot["rows"][0]["remarks"]
+
+
 def test_build_snapshot_treats_system_skip_as_retry_waiting(tmp_path):
     queue_path = tmp_path / "summer_queue.json"
     queue_path.write_text(
