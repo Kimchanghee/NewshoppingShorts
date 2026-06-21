@@ -40,28 +40,35 @@ class ModeCard(QFrame):
         )
         layout.setSpacing(ds.spacing.space_4)
 
-        # Icon + Title row
-        header_layout = QVBoxLayout()
-        header_layout.setSpacing(max(ds.spacing.space_3, 12))
+        # Icon + title block. Keep each text row in its own reserved lane so
+        # Windows emoji font fallback cannot paint over the title at odd DPI.
+        header_frame = QFrame()
+        header_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        header_frame.setMinimumHeight(130)
+        header_frame.setStyleSheet("background: transparent; border: none;")
+        header_layout = QVBoxLayout(header_frame)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(ds.spacing.space_2)
 
-        # Icon (large)
-        # NOTE:
-        # Emoji glyphs can be clipped at startup on some DPI/font fallback paths.
-        # Reserve explicit vertical space and strip variation selector to stabilize metrics.
         normalized_icon = (icon or "").replace("\ufe0f", "")
+        self.icon_box = QFrame()
+        self.icon_box.setFixedHeight(50)
+        self.icon_box.setStyleSheet("background: transparent; border: none;")
+        icon_box_layout = QVBoxLayout(self.icon_box)
+        icon_box_layout.setContentsMargins(0, 0, 0, 0)
+        icon_box_layout.setSpacing(0)
+
         self.icon_label = QLabel(normalized_icon)
-        icon_font = QFont("Segoe UI Emoji", 32)
+        icon_font = QFont("Segoe UI Emoji", 24)
         self.icon_label.setFont(icon_font)
-        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignTop)
+        self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_label.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Fixed
         )
-        self.icon_label.setContentsMargins(0, 4, 0, 0)
-        # Emoji rendering on Windows is larger than font metrics report.
-        # Use a generous fixed height to prevent overlap with title.
-        self.icon_label.setFixedHeight(60)
-        header_layout.addWidget(self.icon_label)
+        self.icon_label.setFixedHeight(44)
+        icon_box_layout.addWidget(self.icon_label)
+        header_layout.addWidget(self.icon_box)
 
         # Title
         self.title_label = QLabel(title)
@@ -71,7 +78,8 @@ class ModeCard(QFrame):
             QFont.Weight.Bold
         ))
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.title_label.setContentsMargins(0, 2, 0, 0)
+        self.title_label.setWordWrap(True)
+        self.title_label.setFixedHeight(34)
         header_layout.addWidget(self.title_label)
 
         # Subtitle
@@ -81,9 +89,11 @@ class ModeCard(QFrame):
             ds.typography.size_sm
         ))
         self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.subtitle_label.setWordWrap(True)
+        self.subtitle_label.setFixedHeight(36)
         header_layout.addWidget(self.subtitle_label)
 
-        layout.addLayout(header_layout)
+        layout.addWidget(header_frame)
 
         # Separator
         separator = QFrame()

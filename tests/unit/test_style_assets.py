@@ -6,6 +6,7 @@ from config.voice_profiles import VOICE_PROFILES
 from ui.components.step_nav import StepNav
 from ui.panels.cta_panel import CTA_OPTIONS, get_selected_cta_lines
 from ui.panels.cta_panel import CTAPanel
+from ui.panels.mode_selection_panel import ModeSelectionPanel
 from ui.panels.voice_panel import VoicePanel
 
 
@@ -113,8 +114,19 @@ def test_selection_panels_adapt_without_icon_text_overlap():
             return None
 
     gui = DummyGui()
+    mode_panel = ModeSelectionPanel(None, gui)
     voice_panel = VoicePanel(None, gui)
     cta_panel = CTAPanel(None, gui)
+
+    mode_panel.resize(1128, 550)
+    mode_panel.show()
+    app.processEvents()
+    for mode_id, card in mode_panel._cards.items():
+        icon_box = card.icon_box.geometry()
+        title = card.title_label.geometry()
+        subtitle = card.subtitle_label.geometry()
+        assert icon_box.bottom() < title.top(), mode_id
+        assert title.bottom() < subtitle.top(), mode_id
 
     for width, expected_voice_columns, expected_cta_columns in (
         (360, 1, 1),
@@ -131,5 +143,6 @@ def test_selection_panels_adapt_without_icon_text_overlap():
         assert cta_panel._column_count() == expected_cta_columns
 
     nav.close()
+    mode_panel.close()
     voice_panel.close()
     cta_panel.close()
