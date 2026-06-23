@@ -15,7 +15,8 @@ DEFAULT_QUEUE_PATH = (
     Path.home() / ".ssmaker" / "summer_coupang_autosourcing_queue_20260603.json"
 )
 
-SUCCESS_STATUSES = {"completed", "completed_linktree_blocked"}
+SUCCESS_STATUSES = {"completed"}
+LINKTREE_RETRY_STATUSES = {"completed_linktree_blocked", "linktree_retry_pending"}
 SKIPPED_STATUSES = {
     "skipped_low_similarity",
     "skipped_quality_gate",
@@ -37,7 +38,8 @@ STATUS_LABELS = {
     "pending": "예약 대기",
     "processing": "진행 중",
     "completed": "완료",
-    "completed_linktree_blocked": "완료(Linktree 보류)",
+    "completed_linktree_blocked": "Linktree 재시도 대기",
+    "linktree_retry_pending": "Linktree 재시도 대기",
     "skipped_low_similarity": "건너뜀",
     "skipped_quality_gate": "품질보류",
     "skipped_duplicate_product": "중복보류",
@@ -97,6 +99,8 @@ def _status_bucket(status: str) -> str:
     normalized = str(status or "pending").strip().lower()
     if normalized in SUCCESS_STATUSES:
         return "completed"
+    if normalized in LINKTREE_RETRY_STATUSES:
+        return "waiting"
     if normalized in SKIPPED_STATUSES:
         return "skipped"
     if normalized in {"failed", "error"}:
@@ -165,8 +169,8 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
     if scheduled_at:
         remarks_parts.append(f"예약 {scheduled_at}")
     remarks_parts.append(f"시도 {attempts}회")
-    if status == "completed_linktree_blocked":
-        remarks_parts.append("Linktree 보류")
+    if status in LINKTREE_RETRY_STATUSES:
+        remarks_parts.append("Linktree 재시도 대기")
         if linktree_reason:
             remarks_parts.append(linktree_reason)
     elif linktree_ok:

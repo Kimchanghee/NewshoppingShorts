@@ -107,6 +107,7 @@ class SourcingPipeline:
         self.best_similarity_score: Optional[float] = None
         self.match_status: str = "not_checked"
         self.match_error: Optional[str] = None
+        self.search_diagnostics: Dict[str, Any] = {}
 
     @staticmethod
     def _is_bad_scraped_product_name(name: Any) -> bool:
@@ -140,6 +141,19 @@ class SourcingPipeline:
         if self._is_bad_scraped_product_image(self.product_info.get("image")):
             self.product_info["image"] = ""
             self.product_info["image_source"] = "discarded_generic_coupang_image"
+
+    def _ensure_product_info_from_fallback(self) -> None:
+        if self.product_info:
+            return
+        fallback_name = self._fallback_product_label()
+        if not fallback_name:
+            return
+        self.product_info = {
+            "name": fallback_name,
+            "image": "",
+            "price": "",
+            "name_source": "queue_fallback_scrape_failed",
+        }
 
     @staticmethod
     def _normalize_similarity_score(value: Any) -> float:
@@ -450,6 +464,7 @@ class SourcingPipeline:
             search_aliexpress_by_image,
             find_products_with_video,
             _category_terms_for_keyword,
+            consume_access_challenge_events,
         )
 
         os.makedirs(self.output_dir, exist_ok=True)
@@ -465,6 +480,7 @@ class SourcingPipeline:
             # ── Step 1: Product analysis ──
             self._progress("product_analysis", "쿠팡 상품 페이지 접속 중...", 0.0)
             self.product_info = await scrape_product(browser, self.coupang_url)
+            self._ensure_product_info_from_fallback()
             self._repair_scraped_product_info()
             if not self.product_info or not self.product_info.get("name"):
                 self.error = "쿠팡 상품 정보를 추출할 수 없습니다."
@@ -500,20 +516,23 @@ class SourcingPipeline:
             cn_kw = (self.keywords or {}).get("chinese", "").strip()
             en_kw = (self.keywords or {}).get("english", "").strip()
             fallback_keyword_name = self._fallback_product_label()
-            if fallback_keyword_name and (not cn_kw or not en_kw):
+            if fallback_keyword_name:
                 fallback_keywords = convert_keywords_rule_based(fallback_keyword_name)
                 fallback_cn = (fallback_keywords or {}).get("chinese", "").strip()
                 fallback_en = (fallback_keywords or {}).get("english", "").strip()
                 if fallback_cn and not cn_kw:
                     cn_kw = fallback_cn
-                if fallback_en and not en_kw:
-                    en_kw = fallback_en
+                fallback_search_en = fallback_en or fallback_keyword_name
+                if fallback_search_en and fallback_search_en.lower() not in en_kw.lower():
+                    en_kw = " ".join(part for part in (en_kw, fallback_search_en) if part).strip()
                 if cn_kw or en_kw:
-                    self.keywords = {
+                    merged_keywords = dict(self.keywords or {})
+                    merged_keywords.update({
                         "chinese": cn_kw,
                         "english": en_kw,
                         "fallback_source": fallback_keyword_name,
-                    }
+                    })
+                    self.keywords = merged_keywords
             if not cn_kw and not en_kw:
                 # Both empty → cannot search either marketplace. Most common cause:
                 # no Gemini client configured AND no rule-based / Latin tokens in the title.
@@ -531,6 +550,22 @@ class SourcingPipeline:
 
             # ── Step 4: Overseas search ──
             self._progress("overseas_search", "해외 상품 검색 중...", 0.0)
+            search_reference_name = self.product_info["name"]
+            if fallback_keyword_name and fallback_keyword_name.lower() not in search_reference_name.lower():
+                search_reference_name = f"{search_reference_name} {fallback_keyword_name}".strip()
+            self.search_diagnostics = {
+                "reference_name": search_reference_name,
+                "fallback_product_name": fallback_keyword_name,
+                "queries": {
+                    "chinese": cn_kw,
+                    "english": en_kw,
+                },
+                "counts": {},
+                "gemini_query_plan": {},
+                "access_challenges": [],
+            }
+            consume_access_challenge_events()
+
             sourcing_ai_policy = {
                 "provider": "gemini",
                 "use_gemini_computer_use": True,
@@ -582,7 +617,7 @@ class SourcingPipeline:
                         search_1688_by_image(
                             browser,
                             coupang_image,
-                            self.product_info["name"],
+                            search_reference_name,
                             cn_kw,
                             en_kw,
                         ),
@@ -604,7 +639,7 @@ class SourcingPipeline:
                     candidates_ali_img = await asyncio.wait_for(
                         search_aliexpress_by_image(
                             browser, coupang_image,
-                            self.product_info["name"], en_kw, cn_kw,
+                            search_reference_name, en_kw, cn_kw,
                         ),
                         timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
@@ -624,7 +659,7 @@ class SourcingPipeline:
                 try:
                     candidates_1688_text = await asyncio.wait_for(
                         search_1688(
-                            browser, cn_kw, self.product_info["name"], en_kw
+                            browser, cn_kw, search_reference_name, en_kw
                         ),
                         timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
@@ -641,7 +676,7 @@ class SourcingPipeline:
                             search_1688_quick(
                                 browser,
                                 cn_kw,
-                                self.product_info["name"],
+                                search_reference_name,
                                 en_kw,
                             ),
                             timeout=quick_timeout,
@@ -671,6 +706,12 @@ class SourcingPipeline:
                     if cid:
                         seen_1688_ids.add(cid)
                     candidates_1688.append(c)
+
+            self.search_diagnostics.setdefault("counts", {}).update({
+                "1688_image": len(candidates_1688_img),
+                "1688_text": len(candidates_1688_text),
+                "1688_total_after_merge": len(candidates_1688),
+            })
 
             self._progress(
                 "overseas_search",
@@ -708,7 +749,7 @@ class SourcingPipeline:
                     candidates_ali_text = await asyncio.wait_for(
                         search_aliexpress(
                             browser, en_kw,
-                            self.product_info["name"], cn_kw,
+                            search_reference_name, cn_kw,
                         ),
                         timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
@@ -725,7 +766,7 @@ class SourcingPipeline:
                             search_aliexpress_quick(
                                 browser,
                                 en_kw,
-                                self.product_info["name"],
+                                search_reference_name,
                                 cn_kw,
                             ),
                             timeout=quick_timeout,
@@ -756,6 +797,12 @@ class SourcingPipeline:
                         seen_ali_ids.add(cid)
                     candidates_ali.append(c)
 
+            self.search_diagnostics.setdefault("counts", {}).update({
+                "aliexpress_image": len(candidates_ali_img),
+                "aliexpress_text": len(candidates_ali_text),
+                "aliexpress_total_after_merge": len(candidates_ali),
+            })
+
             self._progress(
                 "overseas_search",
                 f"AliExpress: {len(candidates_ali)}개 발견 (이미지 {len(candidates_ali_img)} + 텍스트 {len(candidates_ali_text)})",
@@ -777,13 +824,17 @@ class SourcingPipeline:
                 try:
                     query_plan = await build_gemini_computer_use_queries(
                         gemini_client=self.gemini_client,
-                        product_name=self.product_info["name"],
+                        product_name=search_reference_name,
                         keyword_cn=cn_kw,
                         keyword_en=en_kw,
                         max_queries_each=4,
                     )
                     gem_ali_queries = query_plan.get("aliexpress", [])
                     gem_1688_queries = query_plan.get("1688", [])
+                    self.search_diagnostics["gemini_query_plan"] = {
+                        "aliexpress": list(gem_ali_queries),
+                        "1688": list(gem_1688_queries),
+                    }
                     logger.info(
                         "[Pipeline] Gemini fallback query plan: ali=%s / 1688=%s",
                         gem_ali_queries,
@@ -800,7 +851,7 @@ class SourcingPipeline:
                                     search_1688_quick(
                                         browser,
                                         q,
-                                        self.product_info["name"],
+                                        search_reference_name,
                                         en_kw,
                                     ),
                                     timeout=max(20, min(40, MARKETPLACE_SEARCH_STAGE_TIMEOUT)),
@@ -824,7 +875,7 @@ class SourcingPipeline:
                                     search_aliexpress_quick(
                                         browser,
                                         q,
-                                        self.product_info["name"],
+                                        search_reference_name,
                                         cn_kw,
                                     ),
                                     timeout=max(20, min(40, MARKETPLACE_SEARCH_STAGE_TIMEOUT)),
@@ -838,6 +889,11 @@ class SourcingPipeline:
                                 if cid:
                                     existing_ali_ids.add(cid)
                                 candidates_ali.append(c)
+
+                    self.search_diagnostics.setdefault("counts", {}).update({
+                        "1688_total_after_gemini": len(candidates_1688),
+                        "aliexpress_total_after_gemini": len(candidates_ali),
+                    })
 
                     self._progress(
                         "overseas_search",
@@ -882,7 +938,7 @@ class SourcingPipeline:
                     img_candidates = await asyncio.wait_for(
                         search_aliexpress_by_image(
                             browser, coupang_image,
-                            self.product_info["name"], en_kw, cn_kw,
+                            search_reference_name, en_kw, cn_kw,
                         ),
                         timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
@@ -892,6 +948,10 @@ class SourcingPipeline:
                         for ic in img_candidates:
                             if ic.get("id") and ic["id"] not in existing_ids:
                                 candidates_ali.append(ic)
+                        self.search_diagnostics.setdefault("counts", {}).update({
+                            "aliexpress_image_fallback": len(img_candidates),
+                            "aliexpress_total_after_image_fallback": len(candidates_ali),
+                        })
                         self._progress(
                             "overseas_search",
                             f"이미지검색 추가: AliExpress {len(candidates_ali)}개",
@@ -900,7 +960,26 @@ class SourcingPipeline:
                 except Exception as e:
                     logger.warning("[Pipeline] Image search fallback failed: %s", e)
 
+            self.search_diagnostics.setdefault("counts", {}).update({
+                "1688_final": len(candidates_1688),
+                "aliexpress_final": len(candidates_ali),
+                "all_final": len(candidates_1688) + len(candidates_ali),
+            })
+            access_challenges = consume_access_challenge_events()
+            if access_challenges:
+                self.search_diagnostics["access_challenges"] = access_challenges
+
             if not candidates_1688 and not candidates_ali:
+                if access_challenges:
+                    sources = sorted({str(e.get("source") or "") for e in access_challenges if e.get("source")})
+                    self.error = (
+                        "marketplace_access_challenge: AliExpress/1688 search requires a valid logged-in session "
+                        "or manual verification before queue items can be consumed. Sources: "
+                        + ", ".join(sources)
+                    )
+                    logger.warning("[Pipeline] %s", self.error)
+                    self._progress("overseas_search", self.error, 1.0)
+                    return False
                 msg = "후보 0개 — 검색을 종료하고 폴백 단계로 진행합니다."
                 logger.warning("[Pipeline] %s", msg)
                 self._progress("overseas_search", msg, 1.0)
@@ -916,14 +995,15 @@ class SourcingPipeline:
             # domain-level catch-all when no specific dictionary entry matches.
             category_terms = _category_terms_for_keyword(
                 en_kw,
-                reference_name=self.product_info["name"],
+                reference_name=search_reference_name,
                 keyword_cn=cn_kw,
             )
+            self.search_diagnostics["category_terms"] = list(category_terms)
             # References passed to the overlap safety net during the relaxed
             # 0.0-threshold fallback. We compose them once here so they're
             # available to every find_products_with_video call below.
             overlap_refs = [
-                self.product_info["name"],
+                search_reference_name,
                 en_kw,
                 cn_kw,
             ]
@@ -1054,7 +1134,7 @@ class SourcingPipeline:
                     img_candidates = await asyncio.wait_for(
                         search_aliexpress_by_image(
                             browser, coupang_image,
-                            self.product_info["name"], en_kw, cn_kw,
+                            search_reference_name, en_kw, cn_kw,
                         ),
                         timeout=MARKETPLACE_SEARCH_STAGE_TIMEOUT,
                     )
@@ -1599,5 +1679,6 @@ class SourcingPipeline:
             "match_status": self.match_status,
             "match_error": self.match_error,
             "enforce_min_similarity": self.enforce_min_similarity,
+            "search_diagnostics": self.search_diagnostics,
             "error": self.error,
         }

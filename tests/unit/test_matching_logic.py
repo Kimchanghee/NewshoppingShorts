@@ -667,3 +667,144 @@ def test_uncovered_keyword_falls_back_to_phone_domain():
     assert not _passes_category_guard("Stainless Steel Frying Pan", terms)
     # And accept a phone-related candidate
     assert _passes_category_guard("iPhone Magsafe Wallet Holder", terms)
+
+
+def test_summer_neck_cooler_queries_and_similarity_gate():
+    refs = [
+        "\ube44\ub098\uc787 \uc544\uc774\uc2a4 \ub125\ucfe8\ub7ec \ucfe8\uc2a4\uce74\ud504 \uc544\uc774\uc2a4\ub125\ubc34\ub4dc",
+        "pcm ice neck cooler cooling scarf band",
+        "\u51b0\u51c9\u5708 \u964d\u6e29\u9888\u5708",
+    ]
+    candidate = "Reusable PCM Ice Neck Cooler Summer Cooling Neck Ring Scarf Band"
+
+    assert "ice neck cooler" in _preferred_english_query_variants(refs[1], refs[0])
+    assert "\u51b0\u51c9\u5708" in _preferred_chinese_query_variants("", refs[1])
+    assert _semantic_similarity_score(candidate, refs) >= 0.9
+    assert _multi_reference_score(candidate, refs) >= 0.9
+
+    terms = _category_terms_for_keyword(refs[1], reference_name=refs[0], keyword_cn=refs[2])
+    assert terms
+    assert _passes_category_guard(candidate, terms)
+    assert not _passes_category_guard("Silicone Tumbler Ice Mold Tray with Lid", terms)
+    assert _multi_reference_score("Portable Bladeless Neck Fan USB Wearable Fan", refs) < 0.9
+
+
+def test_ice_neck_ring_does_not_use_jewelry_ring_guard():
+    terms = _category_terms_for_keyword(
+        "ice neck ring cooling neck band",
+        reference_name="핏츠런 아이스 넥쿨러 쿨링 넥밴드 얼음 목걸이",
+        keyword_cn="冰凉圈 降温颈圈",
+    )
+
+    assert "neck" in terms
+    assert "cooling" in terms
+    assert "戒指" not in terms
+    assert _passes_category_guard("Reusable PCM Ice Neck Cooler Summer Cooling Neck Ring", terms)
+    assert not _passes_category_guard("Silver Jewelry Ring Wedding Band", terms)
+
+
+def test_swim_ring_does_not_use_jewelry_ring_guard():
+    terms = _category_terms_for_keyword(
+        "inflatable swim ring pool tube",
+        reference_name="물놀이 수영 보행 보조 튜브 물놀이 링",
+        keyword_cn="游泳圈",
+    )
+
+    assert "pool float" in terms
+    assert "tube" in terms
+    assert "戒指" not in terms
+    assert _passes_category_guard("Inflatable Swimming Ring Pool Float Tube", terms)
+    assert not _passes_category_guard("Silver Jewelry Ring Wedding Band", terms)
+
+
+def test_summer_water_gun_and_mosquito_queries_are_high_intent():
+    water_refs = [
+        "\uc5ec\ub984 \uc804\ub3d9\ubb3c\ucd1d",
+        "electric water gun rechargeable water blaster",
+        "\u7535\u52a8\u6c34\u67aa",
+    ]
+    water_candidate = "Rechargeable Electric Water Gun M416 Summer Water Blaster Toy"
+    assert "electric water gun" in _preferred_english_query_variants(water_refs[1], water_refs[0])
+    assert "\u7535\u52a8\u6c34\u67aa" in _preferred_chinese_query_variants("", water_refs[1])
+    assert _semantic_similarity_score(water_candidate, water_refs) >= 0.9
+
+    mosquito_refs = [
+        "\uc804\uae30\ubaa8\uae30\ucc44",
+        "electric mosquito swatter bug zapper racket",
+        "\u7535\u868a\u62cd",
+    ]
+    mosquito_candidate = "Electric Mosquito Swatter USB Rechargeable Bug Zapper Racket"
+    assert "electric mosquito swatter" in _preferred_english_query_variants(mosquito_refs[1], mosquito_refs[0])
+    assert "\u7535\u868a\u62cd" in _preferred_chinese_query_variants("", mosquito_refs[1])
+    assert _semantic_similarity_score(mosquito_candidate, mosquito_refs) >= 0.9
+
+
+def test_summer_skipped_category_query_coverage():
+    cases = [
+        (
+            "cooling bedding pad summer cool mat",
+            "Ice Silk Cooling Mat Summer Bedding Pad",
+            "cooling mat",
+            "\u51b0\u4e1d\u51c9\u5e2d",
+        ),
+        (
+            "cooling arm sleeves uv protection sleeves",
+            "Ice Silk UV Protection Cooling Arm Sleeves",
+            "cooling arm sleeves",
+            "\u51b0\u8896",
+        ),
+        (
+            "waterproof phone pouch swimming dry bag",
+            "Waterproof Phone Pouch Swimming Dry Bag Case",
+            "waterproof phone pouch",
+            "\u624b\u673a\u9632\u6c34\u888b",
+        ),
+        (
+            "uv blocking umbrella compact sun umbrella",
+            "Compact UV Blocking Sun Umbrella Parasol",
+            "uv sun umbrella",
+            "\u9632\u6652\u4f1e",
+        ),
+        (
+            "wide brim outdoor fishing sun hat",
+            "Wide Brim UV Protection Outdoor Sun Hat",
+            "wide brim sun hat",
+            "\u906e\u9633\u5e3d",
+        ),
+        (
+            "folding outdoor camping wagon cart",
+            "Folding Outdoor Camping Wagon Cart",
+            "folding camping wagon",
+            "\u6298\u53e0\u9732\u8425\u8f66",
+        ),
+        (
+            "portable camping shower bag for travel",
+            "Portable Camping Shower Bag Outdoor Shower",
+            "portable camping shower",
+            "\u6237\u5916\u6dcb\u6d74\u888b",
+        ),
+        (
+            "mini insulated cooler bag for summer lunch",
+            "Portable Insulated Cooler Bag Picnic Lunch Bag",
+            "portable cooler bag",
+            "\u4fdd\u6e29\u5305",
+        ),
+        (
+            "kids character life jacket for water play",
+            "Kids Swim Life Jacket Water Play Vest",
+            "kids life jacket",
+            "\u6551\u751f\u8863",
+        ),
+        (
+            "oversized rash guard beach cover up",
+            "UV Swimwear Rash Guard Beach Cover Up",
+            "rash guard swim shirt",
+            "\u9632\u6652\u6cf3\u8863",
+        ),
+    ]
+
+    for reference, candidate, expected_en, expected_cn in cases:
+        refs = [reference, expected_cn]
+        assert expected_en in _preferred_english_query_variants(reference, reference)
+        assert expected_cn in _preferred_chinese_query_variants("", reference)
+        assert _semantic_similarity_score(candidate, refs) >= 0.9

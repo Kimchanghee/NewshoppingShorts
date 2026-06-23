@@ -58,6 +58,7 @@ def test_youtube_preflight_block_does_not_consume_pending(monkeypatch, capsys):
         raise AssertionError("pending queue must not be processed without YouTube OAuth")
 
     monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
+    monkeypatch.setattr(queue_runner, "linktree_publish_ready", lambda: {"ok": True})
     monkeypatch.setattr(
         queue_runner,
         "youtube_upload_ready",
@@ -75,6 +76,46 @@ def test_youtube_preflight_block_does_not_consume_pending(monkeypatch, capsys):
     assert output["processed"] is False
     assert output["reason"] == "youtube_not_connected"
     assert output["pending_count"] == 2
+    assert payload["items"][0]["status"] == "pending"
+    assert payload["items"][0]["attempts"] == 0
+    assert payload["items"][1]["status"] == "pending"
+    assert payload["items"][1]["attempts"] == 1
+
+
+def test_linktree_preflight_block_does_not_consume_pending(monkeypatch, capsys):
+    payload = {
+        "items": [
+            {"planned_number": "[030]", "status": "pending", "attempts": 0, "result": {}},
+            {"planned_number": "[031]", "status": "pending", "attempts": 1, "result": {}},
+        ]
+    }
+
+    def fail_if_called(_payload, **_kwargs):
+        raise AssertionError("pending queue must not be processed without Linktree publish path")
+
+    def fail_youtube_preflight():
+        raise AssertionError("YouTube preflight must not run before Linktree is ready")
+
+    monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
+    monkeypatch.setattr(
+        queue_runner,
+        "linktree_publish_ready",
+        lambda: {
+            "ok": False,
+            "reason": "linktree_not_connected",
+            "blocking_reason": "Linktree webhook URL is not configured.",
+        },
+    )
+    monkeypatch.setattr(queue_runner, "youtube_upload_ready", fail_youtube_preflight)
+    monkeypatch.setattr(queue_runner, "process_pending_items", fail_if_called)
+
+    assert queue_runner.main() == 0
+    output = json.loads(capsys.readouterr().out)
+
+    assert output["processed"] is False
+    assert output["reason"] == "linktree_not_connected"
+    assert output["pending_count"] == 2
+    assert output["upload_required_count"] == 2
     assert payload["items"][0]["status"] == "pending"
     assert payload["items"][0]["attempts"] == 0
     assert payload["items"][1]["status"] == "pending"
@@ -330,6 +371,101 @@ def test_process_pending_items_continues_after_render_quality_skip(monkeypatch, 
                 "upload_quality": {"ok": False, "reasons": ["duration_too_short"]},
                 "_render_result_path": str(tmp_path / "render-032.json"),
             }
+        return {
+            "render_ok": True,
+            "final_video": str(tmp_path / "final.mp4"),
+            "upload_quality": {"ok": True, "reasons": []},
+            "_render_result_path": str(tmp_path / "render-033.json"),
+        }
+
+    monkeypatch.setattr(queue_runner, "run_sourcing", fake_run_sourcing)
+    monkeypatch.setattr(queue_runner, "render_single_item", fake_render)
+    monkeypatch.setattr(queue_runner, "build_upload_item", lambda *_args, **_kwargs: {"upload": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "upload_verified_render",
+        lambda *_args, **_kwargs: {"video_url": "https://youtu.be/next"},
+    )
+    monkeypatch.setattr(queue_runner, "verify_youtube", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "publish_linktree_if_possible",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[032]", "[033]"]
+    assert render_calls == [32, 33]
+    assert result["status"] == "completed"
+    assert result["planned_number"] == "[033]"
+    assert result["skip_count"] == 1
+    assert payload["items"][0]["status"] == "skipped_quality_gate"
+    assert payload["items"][1]["status"] == "completed"
+
+
+def test_process_pending_items_continues_after_render_quality_exception(monkeypatch, tmp_path):
+    payload = {
+        "automation_policy": {
+            "min_similarity_score": 0.9,
+            "youtube_privacy": "unlisted",
+        },
+        "items": [
+            {
+                "planned_number": "[032]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-19T00:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+                "result": {},
+            },
+            {
+                "planned_number": "[033]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-19T04:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/2",
+                "result": {},
+            },
+        ],
+    }
+    calls = []
+    render_calls = []
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 19, 4, 1, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(
+        queue_runner,
+        "build_run_dir",
+        lambda item: tmp_path / str(item.get("planned_number")).strip("[]"),
+    )
+
+    async def fake_run_sourcing(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "best_similarity": 1.0,
+            "match_status": "matched",
+            "_report_path": str(tmp_path / f"{item['planned_number']}.json"),
+            "product_info": {"name": f"good item {item['planned_number']}"},
+            "sourced_products": [
+                {
+                    "source": "aliexpress",
+                    "similarity": 1.0,
+                    "video_file": str(tmp_path / "source.mp4"),
+                    "auto_publish_safe": True,
+                    "requires_review": False,
+                }
+            ],
+        }
+
+    def fake_render(job, _run_dir):
+        render_calls.append(job["index"])
+        if job["index"] == 32:
+            raise RuntimeError("No generated video for job 1")
         return {
             "render_ok": True,
             "final_video": str(tmp_path / "final.mp4"),
@@ -752,6 +888,207 @@ def test_publish_linktree_accepts_existing_public_card(monkeypatch):
     assert result["blocking_reason"] == ""
 
 
+def test_verify_linktree_public_card_retries_until_public_page_updates(monkeypatch):
+    calls = []
+    purchase_url = "https://www.coupang.com/vp/products/9169351491"
+
+    class FakeResponse:
+        status_code = 200
+
+        @property
+        def text(self):
+            if len(calls) < 2:
+                return "not updated yet"
+            return f"[036] {purchase_url}"
+
+    def fake_get(*_args, **_kwargs):
+        calls.append(True)
+        return FakeResponse()
+
+    monkeypatch.setattr("requests.get", fake_get)
+
+    result = queue_runner.verify_linktree_public_card(
+        "[036]",
+        purchase_url,
+        attempts=3,
+        delay_seconds=0,
+    )
+
+    assert result["ok"] is True
+    assert result["attempts"] == 2
+    assert len(calls) == 2
+
+
+def test_process_pending_items_marks_linktree_retry_pending_after_upload(monkeypatch, tmp_path):
+    payload = {
+        "automation_policy": {
+            "min_similarity_score": 0.9,
+            "youtube_privacy": "unlisted",
+        },
+        "items": [
+            {
+                "planned_number": "[036]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-19T00:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/9169351491",
+                "result": {},
+            },
+        ],
+    }
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 19, 0, 1, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(queue_runner, "build_run_dir", lambda _item: tmp_path / "run")
+
+    async def fake_run_sourcing(*_args, **_kwargs):
+        return {
+            "best_similarity": 1.0,
+            "match_status": "matched",
+            "_report_path": str(tmp_path / "report.json"),
+            "product_info": {"name": "desk camping fan"},
+            "sourced_products": [
+                {
+                    "source": "aliexpress",
+                    "similarity": 1.0,
+                    "video_file": str(tmp_path / "source.mp4"),
+                    "auto_publish_safe": True,
+                    "requires_review": False,
+                }
+            ],
+        }
+
+    monkeypatch.setattr(queue_runner, "run_sourcing", fake_run_sourcing)
+    monkeypatch.setattr(
+        queue_runner,
+        "render_single_item",
+        lambda *_args, **_kwargs: {
+            "render_ok": True,
+            "final_video": str(tmp_path / "final.mp4"),
+            "upload_quality": {"ok": True, "reasons": []},
+            "_render_result_path": str(tmp_path / "render.json"),
+        },
+    )
+    monkeypatch.setattr(queue_runner, "build_upload_item", lambda *_args, **_kwargs: {"upload": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "upload_verified_render",
+        lambda *_args, **_kwargs: {"video_url": "https://youtu.be/linktree-wait"},
+    )
+    monkeypatch.setattr(queue_runner, "verify_youtube", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "publish_linktree_if_possible",
+        lambda *_args, **_kwargs: {
+            "ok": False,
+            "method": "webhook",
+            "blocking_reason": "Linktree webhook publish did not verify on the public page.",
+        },
+    )
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert result["status"] == queue_runner.LINKTREE_RETRY_STATUS
+    assert result["linktree_retry"] is True
+    assert payload["items"][0]["status"] == queue_runner.LINKTREE_RETRY_STATUS
+    assert payload["items"][0]["result"]["youtube_url"] == "https://youtu.be/linktree-wait"
+    assert payload["items"][0]["result"]["linktree_result"]["ok"] is False
+
+
+def test_process_pending_items_retries_linktree_only_without_youtube_reupload(monkeypatch):
+    payload = {
+        "items": [
+            {
+                "planned_number": "[036]",
+                "status": queue_runner.LINKTREE_RETRY_STATUS,
+                "attempts": 1,
+                "scheduled_at": "2026-06-19T00:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/9169351491",
+                "result": {
+                    "purchase_url": "https://www.coupang.com/vp/products/9169351491",
+                    "youtube_url": "https://youtu.be/already-uploaded",
+                    "render_path": "C:/tmp/final.mp4",
+                    "linktree_result": {"ok": False},
+                },
+            },
+        ],
+    }
+
+    async def fail_sourcing(*_args, **_kwargs):
+        raise AssertionError("Linktree-only retry must not run sourcing")
+
+    def fail_upload(*_args, **_kwargs):
+        raise AssertionError("Linktree-only retry must not upload YouTube again")
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 19, 0, 1, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(queue_runner, "run_sourcing", fail_sourcing)
+    monkeypatch.setattr(queue_runner, "upload_verified_render", fail_upload)
+    monkeypatch.setattr(
+        queue_runner,
+        "publish_linktree_if_possible",
+        lambda *_args, **_kwargs: {
+            "ok": True,
+            "method": "public_existing",
+            "blocking_reason": "",
+        },
+    )
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert result["status"] == "completed"
+    assert result["linktree_ok"] is True
+    assert payload["items"][0]["status"] == "completed"
+    assert payload["items"][0]["attempts"] == 2
+    assert payload["items"][0]["result"]["youtube_url"] == "https://youtu.be/already-uploaded"
+
+
+def test_main_returns_success_for_linktree_retry_pending(monkeypatch, capsys):
+    payload = {
+        "items": [
+            {
+                "planned_number": "[036]",
+                "status": queue_runner.LINKTREE_RETRY_STATUS,
+                "attempts": 1,
+                "result": {"youtube_url": "https://youtu.be/already-uploaded"},
+            },
+            {
+                "planned_number": "[037]",
+                "status": "pending",
+                "attempts": 0,
+                "result": {},
+            },
+        ]
+    }
+
+    async def retry_pending(_payload, **_kwargs):
+        return {
+            "processed": True,
+            "status": queue_runner.LINKTREE_RETRY_STATUS,
+            "planned_number": "[036]",
+            "linktree_retry": True,
+        }
+
+    def fail_youtube_preflight():
+        raise AssertionError("Linktree-only retry must not require YouTube OAuth")
+
+    monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
+    monkeypatch.setattr(queue_runner, "youtube_upload_ready", fail_youtube_preflight)
+    monkeypatch.setattr(queue_runner, "process_pending_items", retry_pending)
+
+    assert queue_runner.main() == 0
+    output = json.loads(capsys.readouterr().out)
+    assert output["status"] == queue_runner.LINKTREE_RETRY_STATUS
+
+
 def test_process_pending_items_continues_skips_until_no_candidates_remain(monkeypatch, tmp_path):
     payload = {
         "automation_policy": {
@@ -838,6 +1175,7 @@ def test_main_returns_success_for_policy_skip(monkeypatch, capsys):
         }
 
     monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
+    monkeypatch.setattr(queue_runner, "linktree_publish_ready", lambda: {"ok": True})
     monkeypatch.setattr(
         queue_runner,
         "youtube_upload_ready",

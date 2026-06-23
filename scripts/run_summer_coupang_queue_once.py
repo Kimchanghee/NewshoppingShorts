@@ -44,9 +44,17 @@ MAX_FINAL_VIDEO_SECONDS = 60.0
 MIN_FINAL_VIDEO_BYTES = 1_000_000
 FORCE_RUN_NOW_ENV = "SSMAKER_SUMMER_COUPANG_RUN_NOW"
 AUTOMATION_LABEL = "summer_coupang_queue"
+LINKTREE_PUBLIC_VERIFY_ATTEMPTS_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_ATTEMPTS"
+LINKTREE_PUBLIC_VERIFY_INTERVAL_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS"
+DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS = 6
+DEFAULT_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS = 10.0
+LINKTREE_RETRY_STATUS = "linktree_retry_pending"
 SUCCESS_FINAL_STATUSES = {
     "completed",
+}
+LINKTREE_RETRY_STATUSES = {
     "completed_linktree_blocked",
+    LINKTREE_RETRY_STATUS,
 }
 SKIP_STATUSES = {
     "skipped_low_similarity",
@@ -72,6 +80,9 @@ SYSTEM_BLOCKER_MARKERS = (
     "gemini api key",
     "gemini api 키",
     "invalid_argument",
+    "marketplace_access_challenge",
+    "manual verification",
+    "logged-in session",
     "키워드 변환에 실패",
     "api 키를 설정",
 )
@@ -259,9 +270,90 @@ def is_retriable_system_skip(item: Dict[str, Any]) -> bool:
     return is_system_sourcing_blocker(result, reason)
 
 
+def is_linktree_retry_item(item: Dict[str, Any]) -> bool:
+    status = str(item.get("status") or "").strip().lower()
+    return status in LINKTREE_RETRY_STATUSES
+
+
 def is_processable_queue_item(item: Dict[str, Any]) -> bool:
     status = str(item.get("status") or "").strip().lower()
-    return status == "pending" or is_retriable_system_skip(item)
+    return status == "pending" or is_linktree_retry_item(item) or is_retriable_system_skip(item)
+
+
+def youtube_upload_required_item_count(queue_payload: Dict[str, Any]) -> int:
+    items: List[Dict[str, Any]] = queue_payload.get("items") or []
+    return sum(
+        1
+        for item in items
+        if is_processable_queue_item(item) and not is_linktree_retry_item(item)
+    )
+
+
+def extract_result_youtube_url(result: Dict[str, Any]) -> str:
+    direct = str(result.get("youtube_url") or "").strip()
+    if direct:
+        return direct
+    youtube = result.get("youtube") if isinstance(result.get("youtube"), dict) else {}
+    url = str(youtube.get("video_url") or "").strip()
+    if url:
+        return url
+    verification = (
+        result.get("youtube_verification")
+        if isinstance(result.get("youtube_verification"), dict)
+        else {}
+    )
+    metadata = verification.get("metadata") if isinstance(verification.get("metadata"), dict) else {}
+    return str(metadata.get("video_url") or "").strip()
+
+
+def linktree_retry_context(item: Dict[str, Any]) -> Dict[str, str]:
+    result = item.get("result") if isinstance(item.get("result"), dict) else {}
+    youtube = result.get("youtube") if isinstance(result.get("youtube"), dict) else {}
+    product_name = str(
+        youtube.get("product_name")
+        or result.get("product_name")
+        or item.get("product_name")
+        or item.get("title")
+        or "Coupang product"
+    ).strip()
+    purchase_url = str(
+        result.get("purchase_url")
+        or item.get("affiliate_url")
+        or item.get("purchase_url")
+        or item.get("coupang_url")
+        or ""
+    ).strip()
+    return {
+        "product_name": product_name,
+        "purchase_url": purchase_url,
+        "render_path": str(result.get("render_path") or "").strip(),
+        "youtube_url": extract_result_youtube_url(result),
+    }
+
+
+def linktree_failure_status(linktree_result: Dict[str, Any]) -> str:
+    return "completed" if linktree_result.get("ok") else LINKTREE_RETRY_STATUS
+
+
+def linktree_retry_summary(
+    item: Dict[str, Any],
+    linktree_result: Dict[str, Any],
+    *,
+    run_now: bool,
+) -> Dict[str, Any]:
+    summary = {
+        "processed": True,
+        "status": linktree_failure_status(linktree_result),
+        "planned_number": item.get("planned_number"),
+        "linktree_ok": linktree_result.get("ok", False),
+        "linktree_retry": not bool(linktree_result.get("ok")),
+    }
+    if run_now:
+        summary["run_now"] = True
+    if not linktree_result.get("ok"):
+        summary["blocking_type"] = "linktree_publish_pending"
+        summary["blocking_reason"] = str(linktree_result.get("blocking_reason") or "")
+    return summary
 
 
 def normalize_duplicate_text(value: Any) -> str:
@@ -504,6 +596,20 @@ def validate_render_upload_quality(rendered: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def is_render_quality_gate_exception(exc: Exception) -> bool:
+    text = str(exc or "").strip().lower()
+    markers = (
+        "no generated video for job",
+        "render pipeline did not produce a result",
+        "render verification failed",
+        "duration_too_short",
+        "video too short",
+        "too short",
+        "minimum duration",
+    )
+    return any(marker in text for marker in markers)
+
+
 async def run_sourcing(item: Dict[str, Any], run_dir: Path, min_similarity: float) -> Dict[str, Any]:
     out_dir = run_dir / "sourcing"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -741,6 +847,20 @@ def verify_youtube(upload_item: Dict[str, Any], uploaded: Dict[str, Any]) -> Dic
     }
 
 
+def env_int(name: str, default: int, *, min_value: int = 1) -> int:
+    try:
+        return max(min_value, int(str(os.environ.get(name, default)).strip()))
+    except (TypeError, ValueError):
+        return default
+
+
+def env_float(name: str, default: float, *, min_value: float = 0.0) -> float:
+    try:
+        return max(min_value, float(str(os.environ.get(name, default)).strip()))
+    except (TypeError, ValueError):
+        return default
+
+
 def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purchase_url: str) -> Dict[str, Any]:
     manager = get_linktree_manager()
     upload_number = parse_upload_number(item.get("planned_number"))
@@ -762,10 +882,22 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
                 "display_number": marker,
             },
         )
-        public_check = verify_linktree_public_card(marker, purchase_url)
+        public_check = verify_linktree_public_card(
+            marker,
+            purchase_url,
+            attempts=env_int(
+                LINKTREE_PUBLIC_VERIFY_ATTEMPTS_ENV,
+                DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS,
+            ),
+            delay_seconds=env_float(
+                LINKTREE_PUBLIC_VERIFY_INTERVAL_ENV,
+                DEFAULT_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS,
+            ),
+        )
         return {
             "ok": bool(ok and public_check.get("ok")),
             "method": "webhook",
+            "webhook_sent": bool(ok),
             "title": title,
             "number": marker,
             "purchase_url": purchase_url,
@@ -803,38 +935,62 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
     }
 
 
-def verify_linktree_public_card(number: str, purchase_url: str) -> Dict[str, Any]:
+def verify_linktree_public_card(
+    number: str,
+    purchase_url: str,
+    *,
+    attempts: int = 1,
+    delay_seconds: float = 0.0,
+) -> Dict[str, Any]:
     import requests
 
     profile_url = DEFAULT_LINKTREE_PROFILE_URL
-    try:
-        response = requests.get(
-            profile_url,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
-                ),
-            },
-            timeout=30,
-        )
-    except Exception as exc:
-        return {
-            "ok": False,
-            "url": profile_url,
-            "status_code": 0,
-            "has_number": False,
-            "has_purchase_url": False,
-            "error": str(exc),
-        }
-    text = response.text
-    return {
-        "ok": response.status_code == 200 and number in text and purchase_url in text,
+    attempts = max(1, int(attempts or 1))
+    delay_seconds = max(0.0, float(delay_seconds or 0.0))
+    last_result: Dict[str, Any] = {
+        "ok": False,
         "url": profile_url,
-        "status_code": response.status_code,
-        "has_number": number in text,
-        "has_purchase_url": purchase_url in text,
+        "status_code": 0,
+        "has_number": False,
+        "has_purchase_url": False,
+        "attempts": 0,
     }
+    for attempt in range(1, attempts + 1):
+        try:
+            response = requests.get(
+                profile_url,
+                headers={
+                    "User-Agent": (
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
+                    ),
+                },
+                timeout=30,
+            )
+            text = response.text
+            last_result = {
+                "ok": response.status_code == 200 and number in text and purchase_url in text,
+                "url": profile_url,
+                "status_code": response.status_code,
+                "has_number": number in text,
+                "has_purchase_url": purchase_url in text,
+                "attempts": attempt,
+            }
+        except Exception as exc:
+            last_result = {
+                "ok": False,
+                "url": profile_url,
+                "status_code": 0,
+                "has_number": False,
+                "has_purchase_url": False,
+                "error": str(exc),
+                "attempts": attempt,
+            }
+        if last_result.get("ok"):
+            return last_result
+        if attempt < attempts and delay_seconds:
+            time.sleep(delay_seconds)
+    return last_result
 
 
 def update_item_attempt(item: Dict[str, Any]) -> None:
@@ -845,6 +1001,20 @@ def update_item_attempt(item: Dict[str, Any]) -> None:
 def pending_item_count(queue_payload: Dict[str, Any]) -> int:
     items: List[Dict[str, Any]] = queue_payload.get("items") or []
     return sum(1 for item in items if is_processable_queue_item(item))
+
+
+def due_linktree_retry_item_count(
+    queue_payload: Dict[str, Any],
+    *,
+    force_run_now: Optional[bool] = None,
+) -> int:
+    items: List[Dict[str, Any]] = queue_payload.get("items") or []
+    retry_items = [item for item in items if is_linktree_retry_item(item)]
+    run_now = force_run_now_enabled() if force_run_now is None else bool(force_run_now)
+    if run_now:
+        return len(retry_items)
+    now = now_datetime()
+    return sum(1 for item in retry_items if is_item_due(item, now=now))
 
 
 def youtube_upload_ready() -> Dict[str, Any]:
@@ -874,6 +1044,33 @@ def youtube_upload_ready() -> Dict[str, Any]:
         return {
             "ok": False,
             "reason": "youtube_preflight_error",
+            "blocking_reason": str(exc),
+        }
+
+
+def linktree_publish_ready() -> Dict[str, Any]:
+    try:
+        manager = get_linktree_manager()
+        if hasattr(manager, "require_connected_for_publish"):
+            ok, issue = manager.require_connected_for_publish()
+            if ok:
+                return {"ok": True}
+            return {
+                "ok": False,
+                "reason": "linktree_not_connected",
+                "blocking_reason": str(issue or "Linktree publish path is not connected."),
+            }
+        if hasattr(manager, "is_connected") and manager.is_connected():
+            return {"ok": True}
+        return {
+            "ok": False,
+            "reason": "linktree_not_connected",
+            "blocking_reason": "Linktree publish path is not connected.",
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": "linktree_preflight_error",
             "blocking_reason": str(exc),
         }
 
@@ -969,6 +1166,44 @@ async def process_pending_items(
     skipped_items: List[Dict[str, Any]] = []
 
     for item in candidate_items:
+        if is_linktree_retry_item(item):
+            retry_context = linktree_retry_context(item)
+            update_item_attempt(item)
+            save_queue(queue_payload)
+            if not retry_context["purchase_url"]:
+                linktree_result = {
+                    "ok": False,
+                    "method": "blocked",
+                    "title": "",
+                    "number": get_linktree_manager().format_publish_index(
+                        parse_upload_number(item.get("planned_number"))
+                    ),
+                    "purchase_url": "",
+                    "profile_url": get_linktree_manager().get_profile_url(),
+                    "public_verification": {},
+                    "blocking_reason": "Cannot retry Linktree publish because the queue item has no purchase URL.",
+                }
+            else:
+                linktree_result = publish_linktree_if_possible(
+                    item,
+                    retry_context["product_name"],
+                    retry_context["purchase_url"],
+                )
+            attach_result(
+                item,
+                status=linktree_failure_status(linktree_result),
+                render_path=retry_context["render_path"],
+                youtube_url=retry_context["youtube_url"],
+                linktree_result=linktree_result,
+                blocking_reason=str(linktree_result.get("blocking_reason") or ""),
+                extra={
+                    "purchase_url": retry_context["purchase_url"],
+                    "linktree_retry_only": True,
+                },
+            )
+            save_queue(queue_payload)
+            return linktree_retry_summary(item, linktree_result, run_now=run_now)
+
         duplicate_reason = duplicate_upload_reason(item, queue_payload)
         if duplicate_reason:
             attach_result(
@@ -1127,7 +1362,7 @@ async def process_pending_items(
                 raise RuntimeError("YouTube metadata/comment verification failed.")
 
             linktree_result = publish_linktree_if_possible(item, product_name, purchase_url)
-            final_status = "completed" if linktree_result.get("ok") else "completed_linktree_blocked"
+            final_status = linktree_failure_status(linktree_result)
             attach_result(
                 item,
                 status=final_status,
@@ -1154,6 +1389,10 @@ async def process_pending_items(
                 "youtube_url": uploaded.get("video_url", ""),
                 "linktree_ok": linktree_result.get("ok", False),
             }
+            if final_status == LINKTREE_RETRY_STATUS:
+                summary["linktree_retry"] = True
+                summary["blocking_type"] = "linktree_publish_pending"
+                summary["blocking_reason"] = str(linktree_result.get("blocking_reason") or "")
             if run_now:
                 summary["run_now"] = True
             if skipped_items:
@@ -1161,6 +1400,38 @@ async def process_pending_items(
                 summary["skip_count"] = len(skipped_items)
             return summary
         except Exception as exc:
+            if is_render_quality_gate_exception(exc):
+                upload_quality = locals().get("upload_quality")
+                if not isinstance(upload_quality, dict):
+                    upload_quality = {
+                        "ok": False,
+                        "reasons": ["render_exception"],
+                    }
+                reason = "Render upload quality gate failed: " + str(exc)
+                attach_result(
+                    item,
+                    status="skipped_quality_gate",
+                    similarity=similarity,
+                    render_path=str((run_dir / "rendered").resolve()),
+                    blocking_reason=reason,
+                    extra={
+                        "match_status": report.get("match_status"),
+                        "report_path": report.get("_report_path", ""),
+                        "purchase_url": purchase_url,
+                        "upload_quality": upload_quality,
+                        "run_dir": str(run_dir),
+                    },
+                )
+                save_queue(queue_payload)
+                skipped_items.append(
+                    {
+                        "planned_number": item.get("planned_number"),
+                        "status": "skipped_quality_gate",
+                        "reason": reason,
+                    }
+                )
+                continue
+
             attach_result(
                 item,
                 status="failed",
@@ -1219,7 +1490,31 @@ def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args([] if argv is None else argv)
     queue_payload = load_queue()
     pending_count = pending_item_count(queue_payload)
-    if pending_count:
+    upload_required_count = youtube_upload_required_item_count(queue_payload)
+    linktree_retry_due_count = due_linktree_retry_item_count(
+        queue_payload,
+        force_run_now=args.run_now or None,
+    )
+    if pending_count and upload_required_count and not linktree_retry_due_count:
+        linktree_state = linktree_publish_ready()
+        if not linktree_state.get("ok"):
+            print(
+                json.dumps(
+                    {
+                        "processed": False,
+                        "reason": linktree_state.get("reason", "linktree_not_ready"),
+                        "pending_count": pending_count,
+                        "upload_required_count": upload_required_count,
+                        "linktree_retry_due_count": linktree_retry_due_count,
+                        "blocking_reason": linktree_state.get("blocking_reason", ""),
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                ),
+                flush=True,
+            )
+            return 0
+
         youtube_state = youtube_upload_ready()
         if not youtube_state.get("ok"):
             print(
@@ -1240,6 +1535,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     summary = asyncio.run(process_pending_items(queue_payload, force_run_now=args.run_now or None))
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
     if summary.get("status") in SUCCESS_FINAL_STATUSES:
+        return 0
+    if summary.get("status") == LINKTREE_RETRY_STATUS:
         return 0
     if summary.get("status") in SKIP_STATUSES:
         return 0

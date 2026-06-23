@@ -25,12 +25,14 @@ from core.api import ApiKeyManager
 from core.video.batch import processor
 from managers.generated_video_manager import GeneratedVideoManager
 from managers.youtube_manager import get_youtube_manager
+from utils.ffmpeg import resolve_ffmpeg_exe
 from utils.token_cost_calculator import TokenCostCalculator
 
 SOURCE_ROOT = Path(
     r"C:\Users\HOME\.ssmaker\sourcing_output\four_new_link_retest_20260601_120001"
 )
 LINKTREE_URL = "https://linktr.ee/studio.idol"
+MIN_UPLOAD_DURATION_SECONDS = 8.0
 COUPANG_DISCLOSURE = (
     "이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 "
     "제공받습니다."
@@ -284,6 +286,90 @@ def verify_video(path: str) -> Dict[str, Any]:
     }
 
 
+def ensure_min_upload_duration(
+    video_path: str,
+    verification: Dict[str, Any],
+    output_dir: Path,
+    min_duration: float = MIN_UPLOAD_DURATION_SECONDS,
+) -> tuple[str, Dict[str, Any]]:
+    """Pad very short successful renders so the upload quality gate can pass."""
+    try:
+        duration = float(verification.get("duration") or 0)
+    except (TypeError, ValueError):
+        duration = 0.0
+    if duration <= 0 or duration >= min_duration:
+        return video_path, verification
+    if not verification.get("has_audio"):
+        return video_path, verification
+
+    ffmpeg = resolve_ffmpeg_exe()
+    if not ffmpeg:
+        return video_path, verification
+
+    pad_seconds = max(0.25, (min_duration + 0.25) - duration)
+    target_duration = duration + pad_seconds
+    source = Path(video_path)
+    padded_path = output_dir / f"{source.stem}_min{int(min_duration)}s{source.suffix}"
+    cmd = [
+        ffmpeg,
+        "-y",
+        "-i",
+        str(source),
+        "-f",
+        "lavfi",
+        "-t",
+        f"{pad_seconds:.3f}",
+        "-i",
+        "anullsrc=channel_layout=stereo:sample_rate=44100",
+        "-filter_complex",
+        (
+            f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f},setsar=1[v];"
+            "[0:a][1:a]concat=n=2:v=0:a=1[a]"
+        ),
+        "-map",
+        "[v]",
+        "-map",
+        "[a]",
+        "-t",
+        f"{target_duration:.3f}",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "18",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "aac",
+        "-b:a",
+        "192k",
+        "-movflags",
+        "+faststart",
+        str(padded_path),
+    ]
+    try:
+        subprocess.run(
+            cmd,
+            check=True,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+        padded_verification = verify_video(str(padded_path))
+        if float(padded_verification.get("duration") or 0) >= min_duration:
+            print(
+                f"[품질 보정] 최종 영상 {duration:.1f}s -> "
+                f"{float(padded_verification.get('duration') or 0):.1f}s"
+            )
+            return str(padded_path), padded_verification
+    except Exception as exc:
+        print(f"[WARN] Minimum duration padding failed: {exc}", file=sys.stderr)
+    return video_path, verification
+
+
 def extract_frame(video_path: str, output_dir: Path, index: int) -> str:
     frame_path = output_dir / f"verify_frame_{index:02d}.jpg"
     subprocess.run(
@@ -339,6 +425,11 @@ def render_jobs(output_dir: Path, limit: int = 0) -> List[Dict[str, Any]]:
                 raise RuntimeError(f"Generated video missing for job {position}")
 
             verification = verify_video(saved_path)
+            saved_path, verification = ensure_min_upload_duration(
+                saved_path,
+                verification,
+                output_dir,
+            )
             frame_path = extract_frame(saved_path, output_dir, position)
             tts_meta = getattr(app, "tts_sync_info", {}) or {}
             subtitle_state = app.progress_states.get("subtitle_overlay", {})

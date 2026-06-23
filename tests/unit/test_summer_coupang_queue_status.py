@@ -55,17 +55,17 @@ def test_build_snapshot_maps_scheduled_queue_rows(tmp_path):
 
     assert snapshot["total"] == 3
     assert snapshot["counts"] == {
-        "waiting": 1,
+        "waiting": 2,
         "processing": 0,
-        "completed": 2,
+        "completed": 1,
         "skipped": 0,
         "failed": 0,
     }
     assert snapshot["interval_minutes"] == 240
-    assert snapshot["next_planned_number"] == "[032]"
-    assert snapshot["next_scheduled_display"] == "06-19 00:26"
+    assert snapshot["next_planned_number"] == "[031]"
+    assert snapshot["next_scheduled_display"] == "06-18 20:26"
     assert snapshot["rows"][0]["status"] == "완료"
-    assert snapshot["rows"][1]["status"] == "완료(Linktree 보류)"
+    assert snapshot["rows"][1]["status"] == "Linktree 재시도 대기"
     assert snapshot["rows"][2]["upload"] == "예약됨"
     assert snapshot["rows"][2]["order"] == "[032]"
 

@@ -153,6 +153,22 @@ def test_scraped_product_info_falls_back_to_category_when_queue_name_is_mojibake
     assert pipeline.product_info["name"] == "desk camping fan"
 
 
+def test_missing_scrape_can_continue_with_queue_fallback_product_info():
+    pipeline = SourcingPipeline(
+        coupang_url="https://www.coupang.com/vp/products/12345",
+        output_dir=".",
+        fallback_product_name="cooling bedding pad summer cool mat",
+        fallback_category="cooling_bedding",
+    )
+    pipeline.product_info = None
+
+    pipeline._ensure_product_info_from_fallback()
+
+    assert pipeline.product_info["name"] == "cooling bedding pad summer cool mat"
+    assert pipeline.product_info["image"] == ""
+    assert pipeline.product_info["name_source"] == "queue_fallback_scrape_failed"
+
+
 def test_cached_marketplace_video_reuses_nested_safe_report(tmp_path, monkeypatch):
     cache_root = tmp_path / "cache"
     report_dir = cache_root / "old_run" / "01"

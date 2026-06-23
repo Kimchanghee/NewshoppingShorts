@@ -66,6 +66,8 @@ _HEAD_ANCHOR_PARTS = (
     "sponge", "garbage", "waste", "bag", "mesh", "net",
     "chopper", "processor", "mixer", "blender", "mincer", "garlic",
     "ice", "mold", "tray", "tumbler", "caddy", "organizer",
+    "cooler", "cooling", "neck", "scarf", "towel", "water", "gun",
+    "aqua", "swim", "goggle", "mosquito", "repellent", "swatter",
     "거름망", "싱크", "배수", "필터", "걸이", "수세미",
     "水槽", "过滤", "沥水", "挂架",
 )
@@ -309,6 +311,321 @@ _SEMANTIC_FEATURE_WEIGHTS: dict[str, float] = {
     "cylinder": 1.5,
 }
 
+_SEMANTIC_FEATURE_ALIASES.update({
+    "neck_cooler": (
+        "neck cooler", "ice neck cooler", "cooling neck", "cooling neck ring",
+        "neck cooling ring", "neck ring cooler", "neck cooling band",
+        "neck cooler ring", "pcm neck cooler", "cooling neck wrap",
+        "cooling neck scarf", "cooling scarf", "ice scarf", "cool scarf",
+        "\ub125\ucfe8\ub7ec", "\uc544\uc774\uc2a4\ub125", "\uc544\uc774\uc2a4 \ub125",
+        "\ucfe8\uc2a4\uce74\ud504", "\ub0c9\uac10\uc2a4\uce74\ud504",
+        "\ub125\ubc34\ub4dc", "\uc5bc\uc74c \ubaa9\uac78\uc774",
+        "\u51b0\u51c9\u5708", "\u51b0\u8116\u5708", "\u964d\u6e29\u9888\u5708",
+        "\u51b0\u4e1d\u56f4\u8116", "\u51b7\u611f\u56f4\u5dfe",
+    ),
+    "cooling_towel": (
+        "cooling towel", "cool towel", "ice towel", "sports cooling towel",
+        "quick dry cooling towel", "\ucfe8\ub9c1\ud0c0\uc6d4", "\ucfe8\ud0c0\uc6d4",
+        "\ub0c9\uac10\ud0c0\uc6d4", "\uc544\uc774\uc2a4\ud0c0\uc6d4",
+        "\u51b0\u51c9\u6bdb\u5dfe", "\u51b7\u611f\u6bdb\u5dfe", "\u8fd0\u52a8\u51b0\u5dfe",
+    ),
+    "water_gun": (
+        "water gun", "water blaster", "squirt gun", "electric water gun",
+        "rechargeable water gun", "m416 water gun", "\ubb3c\ucd1d",
+        "\uc804\ub3d9\ubb3c\ucd1d", "\u6c34\u67aa", "\u7535\u52a8\u6c34\u67aa",
+        "\u73a9\u5177\u6c34\u67aa",
+    ),
+    "aqua_shoes": (
+        "aqua shoes", "water shoes", "beach shoes", "swim shoes",
+        "surf shoes", "river trekking shoes", "\uc544\ucfe0\uc544\uc288\uc988",
+        "\uc6cc\ud130\uc288\uc988", "\u6eaf\u6eaa\u978b", "\u6d89\u6c34\u978b",
+        "\u6c99\u6ee9\u978b", "\u6e38\u6cf3\u978b",
+    ),
+    "swim_goggles": (
+        "swim goggles", "swimming goggles", "anti fog goggles",
+        "water goggles", "water glasses", "\uc218\uc601\uace0\uae00",
+        "\ubb3c\uc548\uacbd", "\uc218\uacbd", "\u6cf3\u955c", "\u6e38\u6cf3\u773c\u955c",
+        "\u9632\u96fe\u6cf3\u955c",
+    ),
+    "pool_float": (
+        "pool float", "swim ring", "swimming ring", "inflatable tube",
+        "inflatable pool tube", "\ubb3c\ub180\uc774\ud29c\ube0c", "\uc218\uc601\ud29c\ube0c",
+        "\ud29c\ube0c", "\u6e38\u6cf3\u5708", "\u5145\u6c14\u6cf3\u5708",
+        "\u5145\u6c14\u6d6e\u6392",
+    ),
+    "mosquito_trap": (
+        "mosquito killer", "mosquito trap", "bug zapper", "insect killer",
+        "mosquito lamp", "\ubaa8\uae30\ud1f4\uce58\uae30", "\ud3ec\ucda9\uae30",
+        "\ubaa8\uae30 \uc720\uc778", "\u706d\u868a\u706f", "\u6355\u868a\u5668",
+        "\u706d\u868a\u5668",
+    ),
+    "mosquito_swatter": (
+        "electric mosquito swatter", "mosquito swatter", "fly swatter",
+        "bug zapper racket", "\uc804\uae30\ubaa8\uae30\ucc44", "\ubaa8\uae30\ucc44",
+        "\u7535\u868a\u62cd", "\u706d\u868a\u62cd",
+    ),
+    "mosquito_band": (
+        "mosquito bracelet", "mosquito band", "repellent bracelet",
+        "mosquito repellent band", "\ubaa8\uae30\ud314\ucc0c",
+        "\ubaa8\uae30\uae30\ud53c\ud314\ucc0c", "\u9a71\u868a\u624b\u73af",
+        "\u9632\u868a\u624b\u73af",
+    ),
+})
+
+_SEMANTIC_FEATURE_WEIGHTS.update({
+    "neck_cooler": 3.2,
+    "cooling_towel": 3.0,
+    "water_gun": 3.2,
+    "aqua_shoes": 3.0,
+    "swim_goggles": 3.0,
+    "pool_float": 3.0,
+    "mosquito_trap": 3.0,
+    "mosquito_swatter": 3.0,
+    "mosquito_band": 3.0,
+})
+
+_SUMMER_INTENT_PROFILES = [
+    {
+        "feature": "cooling_bedding",
+        "aliases": (
+            "cooling bedding", "cooling mat", "cool mat", "cooling pad",
+            "ice silk mat", "summer blanket", "air conditioner quilt",
+            "\ub0c9\uac10\ub9e4\ud2b8", "\uc5ec\ub984\uc774\ubd88", "\uc5ec\ub984\uce68\uad6c",
+            "\ucfe8\ub9e4\ud2b8", "\ub4c0\ub77c\ub860", "\u51b0\u4e1d\u51c9\u5e2d",
+            "\u51c9\u5e2d", "\u51b7\u611f\u57ab", "\u590f\u51c9\u88ab",
+        ),
+        "english_queries": ("cooling mat", "ice silk cooling mat", "summer cooling blanket"),
+        "chinese_queries": ("\u51b0\u4e1d\u51c9\u5e2d", "\u51c9\u5e2d", "\u590f\u51c9\u88ab"),
+        "guard_terms": ("cooling", "mat", "blanket", "quilt", "\ub0c9\uac10", "\ub9e4\ud2b8", "\uc774\ubd88", "\u51c9\u5e2d", "\u51b7\u611f"),
+    },
+    {
+        "feature": "cooling_arm_sleeves",
+        "aliases": (
+            "cooling arm sleeves", "uv arm sleeves", "sun protection sleeves",
+            "ice sleeves", "\ud314\ud1a0\uc2dc", "\ucfe8\ud1a0\uc2dc", "\ub0c9\uac10\ud1a0\uc2dc",
+            "\uc790\uc678\uc120 \ud314\ud1a0\uc2dc", "\u51b0\u8896", "\u9632\u6652\u8896\u5957", "\u8896\u5957",
+        ),
+        "english_queries": ("cooling arm sleeves", "uv protection arm sleeves", "ice silk arm sleeves"),
+        "chinese_queries": ("\u51b0\u8896", "\u9632\u6652\u8896\u5957", "\u51b0\u4e1d\u8896\u5957"),
+        "guard_terms": ("sleeve", "arm", "\ud314\ud1a0\uc2dc", "\u8896", "\u8896\u5957"),
+    },
+    {
+        "feature": "waterproof_phone_pouch",
+        "aliases": (
+            "waterproof phone pouch", "waterproof phone case", "phone dry bag",
+            "swimming phone pouch", "\ubc29\uc218\ud329", "\ubc29\uc218\ud3f0\ud329",
+            "\ubc29\uc218 \ud734\ub300\ud3f0", "\u624b\u673a\u9632\u6c34\u888b", "\u9632\u6c34\u624b\u673a\u888b",
+        ),
+        "english_queries": ("waterproof phone pouch", "waterproof phone case swimming", "phone dry bag waterproof"),
+        "chinese_queries": ("\u624b\u673a\u9632\u6c34\u888b", "\u9632\u6c34\u624b\u673a\u888b", "\u6f02\u6d41\u624b\u673a\u9632\u6c34\u888b"),
+        "guard_terms": ("waterproof", "phone", "pouch", "dry bag", "\ubc29\uc218", "\ud734\ub300\ud3f0", "\u624b\u673a", "\u9632\u6c34"),
+    },
+    {
+        "feature": "uv_umbrella",
+        "aliases": (
+            "uv umbrella", "sun umbrella", "compact sun umbrella", "uv parasol",
+            "sun parasol", "\uc591\uc0b0", "\uc790\uc678\uc120 \uc6b0\uc0b0", "\uc790\uc678\uc120 \uc591\uc0b0",
+            "\u9632\u6652\u4f1e", "\u906e\u9633\u4f1e", "\u6674\u96e8\u4f1e",
+        ),
+        "english_queries": ("uv sun umbrella", "compact sun umbrella", "uv blocking parasol"),
+        "chinese_queries": ("\u9632\u6652\u4f1e", "\u906e\u9633\u4f1e", "\u6674\u96e8\u4f1e"),
+        "guard_terms": ("umbrella", "parasol", "\uc591\uc0b0", "\uc6b0\uc0b0", "\u4f1e"),
+    },
+    {
+        "feature": "sun_hat",
+        "aliases": (
+            "sun hat", "sun visor", "uv hat", "wide brim hat", "bucket hat",
+            "neck cover hat", "\uc120\ud584", "\uc36c\ucea1", "\uc790\uc678\uc120 \ubaa8\uc790",
+            "\uc5ec\ub984 \ubaa8\uc790", "\u906e\u9633\u5e3d", "\u9632\u6652\u5e3d", "\u6e14\u592b\u5e3d", "\u7a7a\u9876\u5e3d",
+        ),
+        "english_queries": ("wide brim sun hat", "uv sun visor hat", "summer bucket hat"),
+        "chinese_queries": ("\u906e\u9633\u5e3d", "\u9632\u6652\u5e3d", "\u7a7a\u9876\u5e3d"),
+        "guard_terms": ("hat", "visor", "cap", "\ubaa8\uc790", "\uc36c\ucea1", "\u5e3d"),
+    },
+    {
+        "feature": "camping_shower",
+        "aliases": (
+            "camping shower", "portable shower", "shower bag", "camping shower pump",
+            "\ucea0\ud551\uc0e4\uc6cc", "\ud734\ub300\uc6a9 \uc0e4\uc6cc", "\uc0e4\uc6cc\ubc31",
+            "\u6237\u5916\u6dcb\u6d74\u888b", "\u9732\u8425\u6dcb\u6d74\u5668", "\u4fbf\u643a\u6d17\u6fa1\u5668",
+        ),
+        "english_queries": ("portable camping shower", "camping shower bag", "camping shower pump"),
+        "chinese_queries": ("\u6237\u5916\u6dcb\u6d74\u888b", "\u9732\u8425\u6dcb\u6d74\u5668", "\u4fbf\u643a\u6d17\u6fa1\u5668"),
+        "guard_terms": ("shower", "camping", "\uc0e4\uc6cc", "\u6dcb\u6d74", "\u6d17\u6fa1"),
+    },
+    {
+        "feature": "camping_wagon",
+        "aliases": (
+            "camping wagon", "folding wagon", "outdoor wagon", "beach wagon",
+            "folding cart", "\ucea0\ud551\uc6e8\uac74", "\uc811\uc774\uc2dd \uc6e8\uac74",
+            "\uc544\uc6c3\ub3c4\uc5b4 \uce74\ud2b8", "\u6298\u53e0\u9732\u8425\u8f66", "\u6237\u5916\u8425\u5730\u8f66", "\u91ce\u8425\u63a8\u8f66",
+        ),
+        "english_queries": ("folding camping wagon", "outdoor folding wagon cart", "beach wagon cart"),
+        "chinese_queries": ("\u6298\u53e0\u9732\u8425\u8f66", "\u6237\u5916\u8425\u5730\u8f66", "\u91ce\u8425\u63a8\u8f66"),
+        "guard_terms": ("wagon", "cart", "\uc6e8\uac74", "\uce74\ud2b8", "\u8f66", "\u63a8\u8f66"),
+    },
+    {
+        "feature": "cooler_storage",
+        "aliases": (
+            "cooler bag", "ice cooler", "ice box", "hard cooler", "insulated bag",
+            "ice pack", "\uc544\uc774\uc2a4\ubc15\uc2a4", "\uc544\uc774\uc2a4\ud329", "\ucfe8\ub7ec\ubc31",
+            "\ubcf4\ub0c9\ubc31", "\u4fdd\u6e29\u5305", "\u51b0\u5305", "\u4fdd\u6e29\u7bb1", "\u51b0\u7bb1", "\u51b0\u888b",
+        ),
+        "english_queries": ("portable cooler bag", "camping ice box cooler", "reusable ice pack cooler"),
+        "chinese_queries": ("\u4fdd\u6e29\u5305", "\u51b0\u5305", "\u4fdd\u6e29\u7bb1"),
+        "guard_terms": ("cooler", "ice pack", "insulated", "\uc544\uc774\uc2a4", "\ubcf4\ub0c9", "\u4fdd\u6e29", "\u51b0"),
+    },
+    {
+        "feature": "beach_towel",
+        "aliases": (
+            "beach towel", "microfiber towel", "quick dry towel", "bath towel",
+            "\ube44\uce58\ud0c0\uc6d4", "\uc18d\uac74\ud0c0\uc6d4", "\uc218\uac74",
+            "\u6c99\u6ee9\u5dfe", "\u901f\u5e72\u6bdb\u5dfe", "\u6d74\u5dfe",
+        ),
+        "english_queries": ("microfiber beach towel", "quick dry beach towel", "large beach towel"),
+        "chinese_queries": ("\u6c99\u6ee9\u5dfe", "\u901f\u5e72\u6bdb\u5dfe", "\u6d74\u5dfe"),
+        "guard_terms": ("towel", "\ud0c0\uc6d4", "\uc218\uac74", "\u6bdb\u5dfe", "\u6d74\u5dfe"),
+    },
+    {
+        "feature": "life_vest",
+        "aliases": (
+            "life vest", "life jacket", "swim vest", "water play vest",
+            "\uad6c\uba85\uc870\ub07c", "\uc218\uc601\uc870\ub07c", "\ub77c\uc774\ud504\uc7ac\ud0b7",
+            "\u6551\u751f\u8863", "\u513f\u7ae5\u6551\u751f\u8863",
+        ),
+        "english_queries": ("kids life jacket", "swim life vest", "water play life vest"),
+        "chinese_queries": ("\u6551\u751f\u8863", "\u513f\u7ae5\u6551\u751f\u8863", "\u6e38\u6cf3\u6551\u751f\u8863"),
+        "guard_terms": ("life", "vest", "jacket", "\uad6c\uba85", "\uc870\ub07c", "\u6551\u751f\u8863"),
+    },
+    {
+        "feature": "rash_guard",
+        "aliases": (
+            "rash guard", "rashguard", "swim shirt", "beach cover up",
+            "uv swimwear", "\ub798\uc26c\uac00\ub4dc", "\uc218\uc601\ubcf5", "\ube44\uce58\uc6e8\uc5b4",
+            "\u9632\u6652\u6cf3\u8863", "\u51b2\u6d6a\u8863", "\u6cf3\u8863",
+        ),
+        "english_queries": ("rash guard swim shirt", "uv swimwear rashguard", "beach cover up rash guard"),
+        "chinese_queries": ("\u9632\u6652\u6cf3\u8863", "\u51b2\u6d6a\u8863", "\u6cf3\u8863"),
+        "guard_terms": ("rash", "swimwear", "swim shirt", "\ub798\uc26c", "\uc218\uc601\ubcf5", "\u6cf3\u8863"),
+    },
+]
+
+for _profile in _SUMMER_INTENT_PROFILES:
+    _feature = str(_profile["feature"])
+    _existing = tuple(_SEMANTIC_FEATURE_ALIASES.get(_feature, ()))
+    _SEMANTIC_FEATURE_ALIASES[_feature] = tuple(dict.fromkeys(_existing + tuple(_profile["aliases"])))
+    _SEMANTIC_FEATURE_WEIGHTS[_feature] = 3.0
+
+_EXTRA_SUMMER_INTENT_PROFILES = [
+    {
+        "feature": "mini_air_cooler",
+        "aliases": (
+            "mini air cooler", "portable air cooler", "evaporative cooler",
+            "personal air cooler", "\ubbf8\ub2c8 \ub0c9\ud48d\uae30", "\ud734\ub300\uc6a9 \ub0c9\ud48d\uae30",
+            "\u5c0f\u578b\u51b7\u98ce\u673a", "\u4fbf\u643a\u51b7\u98ce\u673a", "\u7a7a\u8c03\u98ce\u6247",
+        ),
+        "english_queries": ("mini air cooler", "portable evaporative air cooler", "personal air cooler"),
+        "chinese_queries": ("\u5c0f\u578b\u51b7\u98ce\u673a", "\u4fbf\u643a\u51b7\u98ce\u673a", "\u7a7a\u8c03\u98ce\u6247"),
+        "guard_terms": ("air cooler", "cooler", "evaporative", "\ub0c9\ud48d", "\u51b7\u98ce", "\u7a7a\u8c03"),
+    },
+    {
+        "feature": "cooling_clothing",
+        "aliases": (
+            "cooling shirt", "cooling clothing", "quick dry clothing", "quick dry shirt",
+            "cooling vest", "air conditioned cooling vest", "ice silk shirt",
+            "\ub0c9\uac10\ud2f0", "\ub0c9\uac10\uc758\ub958", "\ucfe8\ub9c1\uc154\uce20", "\uc18d\uac74\ud2f0",
+            "\u51b0\u4e1dt\u6064", "\u901f\u5e72\u8863", "\u51b7\u611f\u8863", "\u964d\u6e29\u80cc\u5fc3",
+        ),
+        "english_queries": ("cooling shirt quick dry", "ice silk cooling shirt", "cooling vest outdoor"),
+        "chinese_queries": ("\u51b0\u4e1dt\u6064", "\u901f\u5e72\u8863", "\u51b7\u611f\u8863"),
+        "guard_terms": ("shirt", "clothing", "vest", "quick dry", "\uc758\ub958", "\uc154\uce20", "\u8863", "\u80cc\u5fc3"),
+    },
+    {
+        "feature": "cooling_bedding",
+        "aliases": (
+            "cooling blanket", "cool summer thin blanket", "thin summer blanket",
+            "forever bedding cool summer", "\ub0c9\uac10\uc774\ubd88", "\ucc28\ub835\uc774\ubd88",
+            "\u51b7\u611f\u88ab", "\u51b0\u4e1d\u88ab", "\u7a7a\u8c03\u88ab",
+        ),
+        "english_queries": ("summer cooling blanket", "cooling thin blanket", "ice silk summer blanket"),
+        "chinese_queries": ("\u590f\u51c9\u88ab", "\u51b7\u611f\u88ab", "\u7a7a\u8c03\u88ab"),
+        "guard_terms": ("blanket", "bedding", "quilt", "\uc774\ubd88", "\uce68\uad6c", "\u88ab"),
+    },
+    {
+        "feature": "aqua_shoes",
+        "aliases": (
+            "aqua sneakers", "aqua sandal", "aqua sandals", "water park aqua",
+            "quick dry aqua", "\uc544\ucfe0\uc544 \uc6b4\ub3d9\ud654", "\uc544\ucfe0\uc544 \uc0cc\ub4e4",
+            "\u6eaf\u6eaa\u51c9\u978b", "\u6d89\u6c34\u51c9\u978b",
+        ),
+        "english_queries": ("aqua shoes", "water shoes beach", "quick dry aqua shoes"),
+        "chinese_queries": ("\u6eaf\u6eaa\u978b", "\u6d89\u6c34\u978b", "\u6eaf\u6eaa\u51c9\u978b"),
+        "guard_terms": ("aqua", "water shoes", "sandal", "sneaker", "\uc544\ucfe0\uc544", "\u978b", "\u51c9\u978b"),
+    },
+    {
+        "feature": "sun_hat",
+        "aliases": (
+            "summer hat", "sun protection ribbon summer hat", "ribbon sun hat",
+            "wide brim sun protection", "\ub9ac\ubcf8 \ucc28\uc591 \ubaa8\uc790", "\uc5ec\ub984 \ubaa8\uc790",
+            "\u9632\u6652\u906e\u9633\u5e3d", "\u5927\u6a90\u906e\u9633\u5e3d",
+        ),
+        "english_queries": ("wide brim sun hat", "summer sun hat", "ribbon sun visor hat"),
+        "chinese_queries": ("\u906e\u9633\u5e3d", "\u9632\u6652\u5e3d", "\u5927\u6a90\u906e\u9633\u5e3d"),
+        "guard_terms": ("hat", "visor", "cap", "ribbon", "\ubaa8\uc790", "\u5e3d"),
+    },
+]
+_SUMMER_INTENT_PROFILES.extend(_EXTRA_SUMMER_INTENT_PROFILES)
+for _profile in _EXTRA_SUMMER_INTENT_PROFILES:
+    _feature = str(_profile["feature"])
+    _existing = tuple(_SEMANTIC_FEATURE_ALIASES.get(_feature, ()))
+    _SEMANTIC_FEATURE_ALIASES[_feature] = tuple(dict.fromkeys(_existing + tuple(_profile["aliases"])))
+    _SEMANTIC_FEATURE_WEIGHTS[_feature] = 3.0
+
+
+_ACCESS_CHALLENGE_PATTERNS = (
+    "captcha", "verify", "robot", "security", "challenge", "punish",
+    "unusual traffic", "access denied", "_____tmd_____", "login.taobao.com",
+    "passport.1688.com", "滑块", "验证", "验证码",
+)
+_ACCESS_CHALLENGE_EVENTS: List[Dict[str, str]] = []
+
+
+def _record_access_challenge(source: str, detail: str = "") -> None:
+    _ACCESS_CHALLENGE_EVENTS.append({
+        "source": str(source or ""),
+        "detail": str(detail or "")[:300],
+    })
+    del _ACCESS_CHALLENGE_EVENTS[:-20]
+
+
+def consume_access_challenge_events() -> List[Dict[str, str]]:
+    events = list(_ACCESS_CHALLENGE_EVENTS)
+    _ACCESS_CHALLENGE_EVENTS.clear()
+    return events
+
+
+async def _page_has_access_challenge(tab: Any) -> bool:
+    """Detect login/CAPTCHA/security interstitials without trying to bypass them."""
+    if tab is None:
+        return False
+    try:
+        text = await tab.evaluate(
+            """
+            (() => {
+                const parts = [
+                    document.title || '',
+                    location.href || '',
+                    document.body?.innerText?.slice(0, 8000) || ''
+                ];
+                return parts.join('\\n').toLowerCase();
+            })()
+            """
+        )
+    except Exception:
+        return False
+    lowered = str(text or "").lower()
+    return any(pattern.lower() in lowered for pattern in _ACCESS_CHALLENGE_PATTERNS)
+
 
 def _extract_semantic_features(text: str) -> set[str]:
     """Extract normalized product attributes for calibrated match scoring."""
@@ -428,6 +745,60 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
         _family_score(
             reference,
             candidate,
+            required={"neck_cooler"},
+            optional={"ice", "personal_cooling", "neck_wearable"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"cooling_towel"},
+            optional={"personal_cooling"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"water_gun"},
+            optional={"electric"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"aqua_shoes"},
+            optional={"personal_cooling"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"swim_goggles"},
+            optional={"personal_cooling"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"pool_float"},
+            optional={"personal_cooling"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"mosquito_trap"},
+            optional={"electric"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"mosquito_swatter"},
+            optional={"electric"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"mosquito_band"},
+            optional={"personal_cooling"},
+        ),
+        _family_score(
+            reference,
+            candidate,
             required={"sponge", "sink", "holder"},
             optional={"soap", "towel", "stainless", "drainage"},
         ),
@@ -444,6 +815,15 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
             optional={"cylinder", "lid"},
         ),
     ]
+    for profile in _SUMMER_INTENT_PROFILES:
+        family_scores.append(
+            _family_score(
+                reference,
+                candidate,
+                required={str(profile["feature"])},
+                optional=set(profile.get("optional", ())),
+            )
+        )
     score = max(family_scores)
 
     disposable_bag_intent = bool(reference & {"biodegradable", "cornstarch", "bag_net", "disposable"})
@@ -469,6 +849,11 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
     if "fan" in reference and "neck_wearable" in candidate and "neck_wearable" not in reference:
         score = min(score, 0.65)
     if "fan" in reference and "neck_wearable" in reference and "neck_wearable" not in candidate:
+        score = min(score, 0.65)
+
+    if "neck_cooler" in reference and "fan" not in reference and "fan" in candidate and "neck_cooler" not in candidate:
+        score = min(score, 0.65)
+    if "fan" in reference and "neck_cooler" in candidate and "neck_cooler" not in reference:
         score = min(score, 0.65)
 
     if score >= 0.9:
@@ -506,6 +891,58 @@ def _preferred_english_query_variants(keyword_en: str, reference_name: str = "")
         if query and query.lower() not in {v.lower() for v in variants}:
             variants.append(query)
 
+    if any(x in haystack for x in ("neck cooler", "ice neck", "cooling neck", "cooling scarf", "neck ring", "neck band", "pcm ice")):
+        add("ice neck cooler")
+        add("cooling neck ring")
+        add("pcm neck cooler")
+        add("cooling neck scarf")
+        add("cooling neck band")
+
+    if any(x in haystack for x in ("cooling towel", "cool towel", "ice towel", "quick dry towel")):
+        add("cooling towel")
+        add("ice cooling towel")
+        add("sports cooling towel")
+
+    if any(x in haystack for x in ("water gun", "squirt gun", "water blaster", "m416")):
+        add("electric water gun")
+        add("rechargeable water gun")
+        add("water blaster toy")
+
+    if any(x in haystack for x in ("aqua shoes", "water shoes", "beach shoes", "swim shoes")):
+        add("aqua shoes")
+        add("water shoes beach")
+        add("swim shoes")
+
+    if any(x in haystack for x in ("swim goggles", "swimming goggles", "water goggles", "anti fog goggles")):
+        add("swimming goggles")
+        add("anti fog swim goggles")
+        add("water goggles")
+
+    if any(x in haystack for x in ("pool float", "swim ring", "swimming ring", "inflatable tube", "pool tube")):
+        add("pool float")
+        add("inflatable swim ring")
+        add("swimming tube")
+
+    if any(x in haystack for x in ("mosquito trap", "mosquito killer", "bug zapper", "mosquito lamp", "insect killer")):
+        add("mosquito killer lamp")
+        add("mosquito trap")
+        add("bug zapper")
+
+    if any(x in haystack for x in ("mosquito swatter", "electric mosquito swatter", "fly swatter", "zapper racket")):
+        add("electric mosquito swatter")
+        add("bug zapper racket")
+        add("mosquito swatter")
+
+    if any(x in haystack for x in ("mosquito bracelet", "mosquito band", "repellent bracelet", "mosquito repellent band")):
+        add("mosquito repellent bracelet")
+        add("mosquito bracelet")
+        add("mosquito repellent band")
+
+    for profile in _SUMMER_INTENT_PROFILES:
+        if any(str(alias).lower() in haystack for alias in profile.get("aliases", ())):
+            for query in profile.get("english_queries", ()):
+                add(str(query))
+
     if any(x in haystack for x in ("chopper", "mincer", "food processor", "garlic", "다지기")):
         add("electric food chopper")
         add("vegetable chopper")
@@ -521,7 +958,18 @@ def _preferred_english_query_variants(keyword_en: str, reference_name: str = "")
         add("cornstarch sink filter mesh")
         add("kitchen drain mesh bag")
 
-    if any(x in haystack for x in ("ice", "tumbler", "ice mold", "얼음틀", "冰格")):
+    neck_cooler_intent = any(
+        x in haystack
+        for x in (
+            "neck cooler", "ice neck", "cooling neck", "cooling scarf",
+            "neck ring", "neck band", "pcm ice",
+        )
+    )
+    ice_mold_intent = (
+        not neck_cooler_intent
+        and any(x in haystack for x in ("tumbler", "ice mold", "ice tray", "ice cube", "mold", "얼음틀", "冰格"))
+    )
+    if ice_mold_intent:
         add("tumbler ice mold")
         add("silicone cylinder ice mold")
         add("ice cube tray tumbler")
@@ -546,11 +994,70 @@ def _preferred_chinese_query_variants(keyword_cn: str, keyword_en: str = "") -> 
     """Chinese search variants for 1688 that avoid losing key noun compounds."""
     haystack = f"{keyword_cn or ''} {keyword_en or ''}".lower()
     variants: List[str] = []
+    summer_seed_queries: List[str] = []
+
+    def seed(query: str) -> None:
+        query = " ".join(str(query or "").split())
+        if query and query not in summer_seed_queries:
+            summer_seed_queries.append(query)
+
+    if any(x in haystack for x in ("neck cooler", "ice neck", "cooling neck", "cooling scarf", "neck ring", "neck band", "pcm ice")):
+        seed("\u51b0\u51c9\u5708")
+        seed("\u964d\u6e29\u9888\u5708")
+        seed("\u51b0\u8116\u5708")
+        seed("\u51b0\u4e1d\u56f4\u8116")
+        seed("\u51b7\u611f\u56f4\u5dfe")
+
+    if any(x in haystack for x in ("cooling towel", "cool towel", "ice towel", "quick dry towel")):
+        seed("\u51b0\u51c9\u6bdb\u5dfe")
+        seed("\u51b7\u611f\u6bdb\u5dfe")
+        seed("\u8fd0\u52a8\u51b0\u5dfe")
+
+    if any(x in haystack for x in ("water gun", "squirt gun", "water blaster", "m416")):
+        seed("\u7535\u52a8\u6c34\u67aa")
+        seed("\u6c34\u67aa")
+        seed("\u73a9\u5177\u6c34\u67aa")
+
+    if any(x in haystack for x in ("aqua shoes", "water shoes", "beach shoes", "swim shoes")):
+        seed("\u6eaf\u6eaa\u978b")
+        seed("\u6d89\u6c34\u978b")
+        seed("\u6c99\u6ee9\u978b")
+
+    if any(x in haystack for x in ("swim goggles", "swimming goggles", "water goggles", "anti fog goggles")):
+        seed("\u6cf3\u955c")
+        seed("\u9632\u96fe\u6cf3\u955c")
+        seed("\u6e38\u6cf3\u773c\u955c")
+
+    if any(x in haystack for x in ("pool float", "swim ring", "swimming ring", "inflatable tube", "pool tube")):
+        seed("\u6e38\u6cf3\u5708")
+        seed("\u5145\u6c14\u6cf3\u5708")
+        seed("\u5145\u6c14\u6d6e\u6392")
+
+    if any(x in haystack for x in ("mosquito trap", "mosquito killer", "bug zapper", "mosquito lamp", "insect killer")):
+        seed("\u706d\u868a\u706f")
+        seed("\u6355\u868a\u5668")
+        seed("\u706d\u868a\u5668")
+
+    if any(x in haystack for x in ("mosquito swatter", "electric mosquito swatter", "fly swatter", "zapper racket")):
+        seed("\u7535\u868a\u62cd")
+        seed("\u706d\u868a\u62cd")
+
+    if any(x in haystack for x in ("mosquito bracelet", "mosquito band", "repellent bracelet", "mosquito repellent band")):
+        seed("\u9a71\u868a\u624b\u73af")
+        seed("\u9632\u868a\u624b\u73af")
 
     def add(query: str):
         query = " ".join(str(query or "").split())
         if query and query not in variants:
             variants.append(query)
+
+    for query in summer_seed_queries:
+        add(query)
+
+    for profile in _SUMMER_INTENT_PROFILES:
+        if any(str(alias).lower() in haystack for alias in profile.get("aliases", ())):
+            for query in profile.get("chinese_queries", ()):
+                add(str(query))
 
     if any(x in haystack for x in ("切碎", "蒜", "绞肉", "chopper")):
         add("电动切碎机")
@@ -564,7 +1071,18 @@ def _preferred_chinese_query_variants(keyword_cn: str, keyword_en: str = "") -> 
         add("可降解水槽过滤网袋")
         add("玉米淀粉水槽过滤网")
         add("厨房下水道过滤网袋")
-    if any(x in haystack for x in ("冰格", "硅胶", "tumbler", "ice")):
+    neck_cooler_intent = any(
+        x in haystack
+        for x in (
+            "neck cooler", "ice neck", "cooling neck", "cooling scarf",
+            "neck ring", "neck band", "pcm ice", "冰凉圈", "冰脖圈", "降温颈圈",
+        )
+    )
+    ice_mold_intent = (
+        not neck_cooler_intent
+        and any(x in haystack for x in ("冰格", "硅胶", "tumbler", "ice mold", "ice tray", "ice cube"))
+    )
+    if ice_mold_intent:
         add("保温杯硅胶冰格")
         add("圆柱冰格模具")
         add("硅胶制冰盒")
@@ -980,6 +1498,10 @@ async def _do_aliexpress_search(
     tab = await browser.get(url)
     if tab is None:
         return []
+    if await _page_has_access_challenge(tab):
+        logger.info("[ProductSearcher] AliExpress access challenge on query='%s'", query[:60])
+        _record_access_challenge("aliexpress", query)
+        return []
 
     extract_js = """
         (() => {
@@ -1047,21 +1569,9 @@ async def _do_aliexpress_search(
     if raw:
         return raw
 
-    # Detect challenge pages to improve debugging.
-    try:
-        challenge = await tab.evaluate(
-            """
-            (() => {
-                const t = (document.title || '') + '\\n' + (location.href || '');
-                const b = (document.body && document.body.innerText) ? document.body.innerText.slice(0, 5000) : '';
-                return /captcha|verify|robot|security|challenge|punish/i.test(t + '\\n' + b);
-            })()
-            """
-        )
-        if challenge:
-            logger.info("[ProductSearcher] AliExpress endpoint challenged on query='%s'", query[:60])
-    except Exception:
-        pass
+    if await _page_has_access_challenge(tab):
+        logger.info("[ProductSearcher] AliExpress endpoint challenged on query='%s'", query[:60])
+        _record_access_challenge("aliexpress", query)
     return []
 
 
@@ -1298,8 +1808,9 @@ async def _do_1688_search(
         # Only a real anti-bot wall blocks us — NOT login. 1688 content loads for
         # guests; a login prompt is a dismissible overlay with the offer cards in
         # the DOM behind it, so we never bail on login redirects.
-        if any(x in current_url for x in ("_____tmd_____", "punish", "captcha", "nouser")):
+        if any(x in current_url for x in ("_____tmd_____", "punish", "captcha", "nouser")) or await _page_has_access_challenge(tab):
             logger.info("[ProductSearcher] 1688 endpoint %s anti-bot challenged, trying next", url[:60])
+            _record_access_challenge("1688", url)
             continue
         # Scroll for lazy-load. Some 1688 endpoints occasionally return an
         # intermediate/blank document where document.body is still null; treat
@@ -1575,8 +2086,9 @@ async def search_1688_by_image(
             current_url = await tab.evaluate("window.location.href") or ""
             # Only bail on a real anti-bot wall, not on login (1688 content loads
             # for guests; login prompts are dismissible overlays).
-            if any(x in current_url for x in ("_____tmd_____", "punish", "captcha", "nouser")):
+            if any(x in current_url for x in ("_____tmd_____", "punish", "captcha", "nouser")) or await _page_has_access_challenge(tab):
                 logger.info("[ProductSearcher] 1688 image endpoint anti-bot challenged: %s", current_url[:100])
+                _record_access_challenge("1688", current_url)
                 continue
 
             # Trigger lazy-load before scraping cards.
@@ -1696,6 +2208,10 @@ async def search_aliexpress_by_image(
             if tab is None:
                 continue
             await tab.sleep(7)
+            if await _page_has_access_challenge(tab):
+                logger.info("[ProductSearcher] AliExpress image endpoint challenged: %s", url[:100])
+                _record_access_challenge("aliexpress", url)
+                continue
             for y in (300, 700, 1200, 1700):
                 await tab.evaluate(f"window.scrollTo(0, {y})")
                 await tab.sleep(1)
@@ -1998,6 +2514,61 @@ _CATEGORY_GUARDS: Dict[str, List[str]] = {
 }
 
 
+_CATEGORY_GUARDS.update({
+    "ice neck cooler": [
+        "neck", "cooler", "cooling", "scarf", "pcm",
+        "\ub125\ucfe8\ub7ec", "\uc544\uc774\uc2a4\ub125", "\ucfe8\uc2a4\uce74\ud504",
+        "\ub0c9\uac10", "\ub125\ubc34\ub4dc", "\uc5bc\uc74c \ubaa9",
+        "\u51b0\u51c9\u5708", "\u51b0\u8116\u5708", "\u964d\u6e29\u9888\u5708",
+        "\u56f4\u8116", "\u56f4\u5dfe",
+    ],
+    "neck cooler": [
+        "neck", "cooler", "cooling", "scarf", "pcm",
+        "\ub125\ucfe8\ub7ec", "\uc544\uc774\uc2a4\ub125", "\ucfe8\uc2a4\uce74\ud504",
+        "\ub0c9\uac10", "\ub125\ubc34\ub4dc", "\u51b0\u51c9\u5708",
+        "\u51b0\u8116\u5708", "\u964d\u6e29\u9888\u5708", "\u56f4\u8116", "\u56f4\u5dfe",
+    ],
+    "cooling towel": [
+        "towel", "cooling", "cool", "ice", "\ud0c0\uc6d4", "\ucfe8\ud0c0\uc6d4",
+        "\ucfe8\ub9c1\ud0c0\uc6d4", "\ub0c9\uac10", "\u51b0\u51c9\u6bdb\u5dfe",
+        "\u51b7\u611f\u6bdb\u5dfe",
+    ],
+    "water gun": [
+        "water gun", "water blaster", "squirt", "m416", "\ubb3c\ucd1d",
+        "\u6c34\u67aa", "\u7535\u52a8\u6c34\u67aa",
+    ],
+    "aqua shoes": [
+        "aqua", "water shoes", "beach shoes", "swim shoes", "\uc544\ucfe0\uc544",
+        "\uc6cc\ud130\uc288\uc988", "\u6eaf\u6eaa\u978b", "\u6d89\u6c34\u978b",
+        "\u6c99\u6ee9\u978b",
+    ],
+    "swim goggles": [
+        "goggles", "swim", "swimming", "anti fog", "\uc218\uc601\uace0\uae00",
+        "\ubb3c\uc548\uacbd", "\uc218\uacbd", "\u6cf3\u955c", "\u6e38\u6cf3\u773c\u955c",
+    ],
+    "pool float": [
+        "pool float", "swim ring", "swimming ring", "inflatable", "tube",
+        "\ud29c\ube0c", "\ubb3c\ub180\uc774", "\u6e38\u6cf3\u5708", "\u5145\u6c14",
+    ],
+    "mosquito trap": [
+        "mosquito", "bug zapper", "insect", "trap", "killer", "lamp",
+        "\ubaa8\uae30", "\ud3ec\ucda9", "\u706d\u868a", "\u6355\u868a",
+    ],
+    "mosquito swatter": [
+        "mosquito", "swatter", "zapper", "racket", "fly swatter",
+        "\ubaa8\uae30\ucc44", "\uc804\uae30\ubaa8\uae30\ucc44", "\u7535\u868a\u62cd",
+    ],
+    "mosquito bracelet": [
+        "mosquito", "bracelet", "repellent", "band", "\ubaa8\uae30\ud314\ucc0c",
+        "\uae30\ud53c", "\u9a71\u868a\u624b\u73af", "\u9632\u868a\u624b\u73af",
+    ],
+})
+
+for _profile in _SUMMER_INTENT_PROFILES:
+    for _query in tuple(_profile.get("english_queries", ()))[:2]:
+        _CATEGORY_GUARDS.setdefault(str(_query), list(_profile.get("guard_terms", ())))
+
+
 # Reverse map: canonical kitchen markers we use to detect "kitchen domain"
 # from a Korean reference title.
 _DOMAIN_MARKERS: Dict[str, list[str]] = {
@@ -2059,6 +2630,25 @@ _DOMAIN_TOKENS: Dict[str, list[str]] = {
 }
 
 
+_DOMAIN_MARKERS["summer"] = [
+    "neck cooler", "ice neck", "cooling towel", "water gun", "aqua shoes",
+    "swim goggles", "pool float", "mosquito", "\ub125\ucfe8\ub7ec",
+    "\ucfe8\ub9c1\ud0c0\uc6d4", "\ubb3c\ucd1d", "\uc544\ucfe0\uc544\uc288\uc988",
+    "\uc218\uc601\uace0\uae00", "\ubaa8\uae30", "\u51b0\u51c9\u5708",
+    "\u6c34\u67aa", "\u6cf3\u955c", "\u706d\u868a",
+]
+_DOMAIN_TOKENS["summer"] = [
+    "cooling", "ice", "neck", "towel", "water", "swim", "pool", "mosquito",
+    "summer", "\ub125", "\ucfe8", "\ub0c9\uac10", "\ubb3c", "\uc218\uc601",
+    "\ubaa8\uae30", "\u51b0", "\u6c34", "\u6cf3", "\u868a",
+]
+for _profile in _SUMMER_INTENT_PROFILES:
+    _DOMAIN_MARKERS["summer"].extend(str(alias) for alias in _profile.get("aliases", ()))
+    _DOMAIN_TOKENS["summer"].extend(str(term) for term in _profile.get("guard_terms", ()))
+_DOMAIN_MARKERS["summer"] = list(dict.fromkeys(_DOMAIN_MARKERS["summer"]))
+_DOMAIN_TOKENS["summer"] = list(dict.fromkeys(_DOMAIN_TOKENS["summer"]))
+
+
 def _detect_domain(reference_name: str, keyword_en: str, keyword_cn: str) -> str:
     """Detect the high-level product domain (kitchen/phone/beauty/...) from
     a Korean Coupang reference name + the resolved EN/CN keywords.
@@ -2105,6 +2695,41 @@ def _category_terms_for_keyword(
         3. If domain undetectable too, return [] (no guard — last resort).
     """
     kw = (keyword_en or "").lower()
+    combined = f"{reference_name} {keyword_en} {keyword_cn}".lower()
+
+    neck_cooler_markers = (
+        "neck cooler",
+        "ice neck",
+        "cooling neck",
+        "neck cooling",
+        "neck ring",
+        "neck band",
+        "pcm ice",
+        "\ub125\ucfe8\ub7ec",
+        "\uc544\uc774\uc2a4\ub125",
+        "\ucfe8\ub9c1 \ub125",
+        "\ub125\ubc34\ub4dc",
+        "\uc5bc\uc74c \ubaa9",
+        "\u51b0\u51c9\u5708",
+        "\u51b0\u8116\u5708",
+        "\u964d\u6e29\u9888\u5708",
+    )
+    if any(marker in combined for marker in neck_cooler_markers):
+        return list(_CATEGORY_GUARDS["ice neck cooler"])
+
+    pool_float_markers = (
+        "pool float",
+        "swim ring",
+        "swimming ring",
+        "pool tube",
+        "inflatable tube",
+        "\ubb3c\ub180\uc774 \ud29c\ube0c",
+        "\uc218\uc601 \ud29c\ube0c",
+        "\u6e38\u6cf3\u5708",
+    )
+    if any(marker in combined for marker in pool_float_markers):
+        return list(_CATEGORY_GUARDS["pool float"])
+
     # 1) Longest specific guard wins
     matches = sorted(
         (g for g in _CATEGORY_GUARDS if _guard_key_matches(g, kw)),
@@ -2639,7 +3264,22 @@ async def find_products_with_video(
                     output_dir,
                     f"sourcing_{source_label}_{idx}_{uuid.uuid4().hex[:8]}_video.mp4",
                 )
-                size = await asyncio.to_thread(_download_video, vurl, filepath, detail_url)
+                try:
+                    size = await asyncio.wait_for(
+                        asyncio.to_thread(_download_video, vurl, filepath, detail_url),
+                        timeout=_DOWNLOAD_MAX_SECONDS + 30,
+                    )
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "[ProductSearcher]   video download task timeout (%ss), skip",
+                        _DOWNLOAD_MAX_SECONDS + 30,
+                    )
+                    try:
+                        if os.path.exists(filepath):
+                            os.remove(filepath)
+                    except OSError:
+                        pass
+                    size = None
                 if size:
                     logger.info("[ProductSearcher]   downloaded %.1fMB", size)
                     found.append({
