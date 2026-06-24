@@ -310,7 +310,10 @@ def linktree_retry_context(item: Dict[str, Any]) -> Dict[str, str]:
     result = item.get("result") if isinstance(item.get("result"), dict) else {}
     youtube = result.get("youtube") if isinstance(result.get("youtube"), dict) else {}
     product_name = str(
-        youtube.get("product_name")
+        item.get("product_title")
+        or youtube.get("product_title")
+        or result.get("product_title")
+        or youtube.get("product_name")
         or result.get("product_name")
         or item.get("product_name")
         or item.get("title")

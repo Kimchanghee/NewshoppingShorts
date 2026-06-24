@@ -1008,6 +1008,8 @@ def test_process_pending_items_retries_linktree_only_without_youtube_reupload(mo
                 "attempts": 1,
                 "scheduled_at": "2026-06-19T00:00:00+00:00",
                 "coupang_url": "https://www.coupang.com/vp/products/9169351491",
+                "product_name": "cooling towel sports towel",
+                "product_title": "나이키 쿨링 타월",
                 "result": {
                     "purchase_url": "https://www.coupang.com/vp/products/9169351491",
                     "youtube_url": "https://youtu.be/already-uploaded",
@@ -1032,20 +1034,28 @@ def test_process_pending_items_retries_linktree_only_without_youtube_reupload(mo
     monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
     monkeypatch.setattr(queue_runner, "run_sourcing", fail_sourcing)
     monkeypatch.setattr(queue_runner, "upload_verified_render", fail_upload)
-    monkeypatch.setattr(
-        queue_runner,
-        "publish_linktree_if_possible",
-        lambda *_args, **_kwargs: {
+
+    published = {}
+
+    def fake_publish(_item, product_name, _purchase_url):
+        published["product_name"] = product_name
+        return {
             "ok": True,
             "method": "public_existing",
             "blocking_reason": "",
-        },
+        }
+
+    monkeypatch.setattr(
+        queue_runner,
+        "publish_linktree_if_possible",
+        fake_publish,
     )
 
     result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
 
     assert result["status"] == "completed"
     assert result["linktree_ok"] is True
+    assert published["product_name"] == "나이키 쿨링 타월"
     assert payload["items"][0]["status"] == "completed"
     assert payload["items"][0]["attempts"] == 2
     assert payload["items"][0]["result"]["youtube_url"] == "https://youtu.be/already-uploaded"
