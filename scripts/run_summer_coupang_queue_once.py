@@ -870,42 +870,6 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
 
     settings = manager.get_settings()
     webhook_url = str(settings.get("webhook_url", "") or "").strip()
-    if webhook_url:
-        ok = manager.publish_link(
-            title=title,
-            url=purchase_url,
-            description=COUPANG_AFFILIATE_DISCLOSURE,
-            source_url=source_url,
-            extra={
-                "channel": "shopping_shorts_maker",
-                "publish_index": upload_number,
-                "display_number": marker,
-            },
-        )
-        public_check = verify_linktree_public_card(
-            marker,
-            purchase_url,
-            attempts=env_int(
-                LINKTREE_PUBLIC_VERIFY_ATTEMPTS_ENV,
-                DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS,
-            ),
-            delay_seconds=env_float(
-                LINKTREE_PUBLIC_VERIFY_INTERVAL_ENV,
-                DEFAULT_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS,
-            ),
-        )
-        return {
-            "ok": bool(ok and public_check.get("ok")),
-            "method": "webhook",
-            "webhook_sent": bool(ok),
-            "title": title,
-            "number": marker,
-            "purchase_url": purchase_url,
-            "profile_url": manager.get_profile_url(),
-            "public_verification": public_check,
-            "blocking_reason": "" if ok and public_check.get("ok") else "Linktree webhook publish did not verify on the public page.",
-        }
-
     public_check = verify_linktree_public_card(marker, purchase_url)
     if public_check.get("ok"):
         return {
@@ -919,19 +883,45 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
             "blocking_reason": "",
         }
 
+    ok = manager.publish_link(
+        title=title,
+        url=purchase_url,
+        description=COUPANG_AFFILIATE_DISCLOSURE,
+        source_url=source_url,
+        extra={
+            "channel": "shopping_shorts_maker",
+            "publish_index": upload_number,
+            "display_number": marker,
+        },
+    )
+    public_check = verify_linktree_public_card(
+        marker,
+        purchase_url,
+        attempts=env_int(
+            LINKTREE_PUBLIC_VERIFY_ATTEMPTS_ENV,
+            DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS,
+        ),
+        delay_seconds=env_float(
+            LINKTREE_PUBLIC_VERIFY_INTERVAL_ENV,
+            DEFAULT_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS,
+        ),
+    )
+    method = "webhook" if webhook_url else "browser"
+    blocking_reason = ""
+    if not ok:
+        blocking_reason = "Linktree publish call failed."
+    elif not public_check.get("ok"):
+        blocking_reason = "Linktree publish did not verify on the public page."
     return {
-        "ok": False,
-        "method": "blocked",
+        "ok": bool(ok and public_check.get("ok")),
+        "method": method,
+        "webhook_sent": bool(ok and webhook_url),
         "title": title,
         "number": marker,
         "purchase_url": purchase_url,
         "profile_url": manager.get_profile_url(),
         "public_verification": public_check,
-        "blocking_reason": (
-            "Linktree webhook URL is not configured, and this session has no callable authenticated "
-            "Linktree browser/computer-use editing path. Public-page Playwright access is available, "
-            "but it cannot create or update cards without an authenticated editor session."
-        ),
+        "blocking_reason": blocking_reason,
     }
 
 

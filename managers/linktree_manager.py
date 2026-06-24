@@ -118,9 +118,16 @@ class LinktreeManager:
         return str(self.get_settings().get("profile_url", "")).strip() or DEFAULT_LINKTREE_PROFILE_URL
 
     def is_connected(self) -> bool:
-        """A webhook URL is required for Linktree publishing."""
+        """Return whether any Linktree publish path is available."""
         webhook_url = str(self.get_settings().get("webhook_url", "")).strip()
-        return bool(webhook_url)
+        if webhook_url:
+            return True
+        try:
+            from managers.linktree_browser_publisher import browser_publish_enabled
+
+            return browser_publish_enabled()
+        except Exception:
+            return False
 
     def get_connection_issue(self) -> str:
         """Return a user-facing reason why automatic Linktree publish cannot run."""
@@ -132,6 +139,13 @@ class LinktreeManager:
 
         webhook_url = str(settings.get("webhook_url", "")).strip()
         if not webhook_url:
+            try:
+                from managers.linktree_browser_publisher import browser_publish_enabled
+
+                if browser_publish_enabled():
+                    return " ".join(issues)
+            except Exception as exc:
+                issues.append(f"Linktree 브라우저 자동 발행을 준비하지 못했습니다: {exc}")
             issues.append(
                 "Linktree 자동 발행이 켜져 있지만 Webhook URL이 없습니다. "
                 "설정 > Coupang/Linktree 자동화에서 Webhook URL을 연결하거나 "
@@ -149,7 +163,16 @@ class LinktreeManager:
     def is_auto_publish_enabled(self) -> bool:
         """Return whether automatic Linktree publish is enabled."""
         settings = self.get_settings()
-        return bool(settings.get("auto_publish", False)) and bool(settings.get("webhook_url"))
+        if not bool(settings.get("auto_publish", False)):
+            return False
+        if bool(str(settings.get("webhook_url", "")).strip()):
+            return True
+        try:
+            from managers.linktree_browser_publisher import browser_publish_enabled
+
+            return browser_publish_enabled()
+        except Exception:
+            return False
 
     @staticmethod
     def _build_headers(api_key: str) -> Dict[str, str]:
@@ -178,15 +201,28 @@ class LinktreeManager:
         settings = self.get_settings()
         webhook_url = str(settings.get("webhook_url", "")).strip()
         if not webhook_url:
-            # Linktree는 직접 쓰기 API가 없어서 이 매니저는 webhook 중계만 지원합니다.
-            # 설정 → 링크트리 탭에서 webhook URL(또는 Make/Zapier/n8n 자동화 endpoint)을
-            # 설정해야 자동 발행이 동작합니다. 직접 linktr.ee 로그인 자동화가 필요한 경우는
-            # 별도의 브라우저 자동화 매니저가 필요합니다 (현재 미구현).
-            logger.warning(
-                "[Linktree] Webhook URL이 비어 있어 자동 발행을 건너뜁니다. "
-                "설정 탭에서 webhook URL을 입력하거나, 별도의 직접 발행 모듈을 구성해주세요."
-            )
-            return False
+            target_url = str(url or "").strip()
+            if not target_url:
+                logger.warning("[Linktree] Empty target URL. Skipping publish.")
+                return False
+            try:
+                from managers.linktree_browser_publisher import publish_link_via_visible_browser
+
+                browser_result = publish_link_via_visible_browser(
+                    title=str(title or "").strip() or "Shopping Shorts Link",
+                    url=target_url,
+                    number=str((extra or {}).get("display_number", "")).strip(),
+                    profile_url=str(settings.get("profile_url", "")).strip(),
+                    timeout_seconds=int(timeout_seconds or self.DEFAULT_TIMEOUT_SECONDS),
+                )
+                if browser_result.get("ok"):
+                    logger.info("[Linktree] Link published through browser fallback.")
+                    return True
+                logger.warning("[Linktree] Browser fallback publish failed: %s", browser_result)
+                return False
+            except Exception as exc:
+                logger.warning("[Linktree] Browser fallback publish crashed: %s", exc)
+                return False
 
         target_url = str(url or "").strip()
         if not target_url:

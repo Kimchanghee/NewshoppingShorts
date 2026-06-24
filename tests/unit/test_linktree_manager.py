@@ -34,7 +34,8 @@ def _make_manager(settings_data):
     return manager
 
 
-def test_is_connected_requires_webhook_url():
+def test_is_connected_requires_publish_path(monkeypatch):
+    monkeypatch.setattr("managers.linktree_browser_publisher.browser_publish_enabled", lambda: False)
     manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "", "auto_publish": False})
     assert manager.is_connected() is False
 
@@ -42,7 +43,15 @@ def test_is_connected_requires_webhook_url():
     assert manager.is_connected() is True
 
 
-def test_is_auto_publish_enabled_requires_flag_and_webhook():
+def test_is_connected_accepts_browser_fallback(monkeypatch):
+    monkeypatch.setattr("managers.linktree_browser_publisher.browser_publish_enabled", lambda: True)
+    manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "", "auto_publish": False})
+
+    assert manager.is_connected() is True
+
+
+def test_is_auto_publish_enabled_requires_flag_and_publish_path(monkeypatch):
+    monkeypatch.setattr("managers.linktree_browser_publisher.browser_publish_enabled", lambda: False)
     manager = _make_manager({"webhook_url": "https://example.com/hook", "api_key": "", "profile_url": "", "auto_publish": False})
     assert manager.is_auto_publish_enabled() is False
 
@@ -53,7 +62,15 @@ def test_is_auto_publish_enabled_requires_flag_and_webhook():
     assert manager.is_auto_publish_enabled() is True
 
 
-def test_connection_issue_requires_webhook_for_auto_publish():
+def test_is_auto_publish_enabled_accepts_browser_fallback(monkeypatch):
+    monkeypatch.setattr("managers.linktree_browser_publisher.browser_publish_enabled", lambda: True)
+    manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "", "auto_publish": True})
+
+    assert manager.is_auto_publish_enabled() is True
+
+
+def test_connection_issue_requires_publish_path_for_auto_publish(monkeypatch):
+    monkeypatch.setattr("managers.linktree_browser_publisher.browser_publish_enabled", lambda: False)
     manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "https://linktr.ee/example", "auto_publish": True})
 
     ok, message = manager.require_connected_for_publish()
@@ -136,6 +153,50 @@ def test_publish_link_posts_payload_and_returns_true(monkeypatch):
     assert called["json"]["title"] == "Sample"
     assert called["json"]["url"] == "https://link.coupang.com/a/abc"
     assert called["json"]["extra"] == {"a": 1}
+
+
+def test_publish_link_uses_browser_fallback_without_webhook(monkeypatch):
+    called = {}
+
+    def _fake_publish_link_via_visible_browser(**kwargs):
+        called.update(kwargs)
+        return {"ok": True, "method": "browser"}
+
+    monkeypatch.setattr(
+        "managers.linktree_browser_publisher.publish_link_via_visible_browser",
+        _fake_publish_link_via_visible_browser,
+    )
+
+    manager = _make_manager(
+        {
+            "webhook_url": "",
+            "api_key": "",
+            "profile_url": "https://linktr.ee/example",
+            "auto_publish": True,
+        }
+    )
+
+    ok = manager.publish_link(
+        title="Sample",
+        url="https://www.coupang.com/vp/products/1",
+        extra={"display_number": "[999]"},
+    )
+
+    assert ok is True
+    assert called["title"] == "Sample"
+    assert called["url"] == "https://www.coupang.com/vp/products/1"
+    assert called["number"] == "[999]"
+    assert called["profile_url"] == "https://linktr.ee/example"
+
+
+def test_publish_link_returns_false_when_browser_fallback_fails(monkeypatch):
+    monkeypatch.setattr(
+        "managers.linktree_browser_publisher.publish_link_via_visible_browser",
+        lambda **kwargs: {"ok": False, "method": "browser", "blocking_reason": "not verified"},
+    )
+    manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "", "auto_publish": True})
+
+    assert manager.publish_link(title="x", url="https://www.coupang.com/vp/products/1") is False
 
 
 def test_publish_link_returns_false_on_http_failure(monkeypatch):
