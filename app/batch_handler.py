@@ -6,6 +6,10 @@ This module handles batch processing control logic, extracted from main.py.
 
 import threading
 import time
+import json
+import subprocess
+import sys
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QTimer
@@ -21,6 +25,7 @@ from caller import rest
 from ui.design_system_v2 import get_design_system, get_color
 import config
 from utils.secrets_manager import SecretsManager
+from managers.summer_coupang_queue_status import build_summer_coupang_queue_snapshot
 
 logger = get_logger(__name__)
 
@@ -63,6 +68,119 @@ class BatchHandler:
             logger.debug("[BatchHandler] API 키 확인 중 예외: %s", e)
         return False
 
+    def _start_summer_coupang_queue_now(self) -> bool:
+        """Run the visible Summer Coupang queue when the normal URL queue is empty."""
+        try:
+            snapshot = build_summer_coupang_queue_snapshot()
+            counts = snapshot.get("counts", {}) if isinstance(snapshot, dict) else {}
+            waiting_count = int(counts.get("waiting", 0) or 0)
+        except Exception as exc:
+            logger.warning("[BatchHandler] Summer Coupang queue check failed: %s", exc)
+            return False
+
+        if waiting_count <= 0:
+            return False
+
+        existing_thread = getattr(self.app, "batch_thread", None)
+        if existing_thread and existing_thread.is_alive():
+            show_warning(self.app, "경고", "이미 작업이 진행 중입니다.")
+            return True
+
+        self.app.batch_processing = True
+        self.app.dynamic_processing = False
+        self.app.add_log(
+            f"[Summer Coupang] 예약 큐 {waiting_count}건 감지 - 첫 대기 상품을 즉시 실행합니다."
+        )
+
+        start_btn = getattr(self.app, "start_batch_button", None)
+        stop_btn = getattr(self.app, "stop_batch_button", None)
+        if start_btn is not None:
+            self._reset_start_button_style(start_btn)
+            start_btn.setEnabled(False)
+        if stop_btn is not None:
+            stop_btn.setEnabled(False)
+
+        thread = threading.Thread(
+            target=self._summer_coupang_queue_now_wrapper,
+            daemon=True,
+        )
+        self.app.batch_thread = thread
+        thread.start()
+        return True
+
+    def _summer_coupang_queue_now_wrapper(self) -> None:
+        repo_root = Path(__file__).resolve().parents[1]
+        script = repo_root / "scripts" / "run_summer_coupang_queue_once.py"
+        command = [sys.executable, str(script), "--run-now"]
+        try:
+            completed = subprocess.run(
+                command,
+                cwd=str(repo_root),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=60 * 60,
+            )
+            output = (completed.stdout or "").strip()
+            summary = self._extract_json_summary(output)
+            if summary:
+                planned = summary.get("planned_number") or "-"
+                status = summary.get("status") or summary.get("reason") or "-"
+                youtube_url = summary.get("youtube_url") or ""
+                self.app.add_log(f"[Summer Coupang] 즉시 실행 완료: {planned} / {status}")
+                if youtube_url:
+                    self.app.add_log(f"[Summer Coupang] YouTube: {youtube_url}")
+            else:
+                tail = output[-800:] if output else (completed.stderr or "")[-800:]
+                self.app.add_log(f"[Summer Coupang] 즉시 실행 결과: {tail}")
+
+            if completed.returncode != 0:
+                self.app.add_log(
+                    f"[Summer Coupang] 즉시 실행 종료 코드 {completed.returncode}: "
+                    f"{(completed.stderr or '').strip()[-800:]}"
+                )
+        except subprocess.TimeoutExpired:
+            self.app.add_log("[Summer Coupang] 즉시 실행이 60분을 초과해 중단되었습니다.")
+            logger.warning("[BatchHandler] Summer Coupang run-now timed out")
+        except Exception as exc:
+            self.app.add_log(f"[Summer Coupang] 즉시 실행 실패: {exc}")
+            logger.error("[BatchHandler] Summer Coupang run-now failed: %s", exc, exc_info=True)
+        finally:
+            QTimer.singleShot(0, self._reset_summer_coupang_manual_ui)
+
+    @staticmethod
+    def _extract_json_summary(output: str):
+        text = (output or "").strip()
+        if not text:
+            return {}
+        start = text.rfind("\n{")
+        if start >= 0:
+            text = text[start + 1 :]
+        else:
+            start = text.find("{")
+            if start > 0:
+                text = text[start:]
+        try:
+            return json.loads(text)
+        except Exception:
+            return {}
+
+    def _reset_summer_coupang_manual_ui(self) -> None:
+        self.app.batch_processing = False
+        self.app.dynamic_processing = False
+        start_btn = getattr(self.app, "start_batch_button", None)
+        if start_btn is not None:
+            start_btn.setEnabled(True)
+            self._reset_start_button_style(start_btn)
+        try:
+            if hasattr(self.app, "update_url_listbox"):
+                self.app.update_url_listbox()
+            elif getattr(self.app, "queue_manager", None) is not None:
+                self.app.queue_manager.update_url_listbox()
+        except Exception as exc:
+            logger.warning("[BatchHandler] Summer Coupang UI refresh failed: %s", exc)
+
     def start_batch_processing(self):
         """배치 처리 시작 - 동적 URL 처리 지원 (중복 실행 방지)"""
         # 이미 실행 중인 스레드가 있는지 확인
@@ -72,6 +190,8 @@ class BatchHandler:
             return
 
         if not self.app.url_queue:
+            if self._start_summer_coupang_queue_now():
+                return
             show_warning(self.app, "경고", "처리할 URL이 없습니다.")
             return
 

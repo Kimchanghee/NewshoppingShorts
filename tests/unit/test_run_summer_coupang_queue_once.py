@@ -200,6 +200,44 @@ def test_process_pending_items_force_run_now_processes_future_item(monkeypatch, 
     assert payload["items"][0]["attempts"] == 1
 
 
+def test_realign_pending_schedule_after_run_now_preserves_four_hour_cadence():
+    payload = {
+        "automation_policy": {"interval_minutes": 240},
+        "items": [
+            {
+                "planned_number": "[141]",
+                "status": "completed",
+                "scheduled_at": "2026-06-25T12:27:27+09:00",
+            },
+            {
+                "planned_number": "[142]",
+                "status": "pending",
+                "scheduled_at": "2026-06-25T16:27:27+09:00",
+            },
+            {
+                "planned_number": "[143]",
+                "status": "pending",
+                "scheduled_at": "2026-06-25T20:27:27+09:00",
+            },
+        ],
+    }
+
+    result = queue_runner.realign_pending_schedule_after_run_now(
+        payload,
+        base_time=datetime(2026, 6, 25, 0, 26, 0, tzinfo=timezone.utc),
+    )
+
+    assert result == {
+        "rescheduled_count": 2,
+        "next_scheduled_at": "2026-06-25T04:26:00+00:00",
+        "interval_minutes": 240,
+    }
+    assert payload["items"][0]["scheduled_at"] == "2026-06-25T12:27:27+09:00"
+    assert payload["items"][1]["scheduled_at"] == "2026-06-25T04:26:00+00:00"
+    assert payload["items"][2]["scheduled_at"] == "2026-06-25T08:26:00+00:00"
+    assert payload["items"][1]["scheduled_interval_minutes"] == 240
+
+
 def test_process_pending_items_continues_after_product_not_found_skip(monkeypatch, tmp_path):
     payload = {
         "automation_policy": {

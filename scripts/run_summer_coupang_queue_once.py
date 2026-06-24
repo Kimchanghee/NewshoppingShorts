@@ -8,7 +8,7 @@ import re
 import sys
 import time
 from copy import deepcopy
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -39,6 +39,7 @@ QUEUE_PATH = Path(r"C:\Users\HOME\.ssmaker\summer_coupang_autosourcing_queue_202
 DEFAULT_MIN_SIMILARITY = 0.9
 DEFAULT_MAX_CANDIDATE_ITEMS_PER_RUN = 50
 DEFAULT_CONTINUE_AFTER_SKIP_UNTIL_COMPLETED = True
+DEFAULT_SCHEDULE_INTERVAL_MINUTES = 240
 MIN_FINAL_VIDEO_SECONDS = 8.0
 MAX_FINAL_VIDEO_SECONDS = 60.0
 MIN_FINAL_VIDEO_BYTES = 1_000_000
@@ -287,6 +288,50 @@ def youtube_upload_required_item_count(queue_payload: Dict[str, Any]) -> int:
         for item in items
         if is_processable_queue_item(item) and not is_linktree_retry_item(item)
     )
+
+
+def queue_interval_minutes(queue_payload: Dict[str, Any]) -> int:
+    policy = queue_payload.get("automation_policy") if isinstance(queue_payload.get("automation_policy"), dict) else {}
+    candidates: List[Any] = [policy.get("interval_minutes"), policy.get("scheduled_interval_minutes")]
+    items = queue_payload.get("items") if isinstance(queue_payload.get("items"), list) else []
+    candidates.extend(item.get("scheduled_interval_minutes") for item in items if isinstance(item, dict))
+    for raw in candidates:
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if value > 0:
+            return value
+    return DEFAULT_SCHEDULE_INTERVAL_MINUTES
+
+
+def realign_pending_schedule_after_run_now(
+    queue_payload: Dict[str, Any],
+    *,
+    base_time: Optional[datetime] = None,
+) -> Dict[str, Any]:
+    items = queue_payload.get("items") if isinstance(queue_payload.get("items"), list) else []
+    pending = [item for item in items if isinstance(item, dict) and is_processable_queue_item(item)]
+    if not pending:
+        return {"rescheduled_count": 0, "next_scheduled_at": ""}
+
+    interval = queue_interval_minutes(queue_payload)
+    now = base_time or now_datetime()
+    pending.sort(
+        key=lambda item: (
+            parse_scheduled_datetime(item.get("scheduled_at")) or datetime.max.replace(tzinfo=now.tzinfo),
+            int(item.get("scheduled_order") or 999999),
+        )
+    )
+    for offset, item in enumerate(pending, start=1):
+        scheduled_at = now + timedelta(minutes=interval * offset)
+        item["scheduled_at"] = scheduled_at.isoformat(timespec="seconds")
+        item["scheduled_interval_minutes"] = interval
+    return {
+        "rescheduled_count": len(pending),
+        "next_scheduled_at": str(pending[0].get("scheduled_at") or ""),
+        "interval_minutes": interval,
+    }
 
 
 def extract_result_youtube_url(result: Dict[str, Any]) -> str:
@@ -1526,6 +1571,13 @@ def main(argv: Optional[List[str]] = None) -> int:
             return 0
 
     summary = asyncio.run(process_pending_items(queue_payload, force_run_now=args.run_now or None))
+    if args.run_now and summary.get("processed"):
+        schedule_update = realign_pending_schedule_after_run_now(queue_payload)
+        if schedule_update.get("rescheduled_count"):
+            save_queue(queue_payload)
+            summary["rescheduled_pending_count"] = schedule_update["rescheduled_count"]
+            summary["next_scheduled_at"] = schedule_update["next_scheduled_at"]
+            summary["interval_minutes"] = schedule_update["interval_minutes"]
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
     if summary.get("status") in SUCCESS_FINAL_STATUSES:
         return 0
