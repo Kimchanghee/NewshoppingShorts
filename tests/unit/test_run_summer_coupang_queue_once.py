@@ -70,7 +70,7 @@ def test_youtube_preflight_block_does_not_consume_pending(monkeypatch, capsys):
     )
     monkeypatch.setattr(queue_runner, "process_pending_items", fail_if_called)
 
-    assert queue_runner.main() == 0
+    assert queue_runner.main() == 1
     output = json.loads(capsys.readouterr().out)
 
     assert output["processed"] is False
@@ -109,7 +109,7 @@ def test_linktree_preflight_block_does_not_consume_pending(monkeypatch, capsys):
     monkeypatch.setattr(queue_runner, "youtube_upload_ready", fail_youtube_preflight)
     monkeypatch.setattr(queue_runner, "process_pending_items", fail_if_called)
 
-    assert queue_runner.main() == 0
+    assert queue_runner.main() == 1
     output = json.loads(capsys.readouterr().out)
 
     assert output["processed"] is False
@@ -120,6 +120,133 @@ def test_linktree_preflight_block_does_not_consume_pending(monkeypatch, capsys):
     assert payload["items"][0]["attempts"] == 0
     assert payload["items"][1]["status"] == "pending"
     assert payload["items"][1]["attempts"] == 1
+
+
+def test_gemini_preflight_block_does_not_consume_due_pending(monkeypatch, capsys):
+    payload = {
+        "items": [
+            {
+                "planned_number": "[146]",
+                "product_name": "pool tube",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-18T04:00:00+09:00",
+                "result": {},
+            }
+        ]
+    }
+    preflight_calls = []
+
+    def fail_if_called(_payload, **_kwargs):
+        raise AssertionError("pending queue must not be processed when all Gemini keys are invalid")
+
+    def fake_gemini_preflight(*, pending_count, next_item):
+        preflight_calls.append((pending_count, next_item["planned_number"]))
+        return {
+            "ok": False,
+            "reason": "gemini_api_keys_unavailable",
+            "blocking_reason": "All configured Gemini API keys were rejected.",
+            "alert_path": "C:/Users/HOME/.ssmaker/alerts/summer_coupang_gemini_api_key_alert.json",
+            "popup_launched": True,
+            "invalid_aliases": [{"alias": "api_1", "google_status": "INVALID_ARGUMENT"}],
+            "missing_aliases": ["api_2"],
+        }
+
+    monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
+    monkeypatch.setattr(queue_runner, "linktree_publish_ready", lambda: {"ok": True})
+    monkeypatch.setattr(queue_runner, "youtube_upload_ready", lambda: {"ok": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 18, 7, 26, 26, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "gemini_api_key_preflight_ready", fake_gemini_preflight)
+    monkeypatch.setattr(queue_runner, "process_pending_items", fail_if_called)
+
+    assert queue_runner.main() == 1
+    output = json.loads(capsys.readouterr().out)
+
+    assert preflight_calls == [(1, "[146]")]
+    assert output["processed"] is False
+    assert output["reason"] == "gemini_api_keys_unavailable"
+    assert output["pending_count"] == 1
+    assert output["next_planned_number"] == "[146]"
+    assert output["popup_launched"] is True
+    assert payload["items"][0]["status"] == "pending"
+    assert payload["items"][0]["attempts"] == 0
+
+
+def test_gemini_preflight_skips_future_scheduled_items(monkeypatch, capsys):
+    payload = {
+        "items": [
+            {
+                "planned_number": "[146]",
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-06-18T20:26:26+09:00",
+                "result": {},
+            }
+        ]
+    }
+
+    def fail_gemini_preflight(**_kwargs):
+        raise AssertionError("Gemini preflight must not run before an item is due")
+
+    monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
+    monkeypatch.setattr(queue_runner, "linktree_publish_ready", lambda: {"ok": True})
+    monkeypatch.setattr(queue_runner, "youtube_upload_ready", lambda: {"ok": True})
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 18, 7, 26, 26, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "gemini_api_key_preflight_ready", fail_gemini_preflight)
+
+    assert queue_runner.main() == 0
+    output = json.loads(capsys.readouterr().out)
+
+    assert output["processed"] is False
+    assert output["reason"] == "no_due_items"
+    assert payload["items"][0]["status"] == "pending"
+    assert payload["items"][0]["attempts"] == 0
+
+
+def test_gemini_alert_uses_branded_dialog_before_windows_fallback(monkeypatch, tmp_path):
+    alert_path = tmp_path / "summer_coupang_gemini_api_key_alert.json"
+    launched_paths = []
+
+    def fake_branded_launcher(path):
+        launched_paths.append(path)
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        assert payload["popup_launched"] is False
+        assert payload["preflight"]["reason"] == "gemini_api_keys_unavailable"
+        return True
+
+    def fail_windows_fallback(_title, _message):
+        raise AssertionError("Windows MessageBox fallback should not run when branded dialog launches")
+
+    monkeypatch.setattr(queue_runner, "GEMINI_KEY_ALERT_PATH", alert_path)
+    monkeypatch.setattr(queue_runner, "_launch_branded_gemini_key_alert", fake_branded_launcher)
+    monkeypatch.setattr(queue_runner, "_launch_windows_message_box", fail_windows_fallback)
+
+    alert = queue_runner.maybe_show_gemini_key_alert(
+        {
+            "ok": False,
+            "reason": "gemini_api_keys_unavailable",
+            "blocking_reason": "All configured Gemini API keys were rejected.",
+            "invalid_aliases": [{"alias": "api_1", "google_status": "INVALID_ARGUMENT"}],
+            "missing_aliases": ["api_2"],
+        },
+        pending_count=1,
+        next_item={"planned_number": "[148]", "product_name": "water gun"},
+    )
+
+    payload = json.loads(alert_path.read_text(encoding="utf-8"))
+    assert launched_paths == [alert_path]
+    assert alert["popup_launched"] is True
+    assert payload["popup_launched"] is True
+    assert payload["next_planned_number"] == "[148]"
+    assert payload["next_product_name"] == "water gun"
 
 
 def test_process_pending_items_skips_items_scheduled_for_later(monkeypatch):
@@ -1228,6 +1355,11 @@ def test_main_returns_success_for_policy_skip(monkeypatch, capsys):
         queue_runner,
         "youtube_upload_ready",
         lambda: {"ok": True},
+    )
+    monkeypatch.setattr(
+        queue_runner,
+        "gemini_api_key_preflight_ready",
+        lambda **_kwargs: {"ok": True},
     )
     monkeypatch.setattr(queue_runner, "process_pending_items", policy_skip)
 

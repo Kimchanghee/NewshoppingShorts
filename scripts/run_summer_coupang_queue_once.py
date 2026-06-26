@@ -2,9 +2,11 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib.util
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from copy import deepcopy
@@ -45,6 +47,11 @@ MAX_FINAL_VIDEO_SECONDS = 60.0
 MIN_FINAL_VIDEO_BYTES = 1_000_000
 FORCE_RUN_NOW_ENV = "SSMAKER_SUMMER_COUPANG_RUN_NOW"
 AUTOMATION_LABEL = "summer_coupang_queue"
+GEMINI_KEY_PREFLIGHT_ENV = "SSMAKER_GEMINI_KEY_PREFLIGHT"
+GEMINI_KEY_ALERT_THROTTLE_SECONDS_ENV = "SSMAKER_GEMINI_KEY_ALERT_THROTTLE_SECONDS"
+GEMINI_KEY_ALERT_PATH = Path.home() / ".ssmaker" / "alerts" / "summer_coupang_gemini_api_key_alert.json"
+GEMINI_KEY_ALERT_DIALOG_SCRIPT = ROOT / "scripts" / "show_summer_coupang_gemini_alert.py"
+GEMINI_MODELS_PROBE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 LINKTREE_PUBLIC_VERIFY_ATTEMPTS_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_ATTEMPTS"
 LINKTREE_PUBLIC_VERIFY_INTERVAL_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS"
 DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS = 6
@@ -508,6 +515,338 @@ def load_queue() -> Dict[str, Any]:
 
 def save_queue(payload: Dict[str, Any]) -> None:
     QUEUE_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def due_upload_required_items(
+    queue_payload: Dict[str, Any],
+    *,
+    force_run_now: Optional[bool] = None,
+) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = queue_payload.get("items") or []
+    pending = [
+        item
+        for item in items
+        if is_processable_queue_item(item) and not is_linktree_retry_item(item)
+    ]
+    if not pending:
+        return []
+
+    run_now = force_run_now_enabled() if force_run_now is None else bool(force_run_now)
+    if run_now:
+        return [pending[0]]
+
+    now = now_datetime()
+    return [item for item in pending if is_item_due(item, now=now)]
+
+
+def gemini_key_preflight_enabled() -> bool:
+    raw = str(os.environ.get(GEMINI_KEY_PREFLIGHT_ENV, "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _google_error_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
+    error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
+    details = error.get("details") if isinstance(error.get("details"), list) else []
+    reasons = []
+    for detail in details:
+        if not isinstance(detail, dict):
+            continue
+        reason = str(detail.get("reason") or "").strip()
+        domain = str(detail.get("domain") or "").strip()
+        if reason or domain:
+            reasons.append({"reason": reason, "domain": domain})
+    return {
+        "google_status": str(error.get("status") or "").strip(),
+        "google_code": error.get("code"),
+        "message_summary": str(error.get("message") or "").strip()[:180],
+        "details": reasons,
+    }
+
+
+def probe_configured_gemini_api_keys(timeout_seconds: float = 15.0) -> Dict[str, Any]:
+    try:
+        import requests
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": "gemini_preflight_unavailable",
+            "blocking_reason": f"Cannot import requests for Gemini API key preflight: {exc}",
+            "valid_aliases": [],
+            "invalid_aliases": [],
+            "missing_aliases": [],
+        }
+
+    try:
+        manager = ApiKeyManager.APIKeyManager(use_secrets_manager=True)
+        api_keys = dict(getattr(manager, "api_keys", {}) or {})
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": "gemini_preflight_unavailable",
+            "blocking_reason": f"Cannot load Gemini API keys: {exc}",
+            "valid_aliases": [],
+            "invalid_aliases": [],
+            "missing_aliases": [],
+        }
+
+    valid_aliases: List[str] = []
+    invalid_aliases: List[Dict[str, Any]] = []
+    missing_aliases = [
+        f"api_{idx}"
+        for idx in range(1, ApiKeyManager.APIKeyManager.MAX_KEYS + 1)
+        if f"api_{idx}" not in api_keys
+    ]
+
+    for alias, key_value in sorted(api_keys.items()):
+        if not str(key_value or "").strip():
+            missing_aliases.append(alias)
+            continue
+        try:
+            response = requests.get(
+                GEMINI_MODELS_PROBE_URL,
+                params={"key": key_value},
+                timeout=timeout_seconds,
+            )
+            if response.status_code == 200:
+                valid_aliases.append(alias)
+                continue
+            try:
+                payload = response.json()
+            except Exception:
+                payload = {}
+            invalid_aliases.append(
+                {
+                    "alias": alias,
+                    "http_status": response.status_code,
+                    **_google_error_summary(payload),
+                }
+            )
+        except Exception as exc:
+            invalid_aliases.append(
+                {
+                    "alias": alias,
+                    "http_status": 0,
+                    "google_status": "probe_error",
+                    "message_summary": f"{type(exc).__name__}: {exc}"[:180],
+                    "details": [],
+                }
+            )
+
+    if valid_aliases:
+        return {
+            "ok": True,
+            "reason": "gemini_api_key_available",
+            "valid_aliases": valid_aliases,
+            "invalid_aliases": invalid_aliases,
+            "missing_aliases": sorted(set(missing_aliases)),
+        }
+
+    reason = "gemini_api_keys_missing" if not api_keys else "gemini_api_keys_unavailable"
+    blocking_reason = (
+        "No Gemini API keys are configured."
+        if not api_keys
+        else "All configured Gemini API keys were rejected by Google Generative Language API."
+    )
+    return {
+        "ok": False,
+        "reason": reason,
+        "blocking_reason": blocking_reason,
+        "valid_aliases": valid_aliases,
+        "invalid_aliases": invalid_aliases,
+        "missing_aliases": sorted(set(missing_aliases)),
+    }
+
+
+def _gemini_key_alert_signature(preflight: Dict[str, Any]) -> str:
+    return json.dumps(
+        {
+            "reason": preflight.get("reason"),
+            "invalid_aliases": preflight.get("invalid_aliases", []),
+            "missing_aliases": preflight.get("missing_aliases", []),
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+    )
+
+
+def _gemini_key_alert_message(
+    preflight: Dict[str, Any],
+    *,
+    pending_count: int,
+    next_item: Optional[Dict[str, Any]] = None,
+) -> str:
+    invalid = preflight.get("invalid_aliases") if isinstance(preflight.get("invalid_aliases"), list) else []
+    invalid_parts = []
+    for item in invalid:
+        if not isinstance(item, dict):
+            continue
+        alias = str(item.get("alias") or "unknown")
+        status = str(item.get("google_status") or item.get("http_status") or "rejected")
+        message = str(item.get("message_summary") or "").strip()
+        invalid_parts.append(f"{alias}: {status} {message}".strip())
+    invalid_text = "\n".join(invalid_parts) if invalid_parts else "(none)"
+    next_number = str((next_item or {}).get("planned_number") or "").strip() or "(unknown)"
+    next_name = str((next_item or {}).get("product_name") or "").strip()
+    next_line = f"{next_number} {next_name}".strip()
+    return (
+        "Summer Coupang automation stopped before consuming the next queue item.\n\n"
+        f"Reason: {preflight.get('blocking_reason') or preflight.get('reason')}\n"
+        f"Next item: {next_line}\n"
+        f"Pending items: {pending_count}\n\n"
+        "Rejected Gemini keys:\n"
+        f"{invalid_text}\n\n"
+        "Open Settings > Gemini API keys and replace the invalid key(s), then run the queue again."
+    )
+
+
+def _launch_windows_message_box(title: str, message: str) -> bool:
+    if os.name != "nt":
+        return False
+    try:
+        ps_title = title.replace("'", "''")
+        ps_message = message.replace("'", "''")
+        command = (
+            "Add-Type -AssemblyName PresentationFramework; "
+            f"[System.Windows.MessageBox]::Show('{ps_message}', '{ps_title}', 'OK', 'Warning') | Out-Null"
+        )
+        subprocess.Popen(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                command,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _launch_branded_gemini_key_alert(alert_path: Path) -> bool:
+    if os.name != "nt":
+        return False
+    if not GEMINI_KEY_ALERT_DIALOG_SCRIPT.exists():
+        return False
+    if importlib.util.find_spec("PyQt6") is None:
+        return False
+    try:
+        env = os.environ.copy()
+        env["QT_QPA_PLATFORM"] = "windows"
+        subprocess.Popen(
+            [
+                sys.executable,
+                str(GEMINI_KEY_ALERT_DIALOG_SCRIPT),
+                "--alert-json",
+                str(alert_path),
+            ],
+            cwd=str(ROOT),
+            env=env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return True
+    except Exception:
+        return False
+
+
+def _launch_gemini_key_alert(alert_path: Path, title: str, message: str) -> bool:
+    return _launch_branded_gemini_key_alert(alert_path) or _launch_windows_message_box(title, message)
+
+
+def maybe_show_gemini_key_alert(
+    preflight: Dict[str, Any],
+    *,
+    pending_count: int,
+    next_item: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    now_ts = time.time()
+    try:
+        throttle_seconds = int(os.environ.get(GEMINI_KEY_ALERT_THROTTLE_SECONDS_ENV, "43200"))
+    except ValueError:
+        throttle_seconds = 43200
+    signature = _gemini_key_alert_signature(preflight)
+    previous: Dict[str, Any] = {}
+    if GEMINI_KEY_ALERT_PATH.exists():
+        try:
+            previous = json.loads(GEMINI_KEY_ALERT_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            previous = {}
+
+    last_popup_at = float(previous.get("last_popup_at") or 0)
+    popup_throttled = (
+        previous.get("signature") == signature
+        and throttle_seconds > 0
+        and now_ts - last_popup_at < throttle_seconds
+    )
+    message = _gemini_key_alert_message(
+        preflight,
+        pending_count=pending_count,
+        next_item=next_item,
+    )
+    popup_launched = False
+
+    payload = {
+        "updated_at": now_local(),
+        "signature": signature,
+        "last_popup_at": last_popup_at,
+        "popup_launched": popup_launched,
+        "popup_throttled": popup_throttled,
+        "pending_count": pending_count,
+        "next_planned_number": str((next_item or {}).get("planned_number") or ""),
+        "next_product_name": str((next_item or {}).get("product_name") or ""),
+        "preflight": preflight,
+        "message": message,
+    }
+    GEMINI_KEY_ALERT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GEMINI_KEY_ALERT_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    if not popup_throttled:
+        popup_launched = _launch_gemini_key_alert(
+            GEMINI_KEY_ALERT_PATH,
+            "SSMaker Gemini API key error",
+            message,
+        )
+        last_popup_at = now_ts if popup_launched else last_popup_at
+        payload["popup_launched"] = popup_launched
+        payload["last_popup_at"] = last_popup_at
+        GEMINI_KEY_ALERT_PATH.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2),
+            encoding="utf-8",
+        )
+    return payload
+
+
+def gemini_api_key_preflight_ready(
+    *,
+    pending_count: int,
+    next_item: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    if not gemini_key_preflight_enabled():
+        return {"ok": True, "reason": "gemini_preflight_disabled"}
+    preflight = probe_configured_gemini_api_keys()
+    if preflight.get("ok"):
+        return preflight
+    alert = maybe_show_gemini_key_alert(
+        preflight,
+        pending_count=pending_count,
+        next_item=next_item,
+    )
+    return {
+        **preflight,
+        "alert_path": str(GEMINI_KEY_ALERT_PATH),
+        "popup_launched": bool(alert.get("popup_launched")),
+        "popup_throttled": bool(alert.get("popup_throttled")),
+    }
 
 
 def parse_upload_number(raw: Any) -> Optional[int]:
@@ -1551,7 +1890,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ),
                 flush=True,
             )
-            return 0
+            return 1
 
         youtube_state = youtube_upload_ready()
         if not youtube_state.get("ok"):
@@ -1568,7 +1907,39 @@ def main(argv: Optional[List[str]] = None) -> int:
                 ),
                 flush=True,
             )
-            return 0
+            return 1
+
+        due_upload_items = due_upload_required_items(
+            queue_payload,
+            force_run_now=args.run_now or None,
+        )
+        if due_upload_items:
+            gemini_state = gemini_api_key_preflight_ready(
+                pending_count=pending_count,
+                next_item=due_upload_items[0],
+            )
+            if not gemini_state.get("ok"):
+                print(
+                    json.dumps(
+                        {
+                            "processed": False,
+                            "reason": gemini_state.get("reason", "gemini_api_keys_unavailable"),
+                            "pending_count": pending_count,
+                            "next_planned_number": due_upload_items[0].get("planned_number", ""),
+                            "blocking_reason": gemini_state.get("blocking_reason", ""),
+                            "alert_path": gemini_state.get("alert_path", ""),
+                            "popup_launched": gemini_state.get("popup_launched", False),
+                            "popup_throttled": gemini_state.get("popup_throttled", False),
+                            "valid_aliases": gemini_state.get("valid_aliases", []),
+                            "invalid_aliases": gemini_state.get("invalid_aliases", []),
+                            "missing_aliases": gemini_state.get("missing_aliases", []),
+                        },
+                        ensure_ascii=False,
+                        indent=2,
+                    ),
+                    flush=True,
+                )
+                return 1
 
     summary = asyncio.run(process_pending_items(queue_payload, force_run_now=args.run_now or None))
     if args.run_now and summary.get("processed"):
