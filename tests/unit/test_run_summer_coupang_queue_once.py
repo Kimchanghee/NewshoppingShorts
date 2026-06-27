@@ -144,7 +144,7 @@ def test_gemini_preflight_block_does_not_consume_due_pending(monkeypatch, capsys
         preflight_calls.append((pending_count, next_item["planned_number"]))
         return {
             "ok": False,
-            "reason": "gemini_api_keys_unavailable",
+            "reason": "gemini_api_keys_rejected",
             "blocking_reason": "All configured Gemini API keys were rejected.",
             "alert_path": "C:/Users/HOME/.ssmaker/alerts/summer_coupang_gemini_api_key_alert.json",
             "popup_launched": True,
@@ -168,7 +168,7 @@ def test_gemini_preflight_block_does_not_consume_due_pending(monkeypatch, capsys
 
     assert preflight_calls == [(1, "[146]")]
     assert output["processed"] is False
-    assert output["reason"] == "gemini_api_keys_unavailable"
+    assert output["reason"] == "gemini_api_keys_rejected"
     assert output["pending_count"] == 1
     assert output["next_planned_number"] == "[146]"
     assert output["popup_launched"] is True
@@ -219,7 +219,7 @@ def test_gemini_alert_uses_branded_dialog_before_windows_fallback(monkeypatch, t
         launched_paths.append(path)
         payload = json.loads(path.read_text(encoding="utf-8"))
         assert payload["popup_launched"] is False
-        assert payload["preflight"]["reason"] == "gemini_api_keys_unavailable"
+        assert payload["preflight"]["reason"] == "gemini_api_keys_rejected"
         return True
 
     def fail_windows_fallback(_title, _message):
@@ -232,7 +232,7 @@ def test_gemini_alert_uses_branded_dialog_before_windows_fallback(monkeypatch, t
     alert = queue_runner.maybe_show_gemini_key_alert(
         {
             "ok": False,
-            "reason": "gemini_api_keys_unavailable",
+            "reason": "gemini_api_keys_rejected",
             "blocking_reason": "All configured Gemini API keys were rejected.",
             "invalid_aliases": [{"alias": "api_1", "google_status": "INVALID_ARGUMENT"}],
             "missing_aliases": ["api_2"],

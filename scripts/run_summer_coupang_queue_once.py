@@ -641,7 +641,7 @@ def probe_configured_gemini_api_keys(timeout_seconds: float = 15.0) -> Dict[str,
             "missing_aliases": sorted(set(missing_aliases)),
         }
 
-    reason = "gemini_api_keys_missing" if not api_keys else "gemini_api_keys_unavailable"
+    reason = "gemini_api_keys_missing" if not api_keys else "gemini_api_keys_rejected"
     blocking_reason = (
         "No Gemini API keys are configured."
         if not api_keys
@@ -684,7 +684,17 @@ def _gemini_key_alert_message(
         status = str(item.get("google_status") or item.get("http_status") or "rejected")
         message = str(item.get("message_summary") or "").strip()
         invalid_parts.append(f"{alias}: {status} {message}".strip())
-    invalid_text = "\n".join(invalid_parts) if invalid_parts else "(none)"
+    invalid_text = "\n".join(invalid_parts) if invalid_parts else "(no configured key was rejected)"
+    missing = preflight.get("missing_aliases") if isinstance(preflight.get("missing_aliases"), list) else []
+    configured_count = len(preflight.get("valid_aliases") or []) + len(invalid_parts)
+    if configured_count <= 0:
+        key_section_title = "Configured Gemini keys:"
+        key_section = "No Gemini API keys are stored. Add at least one key in Settings, then run the queue again."
+    else:
+        key_section_title = "Rejected configured Gemini keys:"
+        key_section = invalid_text
+        if missing:
+            key_section += "\n\nEmpty key slots are unused capacity, not a failure."
     next_number = str((next_item or {}).get("planned_number") or "").strip() or "(unknown)"
     next_name = str((next_item or {}).get("product_name") or "").strip()
     next_line = f"{next_number} {next_name}".strip()
@@ -693,9 +703,9 @@ def _gemini_key_alert_message(
         f"Reason: {preflight.get('blocking_reason') or preflight.get('reason')}\n"
         f"Next item: {next_line}\n"
         f"Pending items: {pending_count}\n\n"
-        "Rejected Gemini keys:\n"
-        f"{invalid_text}\n\n"
-        "Open Settings > Gemini API keys and replace the invalid key(s), then run the queue again."
+        f"{key_section_title}\n"
+        f"{key_section}\n\n"
+        "Open Settings > Gemini API keys, add or replace the configured key(s), then run the queue again."
     )
 
 
@@ -826,6 +836,23 @@ def maybe_show_gemini_key_alert(
     return payload
 
 
+def mark_gemini_key_alert_resolved(preflight: Dict[str, Any]) -> None:
+    if not GEMINI_KEY_ALERT_PATH.exists():
+        return
+    payload = {
+        "updated_at": now_local(),
+        "resolved_at": now_local(),
+        "reason": "gemini_api_key_available",
+        "valid_aliases": preflight.get("valid_aliases", []),
+        "missing_aliases": preflight.get("missing_aliases", []),
+        "message": "Gemini API key preflight is now passing.",
+    }
+    GEMINI_KEY_ALERT_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+
+
 def gemini_api_key_preflight_ready(
     *,
     pending_count: int,
@@ -835,6 +862,7 @@ def gemini_api_key_preflight_ready(
         return {"ok": True, "reason": "gemini_preflight_disabled"}
     preflight = probe_configured_gemini_api_keys()
     if preflight.get("ok"):
+        mark_gemini_key_alert_resolved(preflight)
         return preflight
     alert = maybe_show_gemini_key_alert(
         preflight,
@@ -1923,7 +1951,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                     json.dumps(
                         {
                             "processed": False,
-                            "reason": gemini_state.get("reason", "gemini_api_keys_unavailable"),
+                            "reason": gemini_state.get("reason", "gemini_api_keys_rejected"),
                             "pending_count": pending_count,
                             "next_planned_number": due_upload_items[0].get("planned_number", ""),
                             "blocking_reason": gemini_state.get("blocking_reason", ""),

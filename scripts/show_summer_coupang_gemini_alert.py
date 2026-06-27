@@ -177,15 +177,18 @@ class GeminiKeyAlertDialog(QDialog):
         layout.addWidget(title)
 
         invalid_lines = self._invalid_key_lines()
-        if invalid_lines:
+        configured_count = self._configured_key_count()
+        if configured_count <= 0:
+            layout.addWidget(self._detail_line("저장된 Gemini API 키가 없습니다. 설정에서 키를 추가한 뒤 다시 실행하세요.", c.warning))
+        elif invalid_lines:
             for line in invalid_lines:
                 layout.addWidget(self._detail_line(line, c.error))
         else:
             layout.addWidget(self._detail_line("거절된 키 alias 없음", c.text_secondary))
 
         missing = self._missing_aliases()
-        if missing:
-            layout.addWidget(self._detail_line(f"미설정: {', '.join(missing)}", c.warning))
+        if missing and configured_count > 0:
+            layout.addWidget(self._detail_line(f"빈 슬롯: {', '.join(missing)}", c.text_muted))
 
         note = QLabel("키 원문은 보안상 표시하지 않습니다. 설정 화면에서 해당 alias의 키를 교체한 뒤 큐를 다시 실행하세요.")
         note.setWordWrap(True)
@@ -302,7 +305,15 @@ class GeminiKeyAlertDialog(QDialog):
             reason = preflight.get("blocking_reason") or preflight.get("reason")
             if reason:
                 return str(reason)
-        return str(self.payload.get("reason") or "gemini_api_keys_unavailable")
+        return str(self.payload.get("reason") or "gemini_api_keys_rejected")
+
+    def _configured_key_count(self) -> int:
+        preflight = self.payload.get("preflight")
+        if not isinstance(preflight, dict):
+            return 0
+        valid = preflight.get("valid_aliases") if isinstance(preflight.get("valid_aliases"), list) else []
+        invalid = preflight.get("invalid_aliases") if isinstance(preflight.get("invalid_aliases"), list) else []
+        return len(valid) + len(invalid)
 
     def _invalid_key_lines(self) -> List[str]:
         preflight = self.payload.get("preflight")

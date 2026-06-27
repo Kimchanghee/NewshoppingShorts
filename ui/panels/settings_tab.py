@@ -4169,7 +4169,14 @@ class SettingsTab(QWidget, ThemedMixin):
         for i, key_input in enumerate(self.api_key_inputs):
             key_value = key_input.text().strip()
             if not key_value:
-                continue
+                slot = i + 1
+                key_value = str(SecretsManager.get_api_key(f"gemini_api_{slot}") or "").strip()
+                if not key_value and slot == 1:
+                    key_value = str(SecretsManager.get_api_key("gemini") or "").strip()
+                if key_value and not GEMINI_API_KEY_PATTERN.match(key_value):
+                    key_value = ""
+                if not key_value:
+                    continue
 
             # 키 형식 검증
             if not GEMINI_API_KEY_PATTERN.match(key_value):
@@ -4181,7 +4188,8 @@ class SettingsTab(QWidget, ThemedMixin):
                 # 형식이 잘못돼도 일단 수집하지 않음 (저장하지 않음)
                 continue
 
-            valid_keys.append(key_value)
+            if key_value not in valid_keys:
+                valid_keys.append(key_value)
 
         # 'AQ.' 제한 토큰이 있으면 별도 안내 후 중단
         if restricted_aq_keys:

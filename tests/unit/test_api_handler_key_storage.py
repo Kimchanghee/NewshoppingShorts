@@ -17,19 +17,24 @@ class _FakeApiKeyManager:
         self.api_keys = {}
 
 
-def test_save_api_keys_from_ui_deletes_stale_slots(monkeypatch):
+def test_save_api_keys_from_ui_preserves_existing_slots(monkeypatch):
     app = SimpleNamespace(
-        api_key_entries=[_valid_key("A"), _valid_key("B")],
+        api_key_entries=["", _valid_key("B")],
         api_key_manager=None,
     )
     handler = APIHandler(app)
 
-    monkeypatch.setattr(config, "GEMINI_API_KEYS", {"api_1": "legacy"}, raising=False)
+    existing_key = _valid_key("A")
+    monkeypatch.setattr(config, "GEMINI_API_KEYS", {"api_1": existing_key}, raising=False)
     monkeypatch.setattr("app.api_handler.ApiKeyManager.APIKeyManager", _FakeApiKeyManager)
 
     stored = []
     deleted = []
 
+    def fake_get_api_key(name):
+        return existing_key if name == "gemini_api_1" else ""
+
+    monkeypatch.setattr("app.api_handler.SecretsManager.get_api_key", fake_get_api_key)
     monkeypatch.setattr(
         "app.api_handler.SecretsManager.store_api_key",
         lambda name, value: stored.append((name, value)) or True,
@@ -47,11 +52,9 @@ def test_save_api_keys_from_ui_deletes_stale_slots(monkeypatch):
     handler.save_api_keys_from_ui()
 
     assert [name for name, _ in stored] == ["gemini_api_1", "gemini_api_2"]
-    expected_deleted = {f"gemini_api_{idx}" for idx in range(3, _FakeApiKeyManager.MAX_KEYS + 1)}
-    expected_deleted.add("gemini")
-    assert expected_deleted.issubset(set(deleted))
+    assert deleted == []
     assert config.GEMINI_API_KEYS == {
-        "api_1": _valid_key("A"),
+        "api_1": existing_key,
         "api_2": _valid_key("B"),
     }
     assert isinstance(app.api_key_manager, _FakeApiKeyManager)

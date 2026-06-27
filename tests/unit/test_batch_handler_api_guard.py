@@ -78,3 +78,25 @@ def test_start_batch_processing_runs_summer_coupang_queue_when_url_queue_empty(m
     assert app.batch_processing is True
     assert app.start_batch_button.enabled is False
     assert any("예약 큐 3건" in line for line in logs)
+
+
+def test_summer_coupang_manual_reset_prefers_ui_callback_signal(monkeypatch):
+    emitted = []
+    called = []
+
+    class DummySignal:
+        def emit(self, callback):
+            emitted.append(callback)
+
+    app = SimpleNamespace(ui_callback_signal=DummySignal())
+    handler = BatchHandler(app)
+    monkeypatch.setattr(
+        "app.batch_handler.QTimer.singleShot",
+        lambda _ms, _cb: called.append("qtimer"),
+    )
+
+    callback = object()
+    handler._dispatch_ui_callback(callback)
+
+    assert emitted == [callback]
+    assert called == []

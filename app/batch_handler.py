@@ -147,7 +147,17 @@ class BatchHandler:
             self.app.add_log(f"[Summer Coupang] 즉시 실행 실패: {exc}")
             logger.error("[BatchHandler] Summer Coupang run-now failed: %s", exc, exc_info=True)
         finally:
-            QTimer.singleShot(0, self._reset_summer_coupang_manual_ui)
+            self._dispatch_ui_callback(self._reset_summer_coupang_manual_ui)
+
+    def _dispatch_ui_callback(self, callback) -> None:
+        signal = getattr(self.app, "ui_callback_signal", None)
+        if signal is not None:
+            try:
+                signal.emit(callback)
+                return
+            except Exception as exc:
+                logger.debug("[BatchHandler] ui_callback_signal dispatch failed: %s", exc)
+        QTimer.singleShot(0, callback)
 
     @staticmethod
     def _extract_json_summary(output: str):
