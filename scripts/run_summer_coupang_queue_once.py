@@ -46,6 +46,7 @@ MIN_FINAL_VIDEO_SECONDS = 8.0
 MAX_FINAL_VIDEO_SECONDS = 60.0
 MIN_FINAL_VIDEO_BYTES = 1_000_000
 FORCE_RUN_NOW_ENV = "SSMAKER_SUMMER_COUPANG_RUN_NOW"
+SUMMER_COUPANG_TASK_NAME = "SSMaker Summer Coupang Queue"
 AUTOMATION_LABEL = "summer_coupang_queue"
 GEMINI_KEY_PREFLIGHT_ENV = "SSMAKER_GEMINI_KEY_PREFLIGHT"
 GEMINI_KEY_ALERT_THROTTLE_SECONDS_ENV = "SSMAKER_GEMINI_KEY_ALERT_THROTTLE_SECONDS"
@@ -312,10 +313,40 @@ def queue_interval_minutes(queue_payload: Dict[str, Any]) -> int:
     return DEFAULT_SCHEDULE_INTERVAL_MINUTES
 
 
+def scheduled_task_next_run_time(task_name: str = SUMMER_COUPANG_TASK_NAME) -> Optional[datetime]:
+    if os.name != "nt":
+        return None
+    try:
+        completed = subprocess.run(
+            [
+                "powershell",
+                "-NoProfile",
+                "-Command",
+                f"(Get-ScheduledTaskInfo -TaskName {task_name!r}).NextRunTime.ToString('o')",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception:
+        return None
+    if completed.returncode != 0:
+        return None
+    lines = completed.stdout.strip().splitlines()
+    if not lines:
+        return None
+    try:
+        return datetime.fromisoformat(lines[-1].replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
 def realign_pending_schedule_after_run_now(
     queue_payload: Dict[str, Any],
     *,
     base_time: Optional[datetime] = None,
+    first_scheduled_at: Optional[datetime] = None,
 ) -> Dict[str, Any]:
     items = queue_payload.get("items") if isinstance(queue_payload.get("items"), list) else []
     pending = [item for item in items if isinstance(item, dict) and is_processable_queue_item(item)]
@@ -324,14 +355,15 @@ def realign_pending_schedule_after_run_now(
 
     interval = queue_interval_minutes(queue_payload)
     now = base_time or now_datetime()
+    first_at = first_scheduled_at or (now + timedelta(minutes=interval))
     pending.sort(
         key=lambda item: (
             parse_scheduled_datetime(item.get("scheduled_at")) or datetime.max.replace(tzinfo=now.tzinfo),
             int(item.get("scheduled_order") or 999999),
         )
     )
-    for offset, item in enumerate(pending, start=1):
-        scheduled_at = now + timedelta(minutes=interval * offset)
+    for offset, item in enumerate(pending):
+        scheduled_at = first_at + timedelta(minutes=interval * offset)
         item["scheduled_at"] = scheduled_at.isoformat(timespec="seconds")
         item["scheduled_interval_minutes"] = interval
     return {
@@ -1971,12 +2003,18 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     summary = asyncio.run(process_pending_items(queue_payload, force_run_now=args.run_now or None))
     if args.run_now and summary.get("processed"):
-        schedule_update = realign_pending_schedule_after_run_now(queue_payload)
+        scheduler_next_run = scheduled_task_next_run_time()
+        schedule_update = realign_pending_schedule_after_run_now(
+            queue_payload,
+            first_scheduled_at=scheduler_next_run,
+        )
         if schedule_update.get("rescheduled_count"):
             save_queue(queue_payload)
             summary["rescheduled_pending_count"] = schedule_update["rescheduled_count"]
             summary["next_scheduled_at"] = schedule_update["next_scheduled_at"]
             summary["interval_minutes"] = schedule_update["interval_minutes"]
+            if scheduler_next_run is not None:
+                summary["scheduler_next_run"] = scheduler_next_run.isoformat(timespec="seconds")
     print(json.dumps(summary, ensure_ascii=False, indent=2), flush=True)
     if summary.get("status") in SUCCESS_FINAL_STATUSES:
         return 0

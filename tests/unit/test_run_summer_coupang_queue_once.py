@@ -365,6 +365,38 @@ def test_realign_pending_schedule_after_run_now_preserves_four_hour_cadence():
     assert payload["items"][1]["scheduled_interval_minutes"] == 240
 
 
+def test_realign_pending_schedule_after_run_now_uses_scheduler_next_run():
+    payload = {
+        "automation_policy": {"interval_minutes": 240},
+        "items": [
+            {
+                "planned_number": "[149]",
+                "status": "pending",
+                "scheduled_at": "2026-06-27T13:46:46+09:00",
+            },
+            {
+                "planned_number": "[150]",
+                "status": "pending",
+                "scheduled_at": "2026-06-27T17:46:46+09:00",
+            },
+        ],
+    }
+
+    result = queue_runner.realign_pending_schedule_after_run_now(
+        payload,
+        base_time=datetime(2026, 6, 27, 0, 46, 46, tzinfo=timezone.utc),
+        first_scheduled_at=datetime(2026, 6, 27, 3, 27, 27, tzinfo=timezone.utc),
+    )
+
+    assert result == {
+        "rescheduled_count": 2,
+        "next_scheduled_at": "2026-06-27T03:27:27+00:00",
+        "interval_minutes": 240,
+    }
+    assert payload["items"][0]["scheduled_at"] == "2026-06-27T03:27:27+00:00"
+    assert payload["items"][1]["scheduled_at"] == "2026-06-27T07:27:27+00:00"
+
+
 def test_process_pending_items_continues_after_product_not_found_skip(monkeypatch, tmp_path):
     payload = {
         "automation_policy": {
