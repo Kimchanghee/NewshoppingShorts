@@ -21,6 +21,7 @@ SKIPPED_STATUSES = {
     "skipped_low_similarity",
     "skipped_quality_gate",
     "skipped_duplicate_product",
+    "failed_linktree_publish",
     "skipped",
 }
 SYSTEM_BLOCKER_MARKERS = (
@@ -40,6 +41,7 @@ STATUS_LABELS = {
     "completed": "완료",
     "completed_linktree_blocked": "Linktree 재시도 대기",
     "linktree_retry_pending": "Linktree 재시도 대기",
+    "failed_linktree_publish": "Linktree 실패",
     "skipped_low_similarity": "건너뜀",
     "skipped_quality_gate": "품질보류",
     "skipped_duplicate_product": "중복보류",

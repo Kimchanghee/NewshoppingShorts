@@ -58,6 +58,9 @@ LINKTREE_PUBLIC_VERIFY_INTERVAL_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_INTERVAL_S
 DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS = 6
 DEFAULT_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS = 10.0
 LINKTREE_RETRY_STATUS = "linktree_retry_pending"
+LINKTREE_FAILED_STATUS = "failed_linktree_publish"
+LINKTREE_RETRY_MAX_ATTEMPTS_ENV = "SSMAKER_LINKTREE_RETRY_MAX_ATTEMPTS"
+DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS = 1
 SUCCESS_FINAL_STATUSES = {
     "completed",
 }
@@ -69,6 +72,7 @@ SKIP_STATUSES = {
     "skipped_low_similarity",
     "skipped_quality_gate",
     "skipped_duplicate_product",
+    LINKTREE_FAILED_STATUS,
 }
 PRODUCT_FAMILY_BY_CATEGORY = {
     "cooling_handheld_fan": "fan",
@@ -421,6 +425,24 @@ def linktree_retry_context(item: Dict[str, Any]) -> Dict[str, str]:
 
 def linktree_failure_status(linktree_result: Dict[str, Any]) -> str:
     return "completed" if linktree_result.get("ok") else LINKTREE_RETRY_STATUS
+
+
+def linktree_retry_max_attempts() -> int:
+    return max(
+        1,
+        env_int(
+            LINKTREE_RETRY_MAX_ATTEMPTS_ENV,
+            DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS,
+        ),
+    )
+
+
+def linktree_retry_exhausted(item: Dict[str, Any]) -> bool:
+    try:
+        attempts = int(item.get("attempts") or 0)
+    except (TypeError, ValueError):
+        attempts = 0
+    return attempts >= linktree_retry_max_attempts()
 
 
 def linktree_retry_summary(
@@ -1606,6 +1628,48 @@ async def process_pending_items(
     for item in candidate_items:
         if is_linktree_retry_item(item):
             retry_context = linktree_retry_context(item)
+            if linktree_retry_exhausted(item):
+                max_attempts = linktree_retry_max_attempts()
+                existing_result = item.get("result") if isinstance(item.get("result"), dict) else {}
+                existing_linktree = (
+                    existing_result.get("linktree_result")
+                    if isinstance(existing_result.get("linktree_result"), dict)
+                    else {}
+                )
+                blocking_reason = (
+                    f"Linktree publish failed after {max_attempts} retry attempts; "
+                    "leaving the YouTube upload recorded and moving this item out of the active queue."
+                )
+                linktree_result = {
+                    **existing_linktree,
+                    "ok": False,
+                    "method": str(existing_linktree.get("method") or "retry_exhausted"),
+                    "blocking_reason": blocking_reason,
+                    "retry_exhausted": True,
+                    "max_attempts": max_attempts,
+                }
+                attach_result(
+                    item,
+                    status=LINKTREE_FAILED_STATUS,
+                    render_path=retry_context["render_path"],
+                    youtube_url=retry_context["youtube_url"],
+                    linktree_result=linktree_result,
+                    blocking_reason=blocking_reason,
+                    extra={
+                        "purchase_url": retry_context["purchase_url"],
+                        "linktree_retry_only": True,
+                    },
+                )
+                save_queue(queue_payload)
+                return {
+                    "processed": True,
+                    "status": LINKTREE_FAILED_STATUS,
+                    "planned_number": item.get("planned_number"),
+                    "linktree_ok": False,
+                    "linktree_retry": False,
+                    "blocking_type": "linktree_retry_exhausted",
+                    "blocking_reason": blocking_reason,
+                }
             update_item_attempt(item)
             save_queue(queue_payload)
             if not retry_context["purchase_url"]:

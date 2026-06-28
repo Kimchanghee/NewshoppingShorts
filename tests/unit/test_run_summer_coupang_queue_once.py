@@ -1231,6 +1231,7 @@ def test_process_pending_items_retries_linktree_only_without_youtube_reupload(mo
     monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
     monkeypatch.setattr(queue_runner, "run_sourcing", fail_sourcing)
     monkeypatch.setattr(queue_runner, "upload_verified_render", fail_upload)
+    monkeypatch.setenv(queue_runner.LINKTREE_RETRY_MAX_ATTEMPTS_ENV, "2")
 
     published = {}
 
@@ -1256,6 +1257,57 @@ def test_process_pending_items_retries_linktree_only_without_youtube_reupload(mo
     assert payload["items"][0]["status"] == "completed"
     assert payload["items"][0]["attempts"] == 2
     assert payload["items"][0]["result"]["youtube_url"] == "https://youtu.be/already-uploaded"
+
+
+def test_process_pending_items_exhausts_linktree_retry_without_republishing(monkeypatch):
+    payload = {
+        "items": [
+            {
+                "planned_number": "[149]",
+                "status": queue_runner.LINKTREE_RETRY_STATUS,
+                "attempts": queue_runner.DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS,
+                "scheduled_at": "2026-06-19T00:00:00+00:00",
+                "coupang_url": "https://www.coupang.com/vp/products/1889046462",
+                "product_name": "inflatable swimming ring tube",
+                "result": {
+                    "purchase_url": "https://www.coupang.com/vp/products/1889046462",
+                    "youtube_url": "https://youtu.be/already-uploaded",
+                    "render_path": "C:/tmp/final.mp4",
+                    "linktree_result": {
+                        "ok": False,
+                        "method": "browser",
+                        "blocking_reason": "Linktree publish call failed.",
+                    },
+                },
+            },
+            {
+                "planned_number": "[150]",
+                "status": "pending",
+                "scheduled_at": "2026-06-19T04:00:00+00:00",
+                "result": {},
+            },
+        ],
+    }
+
+    def fail_publish(*_args, **_kwargs):
+        raise AssertionError("Exhausted Linktree retries must not publish again")
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 6, 19, 0, 1, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(queue_runner, "publish_linktree_if_possible", fail_publish)
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert result["status"] == queue_runner.LINKTREE_FAILED_STATUS
+    assert result["blocking_type"] == "linktree_retry_exhausted"
+    assert payload["items"][0]["status"] == queue_runner.LINKTREE_FAILED_STATUS
+    assert payload["items"][0]["result"]["youtube_url"] == "https://youtu.be/already-uploaded"
+    assert payload["items"][0]["result"]["linktree_result"]["retry_exhausted"] is True
+    assert payload["items"][1]["status"] == "pending"
 
 
 def test_main_returns_success_for_linktree_retry_pending(monkeypatch, capsys):
