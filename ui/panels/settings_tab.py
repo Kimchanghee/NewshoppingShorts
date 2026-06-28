@@ -51,7 +51,7 @@ COUPANG_DEEPLINK_WEBHOOK_NOTICE_URL = (
 # 유료 구독자 Computer Use를 처리하는 서버(브리지) 기본 주소.
 # 서버에 올린 Codex CLI가 POST {URL}/v1/computer-use/jobs 를 받아 실행한다.
 # 서버 주소가 바뀌면 이 한 줄만 수정하면 된다. (사용자 설정값이 있으면 그게 우선)
-DEFAULT_COMPUTER_USE_BRIDGE_URL = "https://13-124-7-65.nip.io"
+DEFAULT_COMPUTER_USE_BRIDGE_URL = "https://project-user-dashboard-api.vercel.app"
 logger = get_logger(__name__)
 
 

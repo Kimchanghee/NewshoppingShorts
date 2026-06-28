@@ -1,7 +1,7 @@
 import importlib
 
 
-EXPECTED_API_URL = "https://13-124-7-65.nip.io"
+EXPECTED_API_URL = "https://project-user-dashboard-api.vercel.app"
 
 
 def test_default_auth_api_url_points_to_reachable_server(monkeypatch):

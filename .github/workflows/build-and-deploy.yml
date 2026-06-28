@@ -226,7 +226,7 @@ jobs:
 
         version = os.environ["VERSION"].strip()
         repository = os.environ["REPOSITORY"].strip()
-        api_base_url = (os.environ.get("APP_VERSION_API_BASE_URL") or "https://13-124-7-65.nip.io").rstrip("/")
+        api_base_url = (os.environ.get("APP_VERSION_API_BASE_URL") or "https://project-user-dashboard-api.vercel.app").rstrip("/")
         download_url = f"https://github.com/{repository}/releases/download/v{version}/SSMaker_Setup_v{version}.exe"
 
         payload = {

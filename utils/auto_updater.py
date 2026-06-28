@@ -33,7 +33,7 @@ CURRENT_VERSION = "1.4.24"
 _DEFAULT_UPDATE_BASE_URL = (
     os.getenv("PAYMENT_API_BASE_URL", "").strip()
     or os.getenv("API_SERVER_URL", "").strip()
-    or "https://13-124-7-65.nip.io"
+    or "https://project-user-dashboard-api.vercel.app"
 ).rstrip("/")
 UPDATE_CHECK_URL = os.getenv(
     "UPDATE_CHECK_URL",
@@ -49,7 +49,7 @@ _ALLOWED_DOWNLOAD_DOMAINS: frozenset[str] = frozenset({
     "github.com",
     "objects.githubusercontent.com",
     "storage.googleapis.com",
-    "13-124-7-65.nip.io",
+    "project-user-dashboard-api.vercel.app",
     "ssmaker-auth-api-1049571775048.us-central1.run.app",
 })
 

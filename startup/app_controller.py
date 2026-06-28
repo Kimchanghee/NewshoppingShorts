@@ -27,8 +27,9 @@ _PENDING_UPDATE_PATH = os.path.join(
 )
 
 # Keep API endpoint overridable in local/dev network environments.
-_PUBLIC_API_SERVER_URL = "https://13-124-7-65.nip.io"
+_PUBLIC_API_SERVER_URL = "https://project-user-dashboard-api.vercel.app"
 _DEPRECATED_404_API_SERVER_URLS = {
+    "https://13-124-7-65.nip.io",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
     "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
 }
@@ -56,7 +57,7 @@ _ALLOWED_UPDATE_DOWNLOAD_DOMAINS = frozenset({
     "github.com",
     "objects.githubusercontent.com",
     "storage.googleapis.com",
-    "13-124-7-65.nip.io",
+    "project-user-dashboard-api.vercel.app",
     "ssmaker-auth-api-1049571775048.us-central1.run.app",
 })
 

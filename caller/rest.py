@@ -39,8 +39,9 @@ _ERROR_MESSAGES = {
     "invalid_input": "입력값이 올바르지 않습니다.",
 }
 
-_DEFAULT_API_SERVER_URL = "https://13-124-7-65.nip.io"
+_DEFAULT_API_SERVER_URL = "https://project-user-dashboard-api.vercel.app"
 _DEPRECATED_404_API_SERVER_URLS = {
+    "https://13-124-7-65.nip.io",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
     "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
 }

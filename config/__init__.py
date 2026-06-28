@@ -87,8 +87,9 @@ VERTEX_JSON_KEY_PATH = os.getenv("VERTEX_JSON_KEY_PATH", "")
 # Payment API (web checkout + polling)
 # Set PAYMENT_API_BASE_URL via environment variable or .env file.
 # Default to the main API server URL so payments work out-of-the-box in dev/prod.
-_PUBLIC_API_SERVER_URL = "https://13-124-7-65.nip.io"
+_PUBLIC_API_SERVER_URL = "https://project-user-dashboard-api.vercel.app"
 _DEPRECATED_404_API_SERVER_URLS = {
+    "https://13-124-7-65.nip.io",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
     "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
 }

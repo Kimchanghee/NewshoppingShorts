@@ -138,8 +138,9 @@ class UsernameCheckWorker(QThread):
         logger = logging.getLogger(__name__)
 
         try:
-            default_api_url = "https://13-124-7-65.nip.io"
+            default_api_url = "https://project-user-dashboard-api.vercel.app"
             deprecated_404_urls = {
+                "https://13-124-7-65.nip.io",
                 "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
                 "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
             }
