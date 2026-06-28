@@ -328,6 +328,7 @@ def scheduled_task_next_run_time(task_name: str = SUMMER_COUPANG_TASK_NAME) -> O
             text=True,
             timeout=10,
             check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except Exception:
         return None
