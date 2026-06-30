@@ -162,6 +162,7 @@ def test_publish_link_uses_browser_fallback_without_webhook(monkeypatch):
         called.update(kwargs)
         return {"ok": True, "method": "browser"}
 
+    monkeypatch.setattr("managers.linktree_browser_publisher.browser_publish_enabled", lambda: True)
     monkeypatch.setattr(
         "managers.linktree_browser_publisher.publish_link_via_visible_browser",
         _fake_publish_link_via_visible_browser,
@@ -189,7 +190,22 @@ def test_publish_link_uses_browser_fallback_without_webhook(monkeypatch):
     assert called["profile_url"] == "https://linktr.ee/example"
 
 
+def test_publish_link_does_not_use_browser_fallback_by_default(monkeypatch):
+    def fail_publish_link_via_visible_browser(**_kwargs):
+        raise AssertionError("visible browser fallback must not run unless explicitly enabled")
+
+    monkeypatch.setattr("managers.linktree_browser_publisher.browser_publish_enabled", lambda: False)
+    monkeypatch.setattr(
+        "managers.linktree_browser_publisher.publish_link_via_visible_browser",
+        fail_publish_link_via_visible_browser,
+    )
+    manager = _make_manager({"webhook_url": "", "api_key": "", "profile_url": "", "auto_publish": True})
+
+    assert manager.publish_link(title="x", url="https://www.coupang.com/vp/products/1") is False
+
+
 def test_publish_link_returns_false_when_browser_fallback_fails(monkeypatch):
+    monkeypatch.setattr("managers.linktree_browser_publisher.browser_publish_enabled", lambda: True)
     monkeypatch.setattr(
         "managers.linktree_browser_publisher.publish_link_via_visible_browser",
         lambda **kwargs: {"ok": False, "method": "browser", "blocking_reason": "not verified"},

@@ -27,7 +27,7 @@ def _bool_env(name: str, default: bool = False) -> bool:
 
 
 def browser_publish_enabled() -> bool:
-    return _bool_env("SSMAKER_LINKTREE_BROWSER_PUBLISH", True)
+    return _bool_env("SSMAKER_LINKTREE_BROWSER_PUBLISH", False)
 
 
 def _open_browser_url(url: str) -> None:

@@ -206,7 +206,16 @@ class LinktreeManager:
                 logger.warning("[Linktree] Empty target URL. Skipping publish.")
                 return False
             try:
-                from managers.linktree_browser_publisher import publish_link_via_visible_browser
+                from managers.linktree_browser_publisher import (
+                    browser_publish_enabled,
+                    publish_link_via_visible_browser,
+                )
+
+                if not browser_publish_enabled():
+                    logger.warning(
+                        "[Linktree] Webhook URL is empty and visible browser fallback is disabled."
+                    )
+                    return False
 
                 browser_result = publish_link_via_visible_browser(
                     title=str(title or "").strip() or "Shopping Shorts Link",

@@ -83,6 +83,7 @@ def test_youtube_preflight_block_does_not_consume_pending(monkeypatch, capsys):
 
 
 def test_linktree_preflight_block_does_not_consume_pending(monkeypatch, capsys):
+    monkeypatch.setenv("SSMAKER_LINKTREE_BLOCK_UPLOAD", "1")
     payload = {
         "items": [
             {"planned_number": "[030]", "status": "pending", "attempts": 0, "result": {}},
@@ -120,6 +121,45 @@ def test_linktree_preflight_block_does_not_consume_pending(monkeypatch, capsys):
     assert payload["items"][0]["attempts"] == 0
     assert payload["items"][1]["status"] == "pending"
     assert payload["items"][1]["attempts"] == 1
+
+
+def test_linktree_preflight_warning_does_not_block_upload_by_default(monkeypatch, capsys):
+    payload = {
+        "items": [
+            {"planned_number": "[030]", "status": "pending", "attempts": 0, "result": {}},
+        ]
+    }
+    called = {"youtube": 0, "processed": 0}
+
+    def fake_youtube_preflight():
+        called["youtube"] += 1
+        return {"ok": True}
+
+    async def fake_process_pending(_payload, **_kwargs):
+        called["processed"] += 1
+        return {"processed": True, "status": "completed", "planned_number": "[030]"}
+
+    monkeypatch.delenv("SSMAKER_LINKTREE_BLOCK_UPLOAD", raising=False)
+    monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
+    monkeypatch.setattr(
+        queue_runner,
+        "linktree_publish_ready",
+        lambda: {
+            "ok": False,
+            "reason": "linktree_not_connected",
+            "blocking_reason": "Linktree webhook URL is not configured.",
+        },
+    )
+    monkeypatch.setattr(queue_runner, "youtube_upload_ready", fake_youtube_preflight)
+    monkeypatch.setattr(queue_runner, "gemini_api_key_preflight_ready", lambda **_kwargs: {"ok": True})
+    monkeypatch.setattr(queue_runner, "process_pending_items", fake_process_pending)
+
+    assert queue_runner.main() == 0
+    output = json.loads(capsys.readouterr().out)
+
+    assert output["processed"] is True
+    assert output["status"] == "completed"
+    assert called == {"youtube": 1, "processed": 1}
 
 
 def test_gemini_preflight_block_does_not_consume_due_pending(monkeypatch, capsys):
@@ -1166,6 +1206,47 @@ def test_publish_linktree_accepts_existing_public_card(monkeypatch):
     assert result["ok"] is True
     assert result["method"] == "public_existing"
     assert result["blocking_reason"] == ""
+
+
+def test_publish_linktree_without_webhook_does_not_open_browser_by_default(monkeypatch):
+    class FakeLinktreeManager:
+        def format_publish_index(self, index):
+            return f"[{int(index):03d}]"
+
+        def _build_numbered_product_title(self, product_name, index):
+            return f"[{int(index):03d}] {product_name}"
+
+        def get_settings(self):
+            return {"webhook_url": ""}
+
+        def get_profile_url(self):
+            return "https://linktr.ee/studio.idol"
+
+        def publish_link(self, *_args, **_kwargs):
+            raise AssertionError("publish_link must not run when no webhook and browser fallback is disabled")
+
+    checks = []
+
+    monkeypatch.delenv("SSMAKER_LINKTREE_BROWSER_PUBLISH", raising=False)
+    monkeypatch.setattr(queue_runner, "get_linktree_manager", lambda: FakeLinktreeManager())
+    monkeypatch.setattr(queue_runner, "linktree_browser_publish_enabled", lambda: False)
+    monkeypatch.setattr(
+        queue_runner,
+        "verify_linktree_public_card",
+        lambda number, url, **_kwargs: checks.append((number, url, _kwargs)) or {"ok": False},
+    )
+
+    result = queue_runner.publish_linktree_if_possible(
+        {"planned_number": "[036]", "coupang_url": "https://www.coupang.com/vp/products/9169351491"},
+        "desk camping fan",
+        "https://www.coupang.com/vp/products/9169351491",
+    )
+
+    assert result["ok"] is False
+    assert result["method"] == "browser_disabled"
+    assert result["webhook_sent"] is False
+    assert "visible browser fallback is disabled" in result["blocking_reason"]
+    assert len(checks) == 1
 
 
 def test_verify_linktree_public_card_retries_until_public_page_updates(monkeypatch):

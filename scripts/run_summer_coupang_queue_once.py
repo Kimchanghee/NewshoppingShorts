@@ -55,6 +55,7 @@ GEMINI_KEY_ALERT_DIALOG_SCRIPT = ROOT / "scripts" / "show_summer_coupang_gemini_
 GEMINI_MODELS_PROBE_URL = "https://generativelanguage.googleapis.com/v1beta/models"
 LINKTREE_PUBLIC_VERIFY_ATTEMPTS_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_ATTEMPTS"
 LINKTREE_PUBLIC_VERIFY_INTERVAL_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS"
+LINKTREE_BLOCK_UPLOAD_ENV = "SSMAKER_LINKTREE_BLOCK_UPLOAD"
 DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS = 6
 DEFAULT_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS = 10.0
 LINKTREE_RETRY_STATUS = "linktree_retry_pending"
@@ -1396,6 +1397,28 @@ def env_float(name: str, default: float, *, min_value: float = 0.0) -> float:
         return default
 
 
+def env_bool(name: str, default: bool = False) -> bool:
+    raw = str(os.environ.get(name, "") or "").strip().lower()
+    if raw in {"1", "true", "yes", "on"}:
+        return True
+    if raw in {"0", "false", "no", "off"}:
+        return False
+    return default
+
+
+def linktree_browser_publish_enabled() -> bool:
+    try:
+        from managers.linktree_browser_publisher import browser_publish_enabled
+
+        return browser_publish_enabled()
+    except Exception:
+        return False
+
+
+def linktree_block_upload_enabled() -> bool:
+    return env_bool(LINKTREE_BLOCK_UPLOAD_ENV, False)
+
+
 def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purchase_url: str) -> Dict[str, Any]:
     manager = get_linktree_manager()
     upload_number = parse_upload_number(item.get("planned_number"))
@@ -1405,6 +1428,7 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
 
     settings = manager.get_settings()
     webhook_url = str(settings.get("webhook_url", "") or "").strip()
+    browser_fallback_enabled = linktree_browser_publish_enabled() if not webhook_url else False
     public_check = verify_linktree_public_card(marker, purchase_url)
     if public_check.get("ok"):
         return {
@@ -1416,6 +1440,21 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
             "profile_url": manager.get_profile_url(),
             "public_verification": public_check,
             "blocking_reason": "",
+        }
+
+    if not webhook_url and not browser_fallback_enabled:
+        return {
+            "ok": False,
+            "method": "browser_disabled",
+            "webhook_sent": False,
+            "title": title,
+            "number": marker,
+            "purchase_url": purchase_url,
+            "profile_url": manager.get_profile_url(),
+            "public_verification": public_check,
+            "blocking_reason": (
+                "Linktree webhook URL is not configured and visible browser fallback is disabled."
+            ),
         }
 
     ok = manager.publish_link(
@@ -2050,7 +2089,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     )
     if pending_count and upload_required_count and not linktree_retry_due_count:
         linktree_state = linktree_publish_ready()
-        if not linktree_state.get("ok"):
+        if not linktree_state.get("ok") and linktree_block_upload_enabled():
             print(
                 json.dumps(
                     {

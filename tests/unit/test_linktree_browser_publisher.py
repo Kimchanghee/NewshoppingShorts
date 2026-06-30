@@ -21,6 +21,7 @@ def test_build_create_link_url_encodes_linktree_deeplink_params():
 
 
 def test_browser_publish_existing_card_does_not_open_browser(monkeypatch):
+    monkeypatch.setenv("SSMAKER_LINKTREE_BROWSER_PUBLISH", "1")
     monkeypatch.setattr(
         publisher,
         "_verify_public_card",
@@ -42,7 +43,25 @@ def test_browser_publish_existing_card_does_not_open_browser(monkeypatch):
     assert result["method"] == "browser_existing"
 
 
+def test_browser_publish_disabled_by_default_does_not_open_browser(monkeypatch):
+    def fail_open_browser(_url):
+        raise AssertionError("browser should not open unless the fallback is explicitly enabled")
+
+    monkeypatch.delenv("SSMAKER_LINKTREE_BROWSER_PUBLISH", raising=False)
+    monkeypatch.setattr(publisher, "_open_browser_url", fail_open_browser)
+
+    result = publisher.publish_link_via_visible_browser(
+        title="[135] cooling towel sports towel",
+        url="https://www.coupang.com/vp/products/1775870654",
+        number="[135]",
+    )
+
+    assert result["ok"] is False
+    assert result["method"] == "browser_disabled"
+
+
 def test_browser_publish_opens_create_link_deeplink_and_verifies(monkeypatch):
+    monkeypatch.setenv("SSMAKER_LINKTREE_BROWSER_PUBLISH", "1")
     opened = []
     checks = [
         {"ok": False, "has_number": False, "has_purchase_url": False},
