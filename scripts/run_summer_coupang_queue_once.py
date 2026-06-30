@@ -72,6 +72,7 @@ SKIP_STATUSES = {
     "skipped_low_similarity",
     "skipped_quality_gate",
     "skipped_duplicate_product",
+    "skipped_invalid_queue_item",
     LINKTREE_FAILED_STATUS,
 }
 PRODUCT_FAMILY_BY_CATEGORY = {
@@ -464,6 +465,70 @@ def linktree_retry_summary(
         summary["blocking_type"] = "linktree_publish_pending"
         summary["blocking_reason"] = str(linktree_result.get("blocking_reason") or "")
     return summary
+
+
+def mark_linktree_retry_exhausted(item: Dict[str, Any]) -> Dict[str, Any]:
+    retry_context = linktree_retry_context(item)
+    max_attempts = linktree_retry_max_attempts()
+    existing_result = item.get("result") if isinstance(item.get("result"), dict) else {}
+    existing_linktree = (
+        existing_result.get("linktree_result")
+        if isinstance(existing_result.get("linktree_result"), dict)
+        else {}
+    )
+    blocking_reason = (
+        f"Linktree publish failed after {max_attempts} retry attempts; "
+        "leaving the YouTube upload recorded and moving this item out of the active queue."
+    )
+    linktree_result = {
+        **existing_linktree,
+        "ok": False,
+        "method": str(existing_linktree.get("method") or "retry_exhausted"),
+        "blocking_reason": blocking_reason,
+        "retry_exhausted": True,
+        "max_attempts": max_attempts,
+    }
+    attach_result(
+        item,
+        status=LINKTREE_FAILED_STATUS,
+        render_path=retry_context["render_path"],
+        youtube_url=retry_context["youtube_url"],
+        linktree_result=linktree_result,
+        blocking_reason=blocking_reason,
+        extra={
+            "purchase_url": retry_context["purchase_url"],
+            "linktree_retry_only": True,
+        },
+    )
+    return {
+        "processed": True,
+        "status": LINKTREE_FAILED_STATUS,
+        "planned_number": item.get("planned_number"),
+        "linktree_ok": False,
+        "linktree_retry": False,
+        "blocking_type": "linktree_retry_exhausted",
+        "blocking_reason": blocking_reason,
+    }
+
+
+def settle_exhausted_linktree_retries(
+    queue_payload: Dict[str, Any],
+    *,
+    force_run_now: Optional[bool] = None,
+) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = queue_payload.get("items") or []
+    run_now = force_run_now_enabled() if force_run_now is None else bool(force_run_now)
+    now = now_datetime()
+    settled: List[Dict[str, Any]] = []
+    for item in items:
+        if not is_linktree_retry_item(item):
+            continue
+        if not run_now and not is_item_due(item, now=now):
+            continue
+        if not linktree_retry_exhausted(item):
+            continue
+        settled.append(mark_linktree_retry_exhausted(item))
+    return settled
 
 
 def normalize_duplicate_text(value: Any) -> str:
@@ -1629,47 +1694,9 @@ async def process_pending_items(
         if is_linktree_retry_item(item):
             retry_context = linktree_retry_context(item)
             if linktree_retry_exhausted(item):
-                max_attempts = linktree_retry_max_attempts()
-                existing_result = item.get("result") if isinstance(item.get("result"), dict) else {}
-                existing_linktree = (
-                    existing_result.get("linktree_result")
-                    if isinstance(existing_result.get("linktree_result"), dict)
-                    else {}
-                )
-                blocking_reason = (
-                    f"Linktree publish failed after {max_attempts} retry attempts; "
-                    "leaving the YouTube upload recorded and moving this item out of the active queue."
-                )
-                linktree_result = {
-                    **existing_linktree,
-                    "ok": False,
-                    "method": str(existing_linktree.get("method") or "retry_exhausted"),
-                    "blocking_reason": blocking_reason,
-                    "retry_exhausted": True,
-                    "max_attempts": max_attempts,
-                }
-                attach_result(
-                    item,
-                    status=LINKTREE_FAILED_STATUS,
-                    render_path=retry_context["render_path"],
-                    youtube_url=retry_context["youtube_url"],
-                    linktree_result=linktree_result,
-                    blocking_reason=blocking_reason,
-                    extra={
-                        "purchase_url": retry_context["purchase_url"],
-                        "linktree_retry_only": True,
-                    },
-                )
+                summary = mark_linktree_retry_exhausted(item)
                 save_queue(queue_payload)
-                return {
-                    "processed": True,
-                    "status": LINKTREE_FAILED_STATUS,
-                    "planned_number": item.get("planned_number"),
-                    "linktree_ok": False,
-                    "linktree_retry": False,
-                    "blocking_type": "linktree_retry_exhausted",
-                    "blocking_reason": blocking_reason,
-                }
+                return summary
             update_item_attempt(item)
             save_queue(queue_payload)
             if not retry_context["purchase_url"]:
@@ -1705,6 +1732,23 @@ async def process_pending_items(
             )
             save_queue(queue_payload)
             return linktree_retry_summary(item, linktree_result, run_now=run_now)
+
+        if not str(item.get("coupang_url") or "").strip():
+            reason = "Queue item is missing coupang_url and cannot be sourced."
+            attach_result(
+                item,
+                status="skipped_invalid_queue_item",
+                blocking_reason=reason,
+            )
+            save_queue(queue_payload)
+            skipped_items.append(
+                {
+                    "planned_number": item.get("planned_number"),
+                    "status": "skipped_invalid_queue_item",
+                    "reason": reason,
+                }
+            )
+            continue
 
         duplicate_reason = duplicate_upload_reason(item, queue_payload)
         if duplicate_reason:
@@ -1991,6 +2035,13 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args([] if argv is None else argv)
     queue_payload = load_queue()
+    linktree_housekeeping = settle_exhausted_linktree_retries(
+        queue_payload,
+        force_run_now=args.run_now or None,
+    )
+    if linktree_housekeeping:
+        save_queue(queue_payload)
+
     pending_count = pending_item_count(queue_payload)
     upload_required_count = youtube_upload_required_item_count(queue_payload)
     linktree_retry_due_count = due_linktree_retry_item_count(
@@ -2067,6 +2118,9 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return 1
 
     summary = asyncio.run(process_pending_items(queue_payload, force_run_now=args.run_now or None))
+    if linktree_housekeeping:
+        summary["linktree_housekeeping"] = linktree_housekeeping
+        summary["linktree_housekeeping_count"] = len(linktree_housekeeping)
     if args.run_now and summary.get("processed"):
         scheduler_next_run = scheduled_task_next_run_time()
         schedule_update = realign_pending_schedule_after_run_now(

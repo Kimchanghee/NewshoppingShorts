@@ -21,6 +21,7 @@ SKIPPED_STATUSES = {
     "skipped_low_similarity",
     "skipped_quality_gate",
     "skipped_duplicate_product",
+    "skipped_invalid_queue_item",
     "failed_linktree_publish",
     "skipped",
 }
@@ -45,6 +46,7 @@ STATUS_LABELS = {
     "skipped_low_similarity": "건너뜀",
     "skipped_quality_gate": "품질보류",
     "skipped_duplicate_product": "중복보류",
+    "skipped_invalid_queue_item": "건너뜀",
     "skipped": "건너뜀",
     "failed": "실패",
 }
