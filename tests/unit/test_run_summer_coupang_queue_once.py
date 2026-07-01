@@ -1,7 +1,14 @@
 import json
 from datetime import datetime, timezone
 
+import pytest
+
 from scripts import run_summer_coupang_queue_once as queue_runner
+
+
+@pytest.fixture(autouse=True)
+def allow_plain_coupang_urls_for_legacy_queue_tests(monkeypatch):
+    monkeypatch.setenv(queue_runner.AFFILIATE_LINK_REQUIRED_ENV, "0")
 
 
 def test_load_queue_accepts_utf8_bom(monkeypatch, tmp_path):
