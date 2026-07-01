@@ -17,6 +17,7 @@ DEFAULT_QUEUE_PATH = (
 
 SUCCESS_STATUSES = {"completed"}
 LINKTREE_RETRY_STATUSES = {"completed_linktree_blocked", "linktree_retry_pending"}
+AFFILIATE_LINK_BLOCKED_STATUS = "blocked_affiliate_link_missing"
 SKIPPED_STATUSES = {
     "skipped_low_similarity",
     "skipped_quality_gate",
@@ -50,6 +51,7 @@ STATUS_LABELS = {
     "skipped": "건너뜀",
     "failed": "실패",
 }
+STATUS_LABELS[AFFILIATE_LINK_BLOCKED_STATUS] = "제휴 링크 필요"
 
 
 def load_summer_coupang_queue(
@@ -158,7 +160,9 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
     linktree_ok = bool(linktree_result.get("ok"))
     linktree_reason = str(linktree_result.get("blocking_reason") or blocking_reason).strip()
 
-    if youtube_url:
+    if status == AFFILIATE_LINK_BLOCKED_STATUS:
+        upload_text = "제휴 링크 필요"
+    elif youtube_url:
         upload_text = f"YouTube 완료: {youtube_url}"
     elif retriable_system_skip:
         upload_text = "재시도 대기"

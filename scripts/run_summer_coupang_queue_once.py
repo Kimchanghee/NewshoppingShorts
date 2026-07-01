@@ -62,6 +62,9 @@ LINKTREE_RETRY_STATUS = "linktree_retry_pending"
 LINKTREE_FAILED_STATUS = "failed_linktree_publish"
 LINKTREE_RETRY_MAX_ATTEMPTS_ENV = "SSMAKER_LINKTREE_RETRY_MAX_ATTEMPTS"
 DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS = 1
+AFFILIATE_LINK_REQUIRED_ENV = "SSMAKER_REQUIRE_COUPANG_PARTNER_LINK"
+AFFILIATE_LINK_BLOCKED_STATUS = "blocked_affiliate_link_missing"
+COUPANG_PARTNER_LINK_HOST = "link.coupang.com"
 SUCCESS_FINAL_STATUSES = {
     "completed",
 }
@@ -285,6 +288,42 @@ def is_retriable_system_skip(item: Dict[str, Any]) -> bool:
     return is_system_sourcing_blocker(result, reason)
 
 
+def is_coupang_url(url: str) -> bool:
+    return "coupang.com" in str(url or "").lower()
+
+
+def is_coupang_partner_link(url: str) -> bool:
+    text = str(url or "").strip().lower()
+    return text.startswith(("http://", "https://")) and COUPANG_PARTNER_LINK_HOST in text
+
+
+def coupang_partner_link_required() -> bool:
+    return env_bool(AFFILIATE_LINK_REQUIRED_ENV, True)
+
+
+def coupang_api_keys_configured() -> bool:
+    try:
+        from managers.settings_manager import get_settings_manager
+
+        keys = get_settings_manager().get_coupang_keys()
+        return bool(keys.get("access_key") and keys.get("secret_key"))
+    except Exception:
+        return False
+
+
+def affiliate_inputs_available(item: Dict[str, Any]) -> bool:
+    if not coupang_partner_link_required():
+        return True
+    if is_coupang_partner_link(item.get("affiliate_url") or item.get("purchase_url") or ""):
+        return True
+    return coupang_api_keys_configured()
+
+
+def is_affiliate_link_blocked_item(item: Dict[str, Any]) -> bool:
+    status = str(item.get("status") or "").strip().lower()
+    return status == AFFILIATE_LINK_BLOCKED_STATUS and affiliate_inputs_available(item)
+
+
 def is_linktree_retry_item(item: Dict[str, Any]) -> bool:
     status = str(item.get("status") or "").strip().lower()
     return status in LINKTREE_RETRY_STATUSES
@@ -292,7 +331,12 @@ def is_linktree_retry_item(item: Dict[str, Any]) -> bool:
 
 def is_processable_queue_item(item: Dict[str, Any]) -> bool:
     status = str(item.get("status") or "").strip().lower()
-    return status == "pending" or is_linktree_retry_item(item) or is_retriable_system_skip(item)
+    return (
+        status == "pending"
+        or is_linktree_retry_item(item)
+        or is_retriable_system_skip(item)
+        or is_affiliate_link_blocked_item(item)
+    )
 
 
 def youtube_upload_required_item_count(queue_payload: Dict[str, Any]) -> int:
@@ -1182,7 +1226,59 @@ def determine_purchase_url(item: Dict[str, Any], report: Dict[str, Any]) -> str:
     deep_link = str(report.get("deep_link", "") or "").strip()
     if deep_link:
         return deep_link
+    source_url = str(item.get("coupang_url", "") or "").strip()
+    if source_url and coupang_partner_link_required() and is_coupang_url(source_url):
+        try:
+            from managers.coupang_manager import get_coupang_manager
+
+            generated = str(get_coupang_manager().generate_deep_link(source_url) or "").strip()
+        except Exception as exc:
+            report["deep_link_error"] = f"{type(exc).__name__}: {exc}"
+            generated = ""
+        if generated:
+            item["affiliate_url"] = generated
+            item["affiliate_status"] = "generated_coupang_partners_api"
+            report["deep_link"] = generated
+            return generated
     return str(item.get("coupang_url", "") or "").strip()
+
+
+def validate_purchase_url_for_upload(item: Dict[str, Any], purchase_url: str) -> Dict[str, Any]:
+    source_url = str(item.get("coupang_url", "") or "").strip()
+    if not coupang_partner_link_required() or not is_coupang_url(source_url):
+        return {"ok": True, "blocking_reason": ""}
+    if is_coupang_partner_link(purchase_url):
+        return {"ok": True, "blocking_reason": ""}
+
+    if coupang_api_keys_configured():
+        reason = (
+            "Coupang Partners API keys are configured, but generating a link.coupang.com "
+            "affiliate link failed. Upload stopped to avoid publishing a non-tracked Coupang URL."
+        )
+    else:
+        reason = (
+            "Coupang Partners affiliate link is required before upload. Configure Coupang "
+            "Access/Secret keys or provide item.affiliate_url as a link.coupang.com URL."
+        )
+    return {
+        "ok": False,
+        "blocking_reason": reason,
+        "source_url": source_url,
+        "purchase_url": str(purchase_url or "").strip(),
+        "coupang_keys_present": coupang_api_keys_configured(),
+        "affiliate_required": True,
+    }
+
+
+def validate_affiliate_inputs_before_sourcing(item: Dict[str, Any]) -> Dict[str, Any]:
+    source_url = str(item.get("coupang_url", "") or "").strip()
+    if not coupang_partner_link_required() or not is_coupang_url(source_url):
+        return {"ok": True, "blocking_reason": ""}
+    if is_coupang_partner_link(item.get("affiliate_url") or item.get("purchase_url") or ""):
+        return {"ok": True, "blocking_reason": ""}
+    if coupang_api_keys_configured():
+        return {"ok": True, "blocking_reason": ""}
+    return validate_purchase_url_for_upload(item, source_url)
 
 
 def render_single_item(job: Dict[str, Any], run_dir: Path) -> Dict[str, Any]:
@@ -1326,6 +1422,7 @@ def verify_youtube(upload_item: Dict[str, Any], uploaded: Dict[str, Any]) -> Dic
         "has_linktree": DEFAULT_LINKTREE_PROFILE_URL in desc,
         "has_disclosure": COUPANG_AFFILIATE_DISCLOSURE in desc,
         "has_purchase_url": str(upload_item["coupang_deep_link"]) in desc,
+        "purchase_is_partner": is_coupang_partner_link(str(upload_item.get("coupang_deep_link") or "")),
     }
 
     comment_verification: Dict[str, Any] = {}
@@ -1374,6 +1471,7 @@ def verify_youtube(upload_item: Dict[str, Any], uploaded: Dict[str, Any]) -> Dic
                 metadata["has_linktree"],
                 metadata["has_disclosure"],
                 metadata["has_purchase_url"],
+                metadata["purchase_is_partner"],
                 comment_verification["has_number"],
                 comment_verification["has_linktree"],
                 comment_verification["has_disclosure"],
@@ -1738,7 +1836,21 @@ async def process_pending_items(
                 return summary
             update_item_attempt(item)
             save_queue(queue_payload)
-            if not retry_context["purchase_url"]:
+            purchase_check = validate_purchase_url_for_upload(item, retry_context["purchase_url"])
+            if retry_context["purchase_url"] and not purchase_check.get("ok"):
+                linktree_result = {
+                    "ok": False,
+                    "method": "affiliate_link_blocked",
+                    "title": "",
+                    "number": get_linktree_manager().format_publish_index(
+                        parse_upload_number(item.get("planned_number"))
+                    ),
+                    "purchase_url": retry_context["purchase_url"],
+                    "profile_url": get_linktree_manager().get_profile_url(),
+                    "public_verification": {},
+                    "blocking_reason": purchase_check["blocking_reason"],
+                }
+            elif not retry_context["purchase_url"]:
                 linktree_result = {
                     "ok": False,
                     "method": "blocked",
@@ -1759,17 +1871,32 @@ async def process_pending_items(
                 )
             attach_result(
                 item,
-                status=linktree_failure_status(linktree_result),
+                status=(
+                    AFFILIATE_LINK_BLOCKED_STATUS
+                    if linktree_result.get("method") == "affiliate_link_blocked"
+                    else linktree_failure_status(linktree_result)
+                ),
                 render_path=retry_context["render_path"],
                 youtube_url=retry_context["youtube_url"],
                 linktree_result=linktree_result,
                 blocking_reason=str(linktree_result.get("blocking_reason") or ""),
                 extra={
                     "purchase_url": retry_context["purchase_url"],
+                    "affiliate_check": purchase_check,
                     "linktree_retry_only": True,
                 },
             )
             save_queue(queue_payload)
+            if linktree_result.get("method") == "affiliate_link_blocked":
+                return {
+                    "processed": False,
+                    "status": AFFILIATE_LINK_BLOCKED_STATUS,
+                    "planned_number": item.get("planned_number"),
+                    "youtube_url": retry_context["youtube_url"],
+                    "linktree_ok": False,
+                    "blocking_type": "affiliate_link_missing",
+                    "blocking_reason": str(linktree_result.get("blocking_reason") or ""),
+                }
             return linktree_retry_summary(item, linktree_result, run_now=run_now)
 
         if not str(item.get("coupang_url") or "").strip():
@@ -1809,6 +1936,28 @@ async def process_pending_items(
                 }
             )
             continue
+
+        presourcing_purchase_check = validate_affiliate_inputs_before_sourcing(item)
+        if not presourcing_purchase_check.get("ok"):
+            attach_result(
+                item,
+                status=AFFILIATE_LINK_BLOCKED_STATUS,
+                blocking_reason=presourcing_purchase_check["blocking_reason"],
+                extra={
+                    "purchase_url": str(item.get("coupang_url") or "").strip(),
+                    "affiliate_check": presourcing_purchase_check,
+                },
+            )
+            save_queue(queue_payload)
+            return {
+                "processed": False,
+                "status": AFFILIATE_LINK_BLOCKED_STATUS,
+                "planned_number": item.get("planned_number"),
+                "linktree_ok": False,
+                "blocking_type": "affiliate_link_missing",
+                "blocking_reason": presourcing_purchase_check["blocking_reason"],
+                "run_now": bool(run_now),
+            }
 
         update_item_attempt(item)
         save_queue(queue_payload)
@@ -1895,6 +2044,30 @@ async def process_pending_items(
             continue
 
         purchase_url = determine_purchase_url(item, report)
+        purchase_check = validate_purchase_url_for_upload(item, purchase_url)
+        if not purchase_check.get("ok"):
+            attach_result(
+                item,
+                status=AFFILIATE_LINK_BLOCKED_STATUS,
+                similarity=similarity,
+                blocking_reason=purchase_check["blocking_reason"],
+                extra={
+                    "match_status": report.get("match_status"),
+                    "report_path": report.get("_report_path", ""),
+                    "purchase_url": purchase_url,
+                    "affiliate_check": purchase_check,
+                    "run_dir": str(run_dir),
+                },
+            )
+            save_queue(queue_payload)
+            return {
+                "processed": False,
+                "status": AFFILIATE_LINK_BLOCKED_STATUS,
+                "planned_number": item.get("planned_number"),
+                "linktree_ok": False,
+                "blocking_type": "affiliate_link_missing",
+                "blocking_reason": purchase_check["blocking_reason"],
+            }
         job = {
             "index": parse_upload_number(item.get("planned_number")) or 0,
             "upload_number": parse_upload_number(item.get("planned_number")) or 0,
