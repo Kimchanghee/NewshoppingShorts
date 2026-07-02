@@ -544,8 +544,8 @@ class SettingsTab(QWidget, ThemedMixin):
 
         api_layout.addWidget(self.api_section)
 
-        # 저장된 키 개수만 표시 (값은 자동으로 입력칸에 채우지 않음)
-        self._update_key_count()
+        # 저장된 키를 즉시 불러와 빈칸처럼 보이지 않게 한다.
+        self._load_saved_api_keys()
         
         # =================== SECTION: Linktree 자동 등록 (인라인 가이드) ===================
         # 예전에는 '🪄 간편 설정 가이드' 버튼이 팝업(LinktreeSetupDialog)을 띄웠지만,
@@ -4168,12 +4168,13 @@ class SettingsTab(QWidget, ThemedMixin):
                         self.api_key_inputs[0].setPlaceholderText(
                             f"저장됨 ({masked}) - 변경하려면 새 키 입력"
                         )
-            suffix = " (값은 숨김)" if count else ""
+            visible_saved = any(inp.text().strip() for inp in self.api_key_inputs)
+            suffix = " (입력칸에 표시됨)" if count and visible_saved else " (값은 숨김)" if count else ""
             self.api_count_label.setText(f"저장된 키: {count}개{suffix}")
         except Exception:
             # Fallback: UI 입력값 기준 (예외 상황에서만)
             count = sum(1 for inp in self.api_key_inputs if inp.text().strip())
-            suffix = " (값은 숨김)" if count else ""
+            suffix = " (입력칸에 표시됨)" if count else ""
             self.api_count_label.setText(f"저장된 키: {count}개{suffix}")
 
     def _save_all_api_keys(self):
