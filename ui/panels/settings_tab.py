@@ -1957,8 +1957,8 @@ class SettingsTab(QWidget, ThemedMixin):
             loaded = str(SecretsManager.get_api_key(f"gemini_api_{idx}") or "").strip()
             if loaded != saved_key:
                 return False
-        for idx in range(len(keys) + 1, max_keys + 1):
-            SecretsManager.delete_api_key(f"gemini_api_{idx}")
+        # Do not delete existing key slots while auto-applying one clipboard key.
+        # Deletion is limited to the explicit clear-all action.
 
         for inp in getattr(self, "api_key_inputs", []):
             inp.clear()
@@ -4254,11 +4254,10 @@ class SettingsTab(QWidget, ThemedMixin):
                 )
                 return
             
-            # 2-2. 나머지 슬롯(기존에 있었을 수 있는 키) 삭제
-            # valid_keys 개수 다음부터 MAX_API_KEYS(20)까지 삭제
-            MAX_API_KEYS = len(self.api_key_inputs)
-            for i in range(len(valid_keys) + 1, MAX_API_KEYS + 1):
-                SecretsManager.delete_api_key(f"gemini_api_{i}")
+            # Do not delete omitted/blank key slots during save. Empty fields can
+            # happen after UI reloads, masking, or partial edits; treating them as
+            # delete commands can wipe valid operator-provided keys. Deletion is
+            # limited to the explicit clear-all action.
                 
         except Exception as e:
             from utils.logging_config import get_logger
