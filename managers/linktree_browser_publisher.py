@@ -30,11 +30,15 @@ def browser_publish_enabled() -> bool:
     return _bool_env("SSMAKER_LINKTREE_BROWSER_PUBLISH", False)
 
 
+def close_tab_after_verify_enabled() -> bool:
+    return _bool_env("SSMAKER_LINKTREE_CLOSE_TAB_AFTER_VERIFY", True)
+
+
 def _open_browser_url(url: str) -> None:
     if os.name == "nt":
         try:
             subprocess.Popen(
-                ["chrome.exe", url],
+                ["chrome.exe", "--new-window", url],
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
             )
@@ -44,6 +48,54 @@ def _open_browser_url(url: str) -> None:
     import webbrowser
 
     webbrowser.open(url)
+
+
+def _close_linktree_browser_window() -> Dict[str, Any]:
+    if os.name != "nt" or not close_tab_after_verify_enabled():
+        return {"attempted": False, "closed": False}
+
+    command = r"""
+$shell = New-Object -ComObject WScript.Shell
+$titles = @(
+  'Linktree',
+  'linktr.ee',
+  'Linktree Admin'
+)
+foreach ($title in $titles) {
+  if ($shell.AppActivate($title)) {
+    Start-Sleep -Milliseconds 350
+    $shell.SendKeys('%{F4}')
+    Start-Sleep -Milliseconds 350
+    exit 0
+  }
+}
+exit 2
+"""
+    try:
+        completed = subprocess.run(
+            [
+                "powershell.exe",
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-WindowStyle",
+                "Hidden",
+                "-Command",
+                command,
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=5,
+            check=False,
+        )
+        return {
+            "attempted": True,
+            "closed": completed.returncode == 0,
+            "returncode": completed.returncode,
+        }
+    except Exception as exc:
+        logger.warning("[Linktree] Browser cleanup failed: %s", exc)
+        return {"attempted": True, "closed": False, "error": str(exc)}
 
 
 def _build_create_link_url(title: str, url: str) -> str:
@@ -127,36 +179,44 @@ def publish_link_via_visible_browser(
         }
 
     started = time.time()
+    opened_browser = False
+    result: Dict[str, Any]
     try:
         _open_browser_url(_build_create_link_url(target_title, target_url))
+        opened_browser = True
 
         public_check: Dict[str, Any] = {}
         while time.time() - started < timeout_seconds:
             public_check = _verify_public_card(number, target_url, profile_url=profile)
             if public_check.get("ok"):
-                return {
+                result = {
                     "ok": True,
                     "method": "browser_deeplink",
                     "profile_url": profile,
                     "public_verification": public_check,
                     "blocking_reason": "",
                 }
+                break
             time.sleep(5)
-        return {
-            "ok": False,
-            "method": "browser_deeplink",
-            "profile_url": profile,
-            "public_verification": public_check,
-            "blocking_reason": (
-                "Linktree create-link deep link opened, but the public page did not verify before timeout. "
-                "Confirm Chrome is logged in to the expected Linktree account."
-            ),
-        }
+        else:
+            result = {
+                "ok": False,
+                "method": "browser_deeplink",
+                "profile_url": profile,
+                "public_verification": public_check,
+                "blocking_reason": (
+                    "Linktree create-link deep link opened, but the public page did not verify before timeout. "
+                    "Confirm Chrome is logged in to the expected Linktree account."
+                ),
+            }
     except Exception as exc:
         logger.warning("[Linktree] Browser publish failed: %s", exc)
-        return {
+        result = {
             "ok": False,
             "method": "browser_deeplink",
             "profile_url": profile,
             "blocking_reason": str(exc),
         }
+    if opened_browser:
+        result["browser_cleanup"] = _close_linktree_browser_window()
+    return result
