@@ -11,6 +11,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from user_facing_errors import sanitize_user_message
+
 DEFAULT_QUEUE_PATH = (
     Path.home() / ".ssmaker" / "summer_coupang_autosourcing_queue_20260603.json"
 )
@@ -151,7 +153,12 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
     attempts = int(item.get("attempts") or 0)
     result = item.get("result") if isinstance(item.get("result"), dict) else {}
     youtube_url = _extract_youtube_url(result)
-    blocking_reason = str(result.get("blocking_reason") or "").strip()
+    raw_blocking_reason = str(result.get("blocking_reason") or "").strip()
+    blocking_reason = (
+        sanitize_user_message(raw_blocking_reason, fallback="작업 상태를 확인해 주세요.").strip()
+        if raw_blocking_reason
+        else ""
+    )
     linktree_result = (
         result.get("linktree_result")
         if isinstance(result.get("linktree_result"), dict)

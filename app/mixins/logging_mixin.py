@@ -7,6 +7,7 @@ Extracted from main.py for cleaner separation of logging concerns.
 from datetime import datetime
 
 from utils.logging_config import get_logger
+from user_facing_errors import sanitize_user_message
 
 logger = get_logger(__name__)
 
@@ -32,7 +33,8 @@ class LoggingMixin:
         # UI 패널 업데이트용 시그널 (터미널 출력은 위에서 이미 완료)
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            full_msg = f"[{timestamp}] {message}"
+            ui_message = sanitize_user_message(message, fallback="잠시 문제가 생겼어요. 다시 시도해 주세요.")
+            full_msg = f"[{timestamp}] {ui_message}"
             self.log_signal.emit(full_msg, level)
         except RuntimeError:
             pass

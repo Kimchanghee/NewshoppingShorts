@@ -28,6 +28,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.design_system_v2 import get_design_system, set_dark_mode
+from user_facing_errors import friendly_error_message, sanitize_user_message
 
 
 class GeminiKeyAlertDialog(QDialog):
@@ -99,12 +100,12 @@ class GeminiKeyAlertDialog(QDialog):
         title_group = QVBoxLayout()
         title_group.setSpacing(4)
 
-        title = QLabel("Summer Coupang 자동화가 중지되었습니다")
+        title = QLabel("Summer Coupang 자동화가 잠시 멈췄어요")
         title.setFont(QFont("Pretendard", 17, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {c.text_primary};")
         title_group.addWidget(title)
 
-        subtitle = QLabel("Gemini API 키가 모두 거절되어 다음 큐 아이템을 소비하지 않았습니다.")
+        subtitle = QLabel("저장된 Gemini API 키를 지금 사용할 수 없어 다음 상품 처리를 시작하지 않았어요.")
         subtitle.setFont(QFont("Pretendard", 11))
         subtitle.setWordWrap(True)
         subtitle.setStyleSheet(f"color: {c.text_secondary};")
@@ -179,18 +180,14 @@ class GeminiKeyAlertDialog(QDialog):
         invalid_lines = self._invalid_key_lines()
         configured_count = self._configured_key_count()
         if configured_count <= 0:
-            layout.addWidget(self._detail_line("저장된 Gemini API 키가 없습니다. 설정에서 키를 추가한 뒤 다시 실행하세요.", c.warning))
+            layout.addWidget(self._detail_line("저장된 Gemini API 키가 없어요. 설정에서 키를 추가한 뒤 다시 실행해 주세요.", c.warning))
         elif invalid_lines:
             for line in invalid_lines:
                 layout.addWidget(self._detail_line(line, c.error))
         else:
-            layout.addWidget(self._detail_line("거절된 키 alias 없음", c.text_secondary))
+            layout.addWidget(self._detail_line("저장된 API 키 상태를 다시 확인해 주세요.", c.text_secondary))
 
-        missing = self._missing_aliases()
-        if missing and configured_count > 0:
-            layout.addWidget(self._detail_line(f"빈 슬롯: {', '.join(missing)}", c.text_muted))
-
-        note = QLabel("키 원문은 보안상 표시하지 않습니다. 설정 화면에서 해당 alias의 키를 교체한 뒤 큐를 다시 실행하세요.")
+        note = QLabel("키 원문은 보안상 표시하지 않습니다. 설정 > API 키에서 새 Gemini API 키로 교체한 뒤 다시 실행해 주세요.")
         note.setWordWrap(True)
         note.setFont(QFont("Pretendard", 10))
         note.setStyleSheet(f"color: {c.text_muted}; padding-top: 6px;")
@@ -304,8 +301,8 @@ class GeminiKeyAlertDialog(QDialog):
         if isinstance(preflight, dict):
             reason = preflight.get("blocking_reason") or preflight.get("reason")
             if reason:
-                return str(reason)
-        return str(self.payload.get("reason") or "gemini_api_keys_rejected")
+                return sanitize_user_message(reason, fallback=friendly_error_message(preflight))
+        return friendly_error_message(self.payload, fallback="Gemini API 키 확인이 필요해요.")
 
     def _configured_key_count(self) -> int:
         preflight = self.payload.get("preflight")
@@ -321,18 +318,31 @@ class GeminiKeyAlertDialog(QDialog):
         if not isinstance(invalid, list):
             return []
         lines: List[str] = []
+        has_permission_error = False
+        has_quota_error = False
         for item in invalid:
             if not isinstance(item, dict):
                 continue
-            alias = str(item.get("alias") or "unknown")
-            status = str(item.get("google_status") or item.get("http_status") or "rejected")
-            reason = ""
-            details = item.get("details")
-            if isinstance(details, list) and details and isinstance(details[0], dict):
-                reason = str(details[0].get("reason") or "")
-            message = str(item.get("message_summary") or "").strip()
-            tail = " / ".join(part for part in (status, reason, message) if part)
-            lines.append(f"{alias}: {tail}")
+            text = json.dumps(item, ensure_ascii=False)
+            lowered = text.lower()
+            has_permission_error = (
+                has_permission_error
+                or "permission_denied" in lowered
+                or '"403"' in lowered
+                or ": 403" in lowered
+            )
+            has_quota_error = (
+                has_quota_error
+                or "resource_exhausted" in lowered
+                or '"429"' in lowered
+                or ": 429" in lowered
+            )
+        if has_permission_error:
+            lines.append("저장된 Gemini API 키가 Google에서 권한 거절 상태예요. 새 키로 교체하거나 Google AI Studio에서 키 제한을 확인해 주세요.")
+        elif has_quota_error:
+            lines.append("현재 API 사용량이 한도에 도달했어요. 잠시 후 다시 시도하거나 다른 키를 추가해 주세요.")
+        elif invalid:
+            lines.append("저장된 Gemini API 키를 지금 사용할 수 없어요. 설정에서 새 키로 교체해 주세요.")
         return lines
 
     def _missing_aliases(self) -> List[str]:

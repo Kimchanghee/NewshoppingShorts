@@ -35,6 +35,7 @@ from managers.youtube_manager import (
     get_youtube_manager,
 )
 from scripts import render_program_pipeline_upload as renderer
+from user_facing_errors import friendly_error_message
 
 
 QUEUE_PATH = Path(r"C:\Users\HOME\.ssmaker\summer_coupang_autosourcing_queue_20260603.json")
@@ -840,37 +841,15 @@ def _gemini_key_alert_message(
     pending_count: int,
     next_item: Optional[Dict[str, Any]] = None,
 ) -> str:
-    invalid = preflight.get("invalid_aliases") if isinstance(preflight.get("invalid_aliases"), list) else []
-    invalid_parts = []
-    for item in invalid:
-        if not isinstance(item, dict):
-            continue
-        alias = str(item.get("alias") or "unknown")
-        status = str(item.get("google_status") or item.get("http_status") or "rejected")
-        message = str(item.get("message_summary") or "").strip()
-        invalid_parts.append(f"{alias}: {status} {message}".strip())
-    invalid_text = "\n".join(invalid_parts) if invalid_parts else "(no configured key was rejected)"
-    missing = preflight.get("missing_aliases") if isinstance(preflight.get("missing_aliases"), list) else []
-    configured_count = len(preflight.get("valid_aliases") or []) + len(invalid_parts)
-    if configured_count <= 0:
-        key_section_title = "Configured Gemini keys:"
-        key_section = "No Gemini API keys are stored. Add at least one key in Settings, then run the queue again."
-    else:
-        key_section_title = "Rejected configured Gemini keys:"
-        key_section = invalid_text
-        if missing:
-            key_section += "\n\nEmpty key slots are unused capacity, not a failure."
     next_number = str((next_item or {}).get("planned_number") or "").strip() or "(unknown)"
     next_name = str((next_item or {}).get("product_name") or "").strip()
     next_line = f"{next_number} {next_name}".strip()
     return (
-        "Summer Coupang automation stopped before consuming the next queue item.\n\n"
-        f"Reason: {preflight.get('blocking_reason') or preflight.get('reason')}\n"
-        f"Next item: {next_line}\n"
-        f"Pending items: {pending_count}\n\n"
-        f"{key_section_title}\n"
-        f"{key_section}\n\n"
-        "Open Settings > Gemini API keys, add or replace the configured key(s), then run the queue again."
+        "Summer Coupang 자동화가 잠시 멈췄어요.\n\n"
+        f"{friendly_error_message(preflight)}\n\n"
+        f"다음 상품: {next_line}\n"
+        f"대기 상품: {pending_count}건\n\n"
+        "설정 > API 키에서 새 Gemini API 키로 교체한 뒤 다시 실행해 주세요."
     )
 
 

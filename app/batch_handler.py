@@ -21,6 +21,12 @@ from ui.components.custom_dialog import (
 )
 import core.video.DynamicBatch as DynamicBatch
 from utils.logging_config import get_logger
+from user_facing_errors import (
+    friendly_error_message,
+    friendly_error_title,
+    looks_developer_facing,
+    sanitize_user_message,
+)
 from caller import rest
 from ui.design_system_v2 import get_design_system, get_color
 import config
@@ -77,8 +83,14 @@ class BatchHandler:
 
     def _set_run_status(self, title: str, detail: str = "", level: str = "info") -> None:
         """Keep the queue/progress UI explicit about what Start actually did."""
-        safe_title = str(title or "상태 확인 중").strip()
-        safe_detail = self._short_detail(detail)
+        safe_title = (
+            friendly_error_title(title)
+            if looks_developer_facing(title)
+            else str(title or "상태 확인 중").strip()
+        )
+        safe_detail = self._short_detail(
+            sanitize_user_message(detail, fallback="잠시 문제가 생겼어요. 다시 시도해 주세요.")
+        )
 
         def apply_status():
             try:
@@ -170,22 +182,16 @@ class BatchHandler:
             return "작업 완료", detail, "success"
 
         if reason in {"gemini_api_keys_missing", "gemini_api_keys_rejected"}:
-            invalid = self._format_alias_list(summary.get("invalid_aliases"))
-            missing = self._format_alias_list(summary.get("missing_aliases"))
             parts = []
-            if invalid:
-                parts.append(f"거절된 키: {invalid}")
-            if missing:
-                parts.append(f"비어 있는 키: {missing}")
             if summary.get("popup_launched"):
-                parts.append("알림 팝업 표시됨")
+                parts.append("안내 창을 열어 두었어요.")
             elif summary.get("popup_throttled"):
-                parts.append("알림 팝업은 중복 방지로 생략됨")
-            detail = (
-                f"Gemini API 키 확인에서 막혔습니다. {blocking or reason}. "
-                + " / ".join(parts)
-            ).strip()
-            return "API 키 차단", f"{detail}{code_suffix} 소요 {elapsed}.", "error"
+                parts.append("중복 안내 창은 생략했어요.")
+            detail = friendly_error_message(summary)
+            if parts:
+                detail += "\n" + " ".join(parts)
+            detail += f"\n확인 시간: {elapsed}."
+            return friendly_error_title(summary), f"{detail}{code_suffix}", "error"
 
         reason_titles = {
             "youtube_not_connected": "YouTube 연결 필요",
@@ -200,7 +206,7 @@ class BatchHandler:
         }
         title = reason_titles.get(reason) or reason_titles.get(str(summary.get("blocking_type") or ""))
         if title:
-            detail = blocking or reason
+            detail = sanitize_user_message(blocking or reason, fallback="현재 상태를 확인해 주세요.")
             pending = summary.get("pending_count")
             next_at = summary.get("next_scheduled_at") or summary.get("scheduler_next_run")
             if pending is not None:
@@ -212,10 +218,16 @@ class BatchHandler:
 
         if status:
             level = "success" if returncode == 0 else "warning"
-            detail = blocking or reason or f"{planned}번 결과 상태: {status}"
+            detail = sanitize_user_message(
+                blocking or reason or f"{planned}번 작업 상태: {status}",
+                fallback="실행 결과를 확인해 주세요.",
+            )
             return "실행 결과 확인", f"{detail}{code_suffix} 소요 {elapsed}.", level
 
-        detail = blocking or reason or "러너가 요약을 남겼지만 처리 상태를 분류하지 못했습니다."
+        detail = sanitize_user_message(
+            blocking or reason or "실행 결과가 돌아왔지만 처리 상태를 분류하지 못했어요.",
+            fallback="실행 결과를 확인해 주세요.",
+        )
         level = "success" if returncode == 0 else "error"
         return "실행 결과 확인", f"{detail}{code_suffix} 소요 {elapsed}.", level
 

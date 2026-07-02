@@ -4118,6 +4118,7 @@ class SettingsTab(QWidget, ThemedMixin):
         try:
             for key_input in self.api_key_inputs:
                 key_input.clear()
+                key_input.setPlaceholderText("API 키 (AIza...)")
             for i in range(1, 9):
                 key_value = SecretsManager.get_api_key(f"gemini_api_{i}")
                 if i == 1 and not key_value:
@@ -4138,6 +4139,13 @@ class SettingsTab(QWidget, ThemedMixin):
             logger = get_logger(__name__)
             logger.warning(f"[Settings] API 키 로드 실패: {e}")
 
+    @staticmethod
+    def _mask_api_key_for_display(key_value: str) -> str:
+        key = str(key_value or "").strip()
+        if len(key) <= 8:
+            return "저장됨"
+        return f"{key[:4]}...{key[-4:]}"
+
     def _update_key_count(self):
         """저장된 키 개수 업데이트 (SecretsManager 기준)."""
         try:
@@ -4146,15 +4154,27 @@ class SettingsTab(QWidget, ThemedMixin):
                 key_value = SecretsManager.get_api_key(f"gemini_api_{i}")
                 if key_value and str(key_value).strip():
                     count += 1
+                    if i <= len(self.api_key_inputs) and not self.api_key_inputs[i - 1].text().strip():
+                        masked = self._mask_api_key_for_display(str(key_value))
+                        self.api_key_inputs[i - 1].setPlaceholderText(
+                            f"저장됨 ({masked}) - 변경하려면 새 키 입력"
+                        )
             if count == 0:
                 legacy_value = SecretsManager.get_api_key("gemini")
                 if legacy_value and str(legacy_value).strip():
                     count = 1
-            self.api_count_label.setText(f"저장된 키: {count}개")
+                    if self.api_key_inputs and not self.api_key_inputs[0].text().strip():
+                        masked = self._mask_api_key_for_display(str(legacy_value))
+                        self.api_key_inputs[0].setPlaceholderText(
+                            f"저장됨 ({masked}) - 변경하려면 새 키 입력"
+                        )
+            suffix = " (값은 숨김)" if count else ""
+            self.api_count_label.setText(f"저장된 키: {count}개{suffix}")
         except Exception:
             # Fallback: UI 입력값 기준 (예외 상황에서만)
             count = sum(1 for inp in self.api_key_inputs if inp.text().strip())
-            self.api_count_label.setText(f"저장된 키: {count}개")
+            suffix = " (값은 숨김)" if count else ""
+            self.api_count_label.setText(f"저장된 키: {count}개{suffix}")
 
     def _save_all_api_keys(self):
         """모든 API 키 저장 (빈칸 제거 및 당겨서 저장)"""
@@ -4289,7 +4309,7 @@ class SettingsTab(QWidget, ThemedMixin):
         if saved_count > 0:
             show_info(self, "저장 완료", f"총 {saved_count}개의 API 키가 순서대로 정렬되어 저장되었습니다.")
         else:
-            show_info(self, "저장 완료", "모든 API 키가 삭제되었습니다.")
+            show_info(self, "저장 완료", "저장된 API 키가 없습니다. 입력한 키가 없어서 새로 저장하지 않았습니다.")
 
     def _clear_all_api_keys(self):
         """모든 API 키 삭제"""
@@ -4310,6 +4330,10 @@ class SettingsTab(QWidget, ThemedMixin):
                 SecretsManager.delete_api_key(f"gemini_api_{i}")
             except Exception as del_err:
                 _logger.debug(f"[Settings] Failed to delete gemini_api_{i}: {del_err}")
+        try:
+            SecretsManager.delete_api_key("gemini")
+        except Exception as del_err:
+            _logger.debug(f"[Settings] Failed to delete legacy gemini key: {del_err}")
 
         # config 초기화
         config.GEMINI_API_KEYS = {}

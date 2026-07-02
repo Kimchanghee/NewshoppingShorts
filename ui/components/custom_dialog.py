@@ -12,6 +12,7 @@ from PyQt6.QtCore import Qt, QSize
 from PyQt6.QtGui import QFont, QIcon
 
 from ..design_system_v2 import get_design_system, get_color
+from user_facing_errors import sanitize_user_message
 
 
 _TITLE_MAP = {
@@ -49,7 +50,7 @@ def _localize_button_text(text: str) -> str:
 
 
 def _localize_message(message: str) -> str:
-    raw = (message or "").strip()
+    raw = sanitize_user_message(message, fallback="잠시 후 다시 시도해 주세요.").strip()
     if not raw:
         return raw
 

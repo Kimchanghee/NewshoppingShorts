@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont
 
 from utils.logging_config import get_logger
+from user_facing_errors import friendly_error_message, friendly_error_title
 
 logger = get_logger(__name__)
 
@@ -55,6 +56,11 @@ class ApiKeyErrorDialog(QDialog):
         self._build_ui(step_name, key_name, error_msg, error_type)
 
     def _build_ui(self, step_name, key_name, error_msg, error_type):
+        friendly_title = friendly_error_title(error_msg or error_type, fallback="API 키를 확인해 주세요")
+        friendly_message = friendly_error_message(
+            error_msg or error_type,
+            fallback="설정에서 API 키를 확인한 뒤 다시 시도해 주세요.",
+        )
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
@@ -68,12 +74,10 @@ class ApiKeyErrorDialog(QDialog):
         title_layout = QVBoxLayout()
         title_layout.setSpacing(4)
 
-        if error_type == "quota":
-            title_text = "API 할당량 초과 (429)"
-        elif error_type == "permission":
-            title_text = "API 권한 오류 (403)"
+        if error_type in {"quota", "permission"}:
+            title_text = friendly_title
         else:
-            title_text = "API Key 오류"
+            title_text = "API 키를 확인해 주세요"
 
         title = QLabel(title_text)
         title.setFont(QFont("Pretendard", 16, QFont.Weight.Bold))
@@ -109,8 +113,7 @@ class ApiKeyErrorDialog(QDialog):
             details_layout.addLayout(key_row)
 
         if error_msg:
-            display_msg = error_msg[:150] + "..." if len(error_msg) > 150 else error_msg
-            err_row = self._info_row("오류 내용", display_msg)
+            err_row = self._info_row("안내", friendly_message)
             details_layout.addLayout(err_row)
 
         layout.addLayout(details_layout)

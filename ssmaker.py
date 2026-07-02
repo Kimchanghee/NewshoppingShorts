@@ -7,7 +7,34 @@ import os
 import time
 import logging
 from PyQt6 import QtCore, QtWidgets, QtGui
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QMessageBox
+
+from user_facing_errors import sanitize_user_message
+
+_ORIGINAL_QMESSAGEBOX_CRITICAL = QMessageBox.critical
+
+
+def _looks_broken_ui_text(value: object) -> bool:
+    text = str(value or "")
+    if not text:
+        return False
+    cjk_count = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    return text.count("?") >= 2 or (len(text) >= 12 and cjk_count / max(len(text), 1) > 0.15)
+
+
+def _critical_user_message(parent, title, message, *args, **kwargs):
+    safe_title = "시작할 수 없어요" if _looks_broken_ui_text(title) else str(title or "시작할 수 없어요")
+    if _looks_broken_ui_text(message):
+        safe_message = "프로그램 시작 중 문제가 생겼어요.\n프로그램을 다시 실행하거나 최신 설치 파일로 다시 설치해 주세요."
+    else:
+        safe_message = sanitize_user_message(
+            message,
+            fallback="프로그램 시작 중 문제가 생겼어요.\n프로그램을 다시 실행해 주세요.",
+        )
+    return _ORIGINAL_QMESSAGEBOX_CRITICAL(parent, safe_title, safe_message, *args, **kwargs)
+
+
+QMessageBox.critical = _critical_user_message
 
 # Environmental settings for HighDPI
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"

@@ -17,9 +17,37 @@ from PyQt6 import QtCore
 from PyQt6.QtWidgets import QMessageBox
 from utils.logging_config import get_logger
 from utils.auto_updater import compare_versions
+from user_facing_errors import sanitize_user_message
 from .initializer import Initializer
 
 logger = get_logger(__name__)
+
+_ORIGINAL_QMESSAGEBOX_CRITICAL = QMessageBox.critical
+
+
+def _looks_broken_ui_text(value: object) -> bool:
+    text = str(value or "")
+    if not text:
+        return False
+    # Existing legacy strings include mojibake with many question marks/CJK
+    # codepoints. Do not show those to customers.
+    cjk_count = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    return text.count("?") >= 2 or (len(text) >= 12 and cjk_count / max(len(text), 1) > 0.15)
+
+
+def _critical_user_message(parent, title, message, *args, **kwargs):
+    safe_title = "확인이 필요해요" if _looks_broken_ui_text(title) else str(title or "확인이 필요해요")
+    if _looks_broken_ui_text(message):
+        safe_message = "프로그램 처리 중 문제가 생겼어요.\n프로그램을 다시 실행하거나 최신 설치 파일로 다시 설치해 주세요."
+    else:
+        safe_message = sanitize_user_message(
+            message,
+            fallback="프로그램 처리 중 문제가 생겼어요.\n프로그램을 다시 실행해 주세요.",
+        )
+    return _ORIGINAL_QMESSAGEBOX_CRITICAL(parent, safe_title, safe_message, *args, **kwargs)
+
+
+QMessageBox.critical = _critical_user_message
 
 # Path for persisting update info across restart
 _PENDING_UPDATE_PATH = os.path.join(
@@ -494,8 +522,9 @@ class AppController:
                         logger.error("Executable signature verification failed: %s", reason)
                         QMessageBox.critical(
                             None,
-                            "Security Error",
-                            "App signature verification failed. Startup has been blocked.",
+                            "보안 확인 필요",
+                            "프로그램 파일 확인에 실패해서 실행을 중단했어요.\n"
+                            "최신 설치 파일로 다시 설치한 뒤 실행해 주세요.",
                         )
                         sys.exit(1)
 
