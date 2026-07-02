@@ -710,6 +710,18 @@ def gemini_key_preflight_enabled() -> bool:
     return raw not in {"0", "false", "no", "off"}
 
 
+def gemini_runtime_fallback_enabled() -> bool:
+    raw = str(os.environ.get("SSMAKER_GEMINI_RUNTIME_FALLBACK", "1")).strip().lower()
+    return raw not in {"0", "false", "no", "off"}
+
+
+def _disable_gemini_runtime_for_current_process(preflight: Dict[str, Any]) -> None:
+    os.environ["SSMAKER_GEMINI_RUNTIME_DISABLED"] = "1"
+    os.environ["SSMAKER_GEMINI_RUNTIME_FALLBACK_REASON"] = str(
+        preflight.get("reason") or "gemini_api_unavailable"
+    )
+
+
 def _google_error_summary(payload: Dict[str, Any]) -> Dict[str, Any]:
     error = payload.get("error") if isinstance(payload.get("error"), dict) else {}
     details = error.get("details") if isinstance(error.get("details"), list) else []
@@ -980,6 +992,34 @@ def maybe_show_gemini_key_alert(
     return payload
 
 
+def record_gemini_key_fallback_warning(
+    preflight: Dict[str, Any],
+    *,
+    pending_count: int,
+    next_item: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    payload = {
+        "updated_at": now_local(),
+        "fallback_mode": True,
+        "popup_launched": False,
+        "popup_throttled": True,
+        "pending_count": pending_count,
+        "next_planned_number": str((next_item or {}).get("planned_number") or ""),
+        "next_product_name": str((next_item or {}).get("product_name") or ""),
+        "preflight": preflight,
+        "message": (
+            "저장된 Gemini API 키를 지금 사용할 수 없어 이번 실행은 Gemini 없이 계속 진행합니다. "
+            "소싱 키워드는 규칙 기반으로 만들고, 음성은 Edge TTS 대체 경로를 사용합니다."
+        ),
+    }
+    GEMINI_KEY_ALERT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    GEMINI_KEY_ALERT_PATH.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return payload
+
+
 def mark_gemini_key_alert_resolved(preflight: Dict[str, Any]) -> None:
     if not GEMINI_KEY_ALERT_PATH.exists():
         return
@@ -1008,6 +1048,23 @@ def gemini_api_key_preflight_ready(
     if preflight.get("ok"):
         mark_gemini_key_alert_resolved(preflight)
         return preflight
+    if gemini_runtime_fallback_enabled():
+        _disable_gemini_runtime_for_current_process(preflight)
+        warning = record_gemini_key_fallback_warning(
+            preflight,
+            pending_count=pending_count,
+            next_item=next_item,
+        )
+        return {
+            **preflight,
+            "ok": True,
+            "reason": "gemini_runtime_fallback",
+            "warning_reason": preflight.get("reason"),
+            "fallback_mode": True,
+            "alert_path": str(GEMINI_KEY_ALERT_PATH),
+            "popup_launched": bool(warning.get("popup_launched")),
+            "popup_throttled": bool(warning.get("popup_throttled")),
+        }
     alert = maybe_show_gemini_key_alert(
         preflight,
         pending_count=pending_count,
@@ -1038,14 +1095,30 @@ def build_run_dir(item: Dict[str, Any]) -> Path:
     return path
 
 
-def get_gemini_client() -> Any:
+def get_gemini_client() -> Optional[Any]:
+    if str(os.environ.get("SSMAKER_GEMINI_RUNTIME_DISABLED", "")).strip() == "1":
+        return None
     from google import genai
 
-    manager = ApiKeyManager.APIKeyManager(use_secrets_manager=True)
-    key = manager.get_available_key()
-    if not key:
-        raise RuntimeError("Gemini API key is not configured.")
-    return genai.Client(api_key=key)
+    try:
+        manager = ApiKeyManager.APIKeyManager(use_secrets_manager=True)
+        key = manager.get_available_key()
+        if not key:
+            return None
+        return genai.Client(api_key=key)
+    except Exception as exc:
+        print(
+            json.dumps(
+                {
+                    "gemini_runtime": "disabled_for_fallback",
+                    "reason": str(exc)[:180],
+                },
+                ensure_ascii=False,
+            ),
+            flush=True,
+        )
+        os.environ["SSMAKER_GEMINI_RUNTIME_DISABLED"] = "1"
+        return None
 
 
 def progress(label: str):

@@ -521,39 +521,43 @@ class AudioPipeline:
         original_path = os.path.join(self.app.tts_output_dir, original_filename)
 
         audio_data = b""
-        try:
-            response = self.app.genai_client.models.generate_content(
-                model=self.app.config.GEMINI_TTS_MODEL,
-                contents=[tts_text],
-                config=types.GenerateContentConfig(
-                    response_modalities=["AUDIO"],
-                    speech_config=types.SpeechConfig(
-                        voice_config=types.VoiceConfig(
-                            prebuilt_voice_config=types.PrebuiltVoiceConfig(
-                                voice_name=voice
+        genai_client = getattr(self.app, "genai_client", None)
+        if genai_client is None:
+            logger.info("[TTS] Gemini TTS is unavailable; using Edge fallback.")
+        else:
+            try:
+                response = genai_client.models.generate_content(
+                    model=self.app.config.GEMINI_TTS_MODEL,
+                    contents=[tts_text],
+                    config=types.GenerateContentConfig(
+                        response_modalities=["AUDIO"],
+                        speech_config=types.SpeechConfig(
+                            voice_config=types.VoiceConfig(
+                                prebuilt_voice_config=types.PrebuiltVoiceConfig(
+                                    voice_name=voice
+                                )
                             )
-                        )
+                        ),
                     ),
-                ),
-            )
-            if response and response.candidates:
-                candidate = response.candidates[0]
-                parts = (
-                    getattr(getattr(candidate, "content", None), "parts", None)
-                    or []
                 )
-                if parts and getattr(parts[0], "inline_data", None):
-                    audio_data = parts[0].inline_data.data or b""
-                else:
-                    finish_reason = getattr(candidate, "finish_reason", "unknown")
-                    logger.warning(
-                        "[TTS] Gemini returned no audio parts (finish=%s); using Edge fallback.",
-                        finish_reason,
+                if response and response.candidates:
+                    candidate = response.candidates[0]
+                    parts = (
+                        getattr(getattr(candidate, "content", None), "parts", None)
+                        or []
                     )
-            else:
-                logger.warning("[TTS] Gemini returned no candidates; using Edge fallback.")
-        except Exception as exc:
-            logger.warning("[TTS] Gemini TTS failed; using Edge fallback: %s", exc)
+                    if parts and getattr(parts[0], "inline_data", None):
+                        audio_data = parts[0].inline_data.data or b""
+                    else:
+                        finish_reason = getattr(candidate, "finish_reason", "unknown")
+                        logger.warning(
+                            "[TTS] Gemini returned no audio parts (finish=%s); using Edge fallback.",
+                            finish_reason,
+                        )
+                else:
+                    logger.warning("[TTS] Gemini returned no candidates; using Edge fallback.")
+            except Exception as exc:
+                logger.warning("[TTS] Gemini TTS failed; using Edge fallback: %s", exc)
 
         if audio_data:
             # WAV 파일 저장

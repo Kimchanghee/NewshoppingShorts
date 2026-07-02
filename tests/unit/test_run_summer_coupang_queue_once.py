@@ -296,6 +296,58 @@ def test_gemini_alert_uses_branded_dialog_before_windows_fallback(monkeypatch, t
     assert payload["next_product_name"] == "water gun"
 
 
+def test_gemini_preflight_fallback_records_warning_without_popup(monkeypatch, tmp_path):
+    alert_path = tmp_path / "summer_coupang_gemini_api_key_alert.json"
+    preflight = {
+        "ok": False,
+        "reason": "gemini_api_keys_rejected",
+        "blocking_reason": "All configured Gemini API keys were rejected.",
+        "invalid_aliases": [
+            {
+                "alias": "api_1",
+                "http_status": 403,
+                "google_status": "PERMISSION_DENIED",
+            }
+        ],
+        "missing_aliases": ["api_2"],
+    }
+
+    def fail_popup(*_args, **_kwargs):
+        raise AssertionError("fallback mode must not launch a blocking Gemini key popup")
+
+    monkeypatch.delenv("SSMAKER_GEMINI_RUNTIME_DISABLED", raising=False)
+    monkeypatch.delenv("SSMAKER_GEMINI_RUNTIME_FALLBACK", raising=False)
+    monkeypatch.setattr(queue_runner, "GEMINI_KEY_ALERT_PATH", alert_path)
+    monkeypatch.setattr(queue_runner, "probe_configured_gemini_api_keys", lambda: preflight)
+    monkeypatch.setattr(queue_runner, "maybe_show_gemini_key_alert", fail_popup)
+
+    result = queue_runner.gemini_api_key_preflight_ready(
+        pending_count=60,
+        next_item={"planned_number": "[168]", "product_name": "mosquito swatter"},
+    )
+
+    payload = json.loads(alert_path.read_text(encoding="utf-8"))
+    assert result["ok"] is True
+    assert result["reason"] == "gemini_runtime_fallback"
+    assert result["warning_reason"] == "gemini_api_keys_rejected"
+    assert result["fallback_mode"] is True
+    assert result["popup_launched"] is False
+    assert queue_runner.os.environ["SSMAKER_GEMINI_RUNTIME_DISABLED"] == "1"
+    assert payload["fallback_mode"] is True
+    assert payload["popup_launched"] is False
+    assert payload["popup_throttled"] is True
+    assert payload["next_planned_number"] == "[168]"
+    assert payload["preflight"]["reason"] == "gemini_api_keys_rejected"
+    assert "Gemini" in payload["message"]
+    assert "Edge TTS" in payload["message"]
+
+
+def test_get_gemini_client_returns_none_when_runtime_disabled(monkeypatch):
+    monkeypatch.setenv("SSMAKER_GEMINI_RUNTIME_DISABLED", "1")
+
+    assert queue_runner.get_gemini_client() is None
+
+
 def test_process_pending_items_skips_items_scheduled_for_later(monkeypatch):
     payload = {
         "items": [

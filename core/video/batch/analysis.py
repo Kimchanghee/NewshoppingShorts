@@ -143,6 +143,11 @@ def _analyze_video_for_batch(app):
         logger.info("  Thinking 레벨: %s", config.GEMINI_THINKING_LEVEL)
         logger.info("  Temperature: %s", config.GEMINI_TEMPERATURE)
 
+        if getattr(app, "genai_client", None) is None:
+            if _apply_sourcing_analysis_fallback(app, "Gemini analysis is unavailable"):
+                return
+            raise RuntimeError("Gemini video analysis is unavailable and no fallback product text was found.")
+
         prompt = get_video_analysis_prompt(cta_lines)
 
         # 5분 타임아웃으로 분석 실행 (최대 5회 재시도)

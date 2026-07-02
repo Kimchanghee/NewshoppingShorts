@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
 from core.video.batch.analysis import (
+    _analyze_video_for_batch,
     _apply_sourcing_analysis_fallback,
     _get_sourcing_fallback_text,
     _run_with_timeout,
@@ -46,6 +47,40 @@ def test_apply_sourcing_analysis_fallback_populates_analysis_result():
     assert app.translation_result == "휴대용 미니 청소기"
     assert app.analysis_result["subtitle_positions"] == subtitle_positions
     assert app.analysis_result["fallback_reason"] == "timeout"
+    assert logs
+    assert progress
+
+
+def test_analyze_video_without_gemini_uses_sourcing_fallback(monkeypatch):
+    logs = []
+    progress = []
+    app = SimpleNamespace(
+        genai_client=None,
+        state=SimpleNamespace(
+            sourcing_result={
+                "description": "fallback product copy",
+                "product_info": {"name": "fallback product"},
+            }
+        ),
+        fixed_tts_voice=None,
+        last_voice_used=None,
+        available_tts_voices=[],
+        multi_voice_presets=[],
+        _temp_downloaded_file="video.mp4",
+        add_log=logs.append,
+        update_progress_state=lambda *args: progress.append(args),
+        detect_subtitles_with_opencv=lambda: [],
+        video_analysis_result=None,
+        translation_result=None,
+        analysis_result={},
+    )
+    monkeypatch.setattr("ui.panels.cta_panel.get_selected_cta_lines", lambda _app: [])
+
+    _analyze_video_for_batch(app)
+
+    assert app.video_analysis_result == "fallback product copy"
+    assert app.translation_result == "fallback product copy"
+    assert app.analysis_result["fallback_reason"] == "Gemini analysis is unavailable"
     assert logs
     assert progress
 

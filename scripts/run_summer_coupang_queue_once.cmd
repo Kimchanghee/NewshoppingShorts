@@ -8,6 +8,7 @@ if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
 set "LOG_FILE=%LOG_DIR%\summer_coupang_queue_once.log"
 set "PYTHONIOENCODING=utf-8"
+set "SSMAKER_LINKTREE_BROWSER_PUBLISH=1"
 echo.>> "%LOG_FILE%"
 echo ===== %DATE% %TIME% summer_coupang_queue_once start =====>> "%LOG_FILE%"
 

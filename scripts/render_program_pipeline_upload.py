@@ -119,8 +119,7 @@ class HeadlessBatchApp(AppState):
         self.config = config
 
         self.api_key_manager = ApiKeyManager.APIKeyManager(use_secrets_manager=True)
-        if not self.init_client():
-            raise RuntimeError("Gemini API client initialization failed.")
+        self.init_client()
 
         for voice_id in list(self.voice_vars):
             self.voice_vars[voice_id] = False
@@ -131,6 +130,10 @@ class HeadlessBatchApp(AppState):
         self.fixed_tts_voice = self.multi_voice_presets[0]
 
     def init_client(self, use_specific_key=None) -> bool:
+        if str(os.environ.get("SSMAKER_GEMINI_RUNTIME_DISABLED", "")).strip() == "1":
+            self.genai_client = None
+            self.state.genai_client = None
+            return True
         try:
             from google import genai
 
@@ -140,6 +143,9 @@ class HeadlessBatchApp(AppState):
             return True
         except Exception as exc:
             print(f"[ERROR] Gemini client init failed: {exc}", file=sys.stderr)
+            self.genai_client = None
+            self.state.genai_client = None
+            os.environ["SSMAKER_GEMINI_RUNTIME_DISABLED"] = "1"
             return False
 
     def add_log(self, message: str):
