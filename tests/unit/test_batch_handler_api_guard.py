@@ -100,3 +100,26 @@ def test_summer_coupang_manual_reset_prefers_ui_callback_signal(monkeypatch):
 
     assert emitted == [callback]
     assert called == []
+
+
+def test_summer_run_status_describes_rejected_gemini_keys_without_secret_values():
+    handler = BatchHandler(SimpleNamespace())
+
+    title, detail, level = handler._summer_run_result_status(
+        {
+            "reason": "gemini_api_keys_rejected",
+            "blocking_reason": "All configured Gemini API keys were rejected.",
+            "invalid_aliases": ["api_1"],
+            "missing_aliases": ["api_2", "api_3"],
+            "popup_launched": True,
+        },
+        elapsed_seconds=1.4,
+        returncode=1,
+    )
+
+    assert title == "API 키 차단"
+    assert level == "error"
+    assert "api_1" in detail
+    assert "api_2" in detail
+    assert "알림 팝업 표시됨" in detail
+    assert "AIza" not in detail

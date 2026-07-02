@@ -70,6 +70,20 @@ class QueuePanel(QFrame, ThemedMixin):
 
         control_layout.addStretch()
         self.main_layout.addLayout(control_layout)
+
+        run_status_layout = QVBoxLayout()
+        run_status_layout.setSpacing(3)
+        self.gui.start_run_status_label = QLabel("작업 시작 전")
+        self.gui.start_run_status_label.setWordWrap(True)
+        self.gui.start_run_status_label.setMinimumHeight(22)
+        self.gui.start_run_detail_label = QLabel(
+            "작업 시작을 누르면 실행 요청, 실제 실행, 완료 또는 차단 사유가 여기에 표시됩니다."
+        )
+        self.gui.start_run_detail_label.setWordWrap(True)
+        self.gui.start_run_detail_label.setMinimumHeight(28)
+        run_status_layout.addWidget(self.gui.start_run_status_label)
+        run_status_layout.addWidget(self.gui.start_run_detail_label)
+        self.main_layout.addLayout(run_status_layout)
         
         # TreeWidget (Replacement for Treeview)
         self.gui.url_listbox = QTreeWidget()
@@ -172,6 +186,24 @@ class QueuePanel(QFrame, ThemedMixin):
         )
         for label in getattr(self, "_status_chips", []):
             label.setStyleSheet(chip_style)
+
+        run_status_label = getattr(self.gui, "start_run_status_label", None)
+        if run_status_label is not None:
+            run_status_label.setStyleSheet(
+                f"color: {text_primary};"
+                "border: none;"
+                "font-size: 13px;"
+                "font-weight: 700;"
+                "padding: 2px 0 0 0;"
+            )
+        run_detail_label = getattr(self.gui, "start_run_detail_label", None)
+        if run_detail_label is not None:
+            run_detail_label.setStyleSheet(
+                f"color: {text_secondary};"
+                "border: none;"
+                "font-size: 12px;"
+                "padding: 0 0 6px 0;"
+            )
         
         self.gui.url_listbox.setStyleSheet(f"""
             QTreeWidget {{

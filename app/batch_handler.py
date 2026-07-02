@@ -68,6 +68,157 @@ class BatchHandler:
             logger.debug("[BatchHandler] API 키 확인 중 예외: %s", e)
         return False
 
+    @staticmethod
+    def _short_detail(text: str, limit: int = 260) -> str:
+        detail = " ".join(str(text or "").split())
+        if len(detail) <= limit:
+            return detail
+        return detail[: limit - 1].rstrip() + "…"
+
+    def _set_run_status(self, title: str, detail: str = "", level: str = "info") -> None:
+        """Keep the queue/progress UI explicit about what Start actually did."""
+        safe_title = str(title or "상태 확인 중").strip()
+        safe_detail = self._short_detail(detail)
+
+        def apply_status():
+            try:
+                color_key_by_level = {
+                    "active": "warning",
+                    "success": "success",
+                    "warning": "warning",
+                    "error": "error",
+                    "idle": "text_muted",
+                    "info": "primary",
+                }
+                accent = get_color(color_key_by_level.get(level, "primary"))
+            except Exception:
+                accent = "#E31639"
+
+            status_label = getattr(self.app, "start_run_status_label", None)
+            if status_label is not None:
+                status_label.setText(safe_title)
+                status_label.setStyleSheet(
+                    f"color: {accent};"
+                    "border: none;"
+                    "font-size: 13px;"
+                    "font-weight: 700;"
+                    "padding: 2px 0 0 0;"
+                )
+
+            detail_label = getattr(self.app, "start_run_detail_label", None)
+            if detail_label is not None:
+                try:
+                    detail_color = get_color("text_secondary")
+                except Exception:
+                    detail_color = "#B8B8B8"
+                detail_label.setText(safe_detail or "상세 상태를 확인하는 중입니다.")
+                detail_label.setStyleSheet(
+                    f"color: {detail_color};"
+                    "border: none;"
+                    "font-size: 12px;"
+                    "padding: 0 0 6px 0;"
+                )
+
+            task_label = getattr(self.app, "current_task_label", None)
+            if task_label is not None:
+                task_text = f"{safe_title} - {safe_detail}" if safe_detail else safe_title
+                task_label.setText(self._short_detail(task_text, limit=320))
+
+            witty_label = getattr(self.app, "overall_witty_label", None)
+            if witty_label is not None and safe_detail:
+                witty_label.setText(safe_detail)
+
+        self._dispatch_ui_callback(apply_status)
+
+    @staticmethod
+    def _format_alias_list(values) -> str:
+        if not values:
+            return ""
+        if not isinstance(values, (list, tuple, set)):
+            values = [values]
+        return ", ".join(str(v) for v in values if str(v).strip())
+
+    @staticmethod
+    def _set_button_text(button, text: str) -> None:
+        if button is None or not hasattr(button, "setText"):
+            return
+        try:
+            button.setText(text)
+        except Exception:
+            return
+
+    def _summer_run_result_status(self, summary: dict, elapsed_seconds: float, returncode: int):
+        reason = str(summary.get("reason") or "").strip()
+        status = str(summary.get("status") or "").strip()
+        blocking = str(summary.get("blocking_reason") or summary.get("error") or "").strip()
+        planned = (
+            summary.get("planned_number")
+            or summary.get("next_planned_number")
+            or "-"
+        )
+        elapsed = f"{elapsed_seconds:.0f}초"
+        code_suffix = f" 종료코드 {returncode}." if returncode else ""
+
+        if status == "completed":
+            youtube_url = str(summary.get("youtube_url") or "").strip()
+            linktree_ok = bool(summary.get("linktree_ok"))
+            detail = f"{planned}번 처리 완료. YouTube 업로드 완료"
+            detail += ", Linktree 등록 완료." if linktree_ok else "."
+            if youtube_url:
+                detail += f" YouTube: {youtube_url}"
+            detail += f" 소요 {elapsed}."
+            return "작업 완료", detail, "success"
+
+        if reason in {"gemini_api_keys_missing", "gemini_api_keys_rejected"}:
+            invalid = self._format_alias_list(summary.get("invalid_aliases"))
+            missing = self._format_alias_list(summary.get("missing_aliases"))
+            parts = []
+            if invalid:
+                parts.append(f"거절된 키: {invalid}")
+            if missing:
+                parts.append(f"비어 있는 키: {missing}")
+            if summary.get("popup_launched"):
+                parts.append("알림 팝업 표시됨")
+            elif summary.get("popup_throttled"):
+                parts.append("알림 팝업은 중복 방지로 생략됨")
+            detail = (
+                f"Gemini API 키 확인에서 막혔습니다. {blocking or reason}. "
+                + " / ".join(parts)
+            ).strip()
+            return "API 키 차단", f"{detail}{code_suffix} 소요 {elapsed}.", "error"
+
+        reason_titles = {
+            "youtube_not_connected": "YouTube 연결 필요",
+            "youtube_account_verification_failed": "YouTube 계정 확인 실패",
+            "linktree_not_connected": "Linktree 연결 필요",
+            "linktree_preflight_error": "Linktree 확인 실패",
+            "affiliate_link_missing": "제휴 링크 필요",
+            "no_due_items": "예약 시간 전",
+            "no_pending_items": "대기 항목 없음",
+            "all_pending_items_skipped_low_similarity": "처리 가능한 항목 없음",
+            "all_candidate_items_skipped": "후보 항목 건너뜀",
+        }
+        title = reason_titles.get(reason) or reason_titles.get(str(summary.get("blocking_type") or ""))
+        if title:
+            detail = blocking or reason
+            pending = summary.get("pending_count")
+            next_at = summary.get("next_scheduled_at") or summary.get("scheduler_next_run")
+            if pending is not None:
+                detail = f"{detail} 대기 {pending}건."
+            if next_at:
+                detail = f"{detail} 다음 예약 {next_at}."
+            level = "warning" if reason in {"no_due_items", "no_pending_items"} else "error"
+            return title, f"{detail}{code_suffix} 소요 {elapsed}.", level
+
+        if status:
+            level = "success" if returncode == 0 else "warning"
+            detail = blocking or reason or f"{planned}번 결과 상태: {status}"
+            return "실행 결과 확인", f"{detail}{code_suffix} 소요 {elapsed}.", level
+
+        detail = blocking or reason or "러너가 요약을 남겼지만 처리 상태를 분류하지 못했습니다."
+        level = "success" if returncode == 0 else "error"
+        return "실행 결과 확인", f"{detail}{code_suffix} 소요 {elapsed}.", level
+
     def _start_summer_coupang_queue_now(self) -> bool:
         """Run the visible Summer Coupang queue when the normal URL queue is empty."""
         try:
@@ -76,18 +227,40 @@ class BatchHandler:
             waiting_count = int(counts.get("waiting", 0) or 0)
         except Exception as exc:
             logger.warning("[BatchHandler] Summer Coupang queue check failed: %s", exc)
+            self._set_run_status(
+                "큐 확인 실패",
+                f"Summer Coupang 큐 파일을 읽지 못했습니다: {exc}",
+                "error",
+            )
             return False
 
         if waiting_count <= 0:
+            self._set_run_status(
+                "실행할 항목 없음",
+                "일반 URL 큐와 Summer Coupang 대기 항목이 모두 비어 있습니다.",
+                "warning",
+            )
             return False
 
         existing_thread = getattr(self.app, "batch_thread", None)
         if existing_thread and existing_thread.is_alive():
+            self._set_run_status(
+                "이미 실행 중",
+                "이전 작업 스레드가 아직 살아 있습니다. 완료되거나 중지된 뒤 다시 시작할 수 있습니다.",
+                "warning",
+            )
             show_warning(self.app, "경고", "이미 작업이 진행 중입니다.")
             return True
 
         self.app.batch_processing = True
         self.app.dynamic_processing = False
+        next_number = snapshot.get("next_planned_number") or "-"
+        next_time = snapshot.get("next_scheduled_display") or "즉시"
+        self._set_run_status(
+            "실행 요청됨",
+            f"Summer Coupang {next_number}번 상품을 즉시 실행합니다. 대기 {waiting_count}건, 기준 예약 {next_time}.",
+            "active",
+        )
         self.app.add_log(
             f"[Summer Coupang] 예약 큐 {waiting_count}건 감지 - 첫 대기 상품을 즉시 실행합니다."
         )
@@ -96,6 +269,7 @@ class BatchHandler:
         stop_btn = getattr(self.app, "stop_batch_button", None)
         if start_btn is not None:
             self._reset_start_button_style(start_btn)
+            self._set_button_text(start_btn, "실행 중...")
             start_btn.setEnabled(False)
         if stop_btn is not None:
             stop_btn.setEnabled(False)
@@ -112,6 +286,12 @@ class BatchHandler:
         repo_root = Path(__file__).resolve().parents[1]
         script = repo_root / "scripts" / "run_summer_coupang_queue_once.py"
         command = [sys.executable, str(script), "--run-now"]
+        started_at = time.monotonic()
+        self._set_run_status(
+            "실행 중",
+            "Summer Coupang 백그라운드 러너가 실제로 시작됐습니다. run_summer_coupang_queue_once.py --run-now 실행 중.",
+            "active",
+        )
         try:
             completed = subprocess.run(
                 command,
@@ -124,6 +304,7 @@ class BatchHandler:
             )
             output = (completed.stdout or "").strip()
             summary = self._extract_json_summary(output)
+            elapsed = time.monotonic() - started_at
             if summary:
                 planned = summary.get("planned_number") or "-"
                 status = summary.get("status") or summary.get("reason") or "-"
@@ -131,9 +312,20 @@ class BatchHandler:
                 self.app.add_log(f"[Summer Coupang] 즉시 실행 완료: {planned} / {status}")
                 if youtube_url:
                     self.app.add_log(f"[Summer Coupang] YouTube: {youtube_url}")
+                title, detail, level = self._summer_run_result_status(
+                    summary,
+                    elapsed,
+                    completed.returncode,
+                )
+                self._set_run_status(title, detail, level)
             else:
                 tail = output[-800:] if output else (completed.stderr or "")[-800:]
                 self.app.add_log(f"[Summer Coupang] 즉시 실행 결과: {tail}")
+                self._set_run_status(
+                    "실행 결과 확인 필요",
+                    f"러너 요약 JSON을 찾지 못했습니다. {tail}",
+                    "warning" if completed.returncode == 0 else "error",
+                )
 
             if completed.returncode != 0:
                 self.app.add_log(
@@ -142,9 +334,19 @@ class BatchHandler:
                 )
         except subprocess.TimeoutExpired:
             self.app.add_log("[Summer Coupang] 즉시 실행이 60분을 초과해 중단되었습니다.")
+            self._set_run_status(
+                "실행 시간 초과",
+                "Summer Coupang 러너가 60분 안에 끝나지 않아 중단되었습니다.",
+                "error",
+            )
             logger.warning("[BatchHandler] Summer Coupang run-now timed out")
         except Exception as exc:
             self.app.add_log(f"[Summer Coupang] 즉시 실행 실패: {exc}")
+            self._set_run_status(
+                "실행 실패",
+                f"Summer Coupang 러너를 시작하거나 완료 처리하는 중 오류가 났습니다: {exc}",
+                "error",
+            )
             logger.error("[BatchHandler] Summer Coupang run-now failed: %s", exc, exc_info=True)
         finally:
             self._dispatch_ui_callback(self._reset_summer_coupang_manual_ui)
@@ -182,6 +384,7 @@ class BatchHandler:
         start_btn = getattr(self.app, "start_batch_button", None)
         if start_btn is not None:
             start_btn.setEnabled(True)
+            self._set_button_text(start_btn, "▶ 작업 시작")
             self._reset_start_button_style(start_btn)
         try:
             if hasattr(self.app, "update_url_listbox"):
@@ -196,12 +399,22 @@ class BatchHandler:
         # 이미 실행 중인 스레드가 있는지 확인
         if self.app.batch_thread and self.app.batch_thread.is_alive():
             self.app.add_log("이미 작업이 진행 중입니다. 기다려주세요.")
+            self._set_run_status(
+                "이미 실행 중",
+                "이전 작업 스레드가 아직 끝나지 않았습니다. 완료 또는 중지 처리 후 다시 시작할 수 있습니다.",
+                "warning",
+            )
             show_warning(self.app, "경고", "이미 작업이 진행 중입니다.")
             return
 
         if not self.app.url_queue:
             if self._start_summer_coupang_queue_now():
                 return
+            self._set_run_status(
+                "실행할 항목 없음",
+                "일반 URL 큐와 Summer Coupang 대기 항목이 모두 비어 있습니다.",
+                "warning",
+            )
             show_warning(self.app, "경고", "처리할 URL이 없습니다.")
             return
 
@@ -214,6 +427,11 @@ class BatchHandler:
             ]
 
         if not waiting_urls:
+            self._set_run_status(
+                "대기 URL 없음",
+                "URL 목록은 있지만 처리 상태가 '대기'인 항목이 없습니다.",
+                "warning",
+            )
             show_info(self.app, "알림", "처리할 대기 중인 URL이 없습니다.")
             return
 
@@ -222,6 +440,11 @@ class BatchHandler:
             vid for vid, selected in self.app.voice_vars.items() if selected
         ]
         if not selected_voices or len(selected_voices) == 0:
+            self._set_run_status(
+                "TTS 음성 필요",
+                "작업을 시작하려면 TTS 음성을 최소 1개 이상 선택해야 합니다.",
+                "warning",
+            )
             show_warning(
                 self.app, "경고", "TTS 음성을 최소 1개 이상 선택해주세요."
             )
@@ -249,6 +472,11 @@ class BatchHandler:
         # API 키 검증 - 먼저 체크 (빈 dict, None, 또는 모든 값이 빈 문자열인 경우 체크)
         if not self._has_valid_api_key():
             self.app.add_log("[API] API 키가 설정되지 않았습니다.")
+            self._set_run_status(
+                "API 키 필요",
+                "저장된 Gemini API 키가 없습니다. 설정 > API 키에서 최소 1개를 저장해야 작업을 시작할 수 있습니다.",
+                "error",
+            )
             show_warning(
                 self.app,
                 "API KEY 필요",
@@ -361,6 +589,11 @@ class BatchHandler:
             self.app.add_log("[API] Gemini 클라이언트를 초기화합니다.")
             if not self.app.init_client():
                 self.app.add_log("API 연결 실패로 작업을 중단합니다.")
+                self._set_run_status(
+                    "API 초기화 실패",
+                    "Gemini 클라이언트 초기화에 실패했습니다. 저장된 키가 실제로 유효한지 확인해야 합니다.",
+                    "error",
+                )
                 show_error(
                     self.app,
                     "❌ API 초기화 실패",
@@ -396,10 +629,16 @@ class BatchHandler:
         # 동적 처리 플래그 설정
         self.app.dynamic_processing = True
         self.app.batch_processing = True
+        self._set_run_status(
+            "실행 중",
+            f"일반 URL {len(waiting_urls)}개 처리를 시작했습니다. 백그라운드 스레드가 생성됩니다.",
+            "active",
+        )
         start_btn = getattr(self.app, "start_batch_button", None)
         stop_btn = getattr(self.app, "stop_batch_button", None)
         if start_btn is not None:
             self._reset_start_button_style(start_btn)
+            self._set_button_text(start_btn, "실행 중...")
             start_btn.setEnabled(False)
         if stop_btn is not None:
             stop_btn.setEnabled(True)
@@ -422,6 +661,11 @@ class BatchHandler:
         acquired = self.app.batch_processing_lock.acquire(blocking=False)
         if not acquired:
             self.app.add_log("다른 작업이 진행 중이어서 대기합니다...")
+            self._set_run_status(
+                "실행 대기 중",
+                "다른 배치 작업 락이 사용 중입니다. 잠시 대기한 뒤 다시 실행합니다.",
+                "warning",
+            )
             # Timeout-based acquisition to prevent deadlock
             for retry in range(MAX_RETRIES):
                 acquired = self.app.batch_processing_lock.acquire(
@@ -437,6 +681,11 @@ class BatchHandler:
                 self.app.add_log(
                     "다른 작업이 진행 중입니다. 잠시 후 다시 시도해주세요."
                 )
+                self._set_run_status(
+                    "실행 차단",
+                    "배치 작업 락을 확보하지 못했습니다. 이전 작업이 비정상 종료됐는지 확인이 필요합니다.",
+                    "error",
+                )
                 self.app.batch_processing = False
                 self.app.dynamic_processing = False
                 QTimer.singleShot(0, self._reset_batch_ui_on_complete)
@@ -448,10 +697,20 @@ class BatchHandler:
         except Exception as e:
             logger.error("[배치] 처리 중 오류 발생: %s", e, exc_info=True)
             self.app.add_log(f"오류 발생: {e}")
+            self._set_run_status(
+                "작업 오류",
+                f"배치 처리 중 오류가 발생했습니다: {e}",
+                "error",
+            )
         except BaseException as e:
             # MemoryError, SystemExit 등 심각한 오류도 잡아서 로깅
             logger.critical("[배치] 심각한 오류로 처리 중단: %s", e, exc_info=True)
             self.app.add_log(f"심각한 오류: {type(e).__name__}")
+            self._set_run_status(
+                "작업 중단",
+                f"심각한 오류로 배치 처리가 중단됐습니다: {type(e).__name__}",
+                "error",
+            )
         finally:
             self.app.batch_processing_lock.release()
             self.app.add_log("영상 만들기 완료!")
@@ -467,20 +726,44 @@ class BatchHandler:
             stop_btn = getattr(self.app, "stop_batch_button", None)
             if start_btn is not None:
                 start_btn.setEnabled(True)
+                self._set_button_text(start_btn, "▶ 작업 시작")
             if stop_btn is not None:
                 stop_btn.setEnabled(False)
 
             # Check if there were skipped/stopped items → red button
             has_interrupted = False
+            has_failed = False
             url_status = getattr(self.app, "url_status", {})
             for status in url_status.values():
                 normalized = status.strip().lower() if isinstance(status, str) else ""
                 if normalized in ("skipped", "건너뜀", "waiting", "대기"):
                     has_interrupted = True
-                    break
+                if normalized in ("failed", "error", "실패", "오류"):
+                    has_failed = True
 
             if has_interrupted and start_btn is not None:
                 self._set_start_button_red(start_btn)
+            elif start_btn is not None:
+                self._reset_start_button_style(start_btn)
+
+            if has_failed:
+                self._set_run_status(
+                    "작업 완료 - 확인 필요",
+                    "처리 중 실패 항목이 있습니다. 대기열의 상태/비고와 진행 로그를 확인하세요.",
+                    "error",
+                )
+            elif has_interrupted:
+                self._set_run_status(
+                    "작업 중지/대기",
+                    "완료되지 않은 항목이 남아 있습니다. 작업 시작을 다시 누르면 이어서 처리합니다.",
+                    "warning",
+                )
+            else:
+                self._set_run_status(
+                    "작업 완료",
+                    "현재 대기열 처리가 끝났습니다.",
+                    "success",
+                )
 
             self._play_completion_alarm()
         except Exception as e:
@@ -554,10 +837,20 @@ class BatchHandler:
     def stop_batch_processing(self):
         """배치 처리 중지 (현재 URL 완료 후 중지)"""
         if not self.app.batch_processing:
+            self._set_run_status(
+                "이미 중지됨",
+                "현재 실행 중인 작업이 없습니다.",
+                "idle",
+            )
             self.app.add_log("이미 중지된 상태입니다.")
             return
 
         self.app.batch_processing = False
+        self._set_run_status(
+            "중지 요청됨",
+            "현재 처리 중인 항목을 정리한 뒤 작업을 멈춥니다.",
+            "warning",
+        )
         self.app.dynamic_processing = False  # 동적 처리도 중지
         self.app.add_log("중지 요청됨 - 현재 영상 완료 후 중지됩니다.")
 
@@ -585,6 +878,7 @@ class BatchHandler:
                 start_btn = getattr(self.app, "start_batch_button", None)
                 if start_btn is not None:
                     start_btn.setEnabled(True)
+                    self._set_button_text(start_btn, "▶ 작업 시작")
                     self._set_start_button_red(start_btn)
             QTimer.singleShot(0, enable_start_btn)
 
