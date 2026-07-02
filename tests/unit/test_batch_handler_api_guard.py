@@ -117,9 +117,10 @@ def test_summer_run_status_describes_rejected_gemini_keys_without_secret_values(
         returncode=1,
     )
 
-    assert title == "API 키 차단"
+    assert title == "Gemini API 키를 사용할 수 없어요"
     assert level == "error"
-    assert "api_1" in detail
-    assert "api_2" in detail
-    assert "알림 팝업 표시됨" in detail
+    assert "새 API 키를 발급해 교체" in detail
+    assert "안내 창을 열어 두었어요" in detail
+    assert "api_1" not in detail
+    assert "api_2" not in detail
     assert "AIza" not in detail
