@@ -523,8 +523,8 @@ def mark_linktree_retry_exhausted(item: Dict[str, Any]) -> Dict[str, Any]:
         else {}
     )
     blocking_reason = (
-        f"Linktree publish failed after {max_attempts} retry attempts; "
-        "leaving the YouTube upload recorded and moving this item out of the active queue."
+        f"Linktree 자동 등록을 {max_attempts}회 다시 시도했지만 완료하지 못했어요. "
+        "YouTube 업로드 기록은 유지하고 이 항목은 대기 목록에서 정리했어요."
     )
     linktree_result = {
         **existing_linktree,

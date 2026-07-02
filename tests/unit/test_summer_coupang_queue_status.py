@@ -100,7 +100,8 @@ def test_build_snapshot_compacts_quality_gate_rows(tmp_path):
     assert snapshot["counts"]["skipped"] == 1
     assert snapshot["rows"][0]["order"] == "[054]"
     assert snapshot["rows"][0]["status"] == "품질보류"
-    assert "duration_too_short" in snapshot["rows"][0]["remarks"]
+    assert "자동 업로드 기준을 통과하지 못했어요" in snapshot["rows"][0]["remarks"]
+    assert "duration_too_short" not in snapshot["rows"][0]["remarks"]
 
 
 def test_build_snapshot_labels_duplicate_product_rows(tmp_path):
@@ -133,7 +134,8 @@ def test_build_snapshot_labels_duplicate_product_rows(tmp_path):
     assert snapshot["counts"]["skipped"] == 1
     assert snapshot["rows"][0]["order"] == "[055]"
     assert snapshot["rows"][0]["status"] == "중복보류"
-    assert "Duplicate product family" in snapshot["rows"][0]["remarks"]
+    assert "이미 처리한 상품과 너무 비슷해" in snapshot["rows"][0]["remarks"]
+    assert "Duplicate product family" not in snapshot["rows"][0]["remarks"]
 
 
 def test_build_snapshot_treats_system_skip_as_retry_waiting(tmp_path):
@@ -182,3 +184,75 @@ def test_build_snapshot_treats_system_skip_as_retry_waiting(tmp_path):
     assert snapshot["rows"][1]["status"] == "재시도 대기"
     assert snapshot["rows"][1]["upload"] == "재시도 대기"
     assert snapshot["rows"][1]["retriable_system_skip"] == "true"
+
+
+def test_build_snapshot_sanitizes_legacy_linktree_retry_text(tmp_path):
+    queue_path = tmp_path / "summer_queue.json"
+    queue_path.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "planned_number": "[077]",
+                        "status": "failed_linktree_publish",
+                        "coupang_url": "https://www.coupang.com/vp/products/77",
+                        "scheduled_at": "2026-07-01T20:27:00+09:00",
+                        "attempts": 1,
+                        "result": {
+                            "blocking_reason": (
+                                "Linktree publish failed after 1 retry attempts; "
+                                "leaving the YouTube upload recorded and moving this item out of the active queue."
+                            ),
+                            "linktree_result": {
+                                "ok": False,
+                                "blocking_reason": (
+                                    "Linktree publish failed after 1 retry attempts; "
+                                    "leaving the YouTube upload recorded and moving this item out of the active queue."
+                                ),
+                            },
+                        },
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8-sig",
+    )
+
+    snapshot = build_summer_coupang_queue_snapshot(queue_path)
+
+    remarks = snapshot["rows"][0]["remarks"]
+    assert "Linktree 자동 등록을 완료하지 못했어요" in remarks
+    assert "YouTube 업로드 기록은 유지" in remarks
+    assert "Linktree publish failed" not in remarks
+    assert "retry attempts" not in remarks
+
+
+def test_build_snapshot_replaces_question_mark_mojibake_reason(tmp_path):
+    queue_path = tmp_path / "summer_queue.json"
+    queue_path.write_text(
+        json.dumps(
+            {
+                "items": [
+                    {
+                        "planned_number": "[078]",
+                        "status": "skipped_low_similarity",
+                        "coupang_url": "https://www.coupang.com/vp/products/78",
+                        "scheduled_at": "2026-07-01T20:27:00+09:00",
+                        "attempts": 1,
+                        "result": {
+                            "blocking_reason": "??? ??????. ?? ???? ?? ?? ??? ?? ?? ??? ?? ?? ?? ???? ??????.",
+                        },
+                    },
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8-sig",
+    )
+
+    snapshot = build_summer_coupang_queue_snapshot(queue_path)
+
+    remarks = snapshot["rows"][0]["remarks"]
+    assert "같은 상품으로 확인할 수 있는 영상을 찾지 못해" in remarks
+    assert "???" not in remarks

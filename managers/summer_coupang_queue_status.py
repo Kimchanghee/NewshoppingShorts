@@ -139,6 +139,22 @@ def _is_retriable_system_skip(item: Dict[str, Any]) -> bool:
     return _is_system_sourcing_blocker(result)
 
 
+def _friendly_remark(raw: str, fallback: str) -> str:
+    text = sanitize_user_message(raw, fallback=fallback).strip()
+    return " ".join(text.split())
+
+
+def _fallback_reason_for_status(status: str) -> str:
+    return {
+        "skipped_low_similarity": "같은 상품으로 확인할 수 있는 영상을 찾지 못해 자동 진행을 멈췄어요.",
+        "skipped_quality_gate": "영상 품질 확인을 통과하지 못해 자동 진행을 멈췄어요.",
+        "skipped_duplicate_product": "이미 처리한 상품과 너무 비슷해 자동 진행을 멈췄어요.",
+        "failed_linktree_publish": "Linktree 자동 등록 상태를 확인해 주세요.",
+        "linktree_retry_pending": "Linktree 자동 등록을 다시 확인하는 중이에요.",
+        "completed_linktree_blocked": "Linktree 자동 등록을 다시 확인하는 중이에요.",
+    }.get(status, "작업 상태를 확인해 주세요.")
+
+
 def _status_bucket_for_item(item: Dict[str, Any]) -> str:
     if _is_retriable_system_skip(item):
         return "waiting"
@@ -155,7 +171,7 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
     youtube_url = _extract_youtube_url(result)
     raw_blocking_reason = str(result.get("blocking_reason") or "").strip()
     blocking_reason = (
-        sanitize_user_message(raw_blocking_reason, fallback="작업 상태를 확인해 주세요.").strip()
+        _friendly_remark(raw_blocking_reason, fallback=_fallback_reason_for_status(status))
         if raw_blocking_reason
         else ""
     )
@@ -165,7 +181,12 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
         else {}
     )
     linktree_ok = bool(linktree_result.get("ok"))
-    linktree_reason = str(linktree_result.get("blocking_reason") or blocking_reason).strip()
+    raw_linktree_reason = str(linktree_result.get("blocking_reason") or blocking_reason).strip()
+    linktree_reason = (
+        _friendly_remark(raw_linktree_reason, fallback="Linktree 자동 등록 상태를 확인해 주세요.")
+        if raw_linktree_reason
+        else ""
+    )
 
     if status == AFFILIATE_LINK_BLOCKED_STATUS:
         upload_text = "제휴 링크 필요"
