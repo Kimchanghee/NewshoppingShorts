@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import json
 
 import config
 from app.batch_handler import BatchHandler
@@ -193,3 +194,39 @@ def test_run_status_keeps_current_progress_card_short(monkeypatch):
     assert app.overall_witty_label.text == "설정에서 YouTube를 다시 연결해 주세요. 대기 59건."
     assert app.progress_panel.calls == [("YouTube 업로드 권한 만료", "error")]
     assert app.current_task_label.text == ""
+
+
+def test_summer_runner_enables_linktree_browser_publish(monkeypatch):
+    captured = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["env"] = kwargs.get("env") or {}
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                {
+                    "processed": True,
+                    "status": "completed",
+                    "planned_number": "[999]",
+                    "youtube_url": "https://youtu.be/example",
+                    "linktree_ok": True,
+                }
+            ),
+            stderr="",
+        )
+
+    app = SimpleNamespace(
+        batch_processing=True,
+        dynamic_processing=False,
+        add_log=lambda _message: None,
+    )
+    handler = BatchHandler(app)
+    monkeypatch.setattr(handler, "_dispatch_ui_callback", lambda callback: callback())
+    monkeypatch.setattr("app.batch_handler.subprocess.run", fake_run)
+
+    handler._summer_coupang_queue_now_wrapper()
+
+    assert captured["env"]["SSMAKER_LINKTREE_BROWSER_PUBLISH"] == "1"
+    assert captured["env"]["SSMAKER_LINKTREE_CLOSE_TAB_AFTER_VERIFY"] == "1"
+    assert captured["command"][-1] == "--run-now"

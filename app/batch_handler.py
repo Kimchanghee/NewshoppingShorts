@@ -7,6 +7,7 @@ This module handles batch processing control logic, extracted from main.py.
 import threading
 import time
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -319,6 +320,9 @@ class BatchHandler:
         repo_root = Path(__file__).resolve().parents[1]
         script = repo_root / "scripts" / "run_summer_coupang_queue_once.py"
         command = [sys.executable, str(script), "--run-now"]
+        env = os.environ.copy()
+        env["SSMAKER_LINKTREE_BROWSER_PUBLISH"] = "1"
+        env["SSMAKER_LINKTREE_CLOSE_TAB_AFTER_VERIFY"] = "1"
         started_at = time.monotonic()
         self._set_run_status(
             "실행 중",
@@ -333,6 +337,7 @@ class BatchHandler:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
+                env=env,
                 timeout=60 * 60,
             )
             output = (completed.stdout or "").strip()
