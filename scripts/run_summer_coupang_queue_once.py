@@ -1740,7 +1740,7 @@ def youtube_upload_ready() -> Dict[str, Any]:
             return {
                 "ok": False,
                 "reason": "youtube_not_connected",
-                "blocking_reason": "YouTube OAuth token is missing or invalid. Reconnect the YouTube channel before consuming pending queue items.",
+                "blocking_reason": "YouTube 업로드 권한이 만료됐어요. 설정에서 YouTube를 다시 연결해 주세요.",
             }
 
         verification = get_settings_manager().get_youtube_account_verification() or {}

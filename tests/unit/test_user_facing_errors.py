@@ -53,3 +53,17 @@ def test_summer_coupang_status_hides_raw_key_diagnostics():
     assert "api_1" not in detail
     assert "PERMISSION_DENIED" not in detail
     assert "message_summary" not in detail
+
+
+def test_youtube_oauth_missing_message_is_customer_friendly():
+    raw = (
+        "YouTube OAuth token is missing or invalid. Reconnect the YouTube channel "
+        "before consuming pending queue items."
+    )
+
+    message = sanitize_user_message(raw)
+
+    assert friendly_error_title(raw) == "YouTube 업로드 권한 만료"
+    assert message == "설정에서 YouTube를 다시 연결해 주세요."
+    assert "OAuth token" not in message
+    assert "pending queue" not in message

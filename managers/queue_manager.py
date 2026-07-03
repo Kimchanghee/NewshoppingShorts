@@ -7,6 +7,7 @@ from __future__ import annotations
 import os
 import re
 from datetime import datetime
+from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 from uuid import uuid4
 
@@ -194,6 +195,10 @@ class QueueManager:
             "enabled": "사용",
         }
         return mapping.get(normalized_text, normalized_text)
+
+    @staticmethod
+    def _youtube_upload_token_exists() -> bool:
+        return (Path.home() / ".ssmaker" / "youtube_token.json").exists()
 
     def _find_queue_key_by_display(self, display_value: str) -> str:
         if display_value in self.gui.url_queue or display_value in self.gui.url_status:
@@ -592,7 +597,10 @@ class QueueManager:
             settings = get_settings_manager()
             yt_connected = bool(settings.get_youtube_connected())
             channel = (settings.get_youtube_channel_info() or {}).get("channel_name") or ""
-            youtube_text = f"YouTube\n연결됨 {channel}".strip() if yt_connected else "YouTube\n연결 필요"
+            if yt_connected and self._youtube_upload_token_exists():
+                youtube_text = f"YouTube\n연결됨 {channel}".strip()
+            else:
+                youtube_text = "YouTube\n업로드 권한 만료"
             labels["summer_status_youtube"] = youtube_text
         except Exception:
             labels["summer_status_youtube"] = "YouTube\n확인 실패"

@@ -124,3 +124,28 @@ def test_summer_run_status_describes_rejected_gemini_keys_without_secret_values(
     assert "api_1" not in detail
     assert "api_2" not in detail
     assert "AIza" not in detail
+
+
+def test_summer_run_status_uses_short_youtube_oauth_message():
+    handler = BatchHandler(SimpleNamespace())
+
+    title, detail, level = handler._summer_run_result_status(
+        {
+            "reason": "youtube_not_connected",
+            "pending_count": 59,
+            "blocking_reason": (
+                "YouTube OAuth token is missing or invalid. Reconnect the YouTube "
+                "channel before consuming pending queue items."
+            ),
+        },
+        elapsed_seconds=17,
+        returncode=1,
+    )
+
+    assert title == "YouTube 업로드 권한 만료"
+    assert detail == "설정에서 YouTube를 다시 연결해 주세요. 대기 59건."
+    assert level == "error"
+    assert "OAuth" not in detail
+    assert "pending queue" not in detail
+    assert "종료코드" not in detail
+    assert "소요" not in detail

@@ -18,6 +18,14 @@ class DummyGUI:
         self.state = SimpleNamespace(mix_jobs=self.mix_jobs)
 
 
+class DummyLabel:
+    def __init__(self):
+        self.text = ""
+
+    def setText(self, text):
+        self.text = text
+
+
 def _build_manager(monkeypatch):
     events = {"warning": [], "info": []}
     monkeypatch.setattr(
@@ -124,3 +132,69 @@ def test_update_queue_status_allows_terminal_status_new_url(monkeypatch):
 
     assert "https://example.com/done" in gui.url_queue
     assert gui.url_status["https://example.com/done"] == "completed"
+
+
+def test_summer_coupang_youtube_status_expires_without_upload_token(monkeypatch):
+    manager = QueueManager.__new__(QueueManager)
+    gui = SimpleNamespace(
+        summer_status_interval=DummyLabel(),
+        summer_status_queue=DummyLabel(),
+        summer_status_next=DummyLabel(),
+        summer_status_youtube=DummyLabel(),
+    )
+    manager.gui = gui
+    settings = SimpleNamespace(
+        get_youtube_connected=lambda: True,
+        get_youtube_channel_info=lambda: {"channel_name": "Summer Channel"},
+    )
+    monkeypatch.setattr(queue_module, "get_settings_manager", lambda: settings)
+    monkeypatch.setattr(
+        QueueManager,
+        "_youtube_upload_token_exists",
+        staticmethod(lambda: False),
+    )
+
+    manager._update_summer_coupang_status_labels(
+        {
+            "counts": {"completed": 12, "waiting": 59},
+            "total": 71,
+            "next_planned_number": "[168]",
+            "next_scheduled_display": "07-03 12:00",
+            "interval_minutes": 240,
+        }
+    )
+
+    assert gui.summer_status_youtube.text == "YouTube\n업로드 권한 만료"
+
+
+def test_summer_coupang_youtube_status_shows_connected_with_upload_token(monkeypatch):
+    manager = QueueManager.__new__(QueueManager)
+    gui = SimpleNamespace(
+        summer_status_interval=DummyLabel(),
+        summer_status_queue=DummyLabel(),
+        summer_status_next=DummyLabel(),
+        summer_status_youtube=DummyLabel(),
+    )
+    manager.gui = gui
+    settings = SimpleNamespace(
+        get_youtube_connected=lambda: True,
+        get_youtube_channel_info=lambda: {"channel_name": "Summer Channel"},
+    )
+    monkeypatch.setattr(queue_module, "get_settings_manager", lambda: settings)
+    monkeypatch.setattr(
+        QueueManager,
+        "_youtube_upload_token_exists",
+        staticmethod(lambda: True),
+    )
+
+    manager._update_summer_coupang_status_labels(
+        {
+            "counts": {"completed": 12, "waiting": 59},
+            "total": 71,
+            "next_planned_number": "[168]",
+            "next_scheduled_display": "07-03 12:00",
+            "interval_minutes": 240,
+        }
+    )
+
+    assert gui.summer_status_youtube.text == "YouTube\n연결됨 Summer Channel"

@@ -194,7 +194,7 @@ class BatchHandler:
             return friendly_error_title(summary), f"{detail}{code_suffix}", "error"
 
         reason_titles = {
-            "youtube_not_connected": "YouTube 연결 필요",
+            "youtube_not_connected": "YouTube 업로드 권한 만료",
             "youtube_account_verification_failed": "YouTube 계정 확인 실패",
             "linktree_not_connected": "Linktree 연결 필요",
             "linktree_preflight_error": "Linktree 확인 실패",
@@ -206,7 +206,11 @@ class BatchHandler:
         }
         title = reason_titles.get(reason) or reason_titles.get(str(summary.get("blocking_type") or ""))
         if title:
-            detail = sanitize_user_message(blocking or reason, fallback="현재 상태를 확인해 주세요.")
+            detail_source = summary if reason == "youtube_not_connected" else (blocking or reason)
+            detail = sanitize_user_message(
+                detail_source,
+                fallback="현재 상태를 확인해 주세요.",
+            )
             pending = summary.get("pending_count")
             next_at = summary.get("next_scheduled_at") or summary.get("scheduler_next_run")
             if pending is not None:
@@ -214,6 +218,8 @@ class BatchHandler:
             if next_at:
                 detail = f"{detail} 다음 예약 {next_at}."
             level = "warning" if reason in {"no_due_items", "no_pending_items"} else "error"
+            if reason == "youtube_not_connected":
+                return title, detail, level
             return title, f"{detail}{code_suffix} 소요 {elapsed}.", level
 
         if status:

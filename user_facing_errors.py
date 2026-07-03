@@ -32,12 +32,15 @@ RAW_DETAIL_TOKENS = (
     "ConnectionError",
     "TimeoutError",
     "HTTPError",
+    "OAuth token",
     "KeyError",
     "ValueError",
     "RuntimeError",
     "PermissionError",
     "SSLError",
     "Linktree publish failed",
+    "Reconnect the YouTube channel",
+    "pending queue items",
     "leaving the YouTube upload",
     "Render upload quality gate failed",
     "No generated video",
@@ -109,10 +112,15 @@ def classify_error(value: Any) -> str:
         return "quota_exhausted"
     if "api_key_invalid" in combined or "api key not valid" in combined or "api key expired" in combined:
         return "api_key_invalid"
-    if "youtube_not_connected" in combined or "youtube" in combined and "not connected" in combined:
-        return "youtube_not_connected"
     if "invalid_grant" in combined or "token has been expired or revoked" in combined:
         return "youtube_reconnect"
+    if (
+        "youtube_not_connected" in combined
+        or "oauth token is missing or invalid" in combined
+        or "reconnect the youtube channel" in combined
+        or ("youtube" in combined and "not connected" in combined)
+    ):
+        return "youtube_not_connected"
     if "linktree_not_connected" in combined:
         return "linktree_not_connected"
     if (
@@ -150,7 +158,7 @@ def friendly_error_title(value: Any, fallback: str = "잠시 문제가 생겼어
         "gemini_key_rejected": "Gemini API 키를 사용할 수 없어요",
         "quota_exhausted": "API 사용량이 잠시 꽉 찼어요",
         "api_key_invalid": "API 키를 다시 확인해 주세요",
-        "youtube_not_connected": "YouTube 연결이 필요해요",
+        "youtube_not_connected": "YouTube 업로드 권한 만료",
         "youtube_reconnect": "YouTube를 다시 연결해 주세요",
         "linktree_not_connected": "Linktree 연결이 필요해요",
         "linktree_publish_failed": "Linktree 자동 등록을 확인해 주세요",
@@ -183,10 +191,7 @@ def friendly_error_message(value: Any, fallback: str = "잠시 후 다시 시도
             "저장된 API 키가 만료되었거나 형식이 맞지 않아요.\n"
             "설정 > API 키에서 새 Gemini API 키로 교체해 주세요."
         ),
-        "youtube_not_connected": (
-            "YouTube 채널 연결이 확인되지 않았어요.\n"
-            "설정에서 YouTube 연결을 완료한 뒤 다시 실행해 주세요."
-        ),
+        "youtube_not_connected": "설정에서 YouTube를 다시 연결해 주세요.",
         "youtube_reconnect": (
             "YouTube 인증이 만료되었어요.\n"
             "설정에서 YouTube를 한 번 다시 연결해 주세요."
