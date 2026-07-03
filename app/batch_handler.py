@@ -81,6 +81,16 @@ class BatchHandler:
             return detail
         return detail[: limit - 1].rstrip() + "…"
 
+    @staticmethod
+    def _progress_status_for_level(level: str) -> str:
+        return {
+            "active": "active",
+            "success": "completed",
+            "warning": "error",
+            "error": "error",
+            "idle": "idle",
+        }.get(level, "active")
+
     def _set_run_status(self, title: str, detail: str = "", level: str = "info") -> None:
         """Keep the queue/progress UI explicit about what Start actually did."""
         safe_title = (
@@ -132,9 +142,14 @@ class BatchHandler:
                 )
 
             task_label = getattr(self.app, "current_task_label", None)
-            if task_label is not None:
-                task_text = f"{safe_title} - {safe_detail}" if safe_detail else safe_title
-                task_label.setText(self._short_detail(task_text, limit=320))
+            progress_panel = getattr(self.app, "progress_panel", None)
+            if progress_panel is not None and hasattr(progress_panel, "set_current_task"):
+                progress_panel.set_current_task(
+                    self._short_detail(safe_title, limit=80),
+                    status=self._progress_status_for_level(level),
+                )
+            elif task_label is not None:
+                task_label.setText(self._short_detail(safe_title, limit=80))
 
             witty_label = getattr(self.app, "overall_witty_label", None)
             if witty_label is not None and safe_detail:

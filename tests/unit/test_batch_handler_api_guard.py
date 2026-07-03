@@ -12,6 +12,26 @@ class DummyButton:
         self.enabled = bool(enabled)
 
 
+class DummyLabel:
+    def __init__(self):
+        self.text = ""
+        self.style = ""
+
+    def setText(self, text):
+        self.text = text
+
+    def setStyleSheet(self, style):
+        self.style = style
+
+
+class DummyProgressPanel:
+    def __init__(self):
+        self.calls = []
+
+    def set_current_task(self, text, status="active"):
+        self.calls.append((text, status))
+
+
 def test_has_valid_api_key_returns_true_when_secrets_manager_has_key(monkeypatch):
     app = SimpleNamespace(api_key_manager=SimpleNamespace(api_keys={}))
     handler = BatchHandler(app)
@@ -149,3 +169,27 @@ def test_summer_run_status_uses_short_youtube_oauth_message():
     assert "pending queue" not in detail
     assert "종료코드" not in detail
     assert "소요" not in detail
+
+
+def test_run_status_keeps_current_progress_card_short(monkeypatch):
+    app = SimpleNamespace(
+        start_run_status_label=DummyLabel(),
+        start_run_detail_label=DummyLabel(),
+        current_task_label=DummyLabel(),
+        overall_witty_label=DummyLabel(),
+        progress_panel=DummyProgressPanel(),
+    )
+    handler = BatchHandler(app)
+    monkeypatch.setattr(handler, "_dispatch_ui_callback", lambda callback: callback())
+
+    handler._set_run_status(
+        "YouTube 업로드 권한 만료",
+        "설정에서 YouTube를 다시 연결해 주세요. 대기 59건.",
+        "error",
+    )
+
+    assert app.start_run_status_label.text == "YouTube 업로드 권한 만료"
+    assert app.start_run_detail_label.text == "설정에서 YouTube를 다시 연결해 주세요. 대기 59건."
+    assert app.overall_witty_label.text == "설정에서 YouTube를 다시 연결해 주세요. 대기 59건."
+    assert app.progress_panel.calls == [("YouTube 업로드 권한 만료", "error")]
+    assert app.current_task_label.text == ""
