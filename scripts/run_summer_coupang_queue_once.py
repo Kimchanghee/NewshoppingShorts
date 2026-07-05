@@ -1783,6 +1783,41 @@ def verify_linktree_public_card(
     return last_result
 
 
+def youtube_video_is_live(video_url: str) -> bool:
+    """Best-effort liveness check so Linktree cards are only created for
+    videos that still exist (deleted/private videos must not get cards).
+
+    oEmbed alone false-negatives occasionally, so fall back to the watch page.
+    Network failures count as live to avoid blocking publishes on flakiness.
+    """
+    import requests
+
+    url = str(video_url or "").strip()
+    if not url:
+        return False
+    try:
+        response = requests.get(
+            "https://www.youtube.com/oembed",
+            params={"url": url, "format": "json"},
+            timeout=15,
+        )
+        if response.status_code == 200:
+            return True
+        if response.status_code in {401, 403, 404}:
+            watch = requests.get(
+                url,
+                headers={"User-Agent": "Mozilla/5.0"},
+                timeout=15,
+            )
+            if watch.status_code != 200:
+                return False
+            text = watch.text
+            return '"playabilityStatus"' not in text or '"status":"OK"' in text
+    except Exception:
+        return True
+    return True
+
+
 def update_item_attempt(item: Dict[str, Any]) -> None:
     item["attempts"] = int(item.get("attempts", 0) or 0) + 1
     item["last_attempt_at"] = now_local()
@@ -1970,6 +2005,33 @@ async def process_pending_items(
                 return summary
             update_item_attempt(item)
             save_queue(queue_payload)
+            if retry_context["youtube_url"] and not youtube_video_is_live(retry_context["youtube_url"]):
+                reason = (
+                    "YouTube 영상이 삭제되거나 비공개 상태라 Linktree 카드를 만들지 않았어요. "
+                    "영상을 복구하거나 다시 업로드한 뒤 재시도해 주세요."
+                )
+                attach_result(
+                    item,
+                    status=LINKTREE_FAILED_STATUS,
+                    render_path=retry_context["render_path"],
+                    youtube_url=retry_context["youtube_url"],
+                    linktree_result={
+                        "ok": False,
+                        "method": "youtube_video_missing",
+                        "blocking_reason": reason,
+                    },
+                    blocking_reason=reason,
+                    extra={"linktree_retry_only": True},
+                )
+                save_queue(queue_payload)
+                return {
+                    "processed": True,
+                    "status": LINKTREE_FAILED_STATUS,
+                    "planned_number": item.get("planned_number"),
+                    "linktree_ok": False,
+                    "blocking_type": "youtube_video_missing",
+                    "blocking_reason": reason,
+                }
             purchase_check = validate_purchase_url_for_upload(item, retry_context["purchase_url"])
             if retry_context["purchase_url"] and not purchase_check.get("ok"):
                 linktree_result = {

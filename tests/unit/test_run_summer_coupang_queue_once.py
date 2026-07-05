@@ -1629,6 +1629,45 @@ def test_main_settles_exhausted_linktree_retry_then_processes_due_upload(monkeyp
     assert payload["items"][0]["status"] == queue_runner.LINKTREE_FAILED_STATUS
 
 
+def test_linktree_retry_blocked_when_youtube_video_is_gone(monkeypatch):
+    payload = {
+        "items": [
+            {
+                "planned_number": "[190]",
+                "status": queue_runner.LINKTREE_RETRY_STATUS,
+                "attempts": 1,
+                "scheduled_at": "2026-07-05T00:00:00+09:00",
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+                "product_name": "gone video product",
+                "result": {
+                    "purchase_url": "https://link.coupang.com/a/gone",
+                    "youtube_url": "https://youtu.be/deleted-video",
+                    "render_path": "C:/tmp/final.mp4",
+                    "linktree_result": {"ok": False},
+                },
+            },
+        ],
+    }
+
+    def fail_publish(*_args, **_kwargs):
+        raise AssertionError("Must not create a Linktree card for a missing video")
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 7, 5, 12, 0, 0, tzinfo=timezone(timedelta(hours=9))),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(queue_runner, "publish_linktree_if_possible", fail_publish)
+    monkeypatch.setattr(queue_runner, "youtube_video_is_live", lambda _url: False)
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert result["status"] == queue_runner.LINKTREE_FAILED_STATUS
+    assert result["blocking_type"] == "youtube_video_missing"
+    assert payload["items"][0]["status"] == queue_runner.LINKTREE_FAILED_STATUS
+
+
 def test_resolved_linktree_retry_does_not_pull_future_upload_forward(monkeypatch):
     payload = {
         "items": [
