@@ -487,13 +487,15 @@ def test_realign_pending_schedule_after_run_now_uses_scheduler_next_run():
         first_scheduled_at=datetime(2026, 6, 27, 3, 27, 27, tzinfo=timezone.utc),
     )
 
+    # Seconds are floored so items stamped from the scheduler's reported
+    # NextRunTime (:27:27) are still due when the trigger fires (~:27:00).
     assert result == {
         "rescheduled_count": 2,
-        "next_scheduled_at": "2026-06-27T03:27:27+00:00",
+        "next_scheduled_at": "2026-06-27T03:27:00+00:00",
         "interval_minutes": 240,
     }
-    assert payload["items"][0]["scheduled_at"] == "2026-06-27T03:27:27+00:00"
-    assert payload["items"][1]["scheduled_at"] == "2026-06-27T07:27:27+00:00"
+    assert payload["items"][0]["scheduled_at"] == "2026-06-27T03:27:00+00:00"
+    assert payload["items"][1]["scheduled_at"] == "2026-06-27T07:27:00+00:00"
 
 
 def test_process_pending_items_continues_after_product_not_found_skip(monkeypatch, tmp_path):
@@ -1488,7 +1490,9 @@ def test_process_pending_items_exhausts_linktree_retry_without_republishing(monk
             {
                 "planned_number": "[149]",
                 "status": queue_runner.LINKTREE_RETRY_STATUS,
-                "attempts": queue_runner.DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS,
+                # attempts counts the original run too; +1 means the retry
+                # budget is spent.
+                "attempts": queue_runner.DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS + 1,
                 "scheduled_at": "2026-06-19T00:00:00+00:00",
                 "coupang_url": "https://www.coupang.com/vp/products/1889046462",
                 "product_name": "inflatable swimming ring tube",
@@ -1515,6 +1519,13 @@ def test_process_pending_items_exhausts_linktree_retry_without_republishing(monk
     def fail_publish(*_args, **_kwargs):
         raise AssertionError("Exhausted Linktree retries must not publish again")
 
+    class _StubLinktreeManager:
+        def format_publish_index(self, number):
+            return f"[{number:03d}]" if number else ""
+
+        def get_profile_url(self):
+            return "https://linktr.ee/example"
+
     monkeypatch.setattr(
         queue_runner,
         "now_datetime",
@@ -1522,6 +1533,12 @@ def test_process_pending_items_exhausts_linktree_retry_without_republishing(monk
     )
     monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
     monkeypatch.setattr(queue_runner, "publish_linktree_if_possible", fail_publish)
+    monkeypatch.setattr(queue_runner, "get_linktree_manager", lambda: _StubLinktreeManager())
+    monkeypatch.setattr(
+        queue_runner,
+        "verify_linktree_public_card",
+        lambda *_args, **_kwargs: {"ok": False},
+    )
 
     result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
 
@@ -1539,7 +1556,9 @@ def test_main_settles_exhausted_linktree_retry_then_processes_due_upload(monkeyp
             {
                 "planned_number": "[157]",
                 "status": queue_runner.LINKTREE_RETRY_STATUS,
-                "attempts": queue_runner.DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS,
+                # attempts counts the original run too; +1 means the retry
+                # budget is spent.
+                "attempts": queue_runner.DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS + 1,
                 "scheduled_at": "2026-06-30T12:27:27+09:00",
                 "result": {
                     "purchase_url": "https://www.coupang.com/vp/products/1",
@@ -1569,12 +1588,25 @@ def test_main_settles_exhausted_linktree_retry_then_processes_due_upload(monkeyp
             "linktree_ok": True,
         }
 
+    class _StubLinktreeManager:
+        def format_publish_index(self, number):
+            return f"[{number:03d}]" if number else ""
+
+        def get_profile_url(self):
+            return "https://linktr.ee/example"
+
     monkeypatch.setattr(queue_runner, "load_queue", lambda: payload)
     monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
     monkeypatch.setattr(
         queue_runner,
         "now_datetime",
         lambda: datetime(2026, 6, 30, 12, 30, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "get_linktree_manager", lambda: _StubLinktreeManager())
+    monkeypatch.setattr(
+        queue_runner,
+        "verify_linktree_public_card",
+        lambda *_args, **_kwargs: {"ok": False},
     )
     monkeypatch.setattr(queue_runner, "linktree_publish_ready", lambda: {"ok": True})
     monkeypatch.setattr(queue_runner, "youtube_upload_ready", lambda: {"ok": True})

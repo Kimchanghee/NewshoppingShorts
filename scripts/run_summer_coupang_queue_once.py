@@ -57,12 +57,18 @@ GEMINI_MODELS_PROBE_URL = "https://generativelanguage.googleapis.com/v1beta/mode
 LINKTREE_PUBLIC_VERIFY_ATTEMPTS_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_ATTEMPTS"
 LINKTREE_PUBLIC_VERIFY_INTERVAL_ENV = "SSMAKER_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS"
 LINKTREE_BLOCK_UPLOAD_ENV = "SSMAKER_LINKTREE_BLOCK_UPLOAD"
-DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS = 6
-DEFAULT_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS = 10.0
+DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS = 8
+DEFAULT_LINKTREE_PUBLIC_VERIFY_INTERVAL_SECONDS = 15.0
 LINKTREE_RETRY_STATUS = "linktree_retry_pending"
 LINKTREE_FAILED_STATUS = "failed_linktree_publish"
 LINKTREE_RETRY_MAX_ATTEMPTS_ENV = "SSMAKER_LINKTREE_RETRY_MAX_ATTEMPTS"
 DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS = 1
+# Grace window so a run fired seconds before an item's scheduled_at still picks
+# it up. Windows Task Scheduler fires at the trigger boundary (:27:00) while
+# realigned items were stamped from the reported NextRunTime (:27:27), so
+# without a grace every 4-hour slot missed its item by ~27 seconds.
+QUEUE_DUE_GRACE_SECONDS_ENV = "SSMAKER_QUEUE_DUE_GRACE_SECONDS"
+DEFAULT_QUEUE_DUE_GRACE_SECONDS = 180
 AFFILIATE_LINK_REQUIRED_ENV = "SSMAKER_REQUIRE_COUPANG_PARTNER_LINK"
 AFFILIATE_LINK_BLOCKED_STATUS = "blocked_affiliate_link_missing"
 COUPANG_PARTNER_LINK_HOST = "link.coupang.com"
@@ -250,11 +256,20 @@ def parse_scheduled_datetime(raw: Any) -> Optional[datetime]:
     return value
 
 
+def queue_due_grace_seconds() -> int:
+    return env_int(
+        QUEUE_DUE_GRACE_SECONDS_ENV,
+        DEFAULT_QUEUE_DUE_GRACE_SECONDS,
+        min_value=0,
+    )
+
+
 def is_item_due(item: Dict[str, Any], *, now: Optional[datetime] = None) -> bool:
     scheduled_at = parse_scheduled_datetime(item.get("scheduled_at"))
     if scheduled_at is None:
         return True
-    return scheduled_at <= (now or now_datetime())
+    reference = (now or now_datetime()) + timedelta(seconds=queue_due_grace_seconds())
+    return scheduled_at <= reference
 
 
 def force_run_now_enabled() -> bool:
@@ -408,6 +423,9 @@ def realign_pending_schedule_after_run_now(
     interval = queue_interval_minutes(queue_payload)
     now = base_time or now_datetime()
     first_at = first_scheduled_at or (now + timedelta(minutes=interval))
+    # Task Scheduler's reported NextRunTime can trail the actual trigger fire
+    # time by ~30s; floor to the minute so stamped items are due when it fires.
+    first_at = first_at.replace(second=0, microsecond=0)
     pending.sort(
         key=lambda item: (
             parse_scheduled_datetime(item.get("scheduled_at")) or datetime.max.replace(tzinfo=now.tzinfo),
@@ -489,7 +507,11 @@ def linktree_retry_exhausted(item: Dict[str, Any]) -> bool:
         attempts = int(item.get("attempts") or 0)
     except (TypeError, ValueError):
         attempts = 0
-    return attempts >= linktree_retry_max_attempts()
+    # attempts includes the original processing run that produced the video and
+    # first publish call; only attempts beyond it are actual Linktree retries.
+    # (Previously attempts >= max meant items were declared exhausted before a
+    # single real retry ever ran.)
+    return max(0, attempts - 1) >= linktree_retry_max_attempts()
 
 
 def linktree_retry_summary(
@@ -557,6 +579,54 @@ def mark_linktree_retry_exhausted(item: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def settle_linktree_retry_item(item: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve a retry item whose retry budget is used up.
+
+    Linktree's public page often lags the create call by several minutes, so a
+    publish recorded as failed may actually be live. Re-check the public page
+    before declaring the item failed; if the card is there, mark it completed.
+    """
+    retry_context = linktree_retry_context(item)
+    purchase_url = retry_context["purchase_url"]
+    if purchase_url:
+        manager = get_linktree_manager()
+        marker = manager.format_publish_index(
+            parse_upload_number(item.get("planned_number"))
+        )
+        public_check = verify_linktree_public_card(marker, purchase_url)
+        if public_check.get("ok"):
+            linktree_result = {
+                "ok": True,
+                "method": "public_existing_late",
+                "number": marker,
+                "purchase_url": purchase_url,
+                "profile_url": manager.get_profile_url(),
+                "public_verification": public_check,
+                "blocking_reason": "",
+            }
+            attach_result(
+                item,
+                status="completed",
+                render_path=retry_context["render_path"],
+                youtube_url=retry_context["youtube_url"],
+                linktree_result=linktree_result,
+                blocking_reason="",
+                extra={
+                    "purchase_url": purchase_url,
+                    "linktree_retry_only": True,
+                },
+            )
+            return {
+                "processed": True,
+                "status": "completed",
+                "planned_number": item.get("planned_number"),
+                "linktree_ok": True,
+                "linktree_retry": False,
+                "linktree_late_verified": True,
+            }
+    return mark_linktree_retry_exhausted(item)
+
+
 def settle_exhausted_linktree_retries(
     queue_payload: Dict[str, Any],
     *,
@@ -573,7 +643,7 @@ def settle_exhausted_linktree_retries(
             continue
         if not linktree_retry_exhausted(item):
             continue
-        settled.append(mark_linktree_retry_exhausted(item))
+        settled.append(settle_linktree_retry_item(item))
     return settled
 
 
@@ -1879,12 +1949,18 @@ async def process_pending_items(
     candidate_items = pending[first_due_index : first_due_index + max_candidates]
     skipped_items: List[Dict[str, Any]] = []
 
+    resolved_linktree_items: List[Dict[str, Any]] = []
+
     for item in candidate_items:
         if is_linktree_retry_item(item):
             retry_context = linktree_retry_context(item)
             if linktree_retry_exhausted(item):
-                summary = mark_linktree_retry_exhausted(item)
+                summary = settle_linktree_retry_item(item)
                 save_queue(queue_payload)
+                if summary.get("linktree_ok"):
+                    # Card turned out to be live; don't burn this run slot on it.
+                    resolved_linktree_items.append(summary)
+                    continue
                 return summary
             update_item_attempt(item)
             save_queue(queue_payload)
@@ -1949,6 +2025,13 @@ async def process_pending_items(
                     "blocking_type": "affiliate_link_missing",
                     "blocking_reason": str(linktree_result.get("blocking_reason") or ""),
                 }
+            if linktree_result.get("ok"):
+                # Retry resolved quickly (card already live); keep the run slot
+                # for a new upload instead of ending the run here.
+                resolved_linktree_items.append(
+                    linktree_retry_summary(item, linktree_result, run_now=run_now)
+                )
+                continue
             return linktree_retry_summary(item, linktree_result, run_now=run_now)
 
         if not str(item.get("coupang_url") or "").strip():
@@ -2280,8 +2363,18 @@ async def process_pending_items(
             "reason": "all_candidate_items_skipped",
             "skip_count": len(skipped_items),
             "skipped_items": skipped_items,
+            **({"resolved_linktree_items": resolved_linktree_items} if resolved_linktree_items else {}),
             **({"run_now": True} if run_now else {}),
         }
+
+    if resolved_linktree_items:
+        # Keep the per-item summary shape (status/linktree_ok/planned_number)
+        # so UI consumers keep working; annotate with the full resolved list.
+        summary = dict(resolved_linktree_items[-1])
+        summary["reason"] = "linktree_retries_resolved"
+        if len(resolved_linktree_items) > 1:
+            summary["resolved_linktree_items"] = resolved_linktree_items
+        return summary
 
     return {"processed": False, "reason": "all_pending_items_skipped_low_similarity"}
 
