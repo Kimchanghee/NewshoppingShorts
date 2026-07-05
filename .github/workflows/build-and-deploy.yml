@@ -111,8 +111,13 @@ jobs:
       shell: bash
       run: |
         VERSION="${GITHUB_REF#refs/tags/v}"
+        # actions/checkout peels annotated tags to commits, which made this
+        # step return the commit subject instead of the tag message. Re-fetch
+        # the real tag object from origin before reading it.
+        git fetch origin "+refs/tags/v${VERSION}:refs/tags/v${VERSION}" --force 2>/dev/null || true
         SUMMARY="$(git tag -l --format='%(contents:subject)' "v${VERSION}" 2>/dev/null | head -n1)"
-        if [ -z "$(printf '%s' "$SUMMARY" | tr -d '[:space:]')" ]; then
+        HEAD_SUBJECT="$(git log -1 --format='%s' 2>/dev/null | head -n1)"
+        if [ -z "$(printf '%s' "$SUMMARY" | tr -d '[:space:]')" ] || [ "$SUMMARY" = "$HEAD_SUBJECT" ]; then
           SUMMARY="SSMaker v${VERSION} 업데이트"
         fi
         echo "SUMMARY=${SUMMARY}" >> "$GITHUB_OUTPUT"
