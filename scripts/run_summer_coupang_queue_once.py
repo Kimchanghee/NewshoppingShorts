@@ -1748,7 +1748,13 @@ def verify_linktree_public_card(
                         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
                     ),
+                    "Cache-Control": "no-cache",
+                    "Pragma": "no-cache",
                 },
+                # Cache-busting query param: the public page is served from a
+                # CDN whose cache lags new cards by minutes, which made fresh
+                # publishes look like failures.
+                params={"ssmaker_ts": str(int(time.time() * 1000))},
                 timeout=30,
             )
             text = response.text
@@ -2033,6 +2039,15 @@ async def process_pending_items(
                 )
                 continue
             return linktree_retry_summary(item, linktree_result, run_now=run_now)
+
+        if (
+            resolved_linktree_items
+            and not skipped_items
+            and not is_item_due(item, now=now_datetime())
+        ):
+            # Only Linktree retries were resolved so far; no upload slot was
+            # freed, so don't pull a future-scheduled upload forward.
+            break
 
         if not str(item.get("coupang_url") or "").strip():
             reason = "Queue item is missing coupang_url and cannot be sourced."
@@ -2389,8 +2404,79 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+QUEUE_SKIP_LOCK_ENV = "SSMAKER_QUEUE_SKIP_LOCK"
+_LOCK_HANDLE: Optional[Any] = None
+
+
+def acquire_single_instance_lock() -> Optional[Any]:
+    """Prevent concurrent queue runs.
+
+    The scheduled task guards only its own instances (IgnoreNew); manual and
+    in-app --run-now launches are separate processes, so without this lock a
+    long run could overlap the next scheduled fire and double-process items.
+    The OS releases the lock when the process exits, so crashes cannot leave
+    a stale lock. Reentrant within one process (unit tests call main() twice).
+    """
+    global _LOCK_HANDLE
+    if _LOCK_HANDLE is not None:
+        return _LOCK_HANDLE
+    if env_bool(QUEUE_SKIP_LOCK_ENV, False):
+        return object()
+
+    lock_path = Path.home() / ".ssmaker" / "summer_coupang_queue_once.lock"
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fd = os.open(str(lock_path), os.O_CREAT | os.O_RDWR)
+        handle = os.fdopen(fd, "r+", encoding="utf-8", errors="replace")
+    except OSError:
+        # Lock plumbing must never block the automation itself.
+        return object()
+    try:
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        try:
+            handle.close()
+        except OSError:
+            pass
+        return None
+    try:
+        handle.seek(0)
+        handle.truncate()
+        handle.write(f"{os.getpid()} {now_local()}")
+        handle.flush()
+    except OSError:
+        pass
+    _LOCK_HANDLE = handle
+    return handle
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     args = parse_args([] if argv is None else argv)
+    if acquire_single_instance_lock() is None:
+        print(
+            json.dumps(
+                {
+                    "processed": False,
+                    "reason": "another_run_in_progress",
+                    "blocking_reason": (
+                        "다른 자동화 실행이 아직 진행 중이라 이번 실행은 건너뛰었어요. "
+                        "진행 중인 작업이 끝나면 다음 예약 시간에 이어서 처리됩니다."
+                    ),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            flush=True,
+        )
+        return 0
     queue_payload = load_queue()
     linktree_housekeeping = settle_exhausted_linktree_retries(
         queue_payload,

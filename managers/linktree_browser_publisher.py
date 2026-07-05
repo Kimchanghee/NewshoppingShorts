@@ -121,7 +121,12 @@ def _verify_public_card(number: str, purchase_url: str, *, profile_url: str) -> 
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125 Safari/537.36"
                 ),
+                "Cache-Control": "no-cache",
+                "Pragma": "no-cache",
             },
+            # Bypass the CDN cache, which lags new cards by minutes and made
+            # fresh publishes look like failures.
+            params={"ssmaker_ts": str(int(time.time() * 1000))},
             timeout=30,
         )
     except Exception as exc:

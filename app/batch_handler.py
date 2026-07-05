@@ -217,6 +217,7 @@ class BatchHandler:
             "affiliate_link_missing": "제휴 링크 필요",
             "no_due_items": "예약 시간 전",
             "no_pending_items": "대기 항목 없음",
+            "another_run_in_progress": "이미 실행 중",
             "all_pending_items_skipped_low_similarity": "처리 가능한 항목 없음",
             "all_candidate_items_skipped": "후보 항목 건너뜀",
         }
@@ -233,7 +234,11 @@ class BatchHandler:
                 detail = f"{detail} 대기 {pending}건."
             if next_at:
                 detail = f"{detail} 다음 예약 {next_at}."
-            level = "warning" if reason in {"no_due_items", "no_pending_items"} else "error"
+            level = (
+                "warning"
+                if reason in {"no_due_items", "no_pending_items", "another_run_in_progress"}
+                else "error"
+            )
             if reason == "youtube_not_connected":
                 return title, detail, level
             return title, f"{detail}{code_suffix} 소요 {elapsed}.", level

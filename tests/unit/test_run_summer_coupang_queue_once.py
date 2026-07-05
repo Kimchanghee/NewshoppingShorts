@@ -1,5 +1,5 @@
 import json
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -9,6 +9,8 @@ from scripts import run_summer_coupang_queue_once as queue_runner
 @pytest.fixture(autouse=True)
 def allow_plain_coupang_urls_for_legacy_queue_tests(monkeypatch):
     monkeypatch.setenv(queue_runner.AFFILIATE_LINK_REQUIRED_ENV, "0")
+    # Never contend with a real automation run's single-instance lock.
+    monkeypatch.setenv(queue_runner.QUEUE_SKIP_LOCK_ENV, "1")
 
 
 def test_load_queue_accepts_utf8_bom(monkeypatch, tmp_path):
@@ -1625,6 +1627,91 @@ def test_main_settles_exhausted_linktree_retry_then_processes_due_upload(monkeyp
     assert output["linktree_housekeeping_count"] == 1
     assert output["linktree_housekeeping"][0]["planned_number"] == "[157]"
     assert payload["items"][0]["status"] == queue_runner.LINKTREE_FAILED_STATUS
+
+
+def test_resolved_linktree_retry_does_not_pull_future_upload_forward(monkeypatch):
+    payload = {
+        "items": [
+            {
+                "planned_number": "[184]",
+                "status": queue_runner.LINKTREE_RETRY_STATUS,
+                "attempts": 1,
+                "scheduled_at": "2026-07-05T16:27:00+09:00",
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+                "product_name": "cooling towel",
+                "result": {
+                    "purchase_url": "https://link.coupang.com/a/abc",
+                    "youtube_url": "https://youtu.be/already-uploaded",
+                    "render_path": "C:/tmp/final.mp4",
+                    "linktree_result": {"ok": False},
+                },
+            },
+            {
+                "planned_number": "[185]",
+                "status": "pending",
+                "attempts": 0,
+                # Scheduled two hours in the future: must NOT be processed
+                # just because the retry above resolved.
+                "scheduled_at": "2026-07-05T20:27:00+09:00",
+                "coupang_url": "https://www.coupang.com/vp/products/2",
+                "result": {},
+            },
+        ],
+    }
+
+    async def fail_sourcing(*_args, **_kwargs):
+        raise AssertionError("Future-scheduled upload must not start early")
+
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 7, 5, 18, 0, 0, tzinfo=timezone(timedelta(hours=9))),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(queue_runner, "run_sourcing", fail_sourcing)
+    monkeypatch.setattr(
+        queue_runner,
+        "validate_purchase_url_for_upload",
+        lambda _item, _url: {"ok": True},
+    )
+    monkeypatch.setattr(
+        queue_runner,
+        "publish_linktree_if_possible",
+        lambda _item, _name, _url: {"ok": True, "method": "public_existing", "blocking_reason": ""},
+    )
+
+    result = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert result["status"] == "completed"
+    assert result["reason"] == "linktree_retries_resolved"
+    assert result["linktree_ok"] is True
+    assert payload["items"][0]["status"] == "completed"
+    assert payload["items"][1]["status"] == "pending"
+    assert payload["items"][1]["attempts"] == 0
+
+
+def test_single_instance_lock_is_reentrant_within_process(tmp_path, monkeypatch):
+    monkeypatch.setenv(queue_runner.QUEUE_SKIP_LOCK_ENV, "0")
+    monkeypatch.setattr(queue_runner.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(queue_runner, "_LOCK_HANDLE", None)
+
+    first = queue_runner.acquire_single_instance_lock()
+    assert first is not None
+    # Same process must be able to re-enter (tests call main() repeatedly).
+    assert queue_runner.acquire_single_instance_lock() is first
+    assert (tmp_path / ".ssmaker" / "summer_coupang_queue_once.lock").exists()
+
+    first.close()
+    monkeypatch.setattr(queue_runner, "_LOCK_HANDLE", None)
+
+
+def test_single_instance_lock_can_be_disabled_by_env(monkeypatch):
+    monkeypatch.setattr(queue_runner, "_LOCK_HANDLE", None)
+    monkeypatch.setenv(queue_runner.QUEUE_SKIP_LOCK_ENV, "1")
+
+    assert queue_runner.acquire_single_instance_lock() is not None
+    # Env-disabled path must not persist a handle.
+    assert queue_runner._LOCK_HANDLE is None
 
 
 def test_main_returns_success_for_linktree_retry_pending(monkeypatch, capsys):

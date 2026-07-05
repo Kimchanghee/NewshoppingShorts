@@ -91,6 +91,11 @@ def main(argv: List[str]) -> int:
 
         result = dict(item.get("result") or {})
         linktree_result = dict(result.get("linktree_result") or {})
+        if "link.coupang.com" not in purchase_url:
+            # Pre-affiliate era item: the upload gate requires a Coupang
+            # Partners link, so re-arming would just block the queue.
+            unresolved.append(f"{marker} (no Coupang Partners link)")
+            continue
         if (not marker or marker in html) and purchase_url in html:
             item["status"] = "completed"
             linktree_result.update(
