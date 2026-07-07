@@ -136,6 +136,9 @@ class SourcingPanel(QWidget):
         input_layout.setContentsMargins(ds.spacing.space_4, ds.spacing.space_4, ds.spacing.space_4, ds.spacing.space_4)
         input_layout.setSpacing(ds.spacing.space_3)
 
+        # ── 소싱 방식 선택 (풀자동화 전용) ──
+        input_layout.addWidget(self._build_sourcing_method_card())
+
         # URL input
         url_label = QLabel("쿠팡 상품 링크")
         url_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
@@ -391,6 +394,101 @@ class SourcingPanel(QWidget):
         self.chk_upload.toggled.connect(lambda _checked=False: self._sync_upload_timer_enabled())
         self.chk_linktree.toggled.connect(lambda _checked=False: self._refresh_readiness())
         self._refresh_readiness()
+
+    def _build_sourcing_method_card(self) -> QWidget:
+        """풀자동화 소싱 방식 선택 카드 (기존 쿠팡 / 3플랫폼 영상 다운로드)."""
+        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
+
+        ds = self.ds
+        try:
+            from managers.settings_manager import get_settings_manager
+            current = get_settings_manager().get_automation_sourcing_method()
+        except Exception:
+            current = "coupang"
+
+        card = QFrame()
+        card.setObjectName("SourcingMethodCard")
+        card.setStyleSheet(f"""
+            QFrame#SourcingMethodCard {{
+                background-color: {get_color('background')};
+                border: 1px solid {get_color('border_light')};
+                border-radius: {ds.radius.sm}px;
+            }}
+        """)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(ds.spacing.space_3, ds.spacing.space_3, ds.spacing.space_3, ds.spacing.space_3)
+        lay.setSpacing(ds.spacing.space_2)
+
+        title = QLabel("소싱 방식")
+        title.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
+        lay.addWidget(title)
+
+        radio_style = f"""
+            QRadioButton {{ color: {get_color('text_primary')}; background: transparent; padding: 3px 0; }}
+            QRadioButton::indicator {{ width: 15px; height: 15px; }}
+            QRadioButton::indicator:checked {{
+                border: 2px solid {get_color('primary')};
+                border-radius: 8px; background-color: {get_color('primary')};
+            }}
+            QRadioButton::indicator:unchecked {{
+                border: 2px solid {get_color('border_light')};
+                border-radius: 8px; background-color: {get_color('background')};
+            }}
+        """
+
+        self._method_group = QButtonGroup(card)
+
+        self.radio_method_coupang = QRadioButton("기존 방식 — 쿠팡 상품 기반 소싱")
+        self.radio_method_coupang.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
+        self.radio_method_coupang.setStyleSheet(radio_style)
+        self.radio_method_coupang.setChecked(current == "coupang")
+        self._method_group.addButton(self.radio_method_coupang)
+        lay.addWidget(self.radio_method_coupang)
+
+        self.radio_method_platform = QRadioButton("3플랫폼 방식 — 도우인·콰이쇼우·샤오홍슈 영상 다운로드")
+        self.radio_method_platform.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
+        self.radio_method_platform.setStyleSheet(radio_style)
+        self.radio_method_platform.setChecked(current == "platform_video")
+        self._method_group.addButton(self.radio_method_platform)
+        lay.addWidget(self.radio_method_platform)
+
+        self._method_hint = QLabel("")
+        self._method_hint.setWordWrap(True)
+        self._method_hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self._method_hint.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
+        lay.addWidget(self._method_hint)
+
+        self.radio_method_coupang.toggled.connect(self._on_sourcing_method_changed)
+        self.radio_method_platform.toggled.connect(self._on_sourcing_method_changed)
+        self._update_method_hint(current)
+        return card
+
+    def _update_method_hint(self, method: str) -> None:
+        if not hasattr(self, "_method_hint"):
+            return
+        if method == "platform_video":
+            self._method_hint.setText(
+                "⚠️ 재업로드는 저작권 스트라이크 리스크가 있어 재편집(워터마크 크롭·속도 변형·훅 자막)을 자동 적용합니다. "
+                "도우인→콰이쇼우→샤오홍슈→빌리빌리 순으로 검색합니다. 빌리빌리는 로그인 없이도 되고, "
+                "앞의 세 채널은 자동화 브라우저에 한 번 로그인해 두면(scripts/open_platform_login.py) 성공률이 크게 올라갑니다."
+            )
+        else:
+            self._method_hint.setText("쿠팡 상품 정보로 영상을 생성합니다. (현재 기본 방식)")
+
+    def _on_sourcing_method_changed(self, _checked: bool = False) -> None:
+        """라디오 변경 시 설정 저장."""
+        method = "platform_video" if getattr(self, "radio_method_platform", None) and self.radio_method_platform.isChecked() else "coupang"
+        try:
+            from managers.settings_manager import get_settings_manager
+            get_settings_manager().set_automation_sourcing_method(method)
+        except Exception as exc:
+            logger.warning("[Sourcing] 소싱 방식 저장 실패: %s", exc)
+        self._update_method_hint(method)
+        if hasattr(self, "gui") and self.gui is not None:
+            try:
+                self.gui.state.automation_sourcing_method = method
+            except Exception:
+                pass
 
     def _navigate_to_setup(self, target: str) -> None:
         """Jump to the settings/upload step (or guided dialog) that fixes a gap.
@@ -808,7 +906,19 @@ class SourcingPanel(QWidget):
         self._refresh_readiness()
         return False
 
+    def _current_sourcing_method(self) -> str:
+        try:
+            from managers.settings_manager import get_settings_manager
+            return get_settings_manager().get_automation_sourcing_method()
+        except Exception:
+            return "coupang"
+
     def _on_start_clicked(self):
+        # 3플랫폼 방식이면 별도 흐름(영상 다운로드→재편집→업로드)으로 분기.
+        if self._current_sourcing_method() == "platform_video":
+            self._on_start_platform_video()
+            return
+
         url = self.url_input.text().strip()
         if not url:
             self.results_label.setText("쿠팡 상품 링크를 붙여넣어 주세요.")
@@ -845,6 +955,137 @@ class SourcingPanel(QWidget):
             daemon=True,
         )
         thread.start()
+
+    def _on_start_platform_video(self):
+        """3플랫폼 방식: 쿠팡 링크 → 상품명 → 도우인/콰이쇼우/샤오홍슈 순차 검색·다운로드·재편집·업로드."""
+        url = self.url_input.text().strip()
+        if not url or "coupang.com" not in url:
+            self.results_label.setText("쿠팡 상품 링크를 붙여넣어 주세요. (상품명으로 3채널을 검색합니다)")
+            self.results_label.setStyleSheet(f"color: {get_color('error')};")
+            return
+        if self._running:
+            return
+        # 수익화 경로도 기존 방식과 동일하게 검증(딥링크·링크트리·유튜브).
+        if not self._validate_linktree_publish_ready():
+            return
+        if not self._validate_youtube_upload_ready():
+            return
+
+        self._running = True
+        self.btn_start.setEnabled(False)
+        self.btn_start.setText("영상 찾아 만드는 중...")
+        self._apply_button_style(disabled=True)
+        for ind in self._step_indicators.values():
+            ind.set_state("pending", "")
+        self.results_label.setText("상품명으로 도우인·콰이쇼우·샤오홍슈를 순서대로 검색할게요...")
+        self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
+
+        threading.Thread(target=self._run_platform_pipeline, args=(url,), daemon=True).start()
+
+    def _run_platform_pipeline(self, coupang_url: str):
+        """백그라운드: 쿠팡 링크 → (core.platform_pipeline) 소싱·딥링크·재편집 → 링크트리 → YouTube 큐."""
+        import asyncio as _aio
+        from core.sourcing.platform_pipeline import run_platform_sourcing
+
+        def progress(step_id: str, msg: str, pct: float):
+            try:
+                self._on_pipeline_progress(step_id, msg, pct)
+            except Exception:
+                pass
+
+        try:
+            from managers.settings_manager import get_settings_manager
+            platforms = get_settings_manager().get_platform_video_sources()
+        except Exception:
+            platforms = None
+
+        loop = _aio.new_event_loop()
+        try:
+            report = loop.run_until_complete(run_platform_sourcing(
+                coupang_url,
+                progress=progress,
+                platforms=platforms,
+                gemini_client=getattr(self.gui, "genai_client", None),
+            ))
+            if not report.get("ok"):
+                self._safe_set_results(report.get("error") or "3플랫폼 소싱에 실패했어요.")
+                return
+
+            product_name = str((report.get("product_info") or {}).get("name") or "")
+            hit = report.get("hit") or {}
+            edited = report.get("final_video") or ""
+            deep_link = str(report.get("deep_link") or "")
+            # 수동 링크 > API 딥링크 > 원본 — platform_pipeline이 이미 결정.
+            purchase_url = str(report.get("purchase_url") or deep_link or coupang_url)
+
+            # ── 링크트리 발행(체크 시) — 기존 coupang 흐름과 동일 정책 ──
+            linktree_url = ""
+            if getattr(self, "chk_linktree", None) and self.chk_linktree.isChecked():
+                progress("linktree_publish", "링크트리 발행 중...", 0.1)
+                try:
+                    from managers.linktree_manager import get_linktree_manager
+                    lm = get_linktree_manager()
+                    if lm.is_connected():
+                        ok = lm.publish_coupang_link(
+                            product_name=product_name,
+                            coupang_url=purchase_url,
+                            source_url=coupang_url,
+                        )
+                        if ok:
+                            linktree_url = lm.get_profile_url()
+                        progress("linktree_publish",
+                                 "링크트리 발행 완료" if ok else "링크트리 발행 실패", 1.0)
+                    else:
+                        progress("linktree_publish", "링크트리 미연결 - 건너뜀", 1.0)
+                except Exception as e:
+                    logger.warning("[Sourcing] platform linktree publish 실패: %s", e)
+                    progress("linktree_publish", f"링크트리 오류: {e}", 1.0)
+
+            yt = getattr(self.gui, "youtube_manager", None)
+            if yt is not None and hasattr(yt, "add_to_upload_queue"):
+                yt.add_to_upload_queue(
+                    video_path=edited, title="", description="",
+                    product_info=product_name,
+                    source_url=coupang_url,
+                    coupang_deep_link=deep_link,
+                    linktree_url=linktree_url,
+                    render_integrity=report.get("render_integrity") or {"ok": True, "source": "platform_video"},
+                    render_integrity_required=False,
+                )
+            progress("upload", "업로드 큐 등록 완료", 1.0)
+            self._safe_set_results(
+                f"3플랫폼 방식 완료 — '{product_name[:20]}' 영상을 {hit.get('platform', '?')}에서 받아 "
+                f"재편집·업로드 큐 등록했어요."
+            )
+        except Exception as e:
+            logger.warning("[Sourcing] platform pipeline 실패: %s", e)
+            self._safe_set_results(f"3플랫폼 처리 중 오류: {e}")
+        finally:
+            try:
+                loop.close()
+            except Exception:
+                pass
+            self._running = False
+            self._reset_start_button()
+
+    def _safe_set_results(self, text: str):
+        try:
+            from PyQt6.QtCore import QTimer as _QT
+            _QT.singleShot(0, lambda: (self.results_label.setText(text),
+                                       self.results_label.setStyleSheet(f"color: {get_color('text_secondary')};")))
+        except Exception:
+            pass
+
+    def _reset_start_button(self):
+        try:
+            from PyQt6.QtCore import QTimer as _QT
+            def _r():
+                self.btn_start.setEnabled(True)
+                self.btn_start.setText("자동화 시작")
+                self._apply_button_style(disabled=False)
+            _QT.singleShot(0, _r)
+        except Exception:
+            pass
 
     def _run_pipeline(self, coupang_url: str, min_similarity_score: float):
         """Run sourcing pipeline in background thread with its own event loop."""

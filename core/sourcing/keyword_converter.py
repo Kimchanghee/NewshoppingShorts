@@ -53,6 +53,26 @@ _COMPOUND_MAP = {
     "치약 짜개": {"cn": "牙膏挤压器", "en": "toothpaste squeezer"},
     "칫솔 살균": {"cn": "牙刷消毒", "en": "toothbrush sanitizer"},
 
+    # 여름 / 야외 / 해충 (풀자동화 여름 큐 카테고리)
+    "모기 퇴치기": {"cn": "灭蚊灯", "en": "mosquito killer lamp"},
+    "모기퇴치기": {"cn": "灭蚊灯", "en": "mosquito killer lamp"},
+    "포충기": {"cn": "灭蚊灯 捕虫器", "en": "bug zapper"},
+    "해충퇴치기": {"cn": "驱虫器", "en": "pest repeller"},
+    "해충퇴치": {"cn": "驱虫", "en": "pest control"},
+    "모기장": {"cn": "蚊帐", "en": "mosquito net"},
+    "모기채": {"cn": "电蚊拍", "en": "electric mosquito swatter"},
+    "벌레퇴치": {"cn": "驱虫", "en": "bug repellent"},
+    "쿨토시": {"cn": "冰袖", "en": "cooling arm sleeves"},
+    "팔토시": {"cn": "冰袖 防晒袖套", "en": "arm sleeves uv protection"},
+    "쿨링 셔츠": {"cn": "凉感T恤", "en": "cooling shirt"},
+    "냉감 셔츠": {"cn": "凉感T恤", "en": "cooling shirt"},
+    "쿨링 티셔츠": {"cn": "凉感T恤 速干", "en": "cooling t-shirt quick dry"},
+    "냉감 티셔츠": {"cn": "凉感T恤 速干", "en": "cooling t-shirt quick dry"},
+    "쿨링 반팔": {"cn": "凉感T恤 短袖", "en": "cooling short sleeve"},
+    "기능성 티셔츠": {"cn": "速干T恤", "en": "quick dry shirt"},
+    "쿨매트": {"cn": "凉席 冰垫", "en": "cooling mat"},
+    "아이스 조끼": {"cn": "降温背心", "en": "cooling vest"},
+
     # 휴대폰 / 디지털 (phone stand 같은 동음이의 분리용)
     "휴대폰 거치대": {"cn": "手机支架", "en": "phone stand"},
     "차량 거치대": {"cn": "车载支架", "en": "car phone mount"},
@@ -293,17 +313,24 @@ def convert_keywords_rule_based(product_name: str) -> Dict[str, str]:
             if tr["en"]:
                 en_parts.append(tr["en"])
 
-    # De-duplicate while preserving order (compound terms may share words like 不锈钢)
-    def _uniq_join(items):
+    # De-duplicate at TOKEN level while preserving order — 여러 컴파운드가 같은
+    # 단어를 공유하면("灭蚊灯" + "灭蚊灯 捕虫器") 그대로 join 시 중복 토큰이 생겨
+    # 검색 쿼리가 과잉·중복돼 결과가 나빠진다. 토큰 수도 검색 친화적으로 제한.
+    def _uniq_join(items, max_tokens: int = 4):
         seen, out = set(), []
         for it in items:
-            if it not in seen:
-                out.append(it)
-                seen.add(it)
+            for tok in str(it or "").split():
+                if tok and tok not in seen:
+                    out.append(tok)
+                    seen.add(tok)
+                if len(out) >= max_tokens:
+                    break
+            if len(out) >= max_tokens:
+                break
         return " ".join(out).strip()
 
     cn = _uniq_join(cn_parts)
-    en = _uniq_join(en_parts) or _extract_latin_tokens(product_name)
+    en = _uniq_join(en_parts, max_tokens=6) or _extract_latin_tokens(product_name)
 
     if not cn or not en:
         logger.warning(

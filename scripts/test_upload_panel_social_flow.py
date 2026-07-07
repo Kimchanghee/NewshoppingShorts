@@ -127,7 +127,7 @@ def main() -> int:
             print("ERROR: threads status not saved")
             return 8
 
-        if panel._get_channel_status_text("tiktok") != "지원예정":
+        if panel._get_channel_status_text("tiktok") != "연결됨":
             print("ERROR: tiktok tab status mismatch")
             return 9
         if panel._get_channel_status_text("instagram") != "연결됨":
@@ -144,7 +144,7 @@ def main() -> int:
         panel.refresh()
         app.processEvents()
 
-        if panel._get_channel_status_text("tiktok") != "지원예정":
+        if panel._get_channel_status_text("tiktok") != "연결 필요":
             print("ERROR: tiktok disconnected status mismatch")
             return 12
         if panel._get_channel_status_text("instagram") != "연결 필요":

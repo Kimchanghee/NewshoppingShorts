@@ -2149,6 +2149,13 @@ class SettingsTab(QWidget, ThemedMixin):
         return value
 
     def _is_instagram_connected(self) -> bool:
+        """Prefer official API manager state; fall back to stored settings flag."""
+        try:
+            from managers.instagram_manager import get_instagram_manager
+            if get_instagram_manager().is_connected():
+                return True
+        except Exception:
+            pass
         return bool(get_settings_manager().get_social_connection_status("instagram"))
 
     def _is_threads_connected(self) -> bool:
@@ -2598,58 +2605,45 @@ class SettingsTab(QWidget, ThemedMixin):
                 self._advance_setup_step()
                 return
 
-            instagram_handle = self._normalize_social_account_input(
-                self.setup_instagram_handle_input.text() if hasattr(self, "setup_instagram_handle_input") else ""
-            )
-            if instagram_handle:
-                self.setup_instagram_handle_input.setText(instagram_handle)
-                self._set_setup_row_state(step_id, "done")
-                self._append_setup_log(f"Instagram 계정 입력 확인: @{instagram_handle}")
-                self._advance_setup_step()
-                return
-
             self._setup_waiting_user = True
-            self._set_setup_row_state(step_id, "waiting", "계정명 입력 필요")
+            self._set_setup_row_state(step_id, "waiting", "공식 API 연결 필요")
             self._set_setup_current_action(
-                title="Instagram 계정 정보 입력",
+                title="Instagram 공식 API 연결",
                 description=(
-                    "Instagram 로그인/승인을 완료한 뒤 아래 입력칸에 계정명(또는 프로필 URL)을 입력하고 "
+                    "① 인스타그램을 프로페셔널 계정으로 전환하고 Facebook 페이지와 연결하세요.\n"
+                    "② developers.facebook.com에서 앱을 만들고 앱 ID/시크릿 코드를 받으세요.\n"
+                    "③ '연결 창 열기'를 눌러 앱 정보를 입력하고 Facebook 승인을 완료한 뒤 "
                     "'완료했어요'를 눌러주세요."
                 ),
-                action_text="Instagram 열기",
-                action_callback=self._assistant_open_instagram_setup,
+                action_text="연결 창 열기",
+                action_callback=self._assistant_open_instagram_connect,
                 show_done=True,
             )
             return
 
         if step_id == "instagram_verify":
             if self._is_instagram_connected():
+                self._refresh_setup_assistant_status()
                 self._set_setup_row_state(step_id, "done")
-                self._append_setup_log("Instagram 연결 검증 성공")
+                account = get_settings_manager().get_social_account_name("instagram")
+                self._append_setup_log(
+                    f"Instagram 연결 검증 성공{f': @{account}' if account else ''} (공식 API)"
+                )
                 self._advance_setup_step()
                 return
 
-            instagram_handle = self._normalize_social_account_input(
-                self.setup_instagram_handle_input.text() if hasattr(self, "setup_instagram_handle_input") else ""
+            self._setup_waiting_user = True
+            self._set_setup_row_state(step_id, "waiting", "공식 API 연결 확인 필요")
+            self._set_setup_current_action(
+                title="Instagram 연결 확인 필요",
+                description=(
+                    "아직 공식 API 연결이 완료되지 않았어요. "
+                    "'연결 창 열기'에서 Meta 앱 정보 입력과 Facebook 승인을 마친 뒤 다시 확인해주세요."
+                ),
+                action_text="연결 창 열기",
+                action_callback=self._assistant_open_instagram_connect,
+                show_done=True,
             )
-            if not instagram_handle:
-                self._setup_waiting_user = True
-                self._set_setup_row_state(step_id, "waiting", "계정명 확인 필요")
-                self._set_setup_current_action(
-                    title="Instagram 계정명 확인 필요",
-                    description="Instagram 계정명을 입력해 주세요. 예: my_shop_account",
-                    action_text="입력칸으로 이동",
-                    action_callback=lambda: self.setup_instagram_handle_input.setFocus(Qt.FocusReason.OtherFocusReason),
-                    show_done=True,
-                )
-                return
-
-            self.setup_instagram_handle_input.setText(instagram_handle)
-            self._set_manual_social_connected("instagram", instagram_handle)
-            self._refresh_setup_assistant_status()
-            self._set_setup_row_state(step_id, "done")
-            self._append_setup_log(f"Instagram 연결 검증 완료: @{instagram_handle}")
-            self._advance_setup_step()
             return
 
         if step_id == "threads_user_setup":
@@ -2887,6 +2881,21 @@ class SettingsTab(QWidget, ThemedMixin):
         self._open_external_url(META_APPS_URL)
         self.setup_instagram_handle_input.setFocus(Qt.FocusReason.OtherFocusReason)
         self._append_setup_log("Instagram/Meta 설정 페이지를 열었습니다.")
+
+    def _assistant_open_instagram_connect(self):
+        """Open the official Instagram API connect dialog (upload panel)."""
+        self._open_external_url(META_APPS_URL)
+        upload_panel = getattr(self.gui, "upload_panel", None) if self.gui else None
+        if upload_panel is not None and hasattr(upload_panel, "_show_instagram_official_connect"):
+            try:
+                self._append_setup_log("Instagram 공식 API 연결 창을 엽니다.")
+                upload_panel._show_instagram_official_connect()
+                return
+            except Exception as exc:
+                logger.warning("[SetupAssistant] Instagram 연결 창 열기 실패: %s", exc)
+        self._append_setup_log(
+            "업로드 탭 > Instagram > 연결 버튼에서 Meta 앱 정보를 입력해 연결을 진행해주세요."
+        )
 
     def _assistant_open_threads_setup(self):
         """Open Threads + Meta app pages for manual setup."""
@@ -3500,8 +3509,9 @@ class SettingsTab(QWidget, ThemedMixin):
                 "https://console.cloud.google.com/apis/credentials , https://www.youtube.com/",
             ),
             "instagram": (
-                "Instagram 로그인, 프로필 확인, 업로드 화면 동작 확인",
-                "https://www.instagram.com/accounts/login/ , https://www.instagram.com/",
+                "Instagram 공식 API 연결: Meta 앱 생성(비즈니스 유형), 앱 ID/시크릿 코드 확인, "
+                "인스타그램 프로페셔널 계정-Facebook 페이지 연결 확인",
+                "https://developers.facebook.com/apps/ , https://www.facebook.com/pages/creation/ , https://www.instagram.com/accounts/login/",
             ),
         }
         focus_text, pages = focus_map.get(
@@ -3534,8 +3544,11 @@ class SettingsTab(QWidget, ThemedMixin):
             "1) Gemini API key — https://aistudio.google.com/app/apikey\n"
             "2) YouTube channel connection (Google Cloud OAuth client_secrets.json, then connect) — "
             "https://console.cloud.google.com/apis/credentials , https://www.youtube.com/\n"
-            "3) Instagram web upload readiness — log in, confirm the target profile, and verify the create/upload flow. "
-            "Do not submit a public post without explicit final confirmation.\n"
+            "3) Instagram official API connection — create a Meta app (Business type) at "
+            "https://developers.facebook.com/apps/ , collect the App ID and App Secret, make sure the "
+            "Instagram professional account is linked to a Facebook Page, then guide the user to enter the "
+            "App ID/Secret in SSMaker's upload tab (Instagram > 연결) and approve the Facebook login. "
+            "The app then publishes Reels automatically via the official Graph API.\n"
             "4) Linktree auto-publish — https://linktr.ee/admin\n\n"
             "Rules:\n"
             "1) You handle navigation, page transitions, form fill, non-sensitive clicks.\n"
@@ -3696,14 +3709,16 @@ class SettingsTab(QWidget, ThemedMixin):
                 return
             rerun_current_step = True
         elif step_id in ("instagram_user_setup", "instagram_verify"):
-            handle = self._normalize_social_account_input(
-                self.setup_instagram_handle_input.text() if hasattr(self, "setup_instagram_handle_input") else ""
-            )
-            if not handle:
-                show_warning(self, "Instagram 계정 확인", "Instagram 계정명(또는 프로필 URL)을 입력해주세요.")
+            # 공식 API 연결 여부는 매니저 상태로 검증한다 (계정명 수동 입력 불필요).
+            if not self._is_instagram_connected():
+                show_warning(
+                    self,
+                    "Instagram 미연결",
+                    "아직 Instagram 공식 API 연결이 확인되지 않았습니다.\n"
+                    "'연결 창 열기'에서 Meta 앱 정보 입력과 Facebook 승인을 완료해주세요.",
+                )
                 return
-            self.setup_instagram_handle_input.setText(handle)
-            rerun_current_step = step_id == "instagram_verify"
+            rerun_current_step = True
         elif step_id in ("threads_user_setup", "threads_verify"):
             handle = self._normalize_social_account_input(
                 self.setup_threads_handle_input.text() if hasattr(self, "setup_threads_handle_input") else ""

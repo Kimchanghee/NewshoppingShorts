@@ -70,6 +70,37 @@ class _YouTubeOAuthWorker(QObject):
             self.finished.emit(False, {}, str(e))
 
 
+class _InstagramOAuthWorker(QObject):
+    """Runs Instagram (Facebook Login) OAuth work off the UI thread."""
+
+    finished = pyqtSignal(bool, object, str)
+
+    def __init__(self, instagram_manager: Any, app_id: str, app_secret: str):
+        super().__init__()
+        self._instagram_manager = instagram_manager
+        self._app_id = app_id
+        self._app_secret = app_secret
+
+    def run(self):
+        try:
+            success = self._instagram_manager.connect_account(
+                app_id=self._app_id,
+                app_secret=self._app_secret,
+            )
+            if not success:
+                error_message = self._instagram_manager.get_last_error() or (
+                    "인스타그램 계정을 연결하지 못했어요.\n"
+                    "Meta 앱 정보와 페이지-인스타그램 연결 상태를 확인해 주세요."
+                )
+                self.finished.emit(False, {}, error_message)
+                return
+            account_info = self._instagram_manager.get_account_info() or {}
+            self.finished.emit(True, account_info, "")
+        except Exception as e:
+            logger.error(f"[UploadPanel] Instagram OAuth 연결 워커 실패: {e}")
+            self.finished.emit(False, {}, str(e))
+
+
 class PromptInputGroup(QFrame):
     """Reusable group of prompt text inputs for a platform (title, description, hashtags)."""
 
@@ -745,9 +776,8 @@ class UploadPanel(QFrame, ThemedMixin):
         self._channel_tabs: Dict[str, QPushButton] = {}
         self._channel_index: Dict[str, int] = {}
         self._active_channel: str = "youtube"
-        # 틱톡 비활성화: 채널 탭 목록에서 제외(페이지도 생성하지 않음).
-        self._platform_order = ["youtube", "instagram", "threads", "x"]
-        # Instagram is assisted through Computer Use; Threads/X remain disabled.
+        # YouTube·Instagram·TikTok는 공식 API 자동 업로드. Threads/X는 준비 중.
+        self._platform_order = ["youtube", "instagram", "tiktok", "threads", "x"]
         self._coming_soon_channels = {"threads", "x"}
         body_layout.addWidget(self._create_channel_sidebar(main_body))
 
@@ -776,7 +806,10 @@ class UploadPanel(QFrame, ThemedMixin):
         self._channel_index["youtube"] = self._channel_stack.count()
         self._channel_stack.addWidget(yt_page)
 
-        # TikTok 페이지는 비활성화로 생성하지 않는다(틱톡 전면 비활성화).
+        # TikTok page (official Content Posting API)
+        tiktok_page = self._build_tiktok_channel_page(parent=content)
+        self._channel_index["tiktok"] = self._channel_stack.count()
+        self._channel_stack.addWidget(tiktok_page)
 
         # Instagram / Threads pages (computer-use assisted manual connection)
         for platform_id in ["instagram", "threads"]:
@@ -826,7 +859,7 @@ class UploadPanel(QFrame, ThemedMixin):
         title.setStyleSheet(f"color: {c.text_primary}; background-color: transparent; border: none;")
         layout.addWidget(title)
 
-        subtitle = QLabel("YouTube는 API로 자동 업로드하고, Instagram은 Computer Use가 로그인/업로드 준비를 안내합니다. Threads·X는 준비 중입니다.")
+        subtitle = QLabel("YouTube와 Instagram은 공식 API로 자동 업로드합니다. Threads·X는 준비 중입니다.")
         subtitle.setWordWrap(True)
         subtitle.setFont(QFont(ds.typography.font_family_primary, 11))
         subtitle.setStyleSheet(f"color: {c.text_muted}; background-color: transparent; border: none;")
@@ -1191,11 +1224,25 @@ class UploadPanel(QFrame, ThemedMixin):
         layout.addWidget(
             self._create_channel_banner(
                 "tiktok",
-                "틱톡 채널 설정 (지원예정)",
-                "틱톡 자동 업로드는 곧 지원될 예정입니다. 지금은 미리 프롬프트만 저장해두면, 오픈 시 바로 사용할 수 있습니다.",
+                "틱톡 채널 설정",
+                "TikTok 공식 Content Posting API로 자동 업로드합니다. 개발자 앱(Client Key/Secret)을 등록해 연결하세요. "
+                "※ TikTok 정책상 앱 감사(Audit) 통과 전에는 게시물이 '비공개(본인만)'로만 올라갑니다.",
                 parent=page,
             )
         )
+
+        # TikTok 브랜딩 금지 정책 경고 (워터마크/로고/프로모션 텍스트 오버레이 금지).
+        warn = QLabel(
+            "⚠️ TikTok은 영상 위에 워터마크·로고·프로모션 링크/문구를 얹는 것을 금지합니다. "
+            "TikTok에 올릴 영상은 워터마크/CTA 오버레이를 꺼서 렌더하세요(위반 시 삭제·계정 정지)."
+        )
+        warn.setWordWrap(True)
+        warn.setFont(QFont(self.ds.typography.font_family_primary, 10))
+        warn.setStyleSheet(
+            f"color: {c.warning}; background-color: transparent; border: 1px solid {c.warning}; "
+            f"border-radius: {self.ds.radius.sm}px; padding: 8px 10px;"
+        )
+        layout.addWidget(warn)
 
         self._tiktok_state_label = QLabel()
         self._tiktok_state_label.setWordWrap(True)
@@ -1209,7 +1256,7 @@ class UploadPanel(QFrame, ThemedMixin):
             platform_id="tiktok",
             is_connected=tiktok_connected,
             channel_info={"name": account_name or "틱톡 계정"},
-            coming_soon=True,
+            coming_soon=False,
             parent=page,
         )
         self.tiktok_card.connect_clicked.connect(self._connect_tiktok)
@@ -1217,34 +1264,112 @@ class UploadPanel(QFrame, ThemedMixin):
 
         connect_section = UploadWorkflowSection(
             "1단계",
-            "채널 연결 (지원예정)",
-            "틱톡 연결/자동 업로드 기능은 현재 준비 중입니다. 오픈 시 인증 페이지에서 권한 승인 후 바로 연결할 수 있습니다.",
+            "채널 연결",
+            "Client Key/Secret과 Redirect URI를 입력하고 TikTok 로그인·권한 승인을 완료하면 연결됩니다.",
             parent=page,
         )
         connect_section.add_widget(self.tiktok_card)
         layout.addWidget(connect_section)
 
-        helper_section = UploadWorkflowSection(
-            "2단계",
-            "자동 설정 도우미",
-            "로그인이나 2단계 인증이 필요하면, 설정 탭의 자동 설정 도우미를 열어 안내대로 따라 하세요.",
-            parent=page,
-        )
-        helper_section.add_widget(self._create_setup_assistant_shortcut_card("tiktok", page))
-        layout.addWidget(helper_section)
-
         prompt_section = UploadWorkflowSection(
-            "3단계",
+            "2단계",
             "올릴 때 쓸 글 안내문 설정",
-            "틱톡에 올릴 제목·설명·해시태그를 어떻게 써 줬으면 하는지 적어서 저장하세요.",
+            "틱톡 캡션에 쓸 제목·설명·해시태그를 어떻게 써 줬으면 하는지 적어서 저장하세요.",
             parent=page,
         )
         prompt_section.add_widget(PromptInputGroup("tiktok", parent=page))
         layout.addWidget(prompt_section)
 
+        auto_section = UploadWorkflowSection(
+            "3단계",
+            "자동 올리기",
+            "켜 두면 영상이 완성될 때마다 TikTok에 자동 게시됩니다. (감사 전에는 비공개로 게시)",
+            parent=page,
+        )
+        auto_section.add_widget(self._build_tiktok_auto_upload_row(page))
+        layout.addWidget(auto_section)
+
         layout.addStretch()
         self._update_tiktok_state_hint(bool(tiktok_connected))
         return page
+
+    def _build_tiktok_auto_upload_row(self, parent: QWidget) -> QWidget:
+        """Build TikTok auto-upload toggle + interval row."""
+        from PyQt6.QtWidgets import QCheckBox, QSpinBox
+
+        ds = self.ds
+        c = ds.colors
+        row = QWidget(parent)
+        row.setStyleSheet("background-color: transparent; border: none;")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(10)
+
+        manager = self._get_tiktok_manager()
+        upload_settings = (
+            manager.get_upload_settings()
+            if manager is not None and hasattr(manager, "get_upload_settings")
+            else None
+        )
+        manager_connected = bool(
+            manager is not None
+            and hasattr(manager, "is_connected")
+            and manager.is_connected()
+        )
+
+        checkbox = QCheckBox("TikTok 자동 올리기 켜기")
+        checkbox.setFont(QFont(ds.typography.font_family_primary, 11))
+        checkbox.setStyleSheet(f"color: {c.text_primary}; background: transparent;")
+        checkbox.setChecked(bool(upload_settings.enabled) if upload_settings else False)
+        checkbox.setEnabled(manager_connected)
+
+        interval_label = QLabel("업로드 간격(분):")
+        interval_label.setFont(QFont(ds.typography.font_family_primary, 10))
+        interval_label.setStyleSheet(f"color: {c.text_secondary}; background: transparent; border: none;")
+
+        interval_spin = QSpinBox()
+        interval_spin.setRange(1, 1440)
+        interval_spin.setValue(int(upload_settings.interval_minutes) if upload_settings else 60)
+        interval_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 4px 8px;
+            }}
+        """)
+
+        def on_toggle(checked: bool):
+            mgr = self._get_tiktok_manager()
+            if mgr is None:
+                return
+            try:
+                mgr.set_upload_enabled(bool(checked))
+            except Exception as exc:
+                logger.warning("[UploadPanel] TikTok 자동 업로드 설정 실패: %s", exc)
+
+        def on_interval(value: int):
+            mgr = self._get_tiktok_manager()
+            if mgr is None:
+                return
+            try:
+                mgr.set_upload_interval(int(value))
+            except Exception as exc:
+                logger.warning("[UploadPanel] TikTok 업로드 간격 설정 실패: %s", exc)
+
+        checkbox.toggled.connect(on_toggle)
+        interval_spin.valueChanged.connect(on_interval)
+
+        row_layout.addWidget(checkbox)
+        row_layout.addSpacing(8)
+        row_layout.addWidget(interval_label)
+        row_layout.addWidget(interval_spin)
+        row_layout.addStretch()
+
+        self._tiktok_auto_checkbox = checkbox
+        self._tiktok_interval_spin = interval_spin
+        return row
 
     def _build_manual_social_channel_page(self, platform_id: str, parent: Optional[QWidget] = None) -> QWidget:
         """Build Instagram/Threads pages with computer-use assisted manual linkage."""
@@ -1260,7 +1385,7 @@ class UploadPanel(QFrame, ThemedMixin):
         is_instagram = platform_id == "instagram"
         title_suffix = "채널 설정" if is_instagram else "채널 설정 (지원예정)"
         banner_desc = (
-            "Instagram은 Computer Use가 로그인 상태와 업로드 화면을 확인하도록 돕습니다. 로그인, 2FA, CAPTCHA, 최종 게시 제출은 직접 처리해야 합니다."
+            "Instagram 공식 API로 릴스를 자동 게시합니다. Meta 앱(무료)을 만들어 연결하면, 영상이 완성될 때마다 릴스가 자동으로 올라가요."
             if is_instagram
             else f"{cfg.get('name', platform_id.title())} 자동 올리기는 곧 열려요. 지금 글 안내문만 미리 저장해 두면, 열리는 날 바로 쓸 수 있어요."
         )
@@ -1303,7 +1428,7 @@ class UploadPanel(QFrame, ThemedMixin):
         connect_section = UploadWorkflowSection(
             "1단계",
             "채널 연결" if is_instagram else "채널 연결 (지원예정)",
-            "Computer Use 자동 설정에서 Instagram 로그인/프로필 확인을 진행하고, 계정명을 저장합니다."
+            "Meta 앱 ID/시크릿 코드를 입력하고 Facebook 계정으로 승인하면 인스타그램 프로페셔널 계정이 연결됩니다."
             if is_instagram
             else "연결과 자동 올리기는 지금 준비 중이에요. 열리면 로그인한 뒤 계정 이름을 저장해 바로 쓸 수 있어요.",
             parent=page,
@@ -1314,7 +1439,7 @@ class UploadPanel(QFrame, ThemedMixin):
         prompt_section = UploadWorkflowSection(
             "2단계",
             "올릴 때 쓸 글 안내문" if is_instagram else "올릴 때 쓸 글 안내문 (지원예정)",
-            "Instagram 게시 화면에서 사용할 제목/설명/해시태그 안내문을 미리 저장합니다."
+            "릴스 게시글(캡션)에 사용할 제목/설명/해시태그 안내문을 미리 저장합니다."
             if is_instagram
             else "이 채널은 아직 준비 중이라 지금은 사용할 수 없어요. 기능이 열리면 여기서 설정할 수 있어요.",
             parent=page,
@@ -1324,9 +1449,109 @@ class UploadPanel(QFrame, ThemedMixin):
         prompt_section.add_widget(manual_pig)
         layout.addWidget(prompt_section)
 
+        if is_instagram:
+            auto_section = UploadWorkflowSection(
+                "3단계",
+                "자동 올리기",
+                "켜 두면 영상이 완성될 때마다 릴스로 자동 게시됩니다. (24시간 최대 100건, 공식 API 제한)",
+                parent=page,
+            )
+            auto_section.add_widget(self._build_instagram_auto_upload_row(page))
+            layout.addWidget(auto_section)
+
         layout.addStretch()
         self._update_manual_state_hint(platform_id)
         return page
+
+    def _build_instagram_auto_upload_row(self, parent: QWidget) -> QWidget:
+        """Build Instagram auto-upload toggle + interval row."""
+        from PyQt6.QtWidgets import QCheckBox, QSpinBox
+
+        ds = self.ds
+        c = ds.colors
+        row = QWidget(parent)
+        row.setStyleSheet("background-color: transparent; border: none;")
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(10)
+
+        manager = self._get_instagram_manager()
+        upload_settings = (
+            manager.get_upload_settings()
+            if manager is not None and hasattr(manager, "get_upload_settings")
+            else None
+        )
+        manager_connected = bool(
+            manager is not None
+            and hasattr(manager, "is_connected")
+            and manager.is_connected()
+        )
+
+        checkbox = QCheckBox("릴스 자동 올리기 켜기")
+        checkbox.setFont(QFont(ds.typography.font_family_primary, 11))
+        checkbox.setStyleSheet(f"color: {c.text_primary}; background: transparent;")
+        checkbox.setChecked(bool(upload_settings.enabled) if upload_settings else False)
+        checkbox.setEnabled(manager_connected)
+
+        interval_label = QLabel("업로드 간격(분):")
+        interval_label.setFont(QFont(ds.typography.font_family_primary, 10))
+        interval_label.setStyleSheet(f"color: {c.text_secondary}; background: transparent; border: none;")
+
+        interval_spin = QSpinBox()
+        interval_spin.setRange(1, 1440)
+        interval_spin.setValue(int(upload_settings.interval_minutes) if upload_settings else 60)
+        interval_spin.setStyleSheet(f"""
+            QSpinBox {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 4px 8px;
+            }}
+        """)
+
+        def on_toggle(checked: bool):
+            mgr = self._get_instagram_manager()
+            if mgr is None:
+                return
+            try:
+                mgr.set_upload_enabled(bool(checked))
+            except Exception as exc:
+                logger.warning("[UploadPanel] Instagram 자동 업로드 설정 실패: %s", exc)
+
+        def on_interval(value: int):
+            mgr = self._get_instagram_manager()
+            if mgr is None:
+                return
+            try:
+                mgr.set_upload_interval(int(value))
+            except Exception as exc:
+                logger.warning("[UploadPanel] Instagram 업로드 간격 설정 실패: %s", exc)
+
+        checkbox.toggled.connect(on_toggle)
+        interval_spin.valueChanged.connect(on_interval)
+
+        row_layout.addWidget(checkbox)
+        row_layout.addSpacing(8)
+        row_layout.addWidget(interval_label)
+        row_layout.addWidget(interval_spin)
+        row_layout.addStretch()
+
+        self._instagram_auto_checkbox = checkbox
+        self._instagram_interval_spin = interval_spin
+        return row
+
+    def _get_instagram_manager(self):
+        """Resolve Instagram manager instance."""
+        manager = getattr(self.gui, "instagram_manager", None) if self.gui else None
+        if manager is not None:
+            return manager
+        try:
+            from managers.instagram_manager import get_instagram_manager
+            return get_instagram_manager(gui=self.gui)
+        except Exception as exc:
+            logger.warning("[UploadPanel] Instagram 매니저 초기화 실패: %s", exc)
+            return None
 
     def _build_generic_channel_page(self, platform_id: str, parent: Optional[QWidget] = None) -> QWidget:
         """Build fallback page (currently used for X)."""
@@ -1388,9 +1613,9 @@ class UploadPanel(QFrame, ThemedMixin):
         """Get short status text for channel tab."""
         if platform_id == "youtube":
             return "연결됨" if self.settings.get_youtube_connected() else "연결 필요"
-        if platform_id == "instagram":
-            return "연결됨" if self.settings.get_social_connection_status("instagram") else "연결 필요"
-        if platform_id in {"tiktok", "threads", "x"}:
+        if platform_id in {"instagram", "tiktok"}:
+            return "연결됨" if self.settings.get_social_connection_status(platform_id) else "연결 필요"
+        if platform_id in {"threads", "x"}:
             return "지원예정"
         if self.settings.get_social_connection_status(platform_id):
             return "연결됨"
@@ -1628,13 +1853,25 @@ class UploadPanel(QFrame, ThemedMixin):
         return text
 
     def _update_tiktok_state_hint(self, connected: bool):
-        """Update TikTok helper text. 틱톡 자동 업로드는 현재 지원예정 상태."""
+        """Update TikTok helper text based on real connection state."""
         if not hasattr(self, "_tiktok_state_label"):
             return
         c = self.ds.colors
-        self._tiktok_state_label.setText("지금 상태: 지원예정 — 틱톡 자동 올리기 기능은 준비 중이에요.")
+        if connected:
+            account = self.settings.get_social_account_name("tiktok")
+            self._tiktok_state_label.setText(
+                f"지금 상태: 연결됨 — @{account or 'tiktok'} 계정으로 자동 게시됩니다. "
+                "(앱 감사 통과 전에는 비공개로 게시)"
+            )
+            self._tiktok_state_label.setStyleSheet(
+                f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
+            )
+            return
+        self._tiktok_state_label.setText(
+            "지금 상태: 연결 필요 — '연결' 버튼에서 Client Key/Secret을 입력하고 TikTok 승인을 완료하세요."
+        )
         self._tiktok_state_label.setStyleSheet(
-            f"color: {c.text_muted}; background-color: transparent; border: none; padding: 2px 0;"
+            f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
         )
 
     def _update_manual_state_hint(self, platform_id: str):
@@ -1651,13 +1888,13 @@ class UploadPanel(QFrame, ThemedMixin):
             connected = self.settings.get_social_connection_status("instagram")
             account = self.settings.get_social_account_name("instagram")
             if connected:
-                label.setText(f"지금 상태: 연결됨 — @{account or 'instagram'} 계정을 자동 설정 흐름에서 사용할 수 있어요.")
+                label.setText(f"지금 상태: 연결됨 — @{account or 'instagram'} 계정으로 릴스가 자동 게시됩니다. (공식 API)")
                 label.setStyleSheet(
                     f"color: {c.success}; background-color: transparent; border: none; padding: 2px 0;"
                 )
                 return
             label.setText(
-                "지금 상태: 연결 필요 — 자동 설정 버튼을 누르면 Computer Use가 Instagram 로그인/프로필 확인을 안내합니다."
+                "지금 상태: 연결 필요 — '연결' 버튼에서 Meta 앱 정보를 입력하고 Facebook 승인을 완료하면 공식 API로 연결됩니다."
             )
             label.setStyleSheet(
                 f"color: {c.warning}; background-color: transparent; border: none; padding: 2px 0;"
@@ -2051,62 +2288,104 @@ class UploadPanel(QFrame, ThemedMixin):
             show_error(self, "연결 실패", "TikTok 매니저를 초기화하지 못했습니다.")
             return
 
-        auth_url = str(manager.get_auth_url(state="upload_panel_tiktok") or "").strip()
-        if not auth_url:
-            show_error(
-                self,
-                "OAuth 설정 필요",
-                "TikTok OAuth URL을 생성하지 못했습니다.\nTIKTOK_CLIENT_KEY/SECRET/REDIRECT_URI를 확인해주세요.",
-            )
-            return
-
         ds = self.ds
         c = ds.colors
+        stored = manager.load_app_credentials() if hasattr(manager, "load_app_credentials") else {}
+
         dialog = QDialog(self)
-        dialog.setWindowTitle("TikTok 채널 연결")
-        dialog.setFixedSize(560, 320)
+        dialog.setWindowTitle("TikTok 채널 연결 (공식 API)")
+        dialog.setFixedSize(580, 470)
         dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
         layout = QVBoxLayout(dialog)
         layout.setContentsMargins(20, 18, 20, 18)
-        layout.setSpacing(10)
+        layout.setSpacing(9)
 
         inst = QLabel(
-            "1) 인증 페이지 열기를 눌러 TikTok 로그인/승인을 완료하세요.\n"
-            "2) 리디렉션 URL의 code 값을 아래 입력칸에 붙여넣고 연결을 누르세요."
+            "TikTok 공식 Content Posting API로 연결합니다.\n\n"
+            "1) developers.tiktok.com에서 앱을 만들고 Content Posting API 권한을 신청하세요.\n"
+            "2) 앱의 Client Key/Secret과 등록한 Redirect URI를 아래에 입력하세요.\n"
+            "3) '인증 페이지 열기' → TikTok 로그인/승인 → 리디렉션 URL의 code를 붙여넣고 '연결'.\n"
+            "※ 앱 감사(Audit) 통과 전에는 게시물이 비공개(SELF_ONLY)로만 올라갑니다."
         )
         inst.setWordWrap(True)
-        inst.setFont(QFont(ds.typography.font_family_primary, 11))
+        inst.setFont(QFont(ds.typography.font_family_primary, 10))
         inst.setStyleSheet(f"color: {c.text_secondary};")
         layout.addWidget(inst)
 
-        auth_info = QLabel(auth_url)
-        auth_info.setWordWrap(True)
-        auth_info.setFont(QFont(ds.typography.font_family_primary, 9))
-        auth_info.setStyleSheet(f"color: {c.text_muted}; border: 1px solid {c.border_light}; padding: 8px;")
-        layout.addWidget(auth_info)
-
-        code_input = QLineEdit()
-        code_input.setPlaceholderText("code 또는 callback URL 전체 입력")
-        code_input.setStyleSheet(f"""
+        input_style = f"""
             QLineEdit {{
                 background-color: {c.surface_variant};
                 color: {c.text_primary};
                 border: 1px solid {c.border_light};
                 border-radius: {ds.radius.sm}px;
-                padding: 8px 10px;
+                padding: 7px 10px;
                 font-size: 12px;
             }}
             QLineEdit:focus {{ border: 1px solid {c.primary}; }}
-        """)
+        """
+
+        key_input = QLineEdit()
+        key_input.setPlaceholderText("Client Key")
+        key_input.setStyleSheet(input_style)
+        if stored.get("client_key"):
+            key_input.setText(stored["client_key"])
+        layout.addWidget(key_input)
+
+        secret_input = QLineEdit()
+        secret_input.setPlaceholderText("Client Secret")
+        secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        secret_input.setStyleSheet(input_style)
+        if stored.get("client_secret"):
+            secret_input.setText(stored["client_secret"])
+        layout.addWidget(secret_input)
+
+        redirect_input = QLineEdit()
+        redirect_input.setPlaceholderText("Redirect URI (앱에 등록한 값과 동일)")
+        redirect_input.setStyleSheet(input_style)
+        redirect_input.setText(stored.get("redirect_uri") or "http://localhost:8080/callback")
+        layout.addWidget(redirect_input)
+
+        code_input = QLineEdit()
+        code_input.setPlaceholderText("code 또는 callback URL 전체 입력")
+        code_input.setStyleSheet(input_style)
         layout.addWidget(code_input)
+
+        status_label = QLabel("")
+        status_label.setWordWrap(True)
+        status_label.setFont(QFont(ds.typography.font_family_primary, 10))
+        status_label.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(status_label)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
 
+        def save_credentials() -> bool:
+            try:
+                ok = manager.install_app_credentials(
+                    key_input.text(), secret_input.text(), redirect_input.text()
+                )
+            except ValueError as ve:
+                status_label.setText(str(ve))
+                return False
+            if not ok:
+                status_label.setText("자격증명 저장에 실패했습니다.")
+                return False
+            return True
+
+        def open_auth():
+            if not save_credentials():
+                return
+            auth_url = str(manager.get_auth_url(state="upload_panel_tiktok") or "").strip()
+            if not auth_url:
+                status_label.setText("OAuth URL 생성 실패 — Client Key를 확인하세요.")
+                return
+            QDesktopServices.openUrl(QUrl(auth_url))
+            status_label.setText("브라우저에서 승인 후 리디렉션 URL의 code를 붙여넣으세요.")
+
         open_btn = QPushButton("인증 페이지 열기")
         open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        open_btn.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(auth_url)))
+        open_btn.clicked.connect(open_auth)
         btn_row.addWidget(open_btn)
 
         open_dev_btn = QPushButton("개발자 콘솔")
@@ -2137,11 +2416,15 @@ class UploadPanel(QFrame, ThemedMixin):
         cancel_btn.clicked.connect(dialog.reject)
 
         def do_connect():
+            if not save_credentials():
+                return
             ok, result = self._perform_tiktok_code_exchange(code_input.text())
             if not ok:
                 show_error(dialog, "연결 실패", result)
                 return
             account_name = result
+            if hasattr(self, "_tiktok_auto_checkbox"):
+                self._tiktok_auto_checkbox.setEnabled(True)
             dialog.accept()
             show_info(self, "연결 성공", f"TikTok 계정 '{account_name}' 연결이 완료되었습니다.")
 
@@ -2171,6 +2454,9 @@ class UploadPanel(QFrame, ThemedMixin):
 
         if hasattr(self, "tiktok_card"):
             self.tiktok_card.set_connected(False)
+        if hasattr(self, "_tiktok_auto_checkbox"):
+            self._tiktok_auto_checkbox.setChecked(False)
+            self._tiktok_auto_checkbox.setEnabled(False)
         self._update_tiktok_state_hint(False)
         self._refresh_channel_tab_labels()
         show_info(self, "연결 해제", "틱톡 채널 연결이 해제되었습니다.")
@@ -2300,10 +2586,234 @@ class UploadPanel(QFrame, ThemedMixin):
         show_info(self, "연결 해제", f"{platform_name} 연결 상태가 해제되었습니다.")
 
     def _connect_instagram(self, platform_id: str):
-        self._connect_manual_social("instagram")
+        """Connect Instagram professional account via official Graph API OAuth."""
+        from ui.components.custom_dialog import show_error
+
+        try:
+            self._show_instagram_official_connect()
+        except Exception as e:
+            logger.error(f"[UploadPanel] Instagram 연결 실패: {e}")
+            show_error(self, "연결 실패", f"인스타그램 계정을 연결하지 못했어요.\n\n{e}")
+
+    def _show_instagram_official_connect(self):
+        """Meta app credentials input + Facebook Login OAuth dialog."""
+        from ui.components.custom_dialog import show_info, show_error
+        from PyQt6.QtWidgets import QDialog
+
+        manager = self._get_instagram_manager()
+        if manager is None:
+            show_error(self, "연결 실패", "지금 연결을 시작할 수 없어요. 앱을 다시 켠 뒤 시도해 주세요.")
+            return
+
+        ds = self.ds
+        c = ds.colors
+        connection_state = {"running": False, "thread": None, "worker": None}
+        stored_creds = manager.load_app_credentials()
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("인스타그램 채널 연결 (공식 API)")
+        dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
+        dialog.setFixedSize(560, 430)
+        dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
+
+        layout = QVBoxLayout(dialog)
+        layout.setSpacing(10)
+        layout.setContentsMargins(24, 20, 24, 20)
+
+        inst = QLabel(
+            "인스타그램 공식 API(Meta)로 릴스를 자동 게시하려면 아래 3가지가 필요해요.\n\n"
+            "1. 인스타그램 계정을 프로페셔널(비즈니스/크리에이터) 계정으로 전환\n"
+            "2. 그 계정을 Facebook 페이지와 연결\n"
+            "3. developers.facebook.com에서 앱을 만들고 앱 ID/시크릿 코드 입력\n\n"
+            "입력 후 '연결'을 누르면 브라우저에서 Facebook 승인 창이 열려요."
+        )
+        inst.setWordWrap(True)
+        inst.setFont(QFont(ds.typography.font_family_primary, 11))
+        inst.setStyleSheet(f"color: {c.text_secondary};")
+        layout.addWidget(inst)
+
+        guide_link = QLabel(
+            '<a href="https://developers.facebook.com/apps/" '
+            'style="color: #3B82F6; text-decoration: none;">Meta 개발자 콘솔 열기 (앱 만들기) →</a>'
+        )
+        guide_link.setOpenExternalLinks(True)
+        guide_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+        guide_link.setFont(QFont(ds.typography.font_family_primary, 10))
+        guide_link.setStyleSheet("border: none; background: transparent;")
+        layout.addWidget(guide_link)
+
+        input_style = f"""
+            QLineEdit {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+                padding: 8px 10px;
+                font-size: 12px;
+            }}
+            QLineEdit:focus {{ border: 1px solid {c.primary}; }}
+        """
+
+        app_id_input = QLineEdit()
+        app_id_input.setPlaceholderText("Meta 앱 ID (숫자)")
+        app_id_input.setStyleSheet(input_style)
+        if stored_creds.get("app_id"):
+            app_id_input.setText(stored_creds["app_id"])
+        layout.addWidget(app_id_input)
+
+        app_secret_input = QLineEdit()
+        app_secret_input.setPlaceholderText("Meta 앱 시크릿 코드")
+        app_secret_input.setEchoMode(QLineEdit.EchoMode.Password)
+        app_secret_input.setStyleSheet(input_style)
+        if stored_creds.get("app_secret"):
+            app_secret_input.setText(stored_creds["app_secret"])
+        layout.addWidget(app_secret_input)
+
+        status_label = QLabel("")
+        status_label.setWordWrap(True)
+        status_label.setFont(QFont(ds.typography.font_family_primary, 10))
+        status_label.setStyleSheet(f"color: {c.text_muted};")
+        layout.addWidget(status_label)
+
+        btn_layout = QHBoxLayout()
+        btn_layout.addStretch()
+
+        connect_btn = QPushButton("연결")
+        connect_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        connect_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: #E1306C;
+                color: white;
+                padding: 8px 20px;
+                border-radius: {ds.radius.sm}px;
+                font-weight: bold;
+            }}
+            QPushButton:hover {{ background-color: #C13584; }}
+            QPushButton:disabled {{
+                background-color: {c.surface_variant};
+                color: {c.text_muted};
+            }}
+        """)
+
+        cancel_btn = QPushButton("취소")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {c.surface_variant};
+                color: {c.text_primary};
+                padding: 8px 20px;
+                border: 1px solid {c.border_light};
+                border-radius: {ds.radius.sm}px;
+            }}
+            QPushButton:hover {{ background-color: {c.surface}; }}
+        """)
+
+        def set_connecting(running: bool, status_message: str = ""):
+            connection_state["running"] = running
+            app_id_input.setEnabled(not running)
+            app_secret_input.setEnabled(not running)
+            cancel_btn.setEnabled(not running)
+            connect_btn.setText("연결 중..." if running else "연결")
+            connect_btn.setEnabled(not running)
+            status_label.setText(status_message if status_message else "")
+
+        def on_cancel():
+            if connection_state["running"]:
+                status_label.setText("연결하는 중이에요. 끝난 뒤 다시 눌러 주세요.")
+                return
+            dialog.reject()
+
+        cancel_btn.clicked.connect(on_cancel)
+
+        def on_connect_finished(success: bool, account_info_obj: object, error_message: str):
+            set_connecting(False)
+            connection_state["thread"] = None
+            connection_state["worker"] = None
+
+            if success:
+                account_info = account_info_obj if isinstance(account_info_obj, dict) else {}
+                username = account_info.get("username") or "instagram"
+                self._apply_social_connected_state("instagram", username)
+                if hasattr(self, "_instagram_auto_checkbox"):
+                    self._instagram_auto_checkbox.setEnabled(True)
+                dialog.accept()
+                show_info(
+                    self,
+                    "연결 성공",
+                    f"인스타그램 계정 '@{username}'을(를) 연결했어요.\n"
+                    "이제 릴스 자동 올리기를 켤 수 있어요.",
+                )
+                return
+
+            detail = error_message or (
+                "인스타그램 계정을 연결하지 못했어요.\n"
+                "Meta 앱 정보와 페이지-인스타그램 연결 상태를 확인해 주세요."
+            )
+            show_error(self, "연결 실패", detail)
+
+        def do_connect():
+            if connection_state["running"]:
+                return
+            app_id = app_id_input.text().strip()
+            app_secret = app_secret_input.text().strip()
+            if not app_id or not app_secret:
+                status_label.setText("Meta 앱 ID와 시크릿 코드를 모두 입력해 주세요.")
+                return
+
+            set_connecting(
+                True,
+                "브라우저에서 Facebook 로그인/승인을 완료해 주세요. 승인하면 자동으로 이어져요.",
+            )
+
+            worker = _InstagramOAuthWorker(manager, app_id, app_secret)
+            thread = QThread(dialog)
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.finished.connect(on_connect_finished)
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+
+            connection_state["thread"] = thread
+            connection_state["worker"] = worker
+            thread.start()
+
+        connect_btn.clicked.connect(do_connect)
+        btn_layout.addWidget(connect_btn)
+        btn_layout.addWidget(cancel_btn)
+        layout.addLayout(btn_layout)
+
+        dialog.exec()
 
     def _disconnect_instagram(self, platform_id: str):
-        self._disconnect_manual_social("instagram")
+        """Disconnect Instagram official API connection."""
+        from ui.components.custom_dialog import show_question, show_info
+
+        if not show_question(self, "연결 해제", "인스타그램 연결을 끊을까요?\n끊으면 릴스 자동 올리기도 멈춰요."):
+            return
+
+        manager = self._get_instagram_manager()
+        if manager is not None:
+            try:
+                manager.disconnect_account()
+            except Exception as exc:
+                logger.debug("[UploadPanel] Instagram 매니저 해제 실패: %s", exc)
+
+        self.settings.set_social_connection_status("instagram", False)
+        if self.gui and hasattr(self.gui, "state"):
+            try:
+                self.gui.state.instagram_connected = False
+            except Exception:
+                pass
+
+        if hasattr(self, "instagram_card"):
+            self.instagram_card.set_connected(False)
+        if hasattr(self, "_instagram_auto_checkbox"):
+            self._instagram_auto_checkbox.setChecked(False)
+            self._instagram_auto_checkbox.setEnabled(False)
+        self._update_manual_state_hint("instagram")
+        self._refresh_channel_tab_labels()
+        show_info(self, "연결 해제", "인스타그램 연결이 해제되었습니다.")
 
     def _connect_threads(self, platform_id: str):
         self._connect_manual_social("threads")

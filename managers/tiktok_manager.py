@@ -12,6 +12,7 @@ Handles:
 
 import json
 import os
+import re
 import threading
 import time
 import requests
@@ -28,6 +29,25 @@ logger = get_logger(__name__)
 TIKTOK_API_BASE = "https://open.tiktokapis.com"
 TIKTOK_AUTH_URL = "https://www.tiktok.com/v2/auth/authorize/"
 TIKTOK_TOKEN_URL = f"{TIKTOK_API_BASE}/v2/oauth/token/"
+TIKTOK_CREATOR_INFO_URL = f"{TIKTOK_API_BASE}/v2/post/publish/creator_info/query/"
+
+# Coupang affiliate disclosure (shared policy text)
+COUPANG_AFFILIATE_DISCLOSURE = (
+    "이 게시물은 쿠팡 파트너스 활동의 일환으로, "
+    "이에 따른 일정액의 수수료를 제공받습니다."
+)
+
+# TikTok caption hard limit
+TIKTOK_CAPTION_MAX_LEN = 2200
+
+# Privacy levels (ordered by public-preference) used to pick a compliant value
+# from the options creator_info reports as available for this account/app.
+TIKTOK_PRIVACY_PREFERENCE = [
+    "PUBLIC_TO_EVERYONE",
+    "FOLLOWER_OF_CREATOR",
+    "MUTUAL_FOLLOW_FRIENDS",
+    "SELF_ONLY",
+]
 
 
 @dataclass
@@ -80,6 +100,8 @@ class TikTokManager:
         "video.publish",
         "video.upload"
     ]
+    APP_CREDENTIALS_KEY = "tiktok_app_credentials_v1"
+    DEFAULT_REDIRECT_URI = "http://localhost:8080/callback"
 
     def __init__(self, gui=None, settings_file: str = "tiktok_settings.json"):
         """
@@ -91,11 +113,16 @@ class TikTokManager:
         """
         self.gui = gui
         self.settings_file = settings_file
-        
-        # Configuration - 앱 등록 후 설정 필요
-        self._client_key: str = os.environ.get("TIKTOK_CLIENT_KEY", "")
-        self._client_secret: str = os.environ.get("TIKTOK_CLIENT_SECRET", "")
-        self._redirect_uri: str = os.environ.get("TIKTOK_REDIRECT_URI", "http://localhost:8080/callback")
+
+        # App credentials: prefer secure storage, fall back to environment vars.
+        self._client_key: str = ""
+        self._client_secret: str = ""
+        self._redirect_uri: str = os.environ.get("TIKTOK_REDIRECT_URI", self.DEFAULT_REDIRECT_URI)
+        self._load_app_credentials_into_state()
+
+        # Latest creator_info snapshot (privacy options / can-post gating).
+        self._creator_info: Dict[str, Any] = {}
+        self._last_error_message: str = ""
 
         # State
         self._credentials: Optional[TikTokCredentials] = None
@@ -159,6 +186,84 @@ class TikTokManager:
                 logger.warning(f"[TikTok] Token decryption failed: {e}")
                 return ""
         return value
+
+    # ============ App credentials (Client Key / Secret / Redirect) ============
+
+    def install_app_credentials(
+        self,
+        client_key: str,
+        client_secret: str,
+        redirect_uri: str = "",
+    ) -> bool:
+        """Validate and store TikTok app credentials in secure storage."""
+        client_key = str(client_key or "").strip()
+        client_secret = str(client_secret or "").strip()
+        redirect_uri = str(redirect_uri or "").strip() or self.DEFAULT_REDIRECT_URI
+
+        if not re.fullmatch(r"[A-Za-z0-9._-]{6,64}", client_key):
+            raise ValueError("TikTok Client Key 형식이 올바르지 않습니다.")
+        if not re.fullmatch(r"[A-Za-z0-9._-]{6,128}", client_secret):
+            raise ValueError("TikTok Client Secret 형식이 올바르지 않습니다.")
+        if not re.match(r"^https?://", redirect_uri):
+            raise ValueError("Redirect URI는 http(s)로 시작해야 합니다.")
+
+        try:
+            from utils.secrets_manager import get_secrets_manager
+            payload = json.dumps({
+                "client_key": client_key,
+                "client_secret": client_secret,
+                "redirect_uri": redirect_uri,
+            })
+            ok = bool(get_secrets_manager().set_credential(self.APP_CREDENTIALS_KEY, payload))
+            if ok:
+                self._client_key = client_key
+                self._client_secret = client_secret
+                self._redirect_uri = redirect_uri
+                logger.info("[TikTok] App credentials securely stored")
+            return ok
+        except Exception as e:
+            logger.error("[TikTok] Failed to store app credentials: %s", e)
+            return False
+
+    def load_app_credentials(self) -> Dict[str, str]:
+        """Load TikTok app credentials from secure storage (empty dict if none)."""
+        try:
+            from utils.secrets_manager import get_secrets_manager
+            payload = get_secrets_manager().get_credential(self.APP_CREDENTIALS_KEY)
+            if not payload:
+                return {}
+            data = json.loads(payload)
+            client_key = str(data.get("client_key", "") or "").strip()
+            client_secret = str(data.get("client_secret", "") or "").strip()
+            redirect_uri = str(data.get("redirect_uri", "") or "").strip() or self.DEFAULT_REDIRECT_URI
+            if client_key and client_secret:
+                return {
+                    "client_key": client_key,
+                    "client_secret": client_secret,
+                    "redirect_uri": redirect_uri,
+                }
+        except Exception as e:
+            logger.debug("[TikTok] Failed to read app credentials: %s", e)
+        return {}
+
+    def _load_app_credentials_into_state(self) -> None:
+        """Populate client key/secret/redirect from secure storage or env vars."""
+        stored = self.load_app_credentials()
+        if stored:
+            self._client_key = stored["client_key"]
+            self._client_secret = stored["client_secret"]
+            self._redirect_uri = stored["redirect_uri"]
+            return
+        # Fallback: environment variables (legacy / power-user path).
+        self._client_key = os.environ.get("TIKTOK_CLIENT_KEY", "")
+        self._client_secret = os.environ.get("TIKTOK_CLIENT_SECRET", "")
+        self._redirect_uri = os.environ.get("TIKTOK_REDIRECT_URI", self.DEFAULT_REDIRECT_URI)
+
+    def has_app_credentials(self) -> bool:
+        return bool(self._client_key and self._client_secret)
+
+    def get_last_error(self) -> str:
+        return self._last_error_message
 
     def _load_settings(self) -> None:
         """Load settings from file"""
@@ -534,100 +639,253 @@ class TikTokManager:
         video_path: str,
         title: str = "",
         description: str = "",
-        source_url: str = ""
+        source_url: str = "",
+        hashtags: Optional[List[str]] = None,
+        coupang_deep_link: str = "",
+        render_integrity: Optional[Dict[str, Any]] = None,
+        render_integrity_required: bool = False,
+        upload_number: Optional[int] = None,
     ) -> None:
         """
-        Add video to upload queue.
+        Add video to upload queue (caption auto-built).
 
-        Args:
-            video_path: Path to video file
-            title: Video title (becomes part of description)
-            description: Video description/caption
-            source_url: Source URL for reference
+        Signature mirrors YouTube/Instagram managers for pipeline symmetry.
         """
-        # TikTok doesn't have separate title, it's all in the caption
-        caption = f"{title}\n\n{description}" if title else description
+        if render_integrity_required and not (render_integrity or {}).get("ok"):
+            logger.warning("[TikTok] Upload blocked: render integrity was not verified.")
+            return
+
+        purchase_link = coupang_deep_link or source_url
+        caption = self.build_caption(
+            title=title,
+            description=description,
+            hashtags=hashtags,
+            purchase_link=purchase_link,
+            upload_number=upload_number,
+        )
 
         self._upload_queue.append({
             "video_path": video_path,
-            "caption": caption[:2200],  # TikTok max caption length
+            "caption": caption,
             "source_url": source_url,
-            "added_at": datetime.now().isoformat()
+            "coupang_deep_link": coupang_deep_link,
+            "upload_number": upload_number,
+            "render_integrity": render_integrity or {},
+            "render_integrity_required": bool(render_integrity_required),
+            "added_at": datetime.now().isoformat(),
         })
 
         logger.info(f"[TikTok] 업로드 대기열 추가: {os.path.basename(video_path)}")
 
+        if self._upload_settings.enabled and self.is_connected() and not self._upload_running:
+            self.start_auto_upload()
+
+    @staticmethod
+    def _sanitize_caption_text(text: str) -> str:
+        raw = str(text or "")
+        cleaned = (
+            raw.replace("**", "")
+            .replace("__", "")
+            .replace("`", "")
+            .replace("\r", "\n")
+        )
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+        return cleaned.strip()
+
+    @classmethod
+    def build_caption(
+        cls,
+        title: str = "",
+        description: str = "",
+        hashtags: Optional[List[str]] = None,
+        purchase_link: str = "",
+        upload_number: Optional[int] = None,
+        max_length: int = TIKTOK_CAPTION_MAX_LEN,
+    ) -> str:
+        """
+        Build a TikTok caption from title/description/hashtags.
+        쿠팡 링크가 포함되면 파트너스 고지 문구를 보장한다.
+
+        NOTE: TikTok forbids overlaying brand/watermark/promo text ON the video
+        itself; this only builds the post caption (which is allowed to contain
+        text/hashtags). Branding-free rendering is enforced upstream.
+        """
+        title_line = " ".join(str(title or "").split()).strip()
+        if upload_number:
+            try:
+                marker = f"[{int(upload_number):03d}]"
+                title_line = re.sub(r"^\[\d+\]\s*", "", title_line).strip()
+                title_line = f"{marker} {title_line}".strip()
+            except (TypeError, ValueError):
+                pass
+
+        body = cls._sanitize_caption_text(description)
+        tags = [t for t in (str(tag or "").strip().lstrip("#") for tag in (hashtags or [])) if t]
+        hashtag_str = " ".join(f"#{t}" for t in tags[:12])
+
+        parts = [p for p in (title_line, body) if p]
+        caption = "\n\n".join(parts)
+
+        if "coupang.com" in str(purchase_link or "").lower() and COUPANG_AFFILIATE_DISCLOSURE not in caption:
+            caption = f"{COUPANG_AFFILIATE_DISCLOSURE}\n\n{caption}" if caption else COUPANG_AFFILIATE_DISCLOSURE
+
+        if hashtag_str:
+            caption = f"{caption}\n\n{hashtag_str}" if caption else hashtag_str
+
+        if len(caption) > max_length:
+            if hashtag_str and len(hashtag_str) + 2 < max_length:
+                head_budget = max_length - len(hashtag_str) - 2
+                head = caption[: len(caption) - len(hashtag_str) - 2]
+                caption = head[: max(1, head_budget - 3)].rstrip() + "...\n\n" + hashtag_str
+            else:
+                caption = caption[: max_length - 3].rstrip() + "..."
+        return caption.strip()
+
+    def query_creator_info(self) -> Dict[str, Any]:
+        """
+        Query creator info — MANDATORY compliance step before publishing.
+
+        TikTok requires apps to call this and use the returned privacy options
+        and posting-eligibility before every Direct Post. Returns the data dict
+        (with privacy_level_options, *_disabled flags, max duration) or {}.
+        """
+        self._creator_info = {}
+        if not self.is_connected():
+            self._last_error_message = "TikTok 계정이 연결되지 않았습니다."
+            return {}
+        if not self.is_token_valid() and not self.refresh_access_token():
+            self._last_error_message = "TikTok 토큰 갱신 실패"
+            return {}
+        try:
+            response = requests.post(
+                TIKTOK_CREATOR_INFO_URL,
+                headers={
+                    "Authorization": f"Bearer {self._credentials.access_token}",
+                    "Content-Type": "application/json; charset=UTF-8",
+                },
+                timeout=30,
+            )
+            data = response.json() if response.content else {}
+            err = data.get("error", {}) or {}
+            if response.status_code != 200 or err.get("code") not in ("ok", None, ""):
+                self._last_error_message = (
+                    f"creator_info 조회 실패: {err.get('message') or response.status_code}"
+                )
+                logger.error("[TikTok] %s", self._last_error_message)
+                return {}
+            self._creator_info = data.get("data", {}) or {}
+            return self._creator_info
+        except Exception as e:
+            self._last_error_message = f"creator_info 조회 오류: {e}"
+            logger.error("[TikTok] %s", self._last_error_message)
+            return {}
+
+    def _resolve_privacy_level(self, creator_info: Dict[str, Any]) -> Optional[str]:
+        """Pick a compliant privacy level from creator-allowed options.
+
+        Unaudited apps only get ['SELF_ONLY'] here, so this naturally degrades
+        to private posting until the app passes TikTok's audit.
+        """
+        options = [str(x) for x in (creator_info.get("privacy_level_options") or [])]
+        if not options:
+            return None
+        preferred = self._upload_settings.default_privacy
+        if preferred in options:
+            return preferred
+        for level in TIKTOK_PRIVACY_PREFERENCE:
+            if level in options:
+                return level
+        return options[0]
+
     def upload_video(self, video_path: str, caption: str = "") -> Optional[str]:
         """
-        Upload a video to TikTok using Content Posting API.
-        
-        This uses the Direct Post flow:
-        1. Initialize upload
-        2. Upload video file
-        3. Create post
-        4. Poll for status
-        
+        Upload a video to TikTok using the Content Posting API (Direct Post).
+
+        Flow (official): query creator_info (compliance) -> init with post_info
+        + FILE_UPLOAD source_info -> upload the file bytes -> poll status.
+
         Args:
             video_path: Path to video file (MP4, H.264)
             caption: Video caption (max 2200 chars)
-            
+
         Returns:
             publish_id if successful, None otherwise
         """
+        self._last_error_message = ""
         if not self.is_connected():
-            logger.error("[TikTok] 계정이 연결되지 않았습니다.")
+            self._last_error_message = "TikTok 계정이 연결되지 않았습니다."
+            logger.error("[TikTok] %s", self._last_error_message)
             return None
 
         if not self.is_token_valid():
             if not self.refresh_access_token():
-                logger.error("[TikTok] 토큰 리프레시 실패")
+                self._last_error_message = "TikTok 토큰 리프레시 실패"
+                logger.error("[TikTok] %s", self._last_error_message)
                 return None
 
         if not os.path.exists(video_path):
-            logger.error(f"[TikTok] 비디오 파일 없음: {video_path}")
+            self._last_error_message = f"비디오 파일 없음: {video_path}"
+            logger.error("[TikTok] %s", self._last_error_message)
             return None
 
         try:
-            # Get file info
             file_size = os.path.getsize(video_path)
-            
-            if file_size > 500 * 1024 * 1024:  # 500MB limit
-                logger.error("[TikTok] 파일 크기 초과 (최대 500MB)")
+            if file_size > 4 * 1024 * 1024 * 1024:  # 4GB API hard limit
+                self._last_error_message = "파일 크기 초과 (최대 4GB)"
+                logger.error("[TikTok] %s", self._last_error_message)
                 return None
 
-            # Step 1: Initialize upload (Direct Post)
-            init_response = self._init_video_upload(file_size)
+            # Step 0: creator_info (mandatory) + resolve a compliant privacy level.
+            creator_info = self.query_creator_info()
+            if not creator_info:
+                return None
+            privacy_level = self._resolve_privacy_level(creator_info)
+            if not privacy_level:
+                self._last_error_message = (
+                    "지금은 게시할 수 없습니다(게시 한도 도달 또는 권한 없음). 잠시 후 다시 시도됩니다."
+                )
+                logger.warning("[TikTok] %s", self._last_error_message)
+                return None
+
+            # Step 1: Initialize Direct Post (post_info + FILE_UPLOAD source_info).
+            init_response = self._init_video_upload(file_size, caption, privacy_level, creator_info)
             if not init_response:
                 return None
 
             upload_url = init_response.get("upload_url")
             publish_id = init_response.get("publish_id")
 
-            # Step 2: Upload video file
+            # Step 2: Upload the video bytes to the returned upload_url.
             if not self._upload_video_file(upload_url, video_path):
                 return None
 
-            # Step 3: Create post
-            if not self._create_post(publish_id, caption):
-                return None
-
-            # Track pending upload
+            # Track pending upload (status polled by _upload_loop / check_upload_status).
             self._pending_uploads[publish_id] = {
                 "video_path": video_path,
                 "caption": caption,
+                "privacy_level": privacy_level,
                 "started_at": datetime.now().isoformat(),
-                "status": "PROCESSING"
+                "status": "PROCESSING",
             }
 
-            logger.info(f"[TikTok] 업로드 시작됨: {publish_id}")
+            logger.info("[TikTok] 업로드 시작됨: %s (privacy=%s)", publish_id, privacy_level)
             return publish_id
 
         except Exception as e:
-            logger.error(f"[TikTok] 업로드 실패: {e}")
+            self._last_error_message = f"업로드 실패: {e}"
+            logger.error("[TikTok] %s", self._last_error_message)
             return None
 
-    def _init_video_upload(self, file_size: int) -> Optional[Dict[str, Any]]:
-        """Initialize video upload and get upload URL"""
+    def _init_video_upload(
+        self,
+        file_size: int,
+        caption: str = "",
+        privacy_level: str = "SELF_ONLY",
+        creator_info: Optional[Dict[str, Any]] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Initialize Direct Post upload and get the upload URL."""
+        creator_info = creator_info or {}
+        # Single-chunk upload (valid for files up to 64MB, covers Shorts).
         try:
             response = requests.post(
                 f"{TIKTOK_API_BASE}/v2/post/publish/video/init/",
@@ -637,17 +895,26 @@ class TikTokManager:
                 },
                 json={
                     "post_info": {
-                        "title": "",  # Optional title
-                        "privacy_level": self._upload_settings.default_privacy,
-                        "disable_duet": not self._upload_settings.allow_duet,
-                        "disable_comment": not self._upload_settings.allow_comments,
-                        "disable_stitch": not self._upload_settings.allow_stitch,
+                        "title": str(caption or "")[:TIKTOK_CAPTION_MAX_LEN],
+                        "privacy_level": privacy_level,
+                        "disable_duet": (
+                            not self._upload_settings.allow_duet
+                            or bool(creator_info.get("duet_disabled"))
+                        ),
+                        "disable_comment": (
+                            not self._upload_settings.allow_comments
+                            or bool(creator_info.get("comment_disabled"))
+                        ),
+                        "disable_stitch": (
+                            not self._upload_settings.allow_stitch
+                            or bool(creator_info.get("stitch_disabled"))
+                        ),
                         "video_cover_timestamp_ms": 1000  # 1초 지점을 썸네일로
                     },
                     "source_info": {
                         "source": "FILE_UPLOAD",
                         "video_size": file_size,
-                        "chunk_size": file_size,  # Single chunk for simplicity
+                        "chunk_size": file_size,  # Single chunk (<=64MB)
                         "total_chunk_count": 1
                     }
                 },

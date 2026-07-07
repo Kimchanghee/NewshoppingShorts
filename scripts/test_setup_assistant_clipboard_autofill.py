@@ -54,10 +54,27 @@ class _DummyTikTokManager:
         return self._channel
 
 
+class _DummyInstagramManager:
+    """Mimics official-API InstagramManager connection state for headless tests."""
+
+    def __init__(self):
+        self._connected = False
+
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def mark_connected(self):
+        self._connected = True
+
+    def reset(self):
+        self._connected = False
+
+
 class _DummyGUI:
     def __init__(self):
         self.output_folder_path = ""
         self.tiktok_manager = _DummyTikTokManager()
+        self.instagram_manager = _DummyInstagramManager()
 
 
 def _run_until_waiting_or_done(tab: SettingsTab, app: QApplication, max_ticks: int = 300) -> None:
@@ -99,9 +116,19 @@ def main() -> int:
         auto_publish=False,
     )
 
+    gui = _DummyGUI()
+
+    # Instagram now connects through the official Graph API manager (OAuth),
+    # so route _is_instagram_connected() to the dummy manager.
+    import managers.instagram_manager as _ig_module
+    gui_instagram_manager = gui.instagram_manager
+    _ig_module.get_instagram_manager = lambda gui=None: gui_instagram_manager  # type: ignore[assignment]
+
     try:
-        tab = SettingsTab(gui=_DummyGUI())
+        tab = SettingsTab(gui=gui)
         tab._get_saved_gemini_key_count = lambda: 1  # type: ignore[method-assign]
+        # Instagram no longer connects via clipboard; complete OAuth on action.
+        tab._assistant_open_instagram_connect = lambda: gui_instagram_manager.mark_connected()  # type: ignore[method-assign]
 
         # 1) TikTok clipboard autofill
         tab._start_setup_assistant("tiktok")
@@ -115,16 +142,23 @@ def main() -> int:
             print("ERROR: tiktok not connected via clipboard autofill")
             return 2
 
-        # 2) Instagram clipboard autofill
+        # 2) Instagram — official API (OAuth), not clipboard. Drive via action/done.
         tab._start_setup_assistant("instagram")
-        _run_until_waiting_or_done(tab, app)
-        QApplication.clipboard().setText("https://www.instagram.com/demo_instagram/")
-        _run_until_done(tab, app)
+        for _ in range(700):
+            QTest.qWait(15)
+            app.processEvents()
+            if tab._setup_waiting_user:  # noqa: SLF001
+                tab._on_setup_action_clicked()  # simulates completing OAuth
+                app.processEvents()
+                tab._on_setup_done_clicked()
+                app.processEvents()
+            if not tab._setup_running:  # noqa: SLF001
+                break
         if tab._setup_running:  # noqa: SLF001
             print("ERROR: instagram scope did not finish")
             return 3
         if not tab._is_instagram_connected():
-            print("ERROR: instagram not connected via clipboard autofill")
+            print("ERROR: instagram not connected via official API flow")
             return 4
 
         # 3) Threads clipboard autofill

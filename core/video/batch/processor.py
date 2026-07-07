@@ -1827,6 +1827,99 @@ def _process_single_video(app, url, current_number, total_urls):
                                 except Exception:
                                     pass
 
+                            # 4. Add to Instagram Reels Upload Queue (official Graph API)
+                            try:
+                                ig_manager = getattr(app, "instagram_manager", None)
+                                if ig_manager is None:
+                                    from managers.instagram_manager import get_instagram_manager
+                                    ig_manager = get_instagram_manager()
+
+                                ig_enabled = bool(
+                                    ig_manager
+                                    and ig_manager.get_upload_settings().enabled
+                                    and ig_manager.is_connected()
+                                )
+                                if ig_enabled and review_only_source:
+                                    logger.warning(
+                                        "[Automation] Instagram auto-upload skipped: sourced video requires review"
+                                    )
+                                elif ig_enabled and linktree_publish_blocked:
+                                    logger.warning(
+                                        "[Automation] Instagram auto-upload skipped: %s",
+                                        linktree_publish_block_reason
+                                        or "Linktree 자동 발행 실패",
+                                    )
+                                elif ig_enabled:
+                                    ig_manager.add_to_upload_queue(
+                                        video_path=final_video_path,
+                                        title=video_title,
+                                        description=video_desc,
+                                        hashtags=video_tags,
+                                        source_url=original_source_url or url,
+                                        coupang_deep_link=coupang_link,
+                                        render_integrity=render_integrity,
+                                        render_integrity_required=True,
+                                        upload_number=linktree_publish_index,
+                                    )
+                                    logger.info("[Automation] Added to Instagram Reels upload queue")
+                                    try:
+                                        rest.log_user_action(
+                                            "인스타그램 업로드 큐 추가",
+                                            f"제목: {video_title[:50]}",
+                                        )
+                                    except Exception:
+                                        pass
+                            except Exception as ig_err:
+                                logger.warning(
+                                    "[Automation] Instagram upload queue step skipped: %s", ig_err
+                                )
+
+                            # 5. Add to TikTok Upload Queue (official Content Posting API)
+                            try:
+                                tt_manager = getattr(app, "tiktok_manager", None)
+                                if tt_manager is None:
+                                    from managers.tiktok_manager import get_tiktok_manager
+                                    tt_manager = get_tiktok_manager()
+
+                                tt_enabled = bool(
+                                    tt_manager
+                                    and tt_manager.get_upload_settings().enabled
+                                    and tt_manager.is_connected()
+                                )
+                                if tt_enabled and review_only_source:
+                                    logger.warning(
+                                        "[Automation] TikTok auto-upload skipped: sourced video requires review"
+                                    )
+                                elif tt_enabled and linktree_publish_blocked:
+                                    logger.warning(
+                                        "[Automation] TikTok auto-upload skipped: %s",
+                                        linktree_publish_block_reason or "Linktree 자동 발행 실패",
+                                    )
+                                elif tt_enabled:
+                                    tt_manager.add_to_upload_queue(
+                                        video_path=final_video_path,
+                                        title=video_title,
+                                        description=video_desc,
+                                        hashtags=video_tags,
+                                        source_url=original_source_url or url,
+                                        coupang_deep_link=coupang_link,
+                                        render_integrity=render_integrity,
+                                        render_integrity_required=True,
+                                        upload_number=linktree_publish_index,
+                                    )
+                                    logger.info("[Automation] Added to TikTok upload queue")
+                                    try:
+                                        rest.log_user_action(
+                                            "틱톡 업로드 큐 추가",
+                                            f"제목: {video_title[:50]}",
+                                        )
+                                    except Exception:
+                                        pass
+                            except Exception as tt_err:
+                                logger.warning(
+                                    "[Automation] TikTok upload queue step skipped: %s", tt_err
+                                )
+
                 except Exception as auto_err:
                     logger.warning(f"[Automation] 자동화 단계 실패 (영상은 저장됨): {auto_err}")
 

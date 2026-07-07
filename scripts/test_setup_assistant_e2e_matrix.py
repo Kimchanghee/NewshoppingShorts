@@ -83,25 +83,45 @@ class _DummyTikTokManager:
         return self._channel
 
 
+class _DummyInstagramManager:
+    """Mimics official-API InstagramManager connection state for headless tests."""
+
+    def __init__(self):
+        self._connected = False
+
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def mark_connected(self):
+        self._connected = True
+
+    def reset(self):
+        self._connected = False
+
+
 class _DummyGUI:
     def __init__(self):
         self.output_folder_path = ""
         self.youtube_manager = _DummyYouTubeManager()
         self.tiktok_manager = _DummyTikTokManager()
+        self.instagram_manager = _DummyInstagramManager()
         self.upload_panel = _DummyUploadPanel(self.youtube_manager)
 
 
-def _reset_connection_settings() -> None:
+def _reset_connection_settings(tab: SettingsTab = None) -> None:
     settings = get_settings_manager()
     settings.set_youtube_connected(False, "", "")
     settings.set_social_connection_status("tiktok", False, "")
     settings.set_social_connection_status("instagram", False, "")
     settings.set_social_connection_status("threads", False, "")
     settings.set_linktree_settings(webhook_url="", api_key="", profile_url="", auto_publish=False)
+    ig_manager = getattr(getattr(tab, "gui", None), "instagram_manager", None)
+    if ig_manager is not None and hasattr(ig_manager, "reset"):
+        ig_manager.reset()
 
 
 def _run_scope(tab: SettingsTab, app: QApplication, scope: str) -> bool:
-    _reset_connection_settings()
+    _reset_connection_settings(tab)
     tab.setup_tiktok_code_input.clear()
     tab.setup_instagram_handle_input.clear()
     tab.setup_threads_handle_input.clear()
@@ -156,12 +176,19 @@ def main() -> int:
     }
 
     gui = _DummyGUI()
+
+    # Instagram now connects through the official Graph API manager.
+    import managers.instagram_manager as _ig_module
+    gui_instagram_manager = gui.instagram_manager
+    _ig_module.get_instagram_manager = lambda gui=None: gui_instagram_manager  # type: ignore[assignment]
+
     tab = SettingsTab(gui=gui)
     tab._get_saved_gemini_key_count = lambda: 1  # type: ignore[method-assign]
 
     # Deterministic user-step helpers for E2E flow.
     tab._assistant_open_tiktok_auth = lambda: tab.setup_tiktok_code_input.setText("demo_tiktok_oauth_code")  # type: ignore[method-assign]
-    tab._assistant_open_instagram_setup = lambda: tab.setup_instagram_handle_input.setText("demo_instagram")  # type: ignore[method-assign]
+    # Instagram: simulate completing the official Facebook Login OAuth on action.
+    tab._assistant_open_instagram_connect = lambda: gui_instagram_manager.mark_connected()  # type: ignore[method-assign]
     tab._assistant_open_threads_setup = lambda: tab.setup_threads_handle_input.setText("demo_threads")  # type: ignore[method-assign]
     tab._assistant_open_linktree_admin = lambda: tab.linktree_profile_input.setText("https://linktr.ee/demo_store")  # type: ignore[method-assign]
 

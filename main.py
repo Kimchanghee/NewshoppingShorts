@@ -13,6 +13,9 @@ import os
 import threading
 from typing import Optional
 
+# 최상단에서 UTF-8 강제 — cp949 모지바케(제목/채널명 ????? 깨짐) 근본 차단.
+import utils.utf8_boot  # noqa: F401  (import 시점에 force_utf8() 자동 적용)
+
 try:
     from dotenv import load_dotenv
     load_dotenv()
@@ -83,6 +86,7 @@ from managers.subscription_manager import SubscriptionManager
 from managers.generated_video_manager import GeneratedVideoManager
 from managers.youtube_manager import get_youtube_manager
 from managers.tiktok_manager import get_tiktok_manager
+from managers.instagram_manager import get_instagram_manager
 from managers.coupang_manager import CoupangManager
 from managers.inpock_manager import get_inpock_manager
 from managers.sourcing_manager import get_sourcing_manager
@@ -150,6 +154,7 @@ class VideoAnalyzerGUI(
         self._generated_video_manager = GeneratedVideoManager(self)
         self.youtube_manager = get_youtube_manager(gui=self)
         self.tiktok_manager = get_tiktok_manager(gui=self)
+        self.instagram_manager = get_instagram_manager(gui=self)
         self.coupang_manager = CoupangManager()
         # Selenium-based managers must not crash the app on machines without selenium/chrome.
         # Their heavy imports are guarded and the driver is created lazily.

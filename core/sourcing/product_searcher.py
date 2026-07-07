@@ -1319,12 +1319,16 @@ def _download_hls_via_ffmpeg(url: str, filepath: str, referer: str,
 
 def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2,
                     max_bytes: int = _DOWNLOAD_MAX_BYTES,
-                    max_seconds: float = _DOWNLOAD_MAX_SECONDS) -> Optional[float]:
+                    max_seconds: float = _DOWNLOAD_MAX_SECONDS,
+                    cookies: Optional[dict] = None) -> Optional[float]:
     """Download video file with retry. Returns size in MB or None on failure.
 
     Enforces both a maximum byte size and a maximum wall-clock duration per
     attempt — requests' stream `timeout` only limits the gap between chunks, so
     a slow trickle or an unexpectedly huge file would otherwise run unbounded.
+
+    cookies: 브라우저 세션 쿠키(선택). 서명 CDN(콰이쇼우/도우인 등)은 쿠키 없이
+    치면 HTML/403이 떨어지므로, 자동화 브라우저의 쿠키를 넘기면 성공률이 올라간다.
     """
     import time
 
@@ -1338,7 +1342,8 @@ def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2,
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": referer,
             }
-            r = requests.get(url, headers=headers, timeout=(10, 60), stream=True)
+            r = requests.get(url, headers=headers, timeout=(10, 60), stream=True,
+                             cookies=cookies or None)
             if r.status_code != 200:
                 logger.warning("[ProductSearcher] Download HTTP %d (attempt %d/%d): %s",
                                r.status_code, attempt, max_retries, url[:80])

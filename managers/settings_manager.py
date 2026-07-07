@@ -196,6 +196,11 @@ class SettingsManager:
         # Sourcing product match policy
         "sourcing_min_similarity_percent": 90,
         "sourcing_auto_skip_low_similarity": False,
+        # 풀자동화 소싱 방식: "coupang"(기존 상품 기반) | "platform_video"(도우인/콰이쇼우/샤오홍슈 영상 다운로드)
+        "automation_sourcing_method": "coupang",
+        # first-hit-wins 순서와 동일(도우인→콰이쇼우→샤오홍슈→빌리빌리).
+        # bilibili는 비로그인 검색이 가능해 로그인 전에도 성공하는 최종 폴백.
+        "platform_video_sources": ["douyin", "kuaishou", "xiaohongshu", "bilibili"],
         "cookies_inpock": {},  # Dict to store Inpock Link cookies
         "cookies_1688": {},  # Dict to store 1688 cookies
     }
@@ -1148,6 +1153,47 @@ class SettingsManager:
                 self._settings["sourcing_auto_skip_low_similarity"] = bool(
                     auto_skip_low_similarity
                 )
+        return self._save_settings()
+
+    # ============ Full-automation sourcing method ============
+
+    VALID_SOURCING_METHODS = ("coupang", "platform_video")
+
+    def get_automation_sourcing_method(self) -> str:
+        """풀자동화 소싱 방식: 'coupang'(기존) | 'platform_video'(3플랫폼 영상)."""
+        value = str(self._settings.get("automation_sourcing_method", "coupang") or "coupang").strip()
+        return value if value in self.VALID_SOURCING_METHODS else "coupang"
+
+    def set_automation_sourcing_method(self, method: str) -> bool:
+        """Persist the full-automation sourcing method."""
+        normalized = str(method or "").strip()
+        if normalized not in self.VALID_SOURCING_METHODS:
+            logger.warning("[SettingsManager] Unsupported sourcing method: %s", method)
+            return False
+        with self._lock:
+            self._settings["automation_sourcing_method"] = normalized
+        return self._save_settings()
+
+    DEFAULT_PLATFORM_VIDEO_SOURCES = ["douyin", "kuaishou", "xiaohongshu", "bilibili"]
+    VALID_PLATFORM_VIDEO_SOURCES = {"douyin", "xiaohongshu", "kuaishou", "bilibili"}
+
+    def get_platform_video_sources(self) -> List[str]:
+        """Enabled short-video platforms for platform_video method."""
+        raw = self._settings.get("platform_video_sources", list(self.DEFAULT_PLATFORM_VIDEO_SOURCES))
+        cleaned = [str(x).strip().lower() for x in (raw or [])
+                   if str(x).strip().lower() in self.VALID_PLATFORM_VIDEO_SOURCES]
+        # 마이그레이션: bilibili 도입 전 저장된 목록에는 최종 폴백(비로그인 검색 가능)을
+        # 자동 포함시킨다 — 소스 선택 UI가 생기기 전까지는 항상 켜 두는 것이 안전.
+        if cleaned and "bilibili" not in cleaned:
+            cleaned.append("bilibili")
+        return cleaned or list(self.DEFAULT_PLATFORM_VIDEO_SOURCES)
+
+    def set_platform_video_sources(self, sources: List[str]) -> bool:
+        """Persist enabled short-video platforms."""
+        cleaned = [str(x).strip().lower() for x in (sources or [])
+                   if str(x).strip().lower() in self.VALID_PLATFORM_VIDEO_SOURCES]
+        with self._lock:
+            self._settings["platform_video_sources"] = cleaned or list(self.DEFAULT_PLATFORM_VIDEO_SOURCES)
         return self._save_settings()
 
     # ============ Upload Prompt Settings ============

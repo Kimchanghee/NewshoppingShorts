@@ -50,11 +50,25 @@ class _DummyUploadPanel:
         settings.set_youtube_connected(True, "demo_channel_id", "Demo Channel")
 
 
+class _DummyInstagramManager:
+    """Mimics official-API InstagramManager connection state for headless tests."""
+
+    def __init__(self):
+        self._connected = False
+
+    def is_connected(self) -> bool:
+        return self._connected
+
+    def mark_connected(self):
+        self._connected = True
+
+
 class _DummyGUI:
     def __init__(self):
         self.output_folder_path = ""
         self.youtube_manager = _DummyYouTubeManager()
         self.tiktok_manager = _DummyTikTokManager()
+        self.instagram_manager = _DummyInstagramManager()
         self.upload_panel = _DummyUploadPanel(self.youtube_manager)
 
 
@@ -102,6 +116,13 @@ def main() -> int:
         "threads_name": settings.get_social_account_name("threads"),
     }
     gui = _DummyGUI()
+
+    # Instagram now connects through the official Graph API manager, so route
+    # _is_instagram_connected() to the dummy manager instead of a pasted handle.
+    import managers.instagram_manager as _ig_module
+    gui_instagram_manager = gui.instagram_manager
+    _ig_module.get_instagram_manager = lambda gui=None: gui_instagram_manager  # type: ignore[assignment]
+
     tab = SettingsTab(gui=gui)
 
     # Avoid dependency on real secret storage contents.
@@ -113,7 +134,8 @@ def main() -> int:
 
     tab._assistant_open_linktree_admin = _fake_linktree_action  # type: ignore[method-assign]
     tab._assistant_open_tiktok_auth = lambda: tab.setup_tiktok_code_input.setText("demo_tiktok_oauth_code")  # type: ignore[method-assign]
-    tab._assistant_open_instagram_setup = lambda: tab.setup_instagram_handle_input.setText("demo_instagram")  # type: ignore[method-assign]
+    # Instagram: simulate completing the official Facebook Login OAuth on action.
+    tab._assistant_open_instagram_connect = lambda: gui_instagram_manager.mark_connected()  # type: ignore[method-assign]
     tab._assistant_open_threads_setup = lambda: tab.setup_threads_handle_input.setText("demo_threads")  # type: ignore[method-assign]
 
     try:

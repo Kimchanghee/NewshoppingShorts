@@ -48,6 +48,15 @@ ui_preferences.json
 # Claude Code 로컬 설정
 .claude/settings.local.json
 
+# 에이전트 도구 로컬 상태 / 실행 로그 (커밋 금지)
+.omc/
+.omx/
+_run_stdout.log
+_run_stderr.log
+
+# 릴리즈 공지/스크린샷 로컬 산출물
+release_assets/
+
 # 미디어 파일
 *.mp4
 *.wav

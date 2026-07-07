@@ -54,6 +54,27 @@ HASHTAG_STOPWORDS = {
     "틀어도", "안이", "이제", "바로", "후끈후끈", "후끈후끈하시죠",
 }
 
+
+def _text_looks_corrupted(text: str) -> bool:
+    """Detect mojibake / encoding-corrupted text (e.g. cp949↔utf-8 damage).
+
+    Guards against uploading titles like '????? ??? ??' that occur when a
+    Korean/Chinese string is round-tripped through the wrong codec. Returns
+    True when the text carries replacement chars or runs of '?' that no real
+    product title would contain.
+    """
+    s = str(text or "")
+    if not s:
+        return False
+    if "�" in s:  # Unicode replacement character
+        return True
+    # A run of 2+ '?' (real Korean titles use at most a single trailing '?').
+    if re.search(r"\?{2,}", s):
+        return True
+    # Many scattered '?' relative to length also indicates lossy encoding.
+    q = s.count("?")
+    return q >= 3 and q >= (len(s.replace(" ", "")) * 0.25)
+
 # YouTube API imports (optional)
 try:
     from google.oauth2.credentials import Credentials
@@ -1428,6 +1449,25 @@ class YouTubeManager:
             logger.warning("[YouTube] Upload blocked: render integrity guard failed.")
             return False
 
+        # 중복 차단: 동일 상품/유사 영상은 업로드하지 않음(‘3연속 똑같은거’ 방지).
+        product_key = ""
+        try:
+            from managers.uploaded_registry import get_uploaded_registry, normalize_product_key
+            product_key = normalize_product_key(
+                item.get("product_info", ""),
+                item.get("coupang_deep_link", "") or item.get("source_url", ""),
+            )
+            registry = get_uploaded_registry()
+            is_dup, reason = registry.is_duplicate(
+                product_key=product_key, video_path=video_path, platform="youtube"
+            )
+            if is_dup:
+                logger.warning("[YouTube] 중복 업로드 차단: %s — %s", reason, item.get("title", "")[:40])
+                item["skipped_duplicate"] = reason
+                return True  # 성공 처리(큐에서 제거)하되 업로드는 생략
+        except Exception as dup_exc:
+            logger.debug("[YouTube] 중복 검사 건너뜀: %s", dup_exc)
+
         try:
             # Add hashtags to description
             tags = [
@@ -1437,6 +1477,14 @@ class YouTubeManager:
             hashtag_str = " ".join([f"#{tag}" for tag in tags])
             safe_title = self._sanitize_public_text(item.get("title", ""), limit=100) or "쇼핑 추천 영상"
             description = self._sanitize_public_text(item.get("description", ""), limit=5000)
+
+            # 인코딩 손상(????? / �) 제목이 업로드되지 않도록 방어: 손상 감지 시 재생성.
+            if _text_looks_corrupted(safe_title):
+                logger.warning("[YouTube] 손상된 제목 감지, 재생성 시도: %r", safe_title)
+                rebuilt = self.generate_seo_title(item.get("product_info", "") or "")
+                rebuilt = self._sanitize_public_text(rebuilt, limit=100)
+                safe_title = rebuilt if (rebuilt and not _text_looks_corrupted(rebuilt)) else "쇼핑 추천 영상"
+
             purchase_link = self._normalize_public_url(
                 item.get("coupang_deep_link") or item.get("source_url") or ""
             )
@@ -1488,6 +1536,15 @@ class YouTubeManager:
                 item["video_id"] = video_id
                 item["video_url"] = f"https://youtu.be/{video_id}"
                 self._try_post_auto_comment(video_id, item)
+                # 업로드 이력 기록(다음번 중복 차단용).
+                try:
+                    from managers.uploaded_registry import get_uploaded_registry
+                    get_uploaded_registry().record(
+                        product_key=product_key, video_path=video_path,
+                        platform="youtube", video_id=video_id,
+                    )
+                except Exception as rec_exc:
+                    logger.debug("[YouTube] 업로드 이력 기록 건너뜀: %s", rec_exc)
             return True
 
         except Exception as e:

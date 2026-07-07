@@ -21,6 +21,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+# UTF-8 강제(cp949 모지바케 차단) — 다른 무거운 import보다 먼저.
+import utils.utf8_boot  # noqa: E402,F401
+
 from core.api import ApiKeyManager
 from core.sourcing.pipeline import SourcingPipeline
 from managers.linktree_manager import (
@@ -1341,6 +1344,71 @@ async def run_sourcing(item: Dict[str, Any], run_dir: Path, min_similarity: floa
     return report
 
 
+def get_sourcing_method() -> str:
+    """풀자동화 소싱 방식: 'coupang'(기존) | 'platform_video'(3플랫폼 영상)."""
+    try:
+        from managers.settings_manager import get_settings_manager
+
+        return get_settings_manager().get_automation_sourcing_method()
+    except Exception:
+        return "coupang"
+
+
+async def run_platform_sourcing_for_queue(item: Dict[str, Any], run_dir: Path) -> Dict[str, Any]:
+    """3플랫폼 방식 소싱(+재편집) 실행. report에는 deep_link/final_video가 포함된다."""
+    out_dir = run_dir / "platform_sourcing"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    from core.sourcing.platform_pipeline import run_platform_sourcing
+
+    try:
+        report = await run_platform_sourcing(
+            str(item["coupang_url"]),
+            output_dir=str(out_dir),
+            progress=progress(item.get("planned_number") or "PLT"),
+            gemini_client=get_gemini_client(),
+            product_name_hint=str(item.get("product_name") or ""),
+        )
+    except Exception as exc:
+        report = {
+            "ok": False,
+            "error": f"{type(exc).__name__}: {exc}",
+            "sourcing_method": "platform_video",
+            "product_info": {},
+            "deep_link": "",
+            "final_video": "",
+        }
+    report["planned_number"] = item.get("planned_number", "")
+    report["queue_product_name"] = item.get("product_name", "")
+    report_path = out_dir / "report.json"
+    write_json(report_path, report)
+    report["_report_path"] = str(report_path)
+    return report
+
+
+def platform_rendered_result(report: Dict[str, Any], run_dir: Path, product_name: str) -> Dict[str, Any]:
+    """3플랫폼 재편집 결과를 기존 render 결과 형식으로 변환(품질 게이트 공유)."""
+    result: Dict[str, Any] = {
+        "render_ok": bool(report.get("final_video")),
+        "final_video": str(report.get("final_video") or ""),
+        "product_name": product_name,
+        "render_integrity": report.get("render_integrity")
+        or {"ok": bool(report.get("final_video")), "source": "platform_video"},
+        "sourcing_method": "platform_video",
+    }
+    result["upload_quality"] = validate_render_upload_quality(result)
+    result_path = run_dir / "rendered" / "render_result.json"
+    write_json(result_path, result)
+    result["_render_result_path"] = str(result_path)
+    return result
+
+
+def is_platform_system_blocker(reason: str) -> bool:
+    """3플랫폼 소싱 실패가 시스템 원인(브라우저/환경)인지 판별."""
+    markers = ("브라우저", "chrome", "zendriver", "traceback", "browser")
+    low = str(reason or "").lower()
+    return any(m in low for m in markers)
+
+
 def determine_purchase_url(item: Dict[str, Any], report: Dict[str, Any]) -> str:
     queue_affiliate = str(item.get("affiliate_url", "") or "").strip()
     if queue_affiliate:
@@ -2175,9 +2243,15 @@ async def process_pending_items(
         save_queue(queue_payload)
 
         run_dir = build_run_dir(item)
-        report = await run_sourcing(item, run_dir, min_similarity)
-        safe_item = select_safe_marketplace_item(report, min_similarity)
-        similarity = report.get("best_similarity")
+        platform_mode = get_sourcing_method() == "platform_video"
+        if platform_mode:
+            report = await run_platform_sourcing_for_queue(item, run_dir)
+            safe_item = None
+            similarity = None
+        else:
+            report = await run_sourcing(item, run_dir, min_similarity)
+            safe_item = select_safe_marketplace_item(report, min_similarity)
+            similarity = report.get("best_similarity")
         product_name = str((report.get("product_info") or {}).get("name") or item.get("product_name") or "").strip()
 
         duplicate_reason = duplicate_upload_reason(item, queue_payload, product_name=product_name)
@@ -2205,7 +2279,55 @@ async def process_pending_items(
             )
             continue
 
-        if not safe_item:
+        if platform_mode and (not report.get("ok") or not report.get("final_video")):
+            reason = str(report.get("error") or "3플랫폼에서 사용 가능한 영상을 찾지 못했습니다.")
+            if is_platform_system_blocker(reason):
+                attach_result(
+                    item,
+                    status="failed",
+                    blocking_reason=reason,
+                    extra={
+                        "sourcing_method": "platform_video",
+                        "report_path": report.get("_report_path", ""),
+                        "purchase_url": determine_purchase_url(item, report),
+                        "run_dir": str(run_dir),
+                    },
+                )
+                save_queue(queue_payload)
+                summary = {
+                    "processed": True,
+                    "status": "failed",
+                    "planned_number": item.get("planned_number"),
+                    "error": reason,
+                    "blocking_type": "sourcing_system_blocker",
+                }
+                if skipped_items:
+                    summary["skipped_before"] = skipped_items
+                    summary["skip_count"] = len(skipped_items)
+                if run_now:
+                    summary["run_now"] = True
+                return summary
+            attach_result(
+                item,
+                status="skipped_low_similarity",
+                blocking_reason=reason,
+                extra={
+                    "sourcing_method": "platform_video",
+                    "report_path": report.get("_report_path", ""),
+                    "purchase_url": determine_purchase_url(item, report),
+                },
+            )
+            save_queue(queue_payload)
+            skipped_items.append(
+                {
+                    "planned_number": item.get("planned_number"),
+                    "status": "skipped_low_similarity",
+                    "reason": reason,
+                }
+            )
+            continue
+
+        if not platform_mode and not safe_item:
             reason = str(report.get("match_error") or report.get("error") or "No safe marketplace video matched the threshold.")
             if is_system_sourcing_blocker(report, reason):
                 attach_result(
@@ -2280,21 +2402,27 @@ async def process_pending_items(
                 "blocking_type": "affiliate_link_missing",
                 "blocking_reason": purchase_check["blocking_reason"],
             }
-        job = {
-            "index": parse_upload_number(item.get("planned_number")) or 0,
-            "upload_number": parse_upload_number(item.get("planned_number")) or 0,
-            "product_name": product_name,
-            "product_url": str(item.get("coupang_url") or ""),
-            "purchase_url": purchase_url,
-            "video_file": Path(str(safe_item["video_file"])),
-            "report_file": Path(str(report["_report_path"])),
-            "best_similarity": similarity,
-            "source_title": safe_item.get("title") or (safe_item.get("product") or {}).get("title", ""),
-            "source_url": safe_item.get("url") or (safe_item.get("product") or {}).get("url", ""),
-        }
+        job = None
+        if not platform_mode:
+            job = {
+                "index": parse_upload_number(item.get("planned_number")) or 0,
+                "upload_number": parse_upload_number(item.get("planned_number")) or 0,
+                "product_name": product_name,
+                "product_url": str(item.get("coupang_url") or ""),
+                "purchase_url": purchase_url,
+                "video_file": Path(str(safe_item["video_file"])),
+                "report_file": Path(str(report["_report_path"])),
+                "best_similarity": similarity,
+                "source_title": safe_item.get("title") or (safe_item.get("product") or {}).get("title", ""),
+                "source_url": safe_item.get("url") or (safe_item.get("product") or {}).get("url", ""),
+            }
 
         try:
-            rendered = render_single_item(job, run_dir)
+            if platform_mode:
+                # 3플랫폼 방식: 재편집 결과가 곧 최종 영상 — 렌더 단계 생략, 품질 게이트는 동일 적용.
+                rendered = platform_rendered_result(report, run_dir, product_name)
+            else:
+                rendered = render_single_item(job, run_dir)
             upload_quality = rendered.get("upload_quality") or validate_render_upload_quality(rendered)
             if not rendered.get("render_ok") or not upload_quality.get("ok"):
                 reason = "Render upload quality gate failed: " + ", ".join(
