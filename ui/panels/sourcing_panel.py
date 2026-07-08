@@ -109,7 +109,26 @@ class SourcingPanel(QWidget):
             }}
         """)
 
-        main_layout = QVBoxLayout(self)
+        outer_layout = QVBoxLayout(self)
+        outer_layout.setContentsMargins(0, 0, 0, 0)
+        outer_layout.setSpacing(0)
+
+        # Wrap all content in a scroll area so tall content scrolls instead of
+        # compressing the flexible widgets (소싱 방식 카드/하단 진행·결과가 눌리던 문제).
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setStyleSheet("QScrollArea{border:none;background:transparent;}")
+        scroll.viewport().setStyleSheet("background:transparent;")
+        outer_layout.addWidget(scroll)
+
+        content = QWidget()
+        content.setObjectName("SourcingScrollContent")
+        content.setStyleSheet(f"#SourcingScrollContent {{ background-color: {get_color('background')}; }}")
+        scroll.setWidget(content)
+
+        main_layout = QVBoxLayout(content)
         main_layout.setContentsMargins(ds.spacing.space_6, ds.spacing.space_4, ds.spacing.space_6, ds.spacing.space_4)
         main_layout.setSpacing(ds.spacing.space_4)
 

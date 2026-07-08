@@ -301,13 +301,19 @@ class SubtitleSettingsPanel(QFrame, ThemedMixin):
         pos_btn_layout.addWidget(self.custom_y_label)
 
         pos_btn_layout.addStretch()
-        pos_content.addLayout(pos_btn_layout)
+        # Cap the option-button column width so the bars don't sprawl full-width;
+        # keeps a balanced split with the phone preview on the right.
+        pos_btn_container = QWidget()
+        pos_btn_container.setLayout(pos_btn_layout)
+        pos_btn_container.setMaximumWidth(340)
+        pos_content.addWidget(pos_btn_container, 0)
+        pos_content.addStretch(1)
 
         # Phone preview
         self.position_preview = SubtitlePositionPreview()
         self.position_preview.position_clicked.connect(self._on_position_selected)
         self.position_preview.custom_y_changed.connect(self._on_custom_y_changed)
-        pos_content.addWidget(self.position_preview)
+        pos_content.addWidget(self.position_preview, 0)
 
         self.position_section.layout().addLayout(pos_content)
         content_layout.addWidget(self.position_section)
