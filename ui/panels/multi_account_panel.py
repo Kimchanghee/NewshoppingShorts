@@ -158,7 +158,7 @@ class MultiAccountPanel(QWidget):
         if action_text and action_cb:
             self._toast_action.setText(action_text)
             self._toast_action.setStyleSheet(
-                f"QPushButton{{color:{self._c('text_accent')};background:transparent;"
+                f"QPushButton{{color:{self._c('primary')};background:transparent;"
                 "border:none;font-size:13px;font-weight:500;}"
             )
             self._toast_action.clicked.connect(action_cb)
@@ -374,10 +374,12 @@ class MultiAccountPanel(QWidget):
             top.addWidget(self._chip("연결 대기", self._c("warning"), self._c("surface")))
         del_btn = QPushButton("✕")
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        del_btn.setFixedWidth(22)
+        del_btn.setFixedSize(28, 26)
+        del_btn.setToolTip("이 계정 삭제")
         del_btn.setStyleSheet(
-            f"QPushButton{{color:{self._c('text_muted')};background:transparent;border:none;font-size:14px;}}"
-            f"QPushButton:hover{{color:{self._c('error')};}}"
+            f"QPushButton{{color:{self._c('text_muted')};background:transparent;border:none;"
+            f"border-radius:6px;font-size:15px;}}"
+            f"QPushButton:hover{{color:{self._c('error')};background:{self._c('surface_variant')};}}"
         )
         del_btn.clicked.connect(lambda _=False, a=acc: self._on_delete(a))
         top.addWidget(del_btn)
