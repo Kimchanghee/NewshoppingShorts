@@ -107,6 +107,7 @@ class MultiAccountPanel(QWidget):
         v.setSpacing(16)
 
         v.addLayout(self._header_row())
+        v.addWidget(self._flow_explainer())
         v.addLayout(self._metrics_row())
 
         accounts = self.registry.all()
@@ -121,6 +122,47 @@ class MultiAccountPanel(QWidget):
 
         v.addStretch(1)
         self._scroll.setWidget(content)
+
+    def _flow_explainer(self) -> QWidget:
+        """첫 사용자를 위한 '작업 → 계정 → 자동화' 흐름 안내 스트립."""
+        box = QFrame()
+        box.setStyleSheet(
+            f"background-color:{self._c('surface_variant')}; border:none; border-radius:12px;"
+        )
+        outer = QVBoxLayout(box)
+        outer.setContentsMargins(16, 12, 16, 12)
+        outer.setSpacing(8)
+        outer.addWidget(self._label(
+            "이렇게 자동화됩니다  ·  처음이면 이 순서대로 준비하세요",
+            size=13, color="text_secondary",
+        ))
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        steps = [
+            ("①", "쿠팡 소싱", "상품·영상 자동 수집"),
+            ("②", "니치 배분", "상품을 계정별로 분류"),
+            ("③", "계정 연결", "YouTube·Instagram 등록"),
+            ("④", "자동 업로드", "계정마다 시차 업로드"),
+        ]
+        for i, (num, title, desc) in enumerate(steps):
+            row.addWidget(self._flow_step(num, title, desc), 1)
+            if i < len(steps) - 1:
+                row.addWidget(self._label("→", size=16, color="text_muted"))
+        outer.addLayout(row)
+        return box
+
+    def _flow_step(self, num: str, title: str, desc: str) -> QWidget:
+        w = QFrame()
+        w.setStyleSheet(
+            f"background-color:{self._c('surface')};"
+            f" border:1px solid {self._c('border_light')}; border-radius:8px;"
+        )
+        lay = QVBoxLayout(w)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(2)
+        lay.addWidget(self._label(f"{num}  {title}", size=13, color="text_primary", bold=True))
+        lay.addWidget(self._label(desc, size=12, color="text_muted"))
+        return w
 
     def _header_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
