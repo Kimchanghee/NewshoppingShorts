@@ -34,6 +34,7 @@ from ui.panels import (
 from ui.panels.subtitle_settings_panel import SubtitleSettingsPanel
 from ui.panels.settings_tab import SettingsTab
 from ui.panels.sourcing_panel import SourcingPanel
+from ui.panels.multi_account_panel import MultiAccountPanel
 from ui.panels.topbar_panel import TopBarPanel
 from ui.components.status_bar import StatusBar
 from ui.components.step_nav import StepNav
@@ -129,6 +130,7 @@ class UIInitializer:
             ("watermark", "워터마크", "watermark"),
             # '올리기 설정'은 '설정' 화면의 '영상 올리기' 탭으로 이동했으므로 좌측 메뉴에서 제외.
             ("queue", "진행 상황", "queue"),
+            ("multi_account", "다계정 자동화", "multi_account"),
             ("settings", "설정", "settings"),
         ]
         step_nav = StepNav(steps)
@@ -196,6 +198,7 @@ class UIInitializer:
         queue_panel = QueuePanel(stack, gui, theme_manager=self.theme_manager)
         settings_tab = SettingsTab(stack, gui, theme_manager=self.theme_manager)
         subscription_panel = SubscriptionPanel(stack, gui)
+        multi_account_panel = MultiAccountPanel(stack, gui, theme_manager=self.theme_manager)
         logger.info("[UI] 모든 패널 생성 완료")
 
         pages = [
@@ -209,6 +212,7 @@ class UIInitializer:
             ("watermark", "워터마크 설정", "영상에 옅게 새길 내 채널 이름(워터마크)을 설정해요.", watermark_panel),
             # 'upload'(올리기 설정)은 settings_tab의 '영상 올리기' 탭으로 편입 → 스택 페이지에서 제외.
             ("queue", "진행 상황", "만들 목록과 진행 상황을 봐요.", queue_panel),
+            ("multi_account", "다계정 자동화", "여러 계정을 등록하고 니치별로 자동 업로드를 배분해요.", multi_account_panel),
             ("settings", "설정", "앱 설정과 API 키를 관리해요.", settings_tab),
             ("subscription", "구독 관리", "구독 상태와 요금제를 관리해요.", subscription_panel),
         ]
@@ -249,6 +253,7 @@ class UIInitializer:
             "watermark_panel": watermark_panel,
             "upload_panel": upload_panel,
             "queue_panel": queue_panel,
+            "multi_account_panel": multi_account_panel,
             "settings_tab": settings_tab,
             "subscription_panel": subscription_panel,
             "api_key_section": settings_tab.api_section,

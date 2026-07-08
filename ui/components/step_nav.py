@@ -25,6 +25,7 @@ STEP_ICONS = {
     "watermark": "◈",   # Watermark
     "upload": "⬆",      # Upload arrow
     "queue": "≡",       # List/queue
+    "multi_account": "▦",  # Multi-account grid console
     "settings": "⚙",   # Settings gear
 }
 
