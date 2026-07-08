@@ -1942,19 +1942,19 @@ class SettingsTab(QWidget, ThemedMixin):
     def _store_gemini_key_silent(self, key_value: str) -> bool:
         """Store one Gemini API key without modal dialogs."""
         key = str(key_value or "").strip()
-        if not GEMINI_API_KEY_PATTERN.match(key):
+        if not is_valid_gemini_key(key):
             return False
 
         max_keys = len(self.api_key_inputs) if hasattr(self, "api_key_inputs") else 8
         existing: List[str] = []
         for i in range(1, max_keys + 1):
             value = str(SecretsManager.get_api_key(f"gemini_api_{i}") or "").strip()
-            if value and GEMINI_API_KEY_PATTERN.match(value) and value not in existing:
+            if value and is_valid_gemini_key(value) and value not in existing:
                 existing.append(value)
 
         for inp in getattr(self, "api_key_inputs", []):
             value = str(inp.text() or "").strip()
-            if value and GEMINI_API_KEY_PATTERN.match(value) and value not in existing:
+            if value and is_valid_gemini_key(value) and value not in existing:
                 existing.append(value)
 
         if key not in existing:
