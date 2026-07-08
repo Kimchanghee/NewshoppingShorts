@@ -55,6 +55,7 @@ class Account:
     title_prompt: str = ""
     hashtag_prompt: str = ""
     connected: bool = False      # 실제 채널 로그인(OAuth) 연동 여부
+    queue: list = field(default_factory=list)  # 이 계정 전용 대기열: [{title,time,status}]
 
     @property
     def token_path(self) -> str:
@@ -182,6 +183,61 @@ class AccountRegistry:
                 self.save()
             return changed
 
+    # ---------- per-account queue (대기열) ----------
+    def add_queue_item(self, account_id: str, title: str, time: str = "", status: str = "대기") -> bool:
+        with self._lock:
+            acc = self.get(account_id)
+            if acc is None:
+                return False
+            if not isinstance(acc.queue, list):
+                acc.queue = []
+            acc.queue.append({"title": str(title), "time": str(time), "status": str(status)})
+            self.save()
+            return True
+
+    def remove_queue_item(self, account_id: str, index: int) -> bool:
+        with self._lock:
+            acc = self.get(account_id)
+            if acc is None or not isinstance(acc.queue, list):
+                return False
+            if 0 <= index < len(acc.queue):
+                acc.queue.pop(index)
+                self.save()
+                return True
+            return False
+
+    def move_queue_item(self, account_id: str, index: int, delta: int) -> bool:
+        with self._lock:
+            acc = self.get(account_id)
+            if acc is None or not isinstance(acc.queue, list):
+                return False
+            j = index + delta
+            if 0 <= index < len(acc.queue) and 0 <= j < len(acc.queue):
+                acc.queue[index], acc.queue[j] = acc.queue[j], acc.queue[index]
+                self.save()
+                return True
+            return False
+
+    def set_queue_item_status(self, account_id: str, index: int, status: str) -> bool:
+        with self._lock:
+            acc = self.get(account_id)
+            if acc is None or not isinstance(acc.queue, list):
+                return False
+            if 0 <= index < len(acc.queue):
+                acc.queue[index]["status"] = str(status)
+                self.save()
+                return True
+            return False
+
+    def clear_queue(self, account_id: str) -> bool:
+        with self._lock:
+            acc = self.get(account_id)
+            if acc is None:
+                return False
+            acc.queue = []
+            self.save()
+            return True
+
     def _new_id(self, platform: str, name: str) -> str:
         base = re.sub(r"[^a-zA-Z0-9]+", "_", name).strip("_").lower() or "acct"
         cand = f"{platform[:2]}_{base}"
@@ -203,9 +259,21 @@ class AccountRegistry:
     def seed_samples(self) -> int:
         """Populate example accounts so the console is explorable. Returns count added."""
         samples = [
-            dict(platform="youtube", name="가전_리뷰_01", niche="가전", status="ok", today_count=3, next_time="14:08"),
-            dict(platform="youtube", name="주방_꿀템_02", niche="주방", status="ok", today_count=4, next_time="14:16"),
-            dict(platform="instagram", name="뷰티_데일리_03", niche="뷰티", status="ok", today_count=2, next_time="14:08"),
+            dict(platform="youtube", name="가전_리뷰_01", niche="가전", status="ok", today_count=3, next_time="14:08",
+                 queue=[
+                     {"title": "무선 청소기 초간단 리뷰", "time": "14:08", "status": "처리중"},
+                     {"title": "에어프라이어 신제품 소개", "time": "14:16", "status": "대기"},
+                     {"title": "로봇청소기 비교 리뷰", "time": "14:24", "status": "대기"},
+                 ]),
+            dict(platform="youtube", name="주방_꿀템_02", niche="주방", status="ok", today_count=4, next_time="14:16",
+                 queue=[
+                     {"title": "실리콘 주방장갑 꿀템", "time": "14:16", "status": "대기"},
+                     {"title": "다용도 도마 세트", "time": "14:24", "status": "대기"},
+                 ]),
+            dict(platform="instagram", name="뷰티_데일리_03", niche="뷰티", status="ok", today_count=2, next_time="14:08",
+                 queue=[
+                     {"title": "데일리 쿠션 추천", "time": "14:08", "status": "대기"},
+                 ]),
             dict(platform="instagram", name="반려_라이프_04", niche="반려동물", status="ok", today_count=5, next_time="내일 09:00"),
             dict(platform="youtube", name="캠핑_기어_05", niche="캠핑", status="paused", today_count=1, next_time="일시정지"),
             dict(platform="instagram", name="홈오피스_06", niche="홈오피스", status="ok", today_count=3, next_time="14:16"),

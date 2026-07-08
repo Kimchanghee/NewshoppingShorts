@@ -69,6 +69,7 @@ class MultiAccountPanel(QWidget):
         self.ds = get_design_system()
         self.registry = AccountRegistry()
         self._last_deleted: Optional[dict] = None
+        self._expanded: set = set()   # 대기열이 펼쳐진 계정 id들
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
@@ -199,8 +200,9 @@ class MultiAccountPanel(QWidget):
 
         accounts = self.registry.all()
         if accounts:
-            v.addWidget(self._label("계정", size=15, color="text_primary", bold=True))
-            v.addWidget(self._account_grid(accounts))
+            v.addWidget(self._label("계정  ·  카드를 펼치면 그 채널 전용 대기열을 관리해요",
+                                    size=15, color="text_primary", bold=True))
+            v.addWidget(self._account_list(accounts))
             v.addWidget(self._label("배분 규칙  ·  소싱 상품 → 계정 라우팅",
                                     size=15, color="text_primary", bold=True))
             v.addWidget(self._routing_box())
@@ -340,38 +342,52 @@ class MultiAccountPanel(QWidget):
         lay.addWidget(val)
         return card
 
-    def _account_grid(self, accounts: List[Account]) -> QWidget:
+    def _account_list(self, accounts: List[Account]) -> QWidget:
         wrap = QWidget()
-        grid = QGridLayout(wrap)
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(12)
-        cols = 3
-        for i, acc in enumerate(accounts):
-            grid.addWidget(self._account_card(acc), i // cols, i % cols)
-        for c in range(cols):
-            grid.setColumnStretch(c, 1)
+        lay = QVBoxLayout(wrap)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(10)
+        for acc in accounts:
+            lay.addWidget(self._account_card(acc))
         return wrap
 
     def _account_card(self, acc: Account) -> QWidget:
+        expanded = acc.id in self._expanded
+        qlen = len(acc.queue) if isinstance(acc.queue, list) else 0
         card = QFrame()
         card.setStyleSheet(
             f"QFrame{{background:{self._c('surface')};"
             f"border:1px solid {self._c('border_light')};border-radius:12px;}}"
         )
         lay = QVBoxLayout(card)
-        lay.setContentsMargins(16, 14, 16, 14)
+        lay.setContentsMargins(14, 12, 14, 12)
         lay.setSpacing(10)
 
-        top = QHBoxLayout()
-        top.addWidget(self._label(
+        head = QHBoxLayout()
+        head.setSpacing(10)
+        head.addWidget(self._label(
             f"{_PLATFORM_GLYPH.get(acc.platform, '')}  {_PLATFORM_LABEL.get(acc.platform, acc.platform)}",
             size=13, color="text_secondary"))
-        top.addStretch(1)
+        head.addWidget(self._label(acc.name, size=15, color="text_primary", bold=True))
         if getattr(acc, "connected", False):
-            top.addWidget(self._chip("연결됨", self._c("success"), self._c("surface")))
+            head.addWidget(self._chip("연결됨", self._c("success"), self._c("surface")))
         else:
-            top.addWidget(self._chip("연결 대기", self._c("warning"), self._c("surface")))
+            head.addWidget(self._chip("연결 대기", self._c("warning"), self._c("surface")))
+        head.addWidget(self._niche_combo(acc))
+        head.addWidget(self._auto_toggle(acc))
+        head.addWidget(self._chip(f"대기열 {qlen}", self._c("primary"), self._c("surface_variant")))
+        head.addStretch(1)
+
+        chev = QPushButton("▴ 접기" if expanded else "▾ 대기열")
+        chev.setCursor(Qt.CursorShape.PointingHandCursor)
+        chev.setStyleSheet(
+            f"QPushButton{{color:{self._c('text_secondary')};background:transparent;"
+            f"border:1px solid {self._c('border_light')};border-radius:6px;padding:4px 10px;font-size:12px;}}"
+            f"QPushButton:hover{{background:{self._c('surface_variant')};}}"
+        )
+        chev.clicked.connect(lambda _=False, a=acc: self._toggle_expand(a.id))
+        head.addWidget(chev)
+
         del_btn = QPushButton("✕")
         del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         del_btn.setFixedSize(28, 26)
@@ -382,30 +398,104 @@ class MultiAccountPanel(QWidget):
             f"QPushButton:hover{{color:{self._c('error')};background:{self._c('surface_variant')};}}"
         )
         del_btn.clicked.connect(lambda _=False, a=acc: self._on_delete(a))
-        top.addWidget(del_btn)
-        lay.addLayout(top)
+        head.addWidget(del_btn)
+        lay.addLayout(head)
 
-        lay.addWidget(self._label(acc.name, size=15, color="text_primary", bold=True))
+        if expanded:
+            lay.addWidget(self._queue_section(acc))
+        else:
+            foot = QHBoxLayout()
+            foot.addWidget(self._label(
+                f"오늘 {acc.today_count}/{acc.daily_limit}  ·  대기 {qlen}",
+                size=12, color="text_muted"))
+            foot.addStretch(1)
+            foot.addWidget(self._label(f"다음 {acc.next_time}", size=12, color="text_muted"))
+            lay.addLayout(foot)
+        return card
+
+    def _queue_section(self, acc: Account) -> QWidget:
+        box = QFrame()
+        box.setStyleSheet(
+            f"QFrame{{background:{self._c('surface_variant')};border:none;border-radius:10px;}}"
+        )
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(12, 10, 12, 12)
+        lay.setSpacing(0)
+        q = acc.queue if isinstance(acc.queue, list) else []
+        lay.addWidget(self._label(
+            f"대기열 · {len(q)}개 · 다음 {acc.next_time} · {self.registry.stagger_minutes}분 시차",
+            size=12, color="text_muted"))
+        if not q:
+            lay.addSpacing(6)
+            lay.addWidget(self._label("대기 항목이 없어요. ‘소싱에서 더 담기’로 추가하세요.",
+                                      size=12, color="text_muted"))
+        else:
+            for i, item in enumerate(q):
+                lay.addWidget(self._queue_row(acc, i, item, len(q)))
 
         ctl = QHBoxLayout()
         ctl.setSpacing(8)
-        ctl.addWidget(self._niche_combo(acc))
-        ctl.addWidget(self._auto_toggle(acc))
+        ctl.setContentsMargins(0, 10, 0, 0)
+        ctl.addWidget(self._pill_btn(
+            "전체 재개" if acc.status == "paused" else "전체 일시정지",
+            lambda a=acc: self._on_toggle(a)))
+        ctl.addWidget(self._pill_btn("대기열 비우기", lambda a=acc: self._on_clear_queue(a)))
+        ctl.addWidget(self._pill_btn("＋ 소싱에서 더 담기", lambda a=acc: self._on_add_queue_item(a)))
         ctl.addStretch(1)
         lay.addLayout(ctl)
+        return box
 
-        line = QFrame()
-        line.setFrameShape(QFrame.Shape.HLine)
-        line.setFixedHeight(1)
-        line.setStyleSheet(f"background-color:{self._c('border_light')};border:none;")
-        lay.addWidget(line)
+    def _queue_row(self, acc: Account, i: int, item, total: int) -> QWidget:
+        row = QFrame()
+        row.setStyleSheet(
+            f"QFrame{{background:transparent;border-top:1px solid {self._c('border_light')};}}"
+        )
+        rl = QHBoxLayout(row)
+        rl.setContentsMargins(0, 8, 0, 8)
+        rl.setSpacing(8)
+        title = item.get("title", "항목") if isinstance(item, dict) else str(item)
+        tm = item.get("time", "") if isinstance(item, dict) else ""
+        status = item.get("status", "대기") if isinstance(item, dict) else "대기"
+        rl.addWidget(self._label(str(i + 1), size=12, color="text_muted"))
+        rl.addWidget(self._label(title, size=13, color="text_primary"))
+        if tm:
+            rl.addWidget(self._label(f"· {tm}", size=12, color="text_muted"))
+        rl.addStretch(1)
+        st_fg = {"처리중": "primary", "완료": "success", "실패": "error"}.get(status, "text_secondary")
+        rl.addWidget(self._chip(status, self._c(st_fg), self._c("surface")))
+        rl.addWidget(self._icon_btn("▲", (lambda a=acc, idx=i: self._on_q_move(a, idx, -1)) if i > 0 else None, "위로"))
+        rl.addWidget(self._icon_btn("▼", (lambda a=acc, idx=i: self._on_q_move(a, idx, 1)) if i < total - 1 else None, "아래로"))
+        rl.addWidget(self._pill_btn("지금 올리기", lambda a=acc, idx=i: self._on_q_now(a, idx)))
+        rl.addWidget(self._icon_btn("✕", lambda a=acc, idx=i: self._on_q_remove(a, idx), "삭제", danger=True))
+        return row
 
-        foot = QHBoxLayout()
-        foot.addWidget(self._label(f"오늘 {acc.today_count}/{acc.daily_limit}", size=12, color="text_muted"))
-        foot.addStretch(1)
-        foot.addWidget(self._label(f"다음 {acc.next_time}", size=12, color="text_muted"))
-        lay.addLayout(foot)
-        return card
+    def _pill_btn(self, text: str, cb) -> QPushButton:
+        b = QPushButton(text)
+        b.setCursor(Qt.CursorShape.PointingHandCursor)
+        b.setStyleSheet(
+            f"QPushButton{{color:{self._c('text_primary')};background:{self._c('surface')};"
+            f"border:1px solid {self._c('border_light')};border-radius:6px;padding:5px 10px;font-size:12px;}}"
+            f"QPushButton:hover{{background:{self._c('surface_variant')};}}"
+        )
+        b.clicked.connect(lambda _=False: cb())
+        return b
+
+    def _icon_btn(self, glyph: str, cb, tip: str, danger: bool = False) -> QPushButton:
+        b = QPushButton(glyph)
+        b.setFixedSize(24, 24)
+        b.setToolTip(tip)
+        hover = "error" if danger else "text_primary"
+        base = "text_muted" if cb else "border_light"
+        b.setStyleSheet(
+            f"QPushButton{{color:{self._c(base)};background:transparent;border:none;border-radius:6px;font-size:12px;}}"
+            f"QPushButton:hover{{color:{self._c(hover)};background:{self._c('surface')};}}"
+        )
+        if cb:
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False: cb())
+        else:
+            b.setEnabled(False)
+        return b
 
     def _niche_combo(self, acc: Account) -> QComboBox:
         combo = QComboBox()
@@ -625,4 +715,36 @@ class MultiAccountPanel(QWidget):
                 self.registry.add(platform=platform, name=name, niche=niche, **payload)
             except Exception as exc:
                 self._show_toast(str(exc), "warning")
+        self._rerender_soon()
+
+    # ---------- per-account queue actions ----------
+    def _toggle_expand(self, account_id: str):
+        if account_id in self._expanded:
+            self._expanded.discard(account_id)
+        else:
+            self._expanded.add(account_id)
+        self._rerender_soon()
+
+    def _on_clear_queue(self, acc: Account):
+        self.registry.clear_queue(acc.id)
+        self._show_toast(f"‘{acc.name}’ 대기열을 비웠어요.", "info")
+        self._rerender_soon()
+
+    def _on_add_queue_item(self, acc: Account):
+        self.registry.add_queue_item(acc.id, "새 소싱 항목", "예약 대기", "대기")
+        self._show_toast(f"‘{acc.name}’ 대기열에 항목을 담았어요.", "success")
+        self._rerender_soon()
+
+    def _on_q_move(self, acc: Account, index: int, delta: int):
+        self.registry.move_queue_item(acc.id, index, delta)
+        self._rerender_soon()
+
+    def _on_q_remove(self, acc: Account, index: int):
+        self.registry.remove_queue_item(acc.id, index)
+        self._show_toast("대기열 항목을 삭제했어요.", "info")
+        self._rerender_soon()
+
+    def _on_q_now(self, acc: Account, index: int):
+        self.registry.set_queue_item_status(acc.id, index, "처리중")
+        self._show_toast("지금 올리는 중… (실제 업로드 연동은 준비 중)", "info")
         self._rerender_soon()
