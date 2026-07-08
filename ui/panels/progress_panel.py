@@ -156,7 +156,7 @@ class ProgressPanel(QFrame, ThemedMixin):
         steps_layout.setSpacing(0)
         steps_layout.setContentsMargins(0, 2, 0, 0)
 
-        step_definitions = [
+        self.video_step_defs = [
             ("영상 받기", 'download', "⬇"),
             ("AI 분석", 'analysis', "🤖"),
             ("자막 읽기", 'ocr_analysis', "📝"),
@@ -168,59 +168,67 @@ class ProgressPanel(QFrame, ThemedMixin):
             ("영상 만들기", 'video', "🎬"),
             ("마무리", 'finalize', "✅"),
         ]
-
-        self.gui.step_indicators = {}
-        self.gui.step_titles = {}
-
-        for idx, (title, key, icon) in enumerate(step_definitions):
-            row = QFrame()
-            row.setFixedHeight(18)
-            row.setStyleSheet("""
-                QFrame {
-                    background-color: transparent;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 0px;
-                }
-            """)
-            row_layout = QHBoxLayout(row)
-            row_layout.setContentsMargins(4, 0, 4, 0)
-            row_layout.setSpacing(4)
-
-            # Status indicator
-            status_ico = QLabel("○")
-            status_ico.setFixedWidth(12)
-            status_ico.setStyleSheet("font-size: 9px; color: #475569;")
-            row_layout.addWidget(status_ico)
-
-            # Step title
-            title_lbl = QLabel(title)
-            title_lbl.setStyleSheet("font-size: 9px; color: #94A3B8;")
-            row_layout.addWidget(title_lbl)
-
-            row_layout.addStretch()
-
-            # Progress label
-            prog_lbl = QLabel("")
-            prog_lbl.setStyleSheet("font-size: 9px; font-weight: bold; color: #475569;")
-            row_layout.addWidget(prog_lbl)
-
-            steps_layout.addWidget(row)
-
-            self.gui.step_titles[key] = title
-            self.gui.step_indicators[key] = {
-                'status_label': status_ico,
-                'progress_label': prog_lbl,
-                'row_frame': row,
-                'title_label': title_lbl,
-                'index': idx
-            }
+        self._steps_layout = steps_layout
+        self._populate_steps(self.video_step_defs)
 
         self.steps_scroll.setWidget(self.steps_container)
         current_layout.addWidget(self.steps_scroll, stretch=1)
 
         self.main_layout.addWidget(current_section, stretch=1)
 
+    # -----------------------------------------------------------------
+    # Step list (swappable: video steps vs full-automation pipeline steps)
+    # -----------------------------------------------------------------
+    def _populate_steps(self, step_defs):
+        self.gui.step_indicators = {}
+        self.gui.step_titles = {}
+        for idx, (title, key, icon) in enumerate(step_defs):
+            row = QFrame()
+            row.setFixedHeight(18)
+            row.setStyleSheet(
+                "QFrame { background-color: transparent; border: none; border-radius: 4px; padding: 0px; }"
+            )
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(4, 0, 4, 0)
+            row_layout.setSpacing(4)
+            status_ico = QLabel("○")
+            status_ico.setFixedWidth(12)
+            status_ico.setStyleSheet("font-size: 9px; color: #475569;")
+            row_layout.addWidget(status_ico)
+            title_lbl = QLabel(title)
+            title_lbl.setStyleSheet("font-size: 9px; color: #94A3B8;")
+            row_layout.addWidget(title_lbl)
+            row_layout.addStretch()
+            prog_lbl = QLabel("")
+            prog_lbl.setStyleSheet("font-size: 9px; font-weight: bold; color: #475569;")
+            row_layout.addWidget(prog_lbl)
+            self._steps_layout.addWidget(row)
+            self.gui.step_titles[key] = title
+            self.gui.step_indicators[key] = {
+                'status_label': status_ico,
+                'progress_label': prog_lbl,
+                'row_frame': row,
+                'title_label': title_lbl,
+                'index': idx,
+            }
+
+    def set_step_definitions(self, step_defs, section_title=None):
+        """좌측 하단 단계 목록을 교체한다 (예: 풀 자동화면 소싱 파이프라인 단계).
+
+        이렇게 하면 진행 상황이 좌측 하단 한 곳으로 통일된다.
+        """
+        try:
+            self.stop_blink()
+        except Exception:
+            pass
+        while self._steps_layout.count():
+            item = self._steps_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        self._populate_steps(step_defs)
+        if section_title:
+            self.current_section_title.setText(section_title)
 
     # -----------------------------------------------------------------
     # Step status update

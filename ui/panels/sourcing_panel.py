@@ -380,6 +380,10 @@ class SourcingPanel(QWidget):
             self._step_indicators[step_id] = indicator
             progress_layout.addWidget(indicator)
 
+        # 진행 상황은 좌측 하단 패널 한 곳으로 통일 → 페이지 안 중복 섹션은 숨긴다.
+        # (인디케이터 객체는 유지되어 내부 상태 갱신에는 계속 쓰인다.)
+        progress_frame.setVisible(False)
+        self._inpage_progress_frame = progress_frame
         main_layout.addWidget(progress_frame)
 
         # ── Results Section ──
@@ -961,9 +965,7 @@ class SourcingPanel(QWidget):
         self.btn_start.setText("자동으로 만드는 중...")
         self._apply_button_style(disabled=True)
 
-        # Reset indicators
-        for ind in self._step_indicators.values():
-            ind.set_state("pending", "")
+        self._reset_step_indicators()
         self.results_label.setText("자동 만들기를 시작할게요...")
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
@@ -994,8 +996,7 @@ class SourcingPanel(QWidget):
         self.btn_start.setEnabled(False)
         self.btn_start.setText("영상 찾아 만드는 중...")
         self._apply_button_style(disabled=True)
-        for ind in self._step_indicators.values():
-            ind.set_state("pending", "")
+        self._reset_step_indicators()
         self.results_label.setText("상품명으로 도우인·콰이쇼우·샤오홍슈를 순서대로 검색할게요...")
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
@@ -1138,26 +1139,51 @@ class SourcingPanel(QWidget):
         # Emit signal so UI updates run on the main thread
         self.pipeline_finished.emit(success, pipeline)
 
+    def _reset_step_indicators(self):
+        """페이지 안(숨김) 인디케이터와 통일된 좌측 하단 패널을 모두 pending으로 초기화."""
+        for ind in self._step_indicators.values():
+            ind.set_state("pending", "")
+        pp = getattr(self.gui, "progress_panel", None) if self.gui else None
+        if pp is not None and hasattr(pp, "update_step_status"):
+            try:
+                from core.sourcing.pipeline import SourcingPipeline
+                for sid, _label in SourcingPipeline.STEPS:
+                    pp.update_step_status(sid, "pending", 0)
+            except Exception:
+                pass
+
     def _on_pipeline_progress(self, step_id: str, message: str, pct: float):
         """Called from pipeline thread; forwards to UI thread by signal."""
         self.pipeline_progress.emit(step_id, message, pct)
 
     def _update_step(self, step_id: str, message: str, pct: float):
-        """Update step indicator on the main thread."""
-        indicator = self._step_indicators.get(step_id)
-        if not indicator:
-            return
-
+        """Update the (hidden) in-page indicator and mirror progress to the
+        unified left-bottom progress panel (풀 자동화 진행 표시 통일)."""
+        is_error = (pct <= 0 and any(kw in message for kw in ["실패", "오류", "없습니다", "못"]))
         if pct >= 1.0:
-            indicator.set_state("completed", message)
-        elif pct > 0:
-            indicator.set_state("in_progress", message)
+            state = "completed"
+        elif is_error:
+            state = "error"
         else:
-            # Check if message indicates error
-            if any(kw in message for kw in ["실패", "오류", "없습니다", "못"]):
-                indicator.set_state("error", message)
-            else:
-                indicator.set_state("in_progress", message)
+            state = "in_progress"
+
+        indicator = self._step_indicators.get(step_id)
+        if indicator:
+            indicator.set_state(state, message)
+
+        pp = getattr(self.gui, "progress_panel", None) if self.gui else None
+        if pp is not None:
+            panel_status = {"completed": "completed", "error": "error"}.get(state, "active")
+            try:
+                if hasattr(pp, "update_step_status"):
+                    pp.update_step_status(step_id, panel_status,
+                                          int(max(0.0, min(pct, 1.0)) * 100))
+                if hasattr(pp, "set_current_task") and message:
+                    pp.set_current_task(
+                        message,
+                        panel_status if panel_status in ("completed", "error") else "active")
+            except Exception:
+                pass
 
     def _on_pipeline_done(self, success: bool, pipeline):
         """Pipeline finished - update UI and emit results."""

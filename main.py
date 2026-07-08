@@ -310,6 +310,20 @@ class VideoAnalyzerGUI(
         # Mode-specific sidebar visibility
         self._apply_mode_visibility(mode)
 
+        # 진행 상황 표시 통일: 풀 자동화면 좌측 하단이 소싱 파이프라인 단계를 보여준다.
+        # (풀 자동화 페이지 안의 중복 '진행 상황' 섹션은 숨겨진다.)
+        pp = getattr(self, 'progress_panel', None)
+        if pp is not None and hasattr(pp, 'set_step_definitions'):
+            try:
+                if mode == 'sourcing':
+                    from core.sourcing.pipeline import SourcingPipeline
+                    defs = [(label, sid, "○") for sid, label in SourcingPipeline.STEPS]
+                    pp.set_step_definitions(defs, "풀 자동화 진행")
+                elif hasattr(pp, 'video_step_defs'):
+                    pp.set_step_definitions(pp.video_step_defs, "현재 영상 진행율")
+            except Exception as exc:
+                logger.debug("[Mode] progress panel step swap failed: %s", exc)
+
     def _apply_mode_visibility(self, mode: str):
         """Enable/disable mode-gated left-nav tabs based on the chosen mode.
 
