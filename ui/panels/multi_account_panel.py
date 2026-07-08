@@ -12,14 +12,47 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt, QTimer
+import os
+import shutil
+
+from PyQt6.QtCore import Qt, QTimer, QObject, QThread, pyqtSignal
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QLabel, QPushButton, QFrame, QScrollArea, QComboBox,
 )
 
 from ui.design_system_v2 import get_design_system, get_color
-from managers.account_registry import AccountRegistry, Account, MAX_ACCOUNTS
+from managers.account_registry import AccountRegistry, Account, MAX_ACCOUNTS, data_dir
+
+
+class _ConnectWorker(QObject):
+    """Runs the blocking OAuth connect (real browser login) off the UI thread."""
+
+    finished = pyqtSignal(bool, object, str)  # success, info_dict, error
+
+    def __init__(self, manager, platform: str):
+        super().__init__()
+        self._manager = manager
+        self._platform = platform
+
+    def run(self):
+        try:
+            if self._platform == "youtube":
+                ok = bool(self._manager.connect_channel())
+                info = self._manager.get_channel_info() if ok else {}
+            else:
+                ok = bool(self._manager.connect_account())
+                info = self._manager.get_account_info() if ok else {}
+            if not ok:
+                try:
+                    err = self._manager.get_last_error() or ""
+                except Exception:
+                    err = ""
+                self.finished.emit(False, {}, err or "연결에 실패했어요.")
+                return
+            self.finished.emit(True, info or {}, "")
+        except Exception as exc:  # pragma: no cover - defensive
+            self.finished.emit(False, {}, str(exc))
 
 _PLATFORM_LABEL = {"youtube": "YouTube", "instagram": "Instagram"}
 _PLATFORM_GLYPH = {"youtube": "▶", "instagram": "◉"}
@@ -473,9 +506,44 @@ class MultiAccountPanel(QWidget):
         self._rerender_soon()
 
     def _on_connect(self, platform: str):
+        if getattr(self, "_connecting", False):
+            return
         if self.registry.count() >= MAX_ACCOUNTS:
             self._show_toast(f"최대 {MAX_ACCOUNTS}개까지 연결할 수 있어요.", "warning")
             return
+        manager = self._platform_manager(platform)
+        connect_attr = "connect_channel" if platform == "youtube" else "connect_account"
+        if manager is None or not hasattr(manager, connect_attr):
+            # Manager unavailable (e.g. detached) → register a pending profile inline.
+            self._register_pending(platform)
+            return
+        self._connecting = True
+        self._show_toast(
+            f"{_PLATFORM_LABEL.get(platform, platform)} 로그인 창이 열려요 · 브라우저에서 계속 진행하세요",
+            "info", ms=15000,
+        )
+        worker = _ConnectWorker(manager, platform)
+        thread = QThread(self)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(
+            lambda ok, info, err, p=platform: self._on_connect_finished(ok, info, err, p)
+        )
+        worker.finished.connect(thread.quit)
+        worker.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        if not hasattr(self, "_threads"):
+            self._threads = []
+        self._threads.append((thread, worker))
+        thread.start()
+
+    def _platform_manager(self, platform: str):
+        if self.gui is None:
+            return None
+        attr = "youtube_manager" if platform == "youtube" else "instagram_manager"
+        return getattr(self.gui, attr, None)
+
+    def _register_pending(self, platform: str):
         n = len(self.registry.by_platform(platform)) + 1
         name = f"{_PLATFORM_LABEL.get(platform, platform)} 계정 {n}"
         try:
@@ -483,11 +551,45 @@ class MultiAccountPanel(QWidget):
         except Exception as exc:
             self._show_toast(str(exc), "warning")
             return
-        self._show_toast(
-            f"‘{acc.name}’ 추가됨 · 니치를 골라 주세요. (실제 로그인 연동은 준비 중)",
-            "success",
-        )
+        self._show_toast(f"‘{acc.name}’ 추가됨(연결 대기) · 니치를 골라 주세요.", "info")
         self._rerender_soon()
+
+    def _on_connect_finished(self, ok: bool, info, err: str, platform: str):
+        self._connecting = False
+        if not ok:
+            self._show_toast(
+                (err or "연결에 실패했어요.")
+                + "  설정 > 영상 올리기에서 먼저 준비됐는지 확인해 주세요.",
+                "warning", ms=7000,
+            )
+            self._rerender_soon()
+            return
+        info = info or {}
+        name = (info.get("channel_name") or info.get("title") or info.get("username")
+                or info.get("name") or f"{_PLATFORM_LABEL.get(platform, platform)} 계정")
+        try:
+            acc = self.registry.add(platform=platform, name=str(name).strip(),
+                                    niche="", connected=True)
+        except Exception as exc:
+            self._show_toast(str(exc), "warning")
+            return
+        self._persist_account_token(platform, acc.id)
+        self._show_toast(f"‘{acc.name}’ 연결됨 · 니치를 골라 주세요.", "success")
+        self._rerender_soon()
+
+    def _persist_account_token(self, platform: str, account_id: str) -> bool:
+        """Copy the just-connected single token to a per-account path so future
+        per-account upload routing can use the right credential."""
+        try:
+            src_name = "youtube_token.json" if platform == "youtube" else "instagram_settings.json"
+            src = os.path.join(data_dir(), src_name)
+            if not os.path.exists(src):
+                return False
+            dst = os.path.join(data_dir(), f"{platform}_token_{account_id}.json")
+            shutil.copy2(src, dst)
+            return True
+        except Exception:
+            return False
 
     def _on_niche(self, account_id: str, text: str):
         niche = "" if text == "니치 선택" else text.strip()
