@@ -14,6 +14,8 @@ from utils.secrets_manager import SecretsManager
 
 
 GEMINI_KEY_RE = re.compile(r"^AIza[A-Za-z0-9_-]{35,96}$")
+# New 2026 Gemini "Auth key" format (AI Studio now issues AQ.* by default).
+GEMINI_AUTH_KEY_RE = re.compile(r"^AQ\.[A-Za-z0-9_.\-]{16,200}$")
 
 
 def main() -> int:
@@ -21,7 +23,7 @@ def main() -> int:
     if not key:
         print("ERROR: no key received on stdin")
         return 1
-    if not GEMINI_KEY_RE.match(key):
+    if not (GEMINI_KEY_RE.match(key) or GEMINI_AUTH_KEY_RE.match(key)):
         print("ERROR: key format does not look like a Gemini API key")
         return 2
 

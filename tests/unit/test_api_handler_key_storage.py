@@ -92,9 +92,13 @@ def test_clear_all_api_keys_deletes_secure_storage_and_resets_state(monkeypatch)
     assert info_calls
 
 
-def test_save_api_keys_rejects_aq_restricted_token(monkeypatch):
+def test_save_api_keys_accepts_aq_auth_key(monkeypatch):
+    # Google's 2026 migration issues new Gemini "Auth keys" that start with 'AQ.'.
+    # They work on the native google-genai SDK this app uses, so they must be accepted
+    # (previously the app wrongly rejected them as "restricted tokens").
+    aq_key = "AQ.Ab8RN6JvdXUtxAuthKeyExample1234567890abcdefg"
     app = SimpleNamespace(
-        api_key_entries=["AQ.Ab8RN6JvdXUtxRestrictedTokenExample1234567890"],
+        api_key_entries=[aq_key],
         api_key_manager=None,
     )
     handler = APIHandler(app)
@@ -114,7 +118,6 @@ def test_save_api_keys_rejects_aq_restricted_token(monkeypatch):
 
     handler.save_api_keys_from_ui()
 
-    # Restricted AQ. token must not be stored, and the user must be warned about it.
-    assert stored == []
-    assert warnings, "expected a warning for the AQ. restricted token"
-    assert any("AQ." in str(arg) for arg in warnings[0])
+    # The AQ. auth key is valid → it must be stored, with no warning.
+    assert any(value == aq_key for _name, value in stored), "AQ. auth key should be stored"
+    assert warnings == [], "AQ. auth keys are valid and must not warn"

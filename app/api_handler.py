@@ -27,6 +27,18 @@ if TYPE_CHECKING:
 logger = get_logger(__name__)
 
 GEMINI_API_KEY_PATTERN = re.compile(r"^AIza[A-Za-z0-9_-]{35,96}$")
+# New Gemini "Auth key" format rolled out in Google's 2026 migration: AI Studio now
+# issues AQ.* keys by default, unrestricted AIza keys are rejected from 2026-06-19,
+# and Standard (AIza) keys entirely from 2026-09. AQ. keys work on the native
+# generativelanguage endpoint / official google-genai SDK — which is exactly what
+# this app uses. Ref: https://ai.google.dev/gemini-api/docs/api-key
+GEMINI_AUTH_KEY_PATTERN = re.compile(r"^AQ\.[A-Za-z0-9_.\-]{16,200}$")
+
+
+def is_valid_gemini_key(key: str) -> bool:
+    """Accept both legacy Standard (AIza…) and new Auth (AQ.…) Gemini keys."""
+    key = (key or "").strip()
+    return bool(GEMINI_API_KEY_PATTERN.match(key) or GEMINI_AUTH_KEY_PATTERN.match(key))
 
 
 class APIHandler:
@@ -134,31 +146,20 @@ class APIHandler:
         existing_keys = self._load_existing_gemini_keys()
         entered_keys = {}
         invalid = []
-        restricted_aq = []  # 'AQ.' 제한 토큰 (Gemini API에서 작동하지 않음)
         for idx, entry in enumerate(entries, start=1):
             key_value = entry.strip() if isinstance(entry, str) else ""
             if not key_value:
                 continue
-            if GEMINI_API_KEY_PATTERN.match(key_value):
+            # Accept both legacy AIza… and new AQ.… (2026 Auth key) formats.
+            if is_valid_gemini_key(key_value):
                 entered_keys[f"api_{idx}"] = key_value
-            elif key_value.startswith("AQ."):
-                restricted_aq.append(idx)
             else:
                 invalid.append(idx)
 
-        if invalid or restricted_aq or (not entered_keys and not existing_keys):
-            if restricted_aq:
-                msg = (
-                    f"'AQ.'로 시작하는 제한된 토큰이 감지되었습니다(위치: {restricted_aq}).\n"
-                    "계정 제한 시 발급되는 키로, Gemini API에서 작동하지 않습니다(401).\n"
-                    "Google AI Studio에서 'AIza...' 표준 키를 새로 발급받아 입력해주세요."
-                )
-                if invalid:
-                    msg += f"\n형식이 잘못된 키: {invalid}"
-            else:
-                msg = "유효한 키를 최소 1개 입력해주세요."
-                if invalid:
-                    msg += f"\n잘못된 키: {invalid}"
+        if invalid or (not entered_keys and not existing_keys):
+            msg = "유효한 키를 최소 1개 입력해주세요."
+            if invalid:
+                msg += f"\n형식이 잘못된 키: {invalid}"
             show_warning(self.app, "검증 실패", msg)
             return
 

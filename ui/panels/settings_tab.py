@@ -36,6 +36,16 @@ import config
 
 # Gemini API 키 패턴 검증
 GEMINI_API_KEY_PATTERN = re.compile(r"^AIza[A-Za-z0-9_-]{35,96}$")
+# New Gemini "Auth key" format (Google 2026 migration): AI Studio now issues AQ.*
+# keys by default and is phasing out AIza keys. AQ. keys work on the native
+# google-genai SDK used by this app. Ref: https://ai.google.dev/gemini-api/docs/api-key
+GEMINI_AUTH_KEY_PATTERN = re.compile(r"^AQ\.[A-Za-z0-9_.\-]{16,200}$")
+
+
+def is_valid_gemini_key(key: str) -> bool:
+    """Accept both legacy Standard (AIza…) and new Auth (AQ.…) Gemini keys."""
+    key = (key or "").strip()
+    return bool(GEMINI_API_KEY_PATTERN.match(key) or GEMINI_AUTH_KEY_PATTERN.match(key))
 LINKTREE_SIGNUP_URL = "https://linktr.ee/register"
 LINKTREE_ADMIN_URL = "https://linktr.ee/admin/links"
 TIKTOK_LOGIN_URL = "https://www.tiktok.com/login"
@@ -423,7 +433,7 @@ class SettingsTab(QWidget, ThemedMixin):
 
             # 입력 필드
             key_input = QLineEdit()
-            key_input.setPlaceholderText(f"API 키 {i} (AIza...)")
+            key_input.setPlaceholderText(f"API 키 {i} (AIza... 또는 AQ....)")
             key_input.setEchoMode(QLineEdit.EchoMode.Password)
             key_input.setStyleSheet(input_style)
             row_layout.addWidget(key_input, stretch=1)
@@ -1862,11 +1872,11 @@ class SettingsTab(QWidget, ThemedMixin):
     def _extract_gemini_key_from_text(raw_text: str) -> str:
         """Extract one Gemini API key token from arbitrary text."""
         text = str(raw_text or "")
-        match = re.search(r"AIza[A-Za-z0-9_-]{35,96}", text)
+        match = re.search(r"AIza[A-Za-z0-9_-]{35,96}|AQ\.[A-Za-z0-9_.\-]{16,200}", text)
         if not match:
             return ""
         key = match.group(0).strip()
-        return key if GEMINI_API_KEY_PATTERN.match(key) else ""
+        return key if is_valid_gemini_key(key) else ""
 
     @staticmethod
     def _extract_first_http_url(raw_text: str) -> str:
@@ -4133,7 +4143,7 @@ class SettingsTab(QWidget, ThemedMixin):
         try:
             for key_input in self.api_key_inputs:
                 key_input.clear()
-                key_input.setPlaceholderText("API 키 (AIza...)")
+                key_input.setPlaceholderText("API 키 (AIza... 또는 AQ....)")
             for i in range(1, 9):
                 key_value = SecretsManager.get_api_key(f"gemini_api_{i}")
                 if i == 1 and not key_value:
@@ -4199,7 +4209,6 @@ class SettingsTab(QWidget, ThemedMixin):
         # 1. 유효한 키 수집 (빈칸 제거)
         valid_keys = []
         invalid_format_keys = []
-        restricted_aq_keys = []  # 'AQ.' 제한 토큰 (Gemini API에서 작동하지 않음)
 
         # 현재 입력된 모든 텍스트 확인
         for i, key_input in enumerate(self.api_key_inputs):
@@ -4209,36 +4218,19 @@ class SettingsTab(QWidget, ThemedMixin):
                 key_value = str(SecretsManager.get_api_key(f"gemini_api_{slot}") or "").strip()
                 if not key_value and slot == 1:
                     key_value = str(SecretsManager.get_api_key("gemini") or "").strip()
-                if key_value and not GEMINI_API_KEY_PATTERN.match(key_value):
+                if key_value and not is_valid_gemini_key(key_value):
                     key_value = ""
                 if not key_value:
                     continue
 
-            # 키 형식 검증
-            if not GEMINI_API_KEY_PATTERN.match(key_value):
-                # 'AQ.' 토큰은 계정 제한 시 발급되는 키로 Gemini API에서 401로 거부됨
-                if key_value.startswith("AQ."):
-                    restricted_aq_keys.append(i + 1)
-                else:
-                    invalid_format_keys.append(i + 1)
+            # 키 형식 검증 (AIza… 표준 키 + AQ.… 신형 Auth 키 모두 허용)
+            if not is_valid_gemini_key(key_value):
+                invalid_format_keys.append(i + 1)
                 # 형식이 잘못돼도 일단 수집하지 않음 (저장하지 않음)
                 continue
 
             if key_value not in valid_keys:
                 valid_keys.append(key_value)
-
-        # 'AQ.' 제한 토큰이 있으면 별도 안내 후 중단
-        if restricted_aq_keys:
-            show_warning(
-                self,
-                "사용할 수 없는 'AQ.' 키",
-                f"다음 위치의 키는 'AQ.'로 시작하는 제한된 토큰입니다: {restricted_aq_keys}\n\n"
-                "이 토큰은 계정이 제한됐을 때(주로 이전 키가 외부에 노출된 경우) 발급되며,\n"
-                "Gemini API에서는 작동하지 않습니다(401 오류).\n\n"
-                "Google AI Studio(aistudio.google.com/apikey)에서 'AIza...'로 시작하는\n"
-                "표준 키를 새로 발급받아 입력해주세요. (필요 시 새 프로젝트에서 생성)"
-            )
-            return
 
         # 형식이 잘못된 키가 있으면 경고하고 중단
         if invalid_format_keys:
@@ -4246,7 +4238,8 @@ class SettingsTab(QWidget, ThemedMixin):
                 self,
                 "형식이 올바르지 않은 키",
                 f"다음 위치의 키 형식이 올바르지 않습니다: {invalid_format_keys}\n\n"
-                "Gemini API 키는 'AIza'로 시작해야 합니다.\n"
+                "Gemini API 키는 'AIza' 또는 'AQ.'로 시작해야 합니다.\n"
+                "(2026년부터 Google AI Studio는 'AQ.' 형식으로 키를 발급합니다.)\n"
                 "해당 키를 수정하거나 지운 후 다시 저장해주세요."
             )
             return
