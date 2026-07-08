@@ -54,6 +54,7 @@ class Account:
     next_time: str = "-"
     title_prompt: str = ""
     hashtag_prompt: str = ""
+    connected: bool = False      # 실제 채널 로그인(OAuth) 연동 여부
 
     @property
     def token_path(self) -> str:
@@ -218,6 +219,7 @@ class AccountRegistry:
                     break
                 if s["name"] in existing_names:
                     continue
+                s.setdefault("connected", True)
                 self.add(**s)
                 added += 1
         return added

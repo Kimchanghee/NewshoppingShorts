@@ -1,45 +1,31 @@
 # -*- coding: utf-8 -*-
 """
-Multi-account console panel (TRIAL).
+Multi-account console panel (TRIAL) — connect-first, popup-free UX ("방안 B").
 
-A self-contained console for managing up to 10 upload accounts across
-YouTube / Instagram, with niche-based routing. Additive: it reads/writes
-``managers.account_registry`` and does not touch the existing
-single-account upload flow. Reachable as its own left-nav page.
+Accounts are added via inline platform "연결 카드" (no modal dialog), niche and
+on/off are edited inline on each card, deletion is inline with an undo toast, and
+ALL feedback is an inline toast bar — no QDialog / QMessageBox anywhere. Additive:
+reads/writes managers.account_registry only; does not touch existing upload flow.
 """
 from __future__ import annotations
 
+from dataclasses import asdict
 from typing import List, Optional
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QFormLayout,
-    QLabel, QPushButton, QFrame, QScrollArea, QSizePolicy,
-    QDialog, QLineEdit, QComboBox, QSpinBox, QCheckBox, QPlainTextEdit,
-    QMessageBox, QDialogButtonBox,
+    QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
+    QLabel, QPushButton, QFrame, QScrollArea, QComboBox,
 )
 
 from ui.design_system_v2 import get_design_system, get_color
 from managers.account_registry import AccountRegistry, Account, MAX_ACCOUNTS
 
 _PLATFORM_LABEL = {"youtube": "YouTube", "instagram": "Instagram"}
-_PLATFORM_GLYPH = {"youtube": "▶", "instagram": "◉"}   # ▶ / ◉
+_PLATFORM_GLYPH = {"youtube": "▶", "instagram": "◉"}
 _STATUS_COLOR = {"ok": "success", "paused": "warning", "error": "error"}
 _STATUS_LABEL = {"ok": "자동 ON", "paused": "일시정지", "error": "오류"}
-
-
-class _ClickCard(QFrame):
-    """A framed card that emits a click callback."""
-
-    def __init__(self, on_click, parent=None):
-        super().__init__(parent)
-        self._on_click = on_click
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-
-    def mousePressEvent(self, event):
-        if event.button() == Qt.MouseButton.LeftButton and self._on_click:
-            self._on_click()
-        super().mousePressEvent(event)
+_NICHES = ["가전", "주방", "뷰티", "반려동물", "캠핑", "홈오피스", "헬스", "육아", "패션", "기타"]
 
 
 class MultiAccountPanel(QWidget):
@@ -49,17 +35,35 @@ class MultiAccountPanel(QWidget):
         self.theme_manager = theme_manager
         self.ds = get_design_system()
         self.registry = AccountRegistry()
+        self._last_deleted: Optional[dict] = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        # Inline toast bar (replaces every popup / alert dialog).
+        self._toast_bar = QFrame()
+        self._toast_bar.setVisible(False)
+        tl = QHBoxLayout(self._toast_bar)
+        tl.setContentsMargins(12, 8, 12, 8)
+        tl.setSpacing(10)
+        self._toast_msg = QLabel("")
+        self._toast_msg.setWordWrap(True)
+        self._toast_msg.setStyleSheet("background:transparent;border:none;")
+        tl.addWidget(self._toast_msg, 1)
+        self._toast_action = QPushButton("")
+        self._toast_action.setVisible(False)
+        self._toast_action.setCursor(Qt.CursorShape.PointingHandCursor)
+        tl.addWidget(self._toast_action)
+        root.addWidget(self._toast_bar)
+        self._toast_timer = QTimer(self)
+        self._toast_timer.setSingleShot(True)
+        self._toast_timer.timeout.connect(lambda: self._toast_bar.setVisible(False))
+
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
         self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        # Keep the scroll viewport transparent so the dark page card shows through
-        # (default QScrollArea viewport is white → big white block in dark mode).
         self._scroll.setStyleSheet("QScrollArea{border:none;background:transparent;}")
         self._scroll.viewport().setStyleSheet("background:transparent;")
         root.addWidget(self._scroll)
@@ -77,25 +81,74 @@ class MultiAccountPanel(QWidget):
             pass
         self._render()
 
+    def _rerender_soon(self):
+        # Defer so we never delete the widget that is mid-signal (combo/button).
+        QTimer.singleShot(0, self._render)
+
     def _label(self, text: str, size: int = 13, color: str = "text_secondary",
                bold: bool = False) -> QLabel:
         lbl = QLabel(text)
         weight = "500" if bold else "400"
         lbl.setStyleSheet(
-            f"color: {self._c(color)}; font-size: {size}px; font-weight: {weight};"
-            " background: transparent; border: none;"
+            f"color:{self._c(color)};font-size:{size}px;font-weight:{weight};"
+            "background:transparent;border:none;"
         )
         return lbl
 
     def _chip(self, text: str, fg: str, bg: str, border: str = "") -> QLabel:
         lbl = QLabel(text)
-        b = f"border: 1px solid {border};" if border else "border: none;"
+        b = f"border:1px solid {border};" if border else "border:none;"
         lbl.setStyleSheet(
-            f"color: {fg}; background-color: {bg}; {b}"
-            " font-size: 12px; padding: 2px 8px; border-radius: 6px;"
+            f"color:{fg};background-color:{bg};{b}"
+            "font-size:12px;padding:2px 8px;border-radius:6px;"
         )
         lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         return lbl
+
+    def _show_toast(self, msg: str, kind: str = "info",
+                    action_text: str = None, action_cb=None, ms: int = 3500):
+        accent = {"info": "text_secondary", "success": "success",
+                  "warning": "warning", "error": "error"}.get(kind, "text_secondary")
+        self._toast_bar.setStyleSheet(
+            f"QFrame{{background:{self._c('surface_variant')};"
+            f"border:1px solid {self._c(accent)};border-radius:8px;}}"
+        )
+        self._toast_bar.setMinimumHeight(38)
+        self._toast_msg.setStyleSheet(
+            f"color:{self._c('text_primary')};background:transparent;border:none;font-size:13px;"
+        )
+        self._toast_msg.setText(msg)
+        try:
+            self._toast_action.clicked.disconnect()
+        except Exception:
+            pass
+        if action_text and action_cb:
+            self._toast_action.setText(action_text)
+            self._toast_action.setStyleSheet(
+                f"QPushButton{{color:{self._c('text_accent')};background:transparent;"
+                "border:none;font-size:13px;font-weight:500;}"
+            )
+            self._toast_action.clicked.connect(action_cb)
+            self._toast_action.setVisible(True)
+        else:
+            self._toast_action.setVisible(False)
+        self._toast_bar.setVisible(True)
+        self._toast_timer.start(ms)
+
+    def _btn_style(self, primary: bool) -> str:
+        if primary:
+            return (
+                f"QPushButton {{ color:{self._c('text_on_primary')};"
+                f" background-color:{self._c('primary')}; border:none;"
+                " border-radius:8px; padding:8px 16px; font-size:13px; font-weight:500; }}"
+                f" QPushButton:hover {{ background-color:{self._c('primary')}; }}"
+            )
+        return (
+            f"QPushButton {{ color:{self._c('text_primary')}; background-color:{self._c('surface_variant')};"
+            f" border:1px solid {self._c('border_light')}; border-radius:8px;"
+            " padding:8px 14px; font-size:13px; }}"
+            f" QPushButton:hover {{ background-color:{self._c('surface')}; }}"
+        )
 
     # ------------------------------------------------------------------ render
     def _render(self):
@@ -108,23 +161,23 @@ class MultiAccountPanel(QWidget):
 
         v.addLayout(self._header_row())
         v.addWidget(self._flow_explainer())
+        v.addWidget(self._connect_cards())
         v.addLayout(self._metrics_row())
 
         accounts = self.registry.all()
-        if not accounts:
-            v.addWidget(self._empty_state())
-        else:
+        if accounts:
             v.addWidget(self._label("계정", size=15, color="text_primary", bold=True))
             v.addWidget(self._account_grid(accounts))
             v.addWidget(self._label("배분 규칙  ·  소싱 상품 → 계정 라우팅",
                                     size=15, color="text_primary", bold=True))
             v.addWidget(self._routing_box())
+        else:
+            v.addWidget(self._empty_state())
 
         v.addStretch(1)
         self._scroll.setWidget(content)
 
     def _flow_explainer(self) -> QWidget:
-        """첫 사용자를 위한 '작업 → 계정 → 자동화' 흐름 안내 스트립."""
         box = QFrame()
         box.setStyleSheet(
             f"background-color:{self._c('surface_variant')}; border:none; border-radius:12px;"
@@ -167,42 +220,59 @@ class MultiAccountPanel(QWidget):
     def _header_row(self) -> QHBoxLayout:
         row = QHBoxLayout()
         row.setSpacing(8)
-        title = self._label("다계정 자동화 콘솔", size=16, color="text_primary", bold=True)
-        slot = self._chip(
-            f"{self.registry.count()} / {MAX_ACCOUNTS} 슬롯",
-            self._c("text_secondary"), self._c("surface_variant"),
-        )
-        row.addWidget(title)
-        row.addWidget(slot)
+        row.addWidget(self._label("다계정 자동화 콘솔", size=16, color="text_primary", bold=True))
+        row.addWidget(self._chip(f"{self.registry.count()} / {MAX_ACCOUNTS} 슬롯",
+                                 self._c("text_secondary"), self._c("surface_variant")))
         row.addStretch(1)
-
         seed_btn = QPushButton("샘플 채우기")
         seed_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         seed_btn.setStyleSheet(self._btn_style(primary=False))
         seed_btn.clicked.connect(self._on_seed)
         row.addWidget(seed_btn)
-
-        add_btn = QPushButton("＋ 계정 추가")
-        add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        add_btn.setStyleSheet(self._btn_style(primary=True))
-        add_btn.clicked.connect(self._on_add)
-        row.addWidget(add_btn)
         return row
 
-    def _btn_style(self, primary: bool) -> str:
-        if primary:
-            return (
-                f"QPushButton {{ color: {self._c('text_on_primary')};"
-                f" background-color: {self._c('primary')}; border: none;"
-                " border-radius: 8px; padding: 8px 14px; font-size: 13px; font-weight: 500; }}"
-                f" QPushButton:hover {{ background-color: {self._c('primary')}; }}"
-            )
-        return (
-            f"QPushButton {{ color: {self._c('text_primary')}; background-color: {self._c('surface_variant')};"
-            f" border: 1px solid {self._c('border_light')}; border-radius: 8px;"
-            " padding: 8px 14px; font-size: 13px; }}"
-            f" QPushButton:hover {{ background-color: {self._c('surface')}; }}"
+    def _connect_cards(self) -> QWidget:
+        box = QFrame()
+        box.setStyleSheet("background:transparent;border:none;")
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(8)
+        lay.addWidget(self._label(
+            "계정 연결  ·  연결할 플랫폼을 누르면 계정이 추가돼요 (팝업 없음)",
+            size=13, color="text_secondary",
+        ))
+        r = QHBoxLayout()
+        r.setSpacing(12)
+        r.addWidget(self._connect_card("youtube"))
+        r.addWidget(self._connect_card("instagram"))
+        lay.addLayout(r)
+        return box
+
+    def _connect_card(self, platform: str) -> QWidget:
+        card = QFrame()
+        card.setStyleSheet(
+            f"QFrame{{background:{self._c('surface_variant')};border:none;border-radius:12px;}}"
         )
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(16, 16, 16, 16)
+        lay.setSpacing(8)
+        glyph = QLabel(_PLATFORM_GLYPH.get(platform, ""))
+        glyph.setStyleSheet(
+            f"color:{self._c('text_secondary')};font-size:26px;background:transparent;border:none;"
+        )
+        glyph.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(glyph)
+        lay.addWidget(self._label(f"{_PLATFORM_LABEL[platform]} 계정 연결", size=15,
+                                  color="text_primary", bold=True),
+                      alignment=Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(self._label("브라우저 로그인 → 자동 등록", size=12, color="text_muted"),
+                      alignment=Qt.AlignmentFlag.AlignCenter)
+        btn = QPushButton("연결하기")
+        btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        btn.setStyleSheet(self._btn_style(primary=True))
+        btn.clicked.connect(lambda _=False, p=platform: self._on_connect(p))
+        lay.addWidget(btn, alignment=Qt.AlignmentFlag.AlignCenter)
+        return card
 
     def _metrics_row(self) -> QHBoxLayout:
         accts = self.registry.all()
@@ -211,7 +281,6 @@ class MultiAccountPanel(QWidget):
         pending = sum(max(a.daily_limit - a.today_count, 0)
                       for a in accts if a.auto_upload and a.status == "ok")
         errors = sum(1 for a in accts if a.status == "error")
-
         row = QHBoxLayout()
         row.setSpacing(12)
         row.addWidget(self._metric_card("활성 계정", f"{total} / {MAX_ACCOUNTS}"))
@@ -224,7 +293,7 @@ class MultiAccountPanel(QWidget):
     def _metric_card(self, label: str, value: str, value_color: str = "text_primary") -> QWidget:
         card = QFrame()
         card.setStyleSheet(
-            f"background-color: {self._c('surface_variant')}; border: none; border-radius: 8px;"
+            f"background-color:{self._c('surface_variant')};border:none;border-radius:8px;"
         )
         lay = QVBoxLayout(card)
         lay.setContentsMargins(14, 12, 14, 12)
@@ -232,8 +301,8 @@ class MultiAccountPanel(QWidget):
         lay.addWidget(self._label(label, size=12, color="text_muted"))
         val = QLabel(value)
         val.setStyleSheet(
-            f"color: {self._c(value_color)}; font-size: 22px; font-weight: 500;"
-            " background: transparent; border: none;"
+            f"color:{self._c(value_color)};font-size:22px;font-weight:500;"
+            "background:transparent;border:none;"
         )
         lay.addWidget(val)
         return card
@@ -252,107 +321,140 @@ class MultiAccountPanel(QWidget):
         return wrap
 
     def _account_card(self, acc: Account) -> QWidget:
-        card = _ClickCard(on_click=lambda a=acc: self._open_detail(a.id))
+        card = QFrame()
         card.setStyleSheet(
-            f"QFrame {{ background-color: {self._c('surface')};"
-            f" border: 1px solid {self._c('border_light')}; border-radius: 12px; }}"
-            f" QFrame:hover {{ border: 1px solid {self._c('text_muted')}; }}"
+            f"QFrame{{background:{self._c('surface')};"
+            f"border:1px solid {self._c('border_light')};border-radius:12px;}}"
         )
         lay = QVBoxLayout(card)
         lay.setContentsMargins(16, 14, 16, 14)
         lay.setSpacing(10)
 
         top = QHBoxLayout()
-        plat = self._label(
+        top.addWidget(self._label(
             f"{_PLATFORM_GLYPH.get(acc.platform, '')}  {_PLATFORM_LABEL.get(acc.platform, acc.platform)}",
-            size=13, color="text_secondary",
-        )
-        top.addWidget(plat)
+            size=13, color="text_secondary"))
         top.addStretch(1)
-        dot = QLabel("●")  # ●
-        dot.setStyleSheet(
-            f"color: {self._c(_STATUS_COLOR.get(acc.status, 'text_muted'))};"
-            " font-size: 12px; background: transparent; border: none;"
+        if getattr(acc, "connected", False):
+            top.addWidget(self._chip("연결됨", self._c("success"), self._c("surface")))
+        else:
+            top.addWidget(self._chip("연결 대기", self._c("warning"), self._c("surface")))
+        del_btn = QPushButton("✕")
+        del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        del_btn.setFixedWidth(22)
+        del_btn.setStyleSheet(
+            f"QPushButton{{color:{self._c('text_muted')};background:transparent;border:none;font-size:14px;}}"
+            f"QPushButton:hover{{color:{self._c('error')};}}"
         )
-        top.addWidget(dot)
+        del_btn.clicked.connect(lambda _=False, a=acc: self._on_delete(a))
+        top.addWidget(del_btn)
         lay.addLayout(top)
 
         lay.addWidget(self._label(acc.name, size=15, color="text_primary", bold=True))
 
-        badges = QHBoxLayout()
-        badges.setSpacing(6)
-        badges.addWidget(self._chip(acc.niche or "미지정",
-                                    self._c("text_secondary"), self._c("surface_variant")))
-        st_key = _STATUS_COLOR.get(acc.status, "text_muted")
-        badges.addWidget(self._chip(_STATUS_LABEL.get(acc.status, acc.status),
-                                    self._c(st_key), self._c("surface")))
-        badges.addStretch(1)
-        lay.addLayout(badges)
+        ctl = QHBoxLayout()
+        ctl.setSpacing(8)
+        ctl.addWidget(self._niche_combo(acc))
+        ctl.addWidget(self._auto_toggle(acc))
+        ctl.addStretch(1)
+        lay.addLayout(ctl)
 
         line = QFrame()
         line.setFrameShape(QFrame.Shape.HLine)
         line.setFixedHeight(1)
-        line.setStyleSheet(f"background-color: {self._c('border_light')}; border: none;")
+        line.setStyleSheet(f"background-color:{self._c('border_light')};border:none;")
         lay.addWidget(line)
 
         foot = QHBoxLayout()
-        foot.addWidget(self._label(f"오늘 {acc.today_count}/{acc.daily_limit}",
-                                   size=12, color="text_muted"))
+        foot.addWidget(self._label(f"오늘 {acc.today_count}/{acc.daily_limit}", size=12, color="text_muted"))
         foot.addStretch(1)
         foot.addWidget(self._label(f"다음 {acc.next_time}", size=12, color="text_muted"))
         lay.addLayout(foot)
         return card
 
+    def _niche_combo(self, acc: Account) -> QComboBox:
+        combo = QComboBox()
+        combo.setCursor(Qt.CursorShape.PointingHandCursor)
+        combo.setStyleSheet(
+            f"QComboBox{{background:{self._c('surface_variant')};color:{self._c('text_primary')};"
+            f"border:1px solid {self._c('border_light')};border-radius:7px;padding:4px 8px;font-size:12px;}}"
+            f"QComboBox::drop-down{{border:none;width:18px;}}"
+            f"QComboBox QAbstractItemView{{background:{self._c('surface')};color:{self._c('text_primary')};"
+            f"selection-background-color:{self._c('surface_variant')};border:1px solid {self._c('border_light')};}}"
+        )
+        combo.addItem("니치 선택")
+        for n in _NICHES:
+            combo.addItem(n)
+        cur = (acc.niche or "").strip()
+        if cur:
+            if cur not in _NICHES:
+                combo.insertItem(1, cur)
+            combo.setCurrentText(cur)
+        else:
+            combo.setCurrentIndex(0)
+        # Connect AFTER setting the current value so setup doesn't fire the handler.
+        combo.currentTextChanged.connect(lambda t, aid=acc.id: self._on_niche(aid, t))
+        return combo
+
+    def _auto_toggle(self, acc: Account) -> QPushButton:
+        text = _STATUS_LABEL.get(acc.status, acc.status)
+        kind = _STATUS_COLOR.get(acc.status, "text_muted")
+        btn = QPushButton(text)
+        btn.setStyleSheet(
+            f"QPushButton{{color:{self._c(kind)};background:{self._c('surface')};"
+            f"border:1px solid {self._c('border_light')};border-radius:6px;padding:3px 10px;font-size:12px;}}"
+        )
+        if acc.status != "error":
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(lambda _=False, a=acc: self._on_toggle(a))
+        return btn
+
     def _routing_box(self) -> QWidget:
         box = QFrame()
         box.setStyleSheet(
-            f"background-color: {self._c('surface')};"
-            f" border: 1px solid {self._c('border_light')}; border-radius: 12px;"
+            f"background-color:{self._c('surface')};"
+            f"border:1px solid {self._c('border_light')};border-radius:12px;"
         )
         lay = QVBoxLayout(box)
         lay.setContentsMargins(16, 12, 16, 14)
         lay.setSpacing(0)
-
         routing = self.registry.routing_map()
         first = True
         for niche, accts in routing.items():
-            row = QFrame()
-            row.setStyleSheet(
-                "background: transparent;"
-                + ("" if first else f" border-top: 1px solid {self._c('border_light')};")
+            r = QFrame()
+            r.setStyleSheet(
+                "background:transparent;"
+                + ("" if first else f"border-top:1px solid {self._c('border_light')};")
             )
-            rl = QHBoxLayout(row)
+            rl = QHBoxLayout(r)
             rl.setContentsMargins(0, 10, 0, 10)
             rl.addWidget(self._chip(niche, self._c("text_secondary"), self._c("surface_variant")))
             rl.addWidget(self._label("→", size=14, color="text_muted"))
-            names = "  ".join(a.name for a in accts)
-            rl.addWidget(self._label(names, size=13, color="text_primary"))
+            rl.addWidget(self._label("  ".join(a.name for a in accts), size=13, color="text_primary"))
             rl.addStretch(1)
-            lay.addWidget(row)
+            lay.addWidget(r)
             first = False
-
-        note = self._label(
+        lay.addSpacing(6)
+        lay.addWidget(self._label(
             f"타이밍: 하이브리드  ·  레인 내 {self.registry.stagger_minutes}분 시차  ·  플랫폼 간 병렬",
             size=12, color="text_muted",
-        )
-        lay.addSpacing(6)
-        lay.addWidget(note)
+        ))
         return box
 
     def _empty_state(self) -> QWidget:
         box = QFrame()
         box.setStyleSheet(
-            f"background-color: {self._c('surface')};"
-            f" border: 1px dashed {self._c('text_muted')}; border-radius: 12px;"
+            f"background-color:{self._c('surface')};"
+            f"border:1px dashed {self._c('text_muted')};border-radius:12px;"
         )
         lay = QVBoxLayout(box)
-        lay.setContentsMargins(24, 32, 24, 32)
+        lay.setContentsMargins(24, 28, 24, 28)
         lay.setSpacing(8)
         lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         lay.addWidget(self._label("아직 등록된 계정이 없어요", size=15,
                                   color="text_primary", bold=True),
                       alignment=Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self._label("‘계정 추가’로 직접 등록하거나, ‘샘플 채우기’로 미리 볼 수 있어요.",
+        lay.addWidget(self._label("위 ‘계정 연결’에서 플랫폼을 누르거나, ‘샘플 채우기’로 미리 볼 수 있어요.",
                                   size=13, color="text_secondary"),
                       alignment=Qt.AlignmentFlag.AlignCenter)
         return box
@@ -362,131 +464,61 @@ class MultiAccountPanel(QWidget):
         try:
             added = self.registry.seed_samples()
         except Exception as exc:
-            QMessageBox.warning(self, "샘플 채우기", str(exc))
+            self._show_toast(str(exc), "warning")
             return
         if added == 0:
-            QMessageBox.information(self, "샘플 채우기", "추가할 샘플이 없어요 (이미 채워져 있거나 슬롯 가득).")
-        self._render()
+            self._show_toast("추가할 샘플이 없어요 (이미 채워졌거나 슬롯이 가득 찼어요).", "info")
+        else:
+            self._show_toast(f"샘플 계정 {added}개를 채웠어요.", "success")
+        self._rerender_soon()
 
-    def _on_add(self):
+    def _on_connect(self, platform: str):
         if self.registry.count() >= MAX_ACCOUNTS:
-            QMessageBox.information(self, "계정 추가", f"최대 {MAX_ACCOUNTS}개까지 추가할 수 있어요.")
+            self._show_toast(f"최대 {MAX_ACCOUNTS}개까지 연결할 수 있어요.", "warning")
             return
-        dlg = _AccountDialog(self, registry=self.registry)
-        if dlg.exec():
-            data = dlg.values()
-            try:
-                self.registry.add(**data)
-            except Exception as exc:
-                QMessageBox.warning(self, "계정 추가", str(exc))
-                return
-            self._render()
-
-    def _open_detail(self, account_id: str):
-        acc = self.registry.get(account_id)
-        if acc is None:
+        n = len(self.registry.by_platform(platform)) + 1
+        name = f"{_PLATFORM_LABEL.get(platform, platform)} 계정 {n}"
+        try:
+            acc = self.registry.add(platform=platform, name=name, niche="", connected=False)
+        except Exception as exc:
+            self._show_toast(str(exc), "warning")
             return
-        dlg = _AccountDialog(self, registry=self.registry, account=acc)
-        result = dlg.exec()
-        if result == QDialog.DialogCode.Accepted:
-            if dlg.deleted:
-                self.registry.remove(account_id)
-            else:
-                self.registry.update(account_id, **dlg.values())
-            self._render()
-
-
-class _AccountDialog(QDialog):
-    """Add / edit an account profile."""
-
-    def __init__(self, parent=None, registry: AccountRegistry = None, account: Optional[Account] = None):
-        super().__init__(parent)
-        self.registry = registry
-        self.account = account
-        self.deleted = False
-        self.setWindowTitle("계정 설정" if account else "계정 추가")
-        self.setMinimumWidth(420)
-
-        form = QFormLayout(self)
-        form.setSpacing(10)
-
-        self.name_in = QLineEdit(account.name if account else "")
-        self.name_in.setPlaceholderText("예: 가전_리뷰_01")
-        form.addRow("계정 이름", self.name_in)
-
-        self.platform_in = QComboBox()
-        self.platform_in.addItem("YouTube", "youtube")
-        self.platform_in.addItem("Instagram", "instagram")
-        if account:
-            idx = self.platform_in.findData(account.platform)
-            if idx >= 0:
-                self.platform_in.setCurrentIndex(idx)
-        form.addRow("플랫폼", self.platform_in)
-
-        self.niche_in = QLineEdit(account.niche if account else "")
-        self.niche_in.setPlaceholderText("예: 가전, 주방, 뷰티…")
-        form.addRow("니치 / 카테고리", self.niche_in)
-
-        self.interval_in = QSpinBox()
-        self.interval_in.setRange(1, 24)
-        self.interval_in.setSuffix(" 시간")
-        self.interval_in.setValue(account.interval_hours if account else 4)
-        form.addRow("업로드 간격", self.interval_in)
-
-        self.offset_in = QSpinBox()
-        self.offset_in.setRange(0, 120)
-        self.offset_in.setSuffix(" 분")
-        self.offset_in.setValue(account.offset_minutes if account else 0)
-        form.addRow("시차 오프셋", self.offset_in)
-
-        self.limit_in = QSpinBox()
-        self.limit_in.setRange(1, 50)
-        self.limit_in.setSuffix(" 건 / 24h")
-        self.limit_in.setValue(account.daily_limit if account else 5)
-        form.addRow("일일 한도", self.limit_in)
-
-        self.auto_in = QCheckBox("자동 업로드 켜기")
-        self.auto_in.setChecked(account.auto_upload if account else True)
-        form.addRow("", self.auto_in)
-
-        self.title_in = QLineEdit(account.title_prompt if account else "")
-        self.title_in.setPlaceholderText("쿠팡 {상품명} 초간단 리뷰 #{키워드}")
-        form.addRow("제목 프롬프트", self.title_in)
-
-        self.tag_in = QPlainTextEdit(account.hashtag_prompt if account else "")
-        self.tag_in.setPlaceholderText("#가전추천 #자취템 #쿠팡")
-        self.tag_in.setFixedHeight(56)
-        form.addRow("해시태그 프롬프트", self.tag_in)
-
-        buttons = QDialogButtonBox()
-        buttons.addButton("저장", QDialogButtonBox.ButtonRole.AcceptRole)
-        buttons.addButton("취소", QDialogButtonBox.ButtonRole.RejectRole)
-        if account:
-            del_btn = buttons.addButton("삭제", QDialogButtonBox.ButtonRole.DestructiveRole)
-            del_btn.clicked.connect(self._on_delete)
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        form.addRow(buttons)
-
-    def _on_delete(self):
-        confirm = QMessageBox.question(
-            self, "계정 삭제",
-            f"‘{self.account.name}’ 계정을 삭제할까요?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+        self._show_toast(
+            f"‘{acc.name}’ 추가됨 · 니치를 골라 주세요. (실제 로그인 연동은 준비 중)",
+            "success",
         )
-        if confirm == QMessageBox.StandardButton.Yes:
-            self.deleted = True
-            self.accept()
+        self._rerender_soon()
 
-    def values(self) -> dict:
-        return {
-            "name": self.name_in.text().strip(),
-            "platform": self.platform_in.currentData(),
-            "niche": self.niche_in.text().strip(),
-            "interval_hours": self.interval_in.value(),
-            "offset_minutes": self.offset_in.value(),
-            "daily_limit": self.limit_in.value(),
-            "auto_upload": self.auto_in.isChecked(),
-            "title_prompt": self.title_in.text().strip(),
-            "hashtag_prompt": self.tag_in.toPlainText().strip(),
-        }
+    def _on_niche(self, account_id: str, text: str):
+        niche = "" if text == "니치 선택" else text.strip()
+        self.registry.update(account_id, niche=niche)
+        self._rerender_soon()
+
+    def _on_toggle(self, acc: Account):
+        new_status = "paused" if acc.status == "ok" else "ok"
+        self.registry.update(acc.id, status=new_status)
+        self._show_toast("자동 업로드를 " + ("켰어요." if new_status == "ok" else "멈췄어요."), "info")
+        self._rerender_soon()
+
+    def _on_delete(self, acc: Account):
+        self._last_deleted = asdict(acc)
+        self.registry.remove(acc.id)
+        self._show_toast(f"‘{acc.name}’ 삭제됨", "info",
+                         action_text="되돌리기", action_cb=self._undo_delete, ms=6000)
+        self._rerender_soon()
+
+    def _undo_delete(self):
+        data = self._last_deleted or {}
+        self._last_deleted = None
+        self._toast_bar.setVisible(False)
+        if data:
+            fields = set(Account.__dataclass_fields__.keys())
+            payload = {k: v for k, v in data.items() if k in fields and k != "id"}
+            platform = payload.pop("platform", "youtube")
+            name = payload.pop("name", "계정")
+            niche = payload.pop("niche", "")
+            try:
+                self.registry.add(platform=platform, name=name, niche=niche, **payload)
+            except Exception as exc:
+                self._show_toast(str(exc), "warning")
+        self._rerender_soon()
