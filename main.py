@@ -287,9 +287,9 @@ class VideoAnalyzerGUI(
         self.step_nav.step_selected.connect(self._on_step_selected)
         self._on_step_selected("mode")
 
-        # Initial sidebar state: no mode chosen yet → use default (single) visibility
-        default_mode = getattr(self.state, 'processing_mode', 'single') or 'single'
-        self._apply_mode_visibility(default_mode)
+        # 첫 실행: 아직 모드를 고르지 않았으므로 모드 종속 탭(영상 넣기 / 전체 자동 만들기 /
+        # 다계정 자동화)을 모두 비활성화한다. '만들기 방식'에서 모드를 고르면 활성화된다.
+        self._apply_mode_visibility(None)
 
     def _on_mode_selected(self, mode: str):
         """Handle mode selection.
@@ -311,19 +311,25 @@ class VideoAnalyzerGUI(
         self._apply_mode_visibility(mode)
 
     def _apply_mode_visibility(self, mode: str):
-        """Show/hide step_nav buttons based on selected processing mode."""
+        """Enable/disable mode-gated left-nav tabs based on the chosen mode.
+
+        - source(영상 넣기): 단일 영상 / 믹스 모드에서만 활성 (직접 영상 입력).
+        - sourcing(전체 자동 만들기) · multi_account(다계정 자동화): 전체 자동(풀 자동화)에서만 활성.
+        - 첫 실행(모드 미선택, mode=None): 세 탭 모두 비활성 → 모드 선택을 유도.
+        비활성 탭은 회색으로 표시되고 클릭·이동이 막힌다.
+        """
         step_nav = getattr(self, 'step_nav', None)
-        if step_nav is None:
+        if step_nav is None or not hasattr(step_nav, 'set_step_enabled'):
             return
         is_sourcing = (mode == "sourcing")
-        show_rules = {
-            "source": not is_sourcing,     # Mode 1/2 only
-            "sourcing": is_sourcing,       # Mode 3 only
+        is_manual = mode in ("single", "mix")
+        enable_rules = {
+            "source": is_manual,           # 단일/믹스 전용
+            "sourcing": is_sourcing,       # 전체 자동 전용
+            "multi_account": is_sourcing,  # 다계정 = 풀 자동화 전용
         }
-        for step_id, visible in show_rules.items():
-            btn = step_nav.get_button(step_id) if hasattr(step_nav, 'get_button') else None
-            if btn is not None:
-                btn.setVisible(visible)
+        for step_id, enabled in enable_rules.items():
+            step_nav.set_step_enabled(step_id, enabled)
 
     def _on_step_selected(self, step_id: str):
         """Handle step navigation."""

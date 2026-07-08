@@ -38,6 +38,7 @@ class StepButton(QFrame):
         super().__init__(parent)
         self.step_id = step_id
         self._checked = False
+        self._disabled = False
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumHeight(34)
         self.setMaximumHeight(42)
@@ -93,13 +94,42 @@ class StepButton(QFrame):
     def isChecked(self):
         return self._checked
 
+    def set_disabled_state(self, disabled: bool):
+        """모드에 맞지 않는 탭을 회색 처리하고 클릭/이동을 막는다."""
+        disabled = bool(disabled)
+        if disabled == self._disabled:
+            return
+        self._disabled = disabled
+        self.setCursor(
+            Qt.CursorShape.ArrowCursor if disabled else Qt.CursorShape.PointingHandCursor
+        )
+        self.update_style(self._checked)
+
     def mousePressEvent(self, event):
+        if self._disabled:
+            return
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(True)
         super().mousePressEvent(event)
 
     def update_style(self, checked):
         """STITCH 디자인 스타일 적용"""
+        if getattr(self, "_disabled", False):
+            faint = get_color('text_muted')
+            self.setStyleSheet(
+                f"StepButton {{ background-color: transparent; border: none;"
+                f" border-left: 4px solid transparent; border-radius: {self.ds.radius.md}px; }}"
+            )
+            self.text_label.setStyleSheet(
+                f"color: {faint}; background: transparent; border: none;"
+            )
+            self.icon_label.setStyleSheet(
+                f"color: {faint}; background: transparent; border: none;"
+            )
+            f = self.text_label.font()
+            f.setWeight(QFont.Weight.Normal)
+            self.text_label.setFont(f)
+            return
         if checked:
             # Active state - STITCH: 배경 + 왼쪽 보더 + Primary 색상
             bg = f"rgba(227, 22, 57, 0.1)"  # primary with 10% opacity
@@ -191,3 +221,9 @@ class StepNav(QFrame):
     def get_button(self, step_id: str) -> StepButton | None:
         """step_id에 해당하는 버튼 위젯 반환 (튜토리얼 하이라이트용)"""
         return self._buttons.get(step_id)
+
+    def set_step_enabled(self, step_id: str, enabled: bool):
+        """모드에 따라 특정 좌측 탭을 활성/비활성(회색+클릭 불가)한다."""
+        btn = self._buttons.get(step_id)
+        if btn is not None and hasattr(btn, "set_disabled_state"):
+            btn.set_disabled_state(not enabled)
