@@ -125,6 +125,7 @@ class SettingsManager:
         "selected_voices": [],  # List of selected voice IDs
         "gender_filter": "all",
         "output_folder": "",  # 저장 폴더 경로 (빈 문자열이면 바탕화면)
+        "launch_on_startup": True,  # Start SSMaker automatically after Windows login
         "theme": "light",  # 테마 설정 (light/dark)
         "tutorial_completed": False,  # 튜토리얼 완료 여부
         # 워터마크 설정
@@ -401,7 +402,9 @@ class SettingsManager:
         prepared = self._prepare_remote_settings_for_local(remote_settings)
         with self._lock:
             self._settings = prepared
-        return self._save_settings(sync_remote=False)
+        saved = self._save_settings(sync_remote=False)
+        self.sync_launch_on_startup()
+        return saved
 
     def push_remote_settings(self) -> bool:
         """Upload the current local settings snapshot to the authenticated account."""
@@ -577,6 +580,42 @@ class SettingsManager:
             return False
         self._settings["output_folder"] = folder_path
         return self._save_settings()
+
+    # ============ Startup Settings ============
+
+    def get_launch_on_startup(self) -> bool:
+        """Get whether SSMaker should start automatically after Windows login."""
+        return bool(self._settings.get("launch_on_startup", True))
+
+    def sync_launch_on_startup(self) -> bool:
+        """Apply the saved launch-on-startup preference to the OS."""
+        if self.settings_file != "ui_preferences.json":
+            return True
+        try:
+            from utils.autostart import sync_launch_on_startup
+
+            return sync_launch_on_startup(self.get_launch_on_startup())
+        except Exception as exc:
+            logger.warning("[SettingsManager] Launch-on-startup sync failed: %s", exc)
+            return False
+
+    def set_launch_on_startup(self, enabled: bool) -> bool:
+        """Save and immediately apply the launch-on-startup setting."""
+        with self._lock:
+            previous = bool(self._settings.get("launch_on_startup", True))
+            self._settings["launch_on_startup"] = bool(enabled)
+        saved = self._save_settings()
+        if not saved:
+            with self._lock:
+                self._settings["launch_on_startup"] = previous
+            return False
+        synced = self.sync_launch_on_startup()
+        if synced:
+            return True
+        with self._lock:
+            self._settings["launch_on_startup"] = previous
+        self._save_settings()
+        return False
 
     # ============ Theme Settings ============
 

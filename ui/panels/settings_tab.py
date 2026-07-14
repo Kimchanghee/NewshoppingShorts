@@ -318,6 +318,40 @@ class SettingsTab(QWidget, ThemedMixin):
         output_section.add_row("저장 위치", folder_container)
         gen_layout.addWidget(output_section)
 
+        # =================== SECTION: Startup ===================
+        startup_section = SettingsSection("시작 설정")
+
+        startup_container = QWidget()
+        startup_container.setStyleSheet("background: transparent; border: none;")
+        startup_layout = QVBoxLayout(startup_container)
+        startup_layout.setContentsMargins(0, 0, 0, 0)
+        startup_layout.setSpacing(ds.spacing.space_2)
+
+        self.launch_on_startup_checkbox = QCheckBox("컴퓨터를 켤 때 SSMaker 자동 실행")
+        self.launch_on_startup_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.launch_on_startup_checkbox.setStyleSheet(
+            f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
+        )
+        self.launch_on_startup_checkbox.setChecked(
+            get_settings_manager().get_launch_on_startup()
+        )
+        self.launch_on_startup_checkbox.toggled.connect(
+            self._on_launch_on_startup_toggled
+        )
+        startup_layout.addWidget(self.launch_on_startup_checkbox)
+
+        startup_desc = QLabel(
+            "켜두면 Windows 로그인 후 프로그램이 자동으로 다시 실행됩니다."
+        )
+        startup_desc.setWordWrap(True)
+        startup_desc.setStyleSheet(
+            f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px; padding-bottom: 3px;"
+        )
+        startup_layout.addWidget(startup_desc)
+
+        startup_section.add_row("자동 실행", startup_container)
+        gen_layout.addWidget(startup_section)
+
         # =================== SECTION: Work Community ===================
         self.work_community_section = SettingsSection("작업 커뮤니티")
 
@@ -1191,6 +1225,25 @@ class SettingsTab(QWidget, ThemedMixin):
         else:
             from ui.components.custom_dialog import show_warning
             show_warning(self, "알림", "저장 폴더가 설정되지 않았거나 존재하지 않습니다.")
+
+    def _on_launch_on_startup_toggled(self, checked: bool):
+        """Persist and apply the Windows launch-on-startup toggle."""
+        ok = get_settings_manager().set_launch_on_startup(bool(checked))
+        if not ok:
+            self.launch_on_startup_checkbox.blockSignals(True)
+            try:
+                self.launch_on_startup_checkbox.setChecked(
+                    get_settings_manager().get_launch_on_startup()
+                )
+            finally:
+                self.launch_on_startup_checkbox.blockSignals(False)
+            from ui.components.custom_dialog import show_warning
+
+            show_warning(
+                self,
+                "자동 실행 설정 실패",
+                "Windows 시작 프로그램 설정을 변경하지 못했습니다. 프로그램 권한 또는 보안 설정을 확인해주세요.",
+            )
 
     def _build_setup_assistant_section(self, content_layout: QVBoxLayout):
         """Build guided setup assistant section inside Settings."""
@@ -4452,6 +4505,16 @@ class SettingsTab(QWidget, ThemedMixin):
 
     def showEvent(self, event):
         super().showEvent(event)
+        try:
+            checkbox = getattr(self, "launch_on_startup_checkbox", None)
+            if checkbox is not None:
+                checkbox.blockSignals(True)
+                try:
+                    checkbox.setChecked(get_settings_manager().get_launch_on_startup())
+                finally:
+                    checkbox.blockSignals(False)
+        except Exception:
+            pass
         QTimer.singleShot(0, self.refresh_work_community_stats)
         QTimer.singleShot(0, self._refresh_setup_assistant_status)
         QTimer.singleShot(0, self._refresh_computer_use_access_ui)

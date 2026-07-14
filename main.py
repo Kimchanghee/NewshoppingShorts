@@ -447,6 +447,12 @@ def main():
     import threading
     threading.excepthook = thread_exception_handler
     AppLogger.setup(Path("logs"), level="INFO")
+    try:
+        from managers.settings_manager import get_settings_manager
+
+        get_settings_manager().sync_launch_on_startup()
+    except Exception:
+        pass
 
     # DPI awareness (must be before QApplication)
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")

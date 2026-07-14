@@ -207,6 +207,12 @@ if __name__ == "__main__":
     log_file = setup_logging()
     install_keyboardinterrupt_hook()
     logging.info("Application starting...")
+    try:
+        from managers.settings_manager import get_settings_manager
+
+        get_settings_manager().sync_launch_on_startup()
+    except Exception as exc:
+        logging.warning("Launch-on-startup sync skipped: %s", exc)
 
     app = QApplication(sys.argv)
     
