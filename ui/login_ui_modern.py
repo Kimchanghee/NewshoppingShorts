@@ -404,10 +404,10 @@ class ModernLoginUi:
         right_layout.addWidget(self.pwEdit)
         right_layout.addSpacing(4)
 
-        self.rememberCheckbox = QCheckBox(self.rightFrame)
-        self.rememberCheckbox.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
-        self.rememberCheckbox.setText("아이디 / 비밀번호 저장")
-        self.rememberCheckbox.setStyleSheet(f"""
+        login_options_layout = QHBoxLayout()
+        login_options_layout.setContentsMargins(0, 0, 0, 0)
+        login_options_layout.setSpacing(12)
+        checkbox_style = f"""
             QCheckBox {{
                 color: {login_color('text_secondary')};
                 background: transparent;
@@ -426,9 +426,23 @@ class ModernLoginUi:
             QCheckBox::indicator:hover {{
                 border-color: {login_color('primary')};
             }}
-        """)
+        """
+
+        self.rememberCheckbox = QCheckBox(self.rightFrame)
+        self.rememberCheckbox.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
+        self.rememberCheckbox.setText("아이디 / 비밀번호 저장")
+        self.rememberCheckbox.setStyleSheet(checkbox_style)
         self.rememberCheckbox.setCursor(Qt.CursorShape.PointingHandCursor)
-        right_layout.addWidget(self.rememberCheckbox)
+        login_options_layout.addWidget(self.rememberCheckbox)
+
+        self.autoLoginCheckbox = QCheckBox(self.rightFrame)
+        self.autoLoginCheckbox.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
+        self.autoLoginCheckbox.setText("자동 로그인")
+        self.autoLoginCheckbox.setStyleSheet(checkbox_style)
+        self.autoLoginCheckbox.setCursor(Qt.CursorShape.PointingHandCursor)
+        login_options_layout.addWidget(self.autoLoginCheckbox)
+        login_options_layout.addStretch(1)
+        right_layout.addLayout(login_options_layout)
 
         right_layout.addStretch(1)
 

@@ -22,6 +22,7 @@ from pathlib import Path
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
+SAVED_LOGIN_PASSWORD_KEY = "saved_login_pw"
 
 
 def _get_secrets_manager():
@@ -58,7 +59,7 @@ def _clear_saved_password(config_obj: configparser.ConfigParser) -> None:
     sm = _get_secrets_manager()
     if sm:
         try:
-            sm.store_api_key("saved_login_pw", "")
+            sm.delete_api_key(SAVED_LOGIN_PASSWORD_KEY)
         except Exception:
             pass
 
@@ -66,9 +67,45 @@ def _clear_saved_password(config_obj: configparser.ConfigParser) -> None:
         config_obj.set("User", "pw", "")
 
 
+def _load_saved_password() -> str:
+    """Return the saved login password from secure storage, if available."""
+    sm = _get_secrets_manager()
+    if not sm:
+        return ""
+    try:
+        return sm.get_api_key(SAVED_LOGIN_PASSWORD_KEY) or ""
+    except Exception as e:
+        logger.warning("Failed to load saved login password: %s", e)
+        return ""
+
+
+def _save_login_password(password: str) -> bool:
+    """Save the login password to secure storage."""
+    sm = _get_secrets_manager()
+    if not sm:
+        return False
+    try:
+        return sm.store_api_key(SAVED_LOGIN_PASSWORD_KEY, password)
+    except Exception as e:
+        logger.warning("Failed to save login password: %s", e)
+        return False
+
+
+def _delete_login_password() -> None:
+    """Delete the login password from secure storage."""
+    sm = _get_secrets_manager()
+    if not sm:
+        return
+    try:
+        sm.delete_api_key(SAVED_LOGIN_PASSWORD_KEY)
+    except Exception:
+        pass
+
+
 def userLoadInfo(self):
-    """Load saved login info (ID only)."""
+    """Load saved login info."""
     config = configparser.ConfigParser(interpolation=None)
+    self.auto_login_enabled = False
     try:
         primary_path, legacy_path = _get_info_on_paths()
         read_path: Path | None = None
@@ -81,15 +118,34 @@ def userLoadInfo(self):
         if read_path:
             config.read(str(read_path), encoding="utf-8")
             self.version = str(config.get("Config", "version", fallback="1.0.0"))
+            config_changed = False
 
             if config.get("User", "save", fallback="f") == "t":
                 self.idEdit.setText(config.get("User", "id", fallback=""))
-                self.pwEdit.setText("")
-                _clear_saved_password(config)
+
+                legacy_pw = config.get("User", "pw", fallback="")
+                saved_pw = _load_saved_password()
+                if not saved_pw and legacy_pw:
+                    if _save_login_password(legacy_pw):
+                        saved_pw = legacy_pw
+                    config.set("User", "pw", "")
+                    config_changed = True
+
+                self.pwEdit.setText(saved_pw)
                 if hasattr(self, "rememberCheckbox"):
                     self.rememberCheckbox.setChecked(True)
                 elif hasattr(self, "idpw_checkbox"):
                     self.idpw_checkbox.setChecked(True)
+
+                auto_login = config.get("User", "auto_login", fallback="f") == "t"
+                self.auto_login_enabled = bool(auto_login and saved_pw and self.idEdit.text())
+                if hasattr(self, "autoLoginCheckbox"):
+                    self.autoLoginCheckbox.setChecked(self.auto_login_enabled)
+            else:
+                _delete_login_password()
+                if config.has_section("User") and config.get("User", "pw", fallback=""):
+                    config.set("User", "pw", "")
+                    config_changed = True
 
             # If we loaded from legacy, persist migrated content to primary.
             if read_path == legacy_path and legacy_path != primary_path:
@@ -99,7 +155,7 @@ def userLoadInfo(self):
                         config.write(f)
                 except Exception as e:
                     logger.warning("Failed to persist migrated info.on to primary path: %s", e)
-            elif read_path == primary_path:
+            elif read_path == primary_path and config_changed:
                 # Persist cleanup of password remnants.
                 try:
                     with open(str(primary_path), "w", encoding="utf-8") as f:
@@ -110,22 +166,37 @@ def userLoadInfo(self):
         logger.warning("Failed to load user info: %s", e)
 
 
-def userSaveInfo(self, checkState, loginid, loginpw, version="1.0.0"):
-    """Save login info (ID only)."""
+def userSaveInfo(self, checkState, loginid, loginpw, version="1.0.0", autoLogin=False):
+    """Save login info and optional auto-login preference."""
     config = configparser.ConfigParser(interpolation=None)
+    password_saved = False
     if checkState:
-        config["User"] = {"id": loginid, "pw": "", "save": "t"}
+        if loginpw:
+            password_saved = _save_login_password(loginpw)
+        if not password_saved:
+            _delete_login_password()
+        config["User"] = {
+            "id": loginid,
+            "pw": "",
+            "save": "t",
+            "auto_login": "t" if autoLogin and password_saved else "f",
+        }
     else:
-        config["User"] = {"id": "", "pw": "", "save": "f"}
+        _delete_login_password()
+        config["User"] = {"id": "", "pw": "", "save": "f", "auto_login": "f"}
 
-    _clear_saved_password(config)
     config["Config"] = {"version": version}
     try:
         primary_path, _legacy_path = _get_info_on_paths()
         primary_path.parent.mkdir(parents=True, exist_ok=True)
         with open(str(primary_path), "w", encoding="utf-8") as f:
             config.write(f)
-        logger.info("User info saved: remember=%s", checkState)
+        logger.info(
+            "User info saved: remember=%s auto_login=%s password_saved=%s",
+            checkState,
+            autoLogin,
+            password_saved,
+        )
     except Exception as e:
         logger.warning("Failed to save user info: %s", e)
     return loginid, loginpw

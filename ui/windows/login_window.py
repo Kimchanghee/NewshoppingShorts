@@ -41,12 +41,14 @@ class Login(QMainWindow, Ui_LoginWindow):
         self.oldPos: Optional[QPoint] = None
         self.serverSocket: Optional[socket.socket] = None
         self.server_port: Optional[int] = None
+        self.auto_login_enabled = False
         
         if self.setPort():
             self.setupUi(self)
             self.setFixedSize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
             self._apply_version_label()
             ui_controller.userLoadInfo(self)
+            self._connect_login_option_controls()
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
             
             # Connect signals
@@ -57,6 +59,7 @@ class Login(QMainWindow, Ui_LoginWindow):
             
             self._preload_ip()
             self._warmup_server()
+            QtCore.QTimer.singleShot(450, self._attempt_auto_login)
         else:
             raise RuntimeError("이미 실행 중이거나 단일 실행 포트를 사용할 수 없습니다.")
 
@@ -175,6 +178,32 @@ class Login(QMainWindow, Ui_LoginWindow):
         # abrupt app termination where logout was not sent.
         threading.Thread(target=rest.cleanup_local_session, daemon=True).start()
 
+    def _connect_login_option_controls(self) -> None:
+        if hasattr(self, "autoLoginCheckbox"):
+            self.autoLoginCheckbox.toggled.connect(self._on_auto_login_toggled)
+        if hasattr(self, "rememberCheckbox"):
+            self.rememberCheckbox.toggled.connect(self._on_remember_login_toggled)
+
+    def _on_auto_login_toggled(self, checked: bool) -> None:
+        if checked and hasattr(self, "rememberCheckbox"):
+            self.rememberCheckbox.setChecked(True)
+
+    def _on_remember_login_toggled(self, checked: bool) -> None:
+        if not checked and hasattr(self, "autoLoginCheckbox"):
+            self.autoLoginCheckbox.setChecked(False)
+
+    def _attempt_auto_login(self) -> None:
+        if not getattr(self, "auto_login_enabled", False):
+            return
+        if hasattr(self, "autoLoginCheckbox") and not self.autoLoginCheckbox.isChecked():
+            return
+        if not self.idEdit.text().strip() or not self.pwEdit.text():
+            return
+
+        logger.info("Attempting saved auto login")
+        self.loginButton.setText("자동 로그인 중...")
+        self._loginCheck()
+
     def _get_local_ip(self) -> str:
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
@@ -203,14 +232,18 @@ class Login(QMainWindow, Ui_LoginWindow):
                 )
                 if reply and not force:
                     self._loginCheck(force=True)
+                else:
+                    self.loginButton.setText("로그인")
             else:
                 # Use friendly message converter
                 error_msg = rest._friendly_login_message(res)
                 logger.warning(f"Login failed: {error_msg} (status={res.get('status')})")
                 self.showCustomMessageBox("로그인 실패", error_msg)
+                self.loginButton.setText("로그인")
         except Exception as e:
             logger.error(f"Login exception: {str(e)}", exc_info=True)
             self.showCustomMessageBox("오류", "로그인 처리 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.")
+            self.loginButton.setText("로그인")
 
     def _handle_login_success(self, res):
         # 로그인 정보 저장 처리
@@ -219,12 +252,16 @@ class Login(QMainWindow, Ui_LoginWindow):
             remember = self.rememberCheckbox.isChecked()
         elif hasattr(self, 'idpw_checkbox'):
             remember = self.idpw_checkbox.isChecked()
+        auto_login = False
+        if hasattr(self, 'autoLoginCheckbox'):
+            auto_login = self.autoLoginCheckbox.isChecked()
         
         ui_controller.userSaveInfo(
             self,
             checkState=remember,
             loginid=self.idEdit.text(),
-            loginpw=self.pwEdit.text()
+            loginpw=self.pwEdit.text(),
+            autoLogin=auto_login,
         )
         
         # Notify controller or app
