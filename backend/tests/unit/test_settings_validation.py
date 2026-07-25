@@ -57,3 +57,12 @@ def test_production_accepts_valid_configuration():
 
     settings = Settings(**kwargs)
     assert settings.ENVIRONMENT == "production"
+
+
+def test_database_url_does_not_require_legacy_mysql_credentials():
+    settings = Settings(
+        DATABASE_URL="postgresql://user:password@db.example.supabase.co:5432/postgres",
+        JWT_SECRET_KEY="a" * 64,
+    )
+
+    assert settings.DATABASE_URL.startswith("postgresql://")

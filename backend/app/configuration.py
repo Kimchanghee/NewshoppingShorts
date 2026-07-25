@@ -15,8 +15,10 @@ class Settings(BaseSettings):
     DATABASE_URL: str = ""
     DB_HOST: str = "127.0.0.1"  # Default for local, ignored when using Cloud SQL socket
     DB_PORT: int = 3306
-    DB_USER: str
-    DB_PASSWORD: str
+    # A managed PostgreSQL URL (for example, Supabase) does not need the
+    # legacy MySQL credential fields.
+    DB_USER: str = ""
+    DB_PASSWORD: str = ""
     DB_NAME: str = "ssmaker_auth"
 
     # Cloud SQL Unix Socket (for Cloud Run deployment)
@@ -159,6 +161,12 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_requirements(self):
+        if not (self.DATABASE_URL or "").strip():
+            if not (self.DB_USER or "").strip() or not (self.DB_PASSWORD or "").strip():
+                raise ValueError(
+                    "Set DATABASE_URL, or set both DB_USER and DB_PASSWORD for legacy MySQL"
+                )
+
         env = (self.ENVIRONMENT or "development").lower().strip()
         if env != "production":
             return self

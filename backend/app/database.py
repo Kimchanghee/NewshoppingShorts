@@ -1,5 +1,6 @@
 import logging
 from sqlalchemy import create_engine, URL
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.configuration import get_settings
@@ -10,32 +11,50 @@ settings = get_settings()
 # Connection pool configuration
 # Using URL.create() instead of f-string to prevent password from appearing in stack traces
 
-# A standard connection URL lets the same service run on serverless platforms
-# that cannot mount Cloud Run's /cloudsql Unix socket.
-if settings.DATABASE_URL:
-    DATABASE_URL = settings.DATABASE_URL
-# Cloud Run uses Unix socket for Cloud SQL connection
-elif settings.CLOUD_SQL_CONNECTION_NAME:
-    # Unix socket path for Cloud Run
-    unix_socket_path = f"/cloudsql/{settings.CLOUD_SQL_CONNECTION_NAME}"
-    DATABASE_URL = URL.create(
-        "mysql+pymysql",
-        username=settings.DB_USER,
-        password=settings.DB_PASSWORD,
-        database=settings.DB_NAME,
-        query={"unix_socket": unix_socket_path, "charset": "utf8mb4"}
-    )
-else:
-    # TCP connection for local development
-    DATABASE_URL = URL.create(
+def _database_url_from_settings():
+    """Return a database URL for Supabase PostgreSQL or legacy MySQL."""
+    if settings.DATABASE_URL:
+        raw_url = settings.DATABASE_URL.strip()
+        if raw_url.startswith("postgres://"):
+            raw_url = raw_url.replace("postgres://", "postgresql://", 1)
+        if raw_url.startswith("postgresql://"):
+            raw_url = raw_url.replace("postgresql://", "postgresql+psycopg://", 1)
+
+        url = make_url(raw_url)
+        if url.get_backend_name() == "postgresql" and "sslmode" not in url.query:
+            url = url.update_query_dict({"sslmode": "require"})
+        return url
+
+    if settings.CLOUD_SQL_CONNECTION_NAME:
+        return URL.create(
+            "mysql+pymysql",
+            username=settings.DB_USER,
+            password=settings.DB_PASSWORD,
+            database=settings.DB_NAME,
+            query={
+                "unix_socket": f"/cloudsql/{settings.CLOUD_SQL_CONNECTION_NAME}",
+                "charset": "utf8mb4",
+            },
+        )
+
+    return URL.create(
         "mysql+pymysql",
         username=settings.DB_USER,
         password=settings.DB_PASSWORD,
         host=settings.DB_HOST,
         port=settings.DB_PORT,
         database=settings.DB_NAME,
-        query={"charset": "utf8mb4"}
+        query={"charset": "utf8mb4"},
     )
+
+
+DATABASE_URL = _database_url_from_settings()
+
+connect_args = {}
+if DATABASE_URL.get_backend_name() == "postgresql":
+    # Supabase's PgBouncer pooler can reuse prepared-statement names across
+    # logical sessions; disable psycopg's automatic prepare cache.
+    connect_args["prepare_threshold"] = None
 
 engine = create_engine(
     DATABASE_URL,
@@ -43,6 +62,7 @@ engine = create_engine(
     max_overflow=10,  # Extra connections when pool full
     pool_pre_ping=True,  # Verify connections before use
     pool_recycle=3600,  # Recycle connections every hour
+    connect_args=connect_args,
     echo=False,  # Set True for SQL logging
 )
 
