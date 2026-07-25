@@ -10,8 +10,12 @@ settings = get_settings()
 # Connection pool configuration
 # Using URL.create() instead of f-string to prevent password from appearing in stack traces
 
+# A standard connection URL lets the same service run on serverless platforms
+# that cannot mount Cloud Run's /cloudsql Unix socket.
+if settings.DATABASE_URL:
+    DATABASE_URL = settings.DATABASE_URL
 # Cloud Run uses Unix socket for Cloud SQL connection
-if settings.CLOUD_SQL_CONNECTION_NAME:
+elif settings.CLOUD_SQL_CONNECTION_NAME:
     # Unix socket path for Cloud Run
     unix_socket_path = f"/cloudsql/{settings.CLOUD_SQL_CONNECTION_NAME}"
     DATABASE_URL = URL.create(

@@ -10,6 +10,9 @@ logger = logging.getLogger(__name__)
 
 class Settings(BaseSettings):
     # Database
+    # Preferred for serverless platforms (for example, a managed MySQL URL).
+    # When omitted, the legacy Cloud SQL socket/TCP configuration is used.
+    DATABASE_URL: str = ""
     DB_HOST: str = "127.0.0.1"  # Default for local, ignored when using Cloud SQL socket
     DB_PORT: int = 3306
     DB_USER: str
