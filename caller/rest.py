@@ -45,6 +45,37 @@ _DEPRECATED_404_API_SERVER_URLS = {
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
     "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
 }
+_DEPLOYMENT_DISABLED_MARKERS = (
+    "deployment_disabled",
+    "deployment disabled",
+)
+
+
+def _is_deployment_disabled_response(response: requests.Response) -> bool:
+    """Return whether a hosting provider disabled this deployment for billing.
+
+    Vercel responds with HTTP 402 and a ``DEPLOYMENT_DISABLED`` body when a
+    project is suspended.  Treating that as a generic network error makes both
+    login and registration look like an end-user problem.
+    """
+    if getattr(response, "status_code", None) != 402:
+        return False
+    body = str(getattr(response, "text", "") or "").lower()
+    return any(marker in body for marker in _DEPLOYMENT_DISABLED_MARKERS)
+
+
+def _should_try_next_auth_server(response: requests.Response) -> bool:
+    """Return whether an auth host is stale or unavailable and can be skipped."""
+    status_code = getattr(response, "status_code", 0)
+    return status_code == 404 or status_code >= 500 or _is_deployment_disabled_response(response)
+
+
+def _deployment_disabled_message() -> str:
+    """Safe, actionable message for a suspended authentication deployment."""
+    return (
+        "인증 서버 배포가 결제 제한으로 중지되어 로그인/회원가입을 처리할 수 없습니다. "
+        "관리자에게 서버 결제 상태를 확인해 달라고 요청해주세요."
+    )
 
 
 def _normalize_server_url(raw: str) -> str:
@@ -475,6 +506,7 @@ def _friendly_login_message(login_object: Dict[str, Any]) -> str:
     Convert server/login payload into a user-friendly Korean message.
     """
     status = login_object.get("status")
+    http_status = login_object.get("http_status")
     raw_message = str(login_object.get("message") or "").strip()
     error_code, error_message, request_id = _extract_error_fields(login_object)
 
@@ -487,6 +519,10 @@ def _friendly_login_message(login_object: Dict[str, Any]) -> str:
         "RATE_LIMIT_ERROR": "요청이 너무 많습니다. 잠시 후 다시 시도해주세요.",
         "INTERNAL_ERROR": "서버 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
     }
+    if http_status == 402 and any(
+        marker in raw_message.lower() for marker in _DEPLOYMENT_DISABLED_MARKERS
+    ):
+        return _deployment_disabled_message()
     if error_code in backend_error_map:
         return _append_request_id(backend_error_map[error_code], request_id)
 
@@ -643,11 +679,10 @@ def login(**data) -> Dict[str, Any]:
                 f"[Login] Response received in {elapsed:.2f}s, Status: {attempted_response.status_code}"
             )
 
-            # Retry fallback endpoints when this host is stale/misrouted (404)
-            # or temporarily unavailable (5xx).
+            # Retry fallback endpoints when this host is stale/misrouted (404),
+            # unavailable (5xx), or disabled by its hosting provider (402).
             if (
-                attempted_response.status_code == 404
-                or attempted_response.status_code >= 500
+                _should_try_next_auth_server(attempted_response)
             ) and idx < len(candidate_servers) - 1:
                 logger.warning(
                     "[Login] Server returned %s at %s. Trying fallback endpoint.",
@@ -663,6 +698,13 @@ def login(**data) -> Dict[str, Any]:
 
         if response is None:
             return {"status": "error", "message": _ERROR_MESSAGES["network"]}
+
+        if _is_deployment_disabled_response(response):
+            return {
+                "status": "error",
+                "http_status": 402,
+                "message": _deployment_disabled_message(),
+            }
 
         # Raw response logged at TRACE level only (contains token)
         logger.debug("[Login] Raw response received (length=%d)", len(response.text))
@@ -1078,10 +1120,7 @@ def submitRegistrationRequest(
                     continue
                 raise
 
-            if (
-                attempted_response.status_code == 404
-                or attempted_response.status_code >= 500
-            ) and idx < len(candidate_servers) - 1:
+            if _should_try_next_auth_server(attempted_response) and idx < len(candidate_servers) - 1:
                 logger.warning(
                     "Registration endpoint returned %s at %s. Trying fallback endpoint.",
                     attempted_response.status_code,
@@ -1098,6 +1137,13 @@ def submitRegistrationRequest(
             return {"success": False, "message": _ERROR_MESSAGES["network"]}
 
         logger.info(f"Registration response status: {response.status_code}")
+
+        if _is_deployment_disabled_response(response):
+            return {
+                "success": False,
+                "http_status": 402,
+                "message": _deployment_disabled_message(),
+            }
 
         if response.status_code == 409:
             # Username already exists

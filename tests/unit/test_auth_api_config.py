@@ -80,6 +80,76 @@ def test_login_retries_stale_404_endpoint(monkeypatch):
     assert result["status"] is False
 
 
+def test_login_retries_deployment_disabled_402_endpoint(monkeypatch):
+    import caller.rest as rest
+
+    calls = []
+
+    class FakeResponse:
+        def __init__(self, status_code, text):
+            self.status_code = status_code
+            self.text = text
+
+    class FakeSession:
+        def post(self, url, json, timeout):
+            calls.append(url)
+            if len(calls) == 1:
+                return FakeResponse(402, "Payment required\n\nDEPLOYMENT_DISABLED")
+            return FakeResponse(200, '{"status": false, "message": "bad password"}')
+
+    fallback = "https://fallback.example.com"
+    monkeypatch.setattr(rest, "_check_https_security", lambda: True)
+    monkeypatch.setattr(rest, "_secure_session", FakeSession())
+    monkeypatch.setattr(rest, "main_server", "https://disabled.example.com")
+    monkeypatch.delenv("USER_DASHBOARD_API_URL", raising=False)
+    monkeypatch.setenv("API_SERVER_URL_FALLBACK", fallback)
+
+    result = rest.login(
+        userId="sstale_client",
+        userPw="Password123",
+        key="",
+        ip="127.0.0.1",
+        force=False,
+    )
+
+    assert calls == [
+        "https://disabled.example.com/user/login/god",
+        f"{fallback}/user/login/god",
+    ]
+    assert rest.main_server == fallback
+    assert result["status"] is False
+
+
+def test_login_reports_deployment_disabled_402(monkeypatch):
+    import caller.rest as rest
+
+    class FakeResponse:
+        status_code = 402
+        text = "Payment required\n\nDEPLOYMENT_DISABLED"
+
+    class FakeSession:
+        def post(self, url, json, timeout):
+            return FakeResponse()
+
+    monkeypatch.setattr(rest, "_check_https_security", lambda: True)
+    monkeypatch.setattr(rest, "_secure_session", FakeSession())
+    monkeypatch.setattr(rest, "main_server", "https://disabled.example.com")
+    monkeypatch.delenv("USER_DASHBOARD_API_URL", raising=False)
+    monkeypatch.setenv("API_SERVER_URL_FALLBACK", "https://disabled.example.com")
+
+    result = rest.login(
+        userId="sstest_client",
+        userPw="Password123",
+        key="",
+        ip="127.0.0.1",
+        force=False,
+    )
+
+    assert result["status"] == "error"
+    assert result["http_status"] == 402
+    assert "결제 제한" in result["message"]
+
+
 def test_registration_request_sends_ssmaker_program_type(monkeypatch):
     import caller.rest as rest
 
@@ -164,3 +234,33 @@ def test_registration_retries_stale_404_endpoint(monkeypatch):
     ]
     assert rest.main_server == EXPECTED_API_URL
     assert result["success"] is True
+
+
+def test_registration_reports_deployment_disabled_402(monkeypatch):
+    import caller.rest as rest
+
+    class FakeResponse:
+        status_code = 402
+        text = "Payment required\n\nDEPLOYMENT_DISABLED"
+
+    class FakeSession:
+        def post(self, url, json, timeout):
+            return FakeResponse()
+
+    monkeypatch.setattr(rest, "_check_https_security", lambda: True)
+    monkeypatch.setattr(rest, "_secure_session", FakeSession())
+    monkeypatch.setattr(rest, "main_server", "https://disabled.example.com")
+    monkeypatch.delenv("USER_DASHBOARD_API_URL", raising=False)
+    monkeypatch.setenv("API_SERVER_URL_FALLBACK", "https://disabled.example.com")
+
+    result = rest.submitRegistrationRequest(
+        "Tester",
+        "sstest_client",
+        "Password123",
+        "010-1234-5678",
+        "tester@example.com",
+    )
+
+    assert result["success"] is False
+    assert result["http_status"] == 402
+    assert "결제 제한" in result["message"]
