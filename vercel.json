@@ -2,10 +2,11 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "pip install --no-cache-dir -r backend/requirements.txt",
   "functions": {
-    "api/index.py": {
-      "maxDuration": 60,
-      "excludeFiles": "{tests/**,backend/tests/**,build/**,build_candidate/**,dist/**,faster_whisper_models/**,output/**,resource/**,screenshots/**,tts_output/**,venv*/**}"
-    }
+      "api/index.py": {
+        "maxDuration": 60,
+        "includeFiles": "backend/**",
+        "excludeFiles": "{tests/**,backend/tests/**,build/**,build_candidate/**,dist/**,faster_whisper_models/**,output/**,resource/**,screenshots/**,tts_output/**,venv*/**}"
+      }
   },
   "rewrites": [
     {
