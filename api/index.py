@@ -1,6 +1,12 @@
 """Vercel ASGI entrypoint for the SSMaker authentication API."""
 
-# `app` is installed from the repository through api/requirements.txt.
-# This keeps the Vercel function self-contained even when a direct deployment
-# tool uploads only files below `api/`.
+import sys
+from pathlib import Path
+
+
+# vercel.json bundles backend/** with this function. Import the application
+# directly so deployments do not depend on a cached Git branch dependency.
+BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
+sys.path.insert(0, str(BACKEND_DIR))
+
 from app.main import app
