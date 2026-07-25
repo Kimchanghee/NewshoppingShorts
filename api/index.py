@@ -1,11 +1,6 @@
 """Vercel ASGI entrypoint for the SSMaker authentication API."""
 
-from pathlib import Path
-import sys
-
-
-BACKEND_DIR = Path(__file__).resolve().parents[1] / "backend"
-if str(BACKEND_DIR) not in sys.path:
-    sys.path.insert(0, str(BACKEND_DIR))
-
-from app.main import app  # noqa: E402
+# `app` is installed from the repository through api/requirements.txt.
+# This keeps the Vercel function self-contained even when a direct deployment
+# tool uploads only files below `api/`.
+from app.main import app
