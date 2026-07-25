@@ -1,4 +1,5 @@
 import logging
+import os
 from sqlalchemy import create_engine, URL
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.declarative import declarative_base
@@ -13,8 +14,8 @@ settings = get_settings()
 
 def _database_url_from_settings():
     """Return a database URL for Supabase PostgreSQL or legacy MySQL."""
-    if settings.DATABASE_URL:
-        raw_url = settings.DATABASE_URL.strip()
+    raw_url = (settings.DATABASE_URL or os.getenv("POSTGRES_URL", "")).strip()
+    if raw_url:
         if raw_url.startswith("postgres://"):
             raw_url = raw_url.replace("postgres://", "postgresql://", 1)
         if raw_url.startswith("postgresql://"):

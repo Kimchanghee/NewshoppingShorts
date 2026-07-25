@@ -1,4 +1,5 @@
 import logging
+import os
 from pydantic_settings import BaseSettings
 from pydantic import field_validator, model_validator
 from functools import lru_cache
@@ -161,7 +162,8 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_production_requirements(self):
-        if not (self.DATABASE_URL or "").strip():
+        database_url = (self.DATABASE_URL or os.getenv("POSTGRES_URL", "")).strip()
+        if not database_url:
             if not (self.DB_USER or "").strip() or not (self.DB_PASSWORD or "").strip():
                 raise ValueError(
                     "Set DATABASE_URL, or set both DB_USER and DB_PASSWORD for legacy MySQL"
