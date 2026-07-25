@@ -1,3 +1,3 @@
 # The direct Vercel deployment uploads the `api/` function tree. Install the
 # backend package from the public repository into this function environment.
-git+https://github.com/Kimchanghee/NewshoppingShorts.git@main#subdirectory=backend
+ssmaker-auth-api @ git+https://github.com/Kimchanghee/NewshoppingShorts.git@main#subdirectory=backend
