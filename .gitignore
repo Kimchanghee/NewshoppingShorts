@@ -93,6 +93,7 @@ fonts/
 # IDE
 .vscode/
 .idea/
+.vercel/
 *.sublime-*
 
 # OS

@@ -540,13 +540,13 @@ app.add_middleware(
     ],
 )
 
-# Ensure static directory exists before mounting
+# Vercel's function filesystem is read-only. Static assets are optional for the
+# desktop authentication flow, so only mount them when they were bundled.
 static_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "static")
-if not os.path.exists(static_dir):
-    os.makedirs(static_dir, exist_ok=True)
-    logger.info(f"Created missing static directory at {static_dir}")
-
-app.mount("/static", StaticFiles(directory=static_dir), name="static")
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+else:
+    logger.info("Static directory is not bundled; skipping /static mount")
 
 @app.get("/")
 async def root():
