@@ -137,12 +137,14 @@ def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tupl
         "Write-Output (($sig.Status.ToString().ToLower()) + '|' + $thumb)"
     )
     try:
+        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
             capture_output=True,
             text=True,
             timeout=20,
             check=False,
+            creationflags=creation_flags,
         )
     except Exception as e:
         return False, f"Signature check invocation failed: {e}"

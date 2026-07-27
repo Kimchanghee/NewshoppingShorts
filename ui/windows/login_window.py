@@ -40,6 +40,7 @@ class Login(QMainWindow, Ui_LoginWindow):
         self.setWindowIcon(QIcon("resource/trayIcon.png"))
         self.oldPos: Optional[QPoint] = None
         self.serverSocket: Optional[socket.socket] = None
+        self.serverSockets: list[socket.socket] = []
         self.server_port: Optional[int] = None
         self.auto_login_enabled = False
         
@@ -99,8 +100,11 @@ class Login(QMainWindow, Ui_LoginWindow):
 
     def _fallback_port(self) -> int:
         """
-        Deterministic fallback port for single-instance lock.
-        Prevents fixed-port collisions with unrelated local apps.
+        Deterministic app-specific port for single-instance lock.
+
+        This must be tried before the legacy default port. If the default port
+        is tried first, a second app launch can skip to this port and start a
+        duplicate instance when the first launch owns the default port.
         """
         seed = f"{os.path.expanduser('~')}|{os.path.abspath(sys.argv[0])}|ssmaker"
         digest = hashlib.sha256(seed.encode("utf-8")).hexdigest()
@@ -126,14 +130,15 @@ class Login(QMainWindow, Ui_LoginWindow):
             else:
                 default_port = int(DEFAULT_PROCESS_PORT)
                 fallback_port = self._fallback_port()
-                ports_to_try = [default_port]
+                ports_to_try = [fallback_port]
                 if fallback_port != default_port:
-                    ports_to_try.append(fallback_port)
+                    ports_to_try.append(default_port)
         except ValueError as e:
             logger.error(f"Invalid SSMAKER_PORT value: {e}")
             return False
 
         last_error: Optional[OSError] = None
+        bound_sockets: list[socket.socket] = []
 
         for index, port in enumerate(ports_to_try):
             sock: Optional[socket.socket] = None
@@ -142,18 +147,15 @@ class Login(QMainWindow, Ui_LoginWindow):
                 self._configure_single_instance_socket(sock)
                 sock.bind(("127.0.0.1", port))
                 sock.listen(1)
-                self.serverSocket = sock
-                self.server_port = port
+                bound_sockets.append(sock)
 
                 if index > 0:
                     logger.info(
-                        "Default single-instance port %s is busy; using fallback port %s",
-                        ports_to_try[0],
+                        "Additional single-instance guard bound to legacy port %s",
                         port,
                     )
                 else:
                     logger.info(f"Server socket bound to port {port}")
-                return True
             except OSError as e:
                 last_error = e
                 if sock:
@@ -161,6 +163,24 @@ class Login(QMainWindow, Ui_LoginWindow):
                         sock.close()
                     except OSError:
                         pass
+                for bound in bound_sockets:
+                    try:
+                        bound.close()
+                    except OSError:
+                        pass
+                bound_sockets.clear()
+                logger.warning(
+                    "Single-instance port %s is already in use or unavailable: %s",
+                    port,
+                    e,
+                )
+                return False
+
+        if bound_sockets:
+            self.serverSockets = bound_sockets
+            self.serverSocket = bound_sockets[0]
+            self.server_port = ports_to_try[0]
+            return True
 
         logger.warning(
             "Failed to bind single-instance socket (attempted_ports=%s): %s",
@@ -211,7 +231,19 @@ class Login(QMainWindow, Ui_LoginWindow):
                 return s.getsockname()[0]
         except (OSError, socket.error) as e:
             logger.warning(f"Failed to get local IP: {e}")
-            return "127.0.0.1"  # Fallback IP
+        return "127.0.0.1"  # Fallback IP
+
+    def _close_single_instance_sockets(self) -> None:
+        sockets = list(getattr(self, "serverSockets", []) or [])
+        if self.serverSocket and self.serverSocket not in sockets:
+            sockets.append(self.serverSocket)
+        for sock in sockets:
+            try:
+                sock.close()
+            except OSError:
+                pass
+        self.serverSockets = []
+        self.serverSocket = None
 
     def _loginCheck(self, force: bool = False):
         user_id = self.idEdit.text()
@@ -306,19 +338,11 @@ class Login(QMainWindow, Ui_LoginWindow):
         self.showCustomMessageBox("가입 완료", "회원가입이 완료되었습니다.\n로그인 버튼을 눌러주세요.")
 
     def _closeWindow(self):
-        if self.serverSocket:
-            try:
-                self.serverSocket.close()
-            finally:
-                self.serverSocket = None
+        self._close_single_instance_sockets()
         QApplication.quit()
 
     def closeEvent(self, event):
-        if self.serverSocket:
-            try:
-                self.serverSocket.close()
-            finally:
-                self.serverSocket = None
+        self._close_single_instance_sockets()
         super().closeEvent(event)
 
     def keyPressEvent(self, event):

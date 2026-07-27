@@ -27,7 +27,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # ?袁⑹삺 ??甕곌쑴??(??슢諭?????揶쏅?????낅쑓??꾨뱜)
-CURRENT_VERSION = "1.4.24"
+CURRENT_VERSION = "1.5.43"
 
 # 甕곌쑴???類ㅼ뵥 API ?遺얜굡?????
 _DEFAULT_UPDATE_BASE_URL = (
@@ -74,11 +74,12 @@ def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tupl
         "[PSCustomObject]@{Status=[string]$sig.Status; Thumbprint=[string]$thumb} | ConvertTo-Json -Compress"
     )
     proc = subprocess.run(
-        ["powershell", "-NoProfile", "-Command", ps_script],
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
         capture_output=True,
         text=True,
         timeout=20,
         check=False,
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "").strip()

@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import QEasingCurve, QPropertyAnimation, QTimer, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import QApplication, QLabel, QProgressBar, QVBoxLayout, QWidget
 
@@ -31,10 +31,6 @@ class AnimatedLogo(QLabel):
             "background-color: #E31639; color: white; border: 1px solid #F1A5B5; border-radius: 36px;"
         )
 
-        self.pulse_timer = QTimer(self)
-        self.pulse_timer.timeout.connect(self._animate_pulse)
-        self.pulse_timer.start(60)
-
     def _animate_pulse(self):
         self._pulse += 0.06 * self.pulse_direction
         if self._pulse >= 1.0:
@@ -56,10 +52,6 @@ class GradientWidget(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.gradient_offset = 0.0
-
-        self.shimmer_timer = QTimer(self)
-        self.shimmer_timer.timeout.connect(self._animate_shimmer)
-        self.shimmer_timer.start(40)
 
     def _animate_shimmer(self):
         self.gradient_offset = (self.gradient_offset + 0.005) % 1.0
@@ -120,9 +112,6 @@ class StartupSplash(QWidget):
         self._setup_ui()
         self._center_on_screen()
 
-        self.dot_timer = QTimer(self)
-        self.dot_timer.timeout.connect(self._update_dots)
-        self.dot_timer.start(400)
         self._dot_count = 0
 
     def _load_fonts(self):
@@ -261,8 +250,7 @@ class StartupSplash(QWidget):
         self.move((screen.width() - self.width()) // 2, (screen.height() - self.height()) // 2)
 
     def _update_dots(self):
-        self._dot_count = (self._dot_count + 1) % 4
-        self.status_label.setText(self._status_text.rstrip(".") + "." * self._dot_count)
+        self.status_label.setText(self._status_text)
 
     def set_status(self, text):
         """Update status text (maintains backward compatibility)."""
@@ -276,13 +264,6 @@ class StartupSplash(QWidget):
             self.percent_label.setText(f"{value}%")
 
     def showEvent(self, event):
-        """Fade-in animation when splash is shown."""
+        """Show splash without opacity animation to avoid visible flicker."""
         super().showEvent(event)
-        self.setWindowOpacity(0)
-
-        self.fade_in = QPropertyAnimation(self, b"windowOpacity")
-        self.fade_in.setDuration(400)
-        self.fade_in.setStartValue(0.0)
-        self.fade_in.setEndValue(1.0)
-        self.fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self.fade_in.start()
+        self.setWindowOpacity(1)

@@ -8,7 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QProgressBar,
     QPushButton, QApplication, QScrollArea, QTextEdit
 )
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QPropertyAnimation, QEasingCurve
+from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from ui.theme_manager import get_theme_manager
@@ -33,15 +33,9 @@ def _build_colors():
 
 
 def _fade_in(widget):
-    """Apply standard fade-in animation to a widget."""
-    widget.setWindowOpacity(0)
-    anim = QPropertyAnimation(widget, b"windowOpacity")
-    anim.setDuration(300)
-    anim.setStartValue(0.0)
-    anim.setEndValue(1.0)
-    anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-    anim.start()
-    return anim
+    """Show dialogs without opacity animation to avoid visible flicker."""
+    widget.setWindowOpacity(1)
+    return None
 
 
 def _center_widget(widget):
@@ -277,9 +271,7 @@ class UpdateProgressDialog(QWidget):
         self._setup_ui()
         _center_widget(self)
 
-        self.dot_timer = QTimer(self)
-        self.dot_timer.timeout.connect(self._update_dots)
-        self.dot_timer.start(400)
+        self.dot_timer = None
 
     def _setup_window(self):
         _setup_frameless_window(self)
@@ -388,7 +380,8 @@ class UpdateProgressDialog(QWidget):
             self._status_text = "거의 완료"
         else:
             self._status_text = "설치 준비 중"
-            self.dot_timer.stop()
+            if self.dot_timer is not None:
+                self.dot_timer.stop()
             self.status_label.setText(self._status_text + "...")
 
     def set_status(self, text: str):
@@ -398,15 +391,15 @@ class UpdateProgressDialog(QWidget):
     # ── Internal ──
 
     def _update_dots(self):
-        self._dot_count = (self._dot_count % 3) + 1  # cycles 1, 2, 3
-        self.status_label.setText(self._status_text + "." * self._dot_count)
+        self.status_label.setText(self._status_text)
 
     def showEvent(self, event):
         super().showEvent(event)
         self._fade_anim = _fade_in(self)
 
     def closeEvent(self, event):
-        self.dot_timer.stop()
+        if self.dot_timer is not None:
+            self.dot_timer.stop()
         super().closeEvent(event)
 
 

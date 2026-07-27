@@ -4,7 +4,7 @@ Progress Panel for PyQt6 - Dark Mode Design
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, QWidget, QScrollArea
 )
-from PyQt6.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt
 from ui.components.base_widget import ThemedMixin
 from ui.design_system_v2 import get_design_system, get_color, is_dark_mode
 
@@ -319,16 +319,15 @@ class ProgressPanel(QFrame, ThemedMixin):
     # Blink effect for active step
     # -----------------------------------------------------------------
     def start_blink(self, step_key):
-        """Start blinking the active step indicator"""
-        if self._blink_step == step_key and self._blink_timer is not None:
-            return  # already blinking this step
-
+        """Mark the active step without running a blinking timer."""
         self.stop_blink()
         self._blink_step = step_key
         self._blink_visible = True
-        self._blink_timer = QTimer(self)
-        self._blink_timer.timeout.connect(self._on_blink_tick)
-        self._blink_timer.start(500)
+
+        indicator = self.gui.step_indicators.get(step_key)
+        if indicator:
+            indicator['status_label'].setText("●")
+            indicator['status_label'].setStyleSheet("font-size: 9px; color: #FACC15; font-weight: bold;")
 
     def stop_blink(self):
         """Stop blinking - do NOT restore icon (caller will set correct status)"""
