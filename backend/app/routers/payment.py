@@ -87,7 +87,7 @@ PAYAPP_LINKVAL = os.getenv("PAYAPP_LINKVAL", "")
 PAYAPP_SHOPNAME = os.getenv("PAYAPP_SHOPNAME", "NewshoppingShorts")
 DEFAULT_PAYMENT_API_BASE_URL = os.getenv(
     "DEFAULT_PAYMENT_API_BASE_URL",
-    "https://13-124-7-65.nip.io",
+    "https://newshopping-shorts-auth.vercel.app",
 ).strip().rstrip("/")
 _PAYAPP_API_URL_RAW = os.getenv("PAYAPP_API_URL", "https://api.payapp.kr/oapi/apiLoad.html")
 _PAYAPP_WEBHOOK_ALLOWED_IPS_RAW = os.getenv("PAYAPP_WEBHOOK_ALLOWED_IPS", "")

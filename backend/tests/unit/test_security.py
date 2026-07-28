@@ -478,7 +478,7 @@ class TestPayAppContract:
         monkeypatch.delenv("PUBLIC_BASE_URL", raising=False)
 
         request = SimpleNamespace(base_url="http://untrusted.example.test/")
-        assert _resolve_payment_base_url(request) == "https://13-124-7-65.nip.io"
+        assert _resolve_payment_base_url(request) == "https://newshopping-shorts-auth.vercel.app"
 
     def test_payment_base_url_prefers_configured_url(self, monkeypatch):
         from types import SimpleNamespace
