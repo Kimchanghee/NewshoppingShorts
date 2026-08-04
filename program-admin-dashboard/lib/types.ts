@@ -1,4 +1,4 @@
-export type ProgramKey = 'all' | 'ssmaker' | 'stmaker' | 'pineoptimizer' | 'subblur' | 'fitshot' | 'locationalarm';
+export type ProgramKey = 'all' | 'ssmaker' | 'stmaker';
 
 export type User = {
   id: number;

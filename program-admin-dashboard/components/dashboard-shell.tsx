@@ -30,7 +30,7 @@ import {
   Wifi,
   X,
 } from 'lucide-react';
-import { useCallback, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   AdminActionResponse,
@@ -46,10 +46,6 @@ const PROGRAMS: Array<{ key: ProgramKey; label: string; short: string }> = [
   { key: 'all', label: '전체 프로그램', short: 'ALL' },
   { key: 'ssmaker', label: 'SSMaker', short: 'SS' },
   { key: 'stmaker', label: 'STMaker', short: 'ST' },
-  { key: 'pineoptimizer', label: 'PineOptimizer', short: 'PO' },
-  { key: 'subblur', label: 'SubBlur', short: 'SB' },
-  { key: 'fitshot', label: 'FitShot', short: 'FS' },
-  { key: 'locationalarm', label: 'PinAlarm', short: 'PA' },
 ];
 
 const EMPTY_STATS: StatsResponse = {
@@ -67,15 +63,39 @@ type ConfirmState = {
   days?: number;
 } | null;
 
+type ApiErrorPayload = {
+  error?: unknown;
+  detail?: unknown;
+  message?: unknown;
+};
+
+const INTERNAL_ERROR_PATTERN = /traceback|psycopg|sqlalchemy|\[sql:|\[parameters:|exception|invalid input value for enum/i;
+
+function safeApiMessage(value: unknown, fallback: string) {
+  if (typeof value !== 'string') return fallback;
+  const message = value.trim();
+  if (!message || message.length > 200 || INTERNAL_ERROR_PATTERN.test(message)) return fallback;
+  return message;
+}
+
+function apiErrorMessage(status: number, payload: ApiErrorPayload) {
+  if (status >= 500) return '사용자 DB 연결에 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
+  if (status === 404) return '요청한 사용자 정보를 찾을 수 없습니다.';
+  if (status === 403) return '이 작업을 수행할 권한이 없습니다.';
+  if (status === 429) return '요청이 많습니다. 잠시 후 다시 시도해 주세요.';
+  const fallback = `요청을 처리하지 못했습니다. (${status})`;
+  return safeApiMessage(payload.error, safeApiMessage(payload.message, safeApiMessage(payload.detail, fallback)));
+}
+
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/admin/${path}`, { ...init, cache: 'no-store' });
   if (response.status === 401) {
     window.location.assign('/login');
     throw new Error('세션이 만료되었습니다.');
   }
-  const payload = await response.json().catch(() => ({}));
+  const payload = await response.json().catch(() => ({})) as ApiErrorPayload;
   if (!response.ok) {
-    throw new Error(payload.error || payload.detail || payload.message || `요청 실패 (${response.status})`);
+    throw new Error(apiErrorMessage(response.status, payload));
   }
   return payload as T;
 }
@@ -144,10 +164,17 @@ export function DashboardShell() {
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [deleteText, setDeleteText] = useState('');
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
+  const requestSequence = useRef(0);
 
   const loadData = useCallback(async (quiet = false) => {
+    const requestId = ++requestSequence.current;
     quiet ? setRefreshing(true) : setLoading(true);
     setError('');
+    if (!quiet) {
+      setUsers([]);
+      setTotal(0);
+      setStats(EMPTY_STATS);
+    }
     const query = new URLSearchParams({
       page: String(page),
       page_size: String(pageSize),
@@ -165,13 +192,19 @@ export function DashboardShell() {
         apiRequest<UserListResponse>(`users?${query}`),
         apiRequest<StatsResponse>(`stats?${statsQuery}`),
       ]);
+      if (requestId !== requestSequence.current) return;
       setUsers(userData.users || []);
       setTotal(userData.total || 0);
       setStats(statsData);
       setLastUpdated(new Date());
     } catch (requestError) {
+      if (requestId !== requestSequence.current) return;
+      setUsers([]);
+      setTotal(0);
+      setStats(EMPTY_STATS);
       setError(requestError instanceof Error ? requestError.message : '운영 데이터를 불러오지 못했습니다.');
     } finally {
+      if (requestId !== requestSequence.current) return;
       setLoading(false);
       setRefreshing(false);
     }
@@ -236,7 +269,7 @@ export function DashboardShell() {
         headers: body ? { 'Content-Type': 'application/json' } : undefined,
         body: body ? JSON.stringify(body) : undefined,
       });
-      if (result.success === false) throw new Error(result.message || '작업이 적용되지 않았습니다.');
+      if (result.success === false) throw new Error(safeApiMessage(result.message, '작업이 적용되지 않았습니다.'));
       showToast(successMessage);
       if (method === 'DELETE') {
         setSelectedUser(null);
