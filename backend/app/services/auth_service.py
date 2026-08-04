@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
-from sqlalchemy import func, update
+from sqlalchemy import func, or_, update
 from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
@@ -944,7 +944,10 @@ class AuthService:
             # Find users who are marked online but haven't sent heartbeat in 2 mins
             db_users = self.db.query(User).filter(
                 User.is_online == True,
-                User.last_heartbeat < threshold
+                or_(
+                    User.last_heartbeat.is_(None),
+                    User.last_heartbeat < threshold,
+                ),
             ).all()
             
             for user in db_users:

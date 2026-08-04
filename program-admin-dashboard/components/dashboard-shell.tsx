@@ -179,7 +179,7 @@ export function DashboardShell() {
       page: String(page),
       page_size: String(pageSize),
       include_total: 'true',
-      cleanup_offline: 'false',
+      cleanup_offline: 'true',
     });
     const statsQuery = new URLSearchParams({ include_requests: 'false' });
     if (program !== 'all') {
@@ -188,10 +188,11 @@ export function DashboardShell() {
     }
     if (deferredSearch) query.set('search', deferredSearch);
     try {
-      const [userData, statsData] = await Promise.all([
-        apiRequest<UserListResponse>(`users?${query}`),
-        apiRequest<StatsResponse>(`stats?${statsQuery}`),
-      ]);
+      // The user-list call expires stale heartbeats. Read stats only after that
+      // cleanup commits so the online count cannot race ahead with old flags.
+      const userData = await apiRequest<UserListResponse>(`users?${query}`);
+      if (requestId !== requestSequence.current) return;
+      const statsData = await apiRequest<StatsResponse>(`stats?${statsQuery}`);
       if (requestId !== requestSequence.current) return;
       setUsers(userData.users || []);
       setTotal(userData.total || 0);

@@ -598,6 +598,9 @@ async def get_stats(
     """
     from app.models.registration_request import RegistrationRequest, RequestStatus
 
+    # Keep online counts consistent even when no user-list request ran first.
+    await AuthService(db).cleanup_offline_users()
+
     # Base query with optional program_type filter
     base_query = db.query(User)
     if program_type and program_type in ('ssmaker', 'stmaker'):

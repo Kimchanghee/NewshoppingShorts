@@ -93,6 +93,7 @@ def test_admin_stats_includes_work_aggregates():
                 password_hash="hash",
                 is_active=True,
                 is_online=True,
+                last_heartbeat=now,
                 current_task="processing",
                 user_type=UserType.SUBSCRIBER,
                 work_count=-1,
@@ -114,6 +115,7 @@ def test_admin_stats_includes_work_aggregates():
                 password_hash="hash",
                 is_active=False,
                 is_online=True,
+                last_heartbeat=now - timedelta(minutes=5),
                 current_task="대기 중",
                 user_type=UserType.TRIAL,
                 work_count=5,
@@ -159,7 +161,7 @@ def test_admin_stats_includes_work_aggregates():
 
     assert stats["users"]["total"] == 3
     assert stats["users"]["active"] == 2
-    assert stats["users"]["online"] == 2
+    assert stats["users"]["online"] == 1
     assert stats["users"]["with_subscription"] == 1
 
     assert stats["work"]["total_used"] == 13
