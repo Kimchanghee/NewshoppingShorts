@@ -166,6 +166,24 @@ class StepButton(QFrame):
         f.setWeight(font_weight)
         self.text_label.setFont(f)
 
+    def set_compact(self, compact: bool) -> None:
+        """Reduce vertical pressure while keeping a 32px click target."""
+        if compact:
+            self.setMinimumHeight(32)
+            self.setMaximumHeight(36)
+            self.layout().setContentsMargins(8, 4, 8, 4)
+            self.layout().setSpacing(6)
+        else:
+            self.setMinimumHeight(34)
+            self.setMaximumHeight(42)
+            self.layout().setContentsMargins(
+                self.ds.spacing.space_3,
+                self.ds.spacing.space_2,
+                self.ds.spacing.space_3,
+                self.ds.spacing.space_2,
+            )
+            self.layout().setSpacing(self.ds.spacing.space_2)
+
 
 class StepNav(QFrame):
     """Left sidebar navigation - STITCH 디자인 적용"""
@@ -175,6 +193,7 @@ class StepNav(QFrame):
         super().__init__(parent)
         self.ds = get_design_system()
         self._buttons = {}
+        self._display_mode = "full"
 
         self.setObjectName("StepNav")
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Maximum)
@@ -209,6 +228,29 @@ class StepNav(QFrame):
         
         if steps:
             self.set_active(steps[0][0])
+
+    def set_display_mode(self, mode: str) -> None:
+        """Switch between full, compact, and icon-only navigation rails."""
+        mode = mode if mode in {"full", "compact", "icons"} else "full"
+        if mode == self._display_mode and self.width() > 0:
+            return
+
+        self._display_mode = mode
+        widths = {"full": 280, "compact": 220, "icons": 72}
+        self.setFixedWidth(widths[mode])
+
+        icon_only = mode == "icons"
+        compact = mode != "full"
+        layout = self.layout()
+        vertical_margin = self.ds.spacing.space_2 if compact else self.ds.spacing.space_6
+        layout.setContentsMargins(0, vertical_margin, 0, vertical_margin)
+        layout.setSpacing(2 if compact else self.ds.spacing.space_1)
+
+        for button in self._buttons.values():
+            button.text_label.setVisible(not icon_only)
+            button.icon_label.setFixedWidth(28 if icon_only else 22)
+            button.set_compact(compact)
+            button.setToolTip(button.accessibleName() if icon_only else "")
 
     def _on_click(self, step_id: str):
         self.set_active(step_id)

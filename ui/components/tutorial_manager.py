@@ -5,8 +5,8 @@ Tutorial Manager for PyQt6
 """
 import os
 from typing import Optional, Dict, Any, List, TYPE_CHECKING
-from PyQt6.QtCore import QObject, pyqtSignal, QTimer
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtCore import QEvent, QObject, QPoint, QRect, QSize, Qt, pyqtSignal, QTimer
+from PyQt6.QtWidgets import QScrollArea, QWidget
 
 from ui.components.tutorial_spotlight import TutorialSpotlight
 from ui.components.tutorial_tooltip import TutorialTooltip
@@ -15,8 +15,7 @@ if TYPE_CHECKING:
     from main import VideoAnalyzerGUI
 
 
-# 튜토리얼 단계 정의 (고정 좌표 사용)
-# tooltip_x, tooltip_y: 툴팁의 절대 좌표
+# 튜토리얼 단계 정의. 툴팁 위치는 각 타겟과 현재 창 경계에서 계산한다.
 TUTORIAL_STEPS: List[Dict[str, Any]] = [
     {
         "id": "setup_assistant",
@@ -25,8 +24,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "widget",
         "target_widget": "setup_assistant_section",
         "navigate_to": "settings",
-        "tooltip_x": 700,
-        "tooltip_y": 70,
+        "prepare": "select_connect_tab",
     },
     {
         "id": "mode",
@@ -35,8 +33,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "mode",
         "navigate_to": "mode",
-        "tooltip_x": 260,
-        "tooltip_y": 32,
     },
     {
         "id": "source",
@@ -45,8 +41,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "source",
         "navigate_to": "source",
-        "tooltip_x": 260,
-        "tooltip_y": 80,
     },
     {
         "id": "voice",
@@ -55,8 +49,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "voice",
         "navigate_to": "voice",
-        "tooltip_x": 260,
-        "tooltip_y": 128,
     },
     {
         "id": "cta",
@@ -65,8 +57,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "cta",
         "navigate_to": "cta",
-        "tooltip_x": 260,
-        "tooltip_y": 176,
     },
     {
         "id": "font",
@@ -75,8 +65,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "font",
         "navigate_to": "font",
-        "tooltip_x": 260,
-        "tooltip_y": 224,
     },
     {
         "id": "subtitle_settings",
@@ -85,8 +73,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "subtitle_settings",
         "navigate_to": "subtitle_settings",
-        "tooltip_x": 260,
-        "tooltip_y": 272,
     },
     {
         "id": "watermark",
@@ -95,8 +81,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "watermark",
         "navigate_to": "watermark",
-        "tooltip_x": 260,
-        "tooltip_y": 320,
     },
     # '자동 업로드' 단계 제거: 올리기 설정이 좌측 메뉴에서 '설정 > 영상 올리기' 탭으로
     # 이동했고, 마지막 '설정' 단계에서 함께 안내된다. (사이드바에 'upload' 버튼이 없어 스팟라이트가 깨짐)
@@ -107,8 +91,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "queue",
         "navigate_to": "queue",
-        "tooltip_x": 260,
-        "tooltip_y": 416,
     },
     {
         "id": "settings",
@@ -117,8 +99,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "sidebar",
         "target_id": "settings",
         "navigate_to": "settings",
-        "tooltip_x": 260,
-        "tooltip_y": 464,
     },
     {
         "id": "progress",
@@ -127,8 +107,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "widget",
         "target_widget": "progress_panel",
         "navigate_to": None,
-        "tooltip_x": 260,
-        "tooltip_y": 720,
     },
     {
         "id": "last_login",
@@ -137,8 +115,6 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "widget",
         "target_widget": "last_login_label",
         "navigate_to": None,
-        "tooltip_x": 1050,
-        "tooltip_y": 60,
     },
     {
         "id": "api_key_setup",
@@ -147,8 +123,7 @@ TUTORIAL_STEPS: List[Dict[str, Any]] = [
         "target_type": "widget",
         "target_widget": "api_key_section",
         "navigate_to": "settings",
-        "tooltip_x": 680,
-        "tooltip_y": 120,
+        "prepare": "focus_api_key_setup",
     },
 ]
 
@@ -170,6 +145,10 @@ class TutorialManager(QObject):
         # UI 컴포넌트
         self._spotlight: Optional[TutorialSpotlight] = None
         self._tooltip: Optional[TutorialTooltip] = None
+        self._layout_timer = QTimer(self)
+        self._layout_timer.setSingleShot(True)
+        self._layout_timer.setInterval(50)
+        self._layout_timer.timeout.connect(self.refresh_layout)
 
     @property
     def is_running(self) -> bool:
@@ -190,6 +169,7 @@ class TutorialManager(QObject):
 
         self._is_running = True
         self._current_step = 0
+        self._gui.installEventFilter(self)
 
         # 스포트라이트 생성
         self._spotlight = TutorialSpotlight(self._gui)
@@ -211,6 +191,11 @@ class TutorialManager(QObject):
             return
 
         self._is_running = False
+        self._layout_timer.stop()
+        try:
+            self._gui.removeEventFilter(self)
+        except (RuntimeError, TypeError):
+            pass
 
         if self._spotlight:
             self._spotlight.close()
@@ -242,10 +227,25 @@ class TutorialManager(QObject):
         if step.get("navigate_to") and hasattr(self._gui, '_on_step_selected'):
             self._gui._on_step_selected(step["navigate_to"])
 
+        self._prepare_step(step)
+
         # 약간의 딜레이 후 타겟 하이라이트 (페이지 전환 완료 대기)
         QTimer.singleShot(100, lambda: self._highlight_target(step))
 
         self.step_changed.emit(step_index)
+
+    def _prepare_step(self, step: Dict[str, Any]) -> None:
+        """Reveal a nested settings tab before measuring its target widget."""
+        method_name = step.get("prepare")
+        if not method_name:
+            return
+        settings_tab = getattr(self._gui, "settings_tab", None)
+        method = getattr(settings_tab, method_name, None) if settings_tab is not None else None
+        if callable(method):
+            try:
+                method()
+            except Exception:
+                pass
 
     def _highlight_target(self, step: Dict[str, Any]):
         """타겟 위젯 하이라이트"""
@@ -254,7 +254,12 @@ class TutorialManager(QObject):
 
         target_widget = self._get_target_widget(step)
 
-        if not target_widget:
+        if (
+            not target_widget
+            or not target_widget.isVisible()
+            or target_widget.width() <= 0
+            or target_widget.height() <= 0
+        ):
             # 타겟을 찾지 못하면 다음 단계로
             self._go_next()
             return
@@ -282,29 +287,122 @@ class TutorialManager(QObject):
             QTimer.singleShot(50, lambda: self._position_tooltip(step))
 
     def _position_tooltip(self, step: Dict[str, Any]):
-        """툴팁 위치 조정 (고정 좌표 사용)"""
+        """Place the tooltip beside its target and clamp it to the window."""
         if not self._tooltip:
             return
 
-        # 고정 좌표 사용
-        tooltip_x = step.get("tooltip_x", 260)
-        tooltip_y = step.get("tooltip_y", 100)
+        bounds = self._gui.rect().adjusted(12, 12, -12, -12)
+        if bounds.width() <= 0 or bounds.height() <= 0:
+            bounds = self._gui.rect()
+        self._tooltip.fit_to_viewport(self._gui.size())
 
-        self._tooltip.move(tooltip_x, tooltip_y)
+        target_widget = self._get_target_widget(step)
+        target_rect = self._widget_rect_in_gui(target_widget) if target_widget else QRect()
+        tooltip_rect = self.calculate_tooltip_rect(
+            bounds,
+            target_rect,
+            self._tooltip.size(),
+        )
+        self._tooltip.move(tooltip_rect.topLeft())
         self._tooltip.raise_()
+        self._tooltip.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _widget_rect_in_gui(self, widget: QWidget) -> QRect:
+        global_pos = widget.mapToGlobal(QPoint(0, 0))
+        local_pos = self._gui.mapFromGlobal(global_pos)
+        return QRect(local_pos, widget.size())
+
+    @staticmethod
+    def calculate_tooltip_rect(
+        bounds: QRect,
+        target_rect: QRect,
+        tooltip_size: QSize,
+        gap: int = 12,
+    ) -> QRect:
+        """Return a tooltip rect fully contained in *bounds*.
+
+        Right/left/below/above placements are preferred in that order. When no
+        candidate fits directly, the least-overlapping clamped candidate wins.
+        """
+        width = min(max(1, tooltip_size.width()), max(1, bounds.width()))
+        height = min(max(1, tooltip_size.height()), max(1, bounds.height()))
+
+        if target_rect.isEmpty():
+            return QRect(
+                bounds.x() + (bounds.width() - width) // 2,
+                bounds.y() + (bounds.height() - height) // 2,
+                width,
+                height,
+            )
+
+        candidates = [
+            QPoint(target_rect.right() + gap + 1, target_rect.center().y() - height // 2),
+            QPoint(target_rect.left() - gap - width, target_rect.center().y() - height // 2),
+            QPoint(target_rect.center().x() - width // 2, target_rect.bottom() + gap + 1),
+            QPoint(target_rect.center().x() - width // 2, target_rect.top() - gap - height),
+        ]
+
+        for point in candidates:
+            candidate = QRect(point, QSize(width, height))
+            if bounds.contains(candidate) and not candidate.intersects(target_rect):
+                return candidate
+
+        max_x = bounds.x() + max(0, bounds.width() - width)
+        max_y = bounds.y() + max(0, bounds.height() - height)
+        scored = []
+        for order, point in enumerate(candidates):
+            x = max(bounds.x(), min(point.x(), max_x))
+            y = max(bounds.y(), min(point.y(), max_y))
+            rect = QRect(x, y, width, height)
+            overlap = rect.intersected(target_rect)
+            overlap_area = max(0, overlap.width()) * max(0, overlap.height())
+            displacement = abs(x - point.x()) + abs(y - point.y())
+            scored.append(((overlap_area, displacement, order), rect))
+        return min(scored, key=lambda item: item[0])[1]
 
     def _scroll_settings_to_widget(self, target_widget: QWidget):
         """Settings 탭의 scroll area에서 target_widget이 보이도록 스크롤"""
         try:
+            parent = target_widget.parentWidget()
+            while parent is not None:
+                if isinstance(parent, QScrollArea):
+                    parent.ensureWidgetVisible(target_widget, 50, 50)
+                    return
+                parent = parent.parentWidget()
+
             settings_tab = getattr(self._gui, "settings_tab", None)
-            if settings_tab is None:
-                return
-            scroll_area = getattr(settings_tab, "scroll_area", None)
-            if scroll_area is None:
-                return
-            scroll_area.ensureWidgetVisible(target_widget, 50, 50)
+            for name in ("_connect_scroll", "scroll_area"):
+                scroll_area = getattr(settings_tab, name, None) if settings_tab else None
+                if isinstance(scroll_area, QScrollArea):
+                    scroll_area.ensureWidgetVisible(target_widget, 50, 50)
+                    return
         except Exception:
             pass
+
+    def refresh_layout(self) -> None:
+        """Re-measure spotlight and tooltip after resize, move, or DPI change."""
+        if not self._is_running or not (0 <= self._current_step < len(TUTORIAL_STEPS)):
+            return
+        step = TUTORIAL_STEPS[self._current_step]
+        target = self._get_target_widget(step)
+        if target is None or not target.isVisible() or target.width() <= 0 or target.height() <= 0:
+            return
+        if self._spotlight:
+            self._spotlight.set_target(target, padding=8, animate=False)
+        self._position_tooltip(step)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._gui and self._is_running:
+            watched = {
+                QEvent.Type.Resize,
+                QEvent.Type.Move,
+                QEvent.Type.Show,
+                QEvent.Type.WindowStateChange,
+            }
+            screen_change = getattr(QEvent.Type, "ScreenChangeInternal", None)
+            if event.type() in watched or (screen_change is not None and event.type() == screen_change):
+                self._layout_timer.start()
+        return super().eventFilter(obj, event)
 
     def _get_target_widget(self, step: Dict[str, Any]) -> Optional[QWidget]:
         """단계에 해당하는 타겟 위젯 가져오기"""

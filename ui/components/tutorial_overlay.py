@@ -5,7 +5,7 @@ Tutorial Overlay for PyQt6 - Modern Dark Mode Design
 """
 import sys
 from typing import Optional, Callable, List, Dict, Any
-from PyQt6.QtCore import Qt, QRect, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer
+from PyQt6.QtCore import Qt, QRect, QEvent, QPropertyAnimation, QEasingCurve, pyqtProperty, QTimer
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QFrame, QGraphicsOpacityEffect
@@ -143,6 +143,8 @@ class TutorialOverlay(QWidget):
         
         self._setup_ui()
         self._sync_position()
+        if self.parent_window:
+            self.parent_window.installEventFilter(self)
 
     def _setup_ui(self):
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
@@ -172,7 +174,8 @@ class TutorialOverlay(QWidget):
         painter.drawRect(self.rect())
         
         # Card dimensions
-        card_w, card_h = 420, 380
+        card_w = max(1, min(420, self.width() - 32))
+        card_h = max(1, min(380, self.height() - 32))
         card_x = (self.width() - card_w) // 2
         card_y = (self.height() - card_h) // 2
         
@@ -235,14 +238,17 @@ class TutorialOverlay(QWidget):
         )
         
         # Details section
-        details_y = card_y + 155
+        details_y = card_y + 145
         detail_font = QFont("맑은 고딕", 11)
         painter.setFont(detail_font)
         
-        for i, detail in enumerate(step.get("details", [])):
+        details = step.get("details", [])
+        available_details = max(18, card_h - 215)
+        detail_step = max(18, min(26, available_details // max(1, len(details))))
+        for i, detail in enumerate(details):
             painter.setPen(QPen(QColor("#CBD5E1")))
             painter.drawText(
-                QRect(card_x + 28, details_y + i * 26, card_w - 56, 24),
+                QRect(card_x + 28, details_y + i * detail_step, card_w - 56, detail_step),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
                 detail
             )
@@ -329,6 +335,24 @@ class TutorialOverlay(QWidget):
         super().showEvent(event)
         self._sync_position()
         self.setFocus()
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.parent_window and event.type() in {
+            QEvent.Type.Resize,
+            QEvent.Type.Move,
+            QEvent.Type.WindowStateChange,
+        }:
+            self._sync_position()
+            self.update()
+        return super().eventFilter(obj, event)
+
+    def closeEvent(self, event):
+        if self.parent_window:
+            try:
+                self.parent_window.removeEventFilter(self)
+            except (RuntimeError, TypeError):
+                pass
+        super().closeEvent(event)
 
 
 def show_tutorial(parent_window, on_complete=None, on_skip=None):

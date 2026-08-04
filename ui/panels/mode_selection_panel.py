@@ -4,7 +4,7 @@ Mode Selection Panel for PyQt6
 """
 from typing import Optional, Dict
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, QWidget, QSizePolicy
+    QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QWidget, QSizePolicy
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QFontMetricsF
@@ -30,7 +30,7 @@ class ModeCard(QFrame):
                   icon: str, features: list):
         ds = self.ds
 
-        self.setMinimumSize(340, 380)
+        self.setMinimumSize(260, 380)
         self.setMaximumWidth(420)
 
         layout = QVBoxLayout(self)
@@ -288,9 +288,10 @@ class ModeSelectionPanel(QWidget):
         main_layout.addSpacing(ds.spacing.space_4)
 
         # Cards container
-        cards_layout = QHBoxLayout()
-        cards_layout.setSpacing(ds.spacing.space_6)
-        cards_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cards_layout = QGridLayout()
+        self.cards_layout.setHorizontalSpacing(ds.spacing.space_6)
+        self.cards_layout.setVerticalSpacing(ds.spacing.space_6)
+        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Single Video Mode Card
         single_card = ModeCard(
@@ -309,7 +310,6 @@ class ModeSelectionPanel(QWidget):
         )
         single_card.clicked.connect(self._on_mode_clicked)
         self._cards["single"] = single_card
-        cards_layout.addWidget(single_card)
 
         # Mix Mode Card
         mix_card = ModeCard(
@@ -328,7 +328,6 @@ class ModeSelectionPanel(QWidget):
         )
         mix_card.clicked.connect(self._on_mode_clicked)
         self._cards["mix"] = mix_card
-        cards_layout.addWidget(mix_card)
 
         # Sourcing (Full Automation) Mode Card - Mode 3
         sourcing_card = ModeCard(
@@ -347,9 +346,9 @@ class ModeSelectionPanel(QWidget):
         )
         sourcing_card.clicked.connect(self._on_mode_clicked)
         self._cards["sourcing"] = sourcing_card
-        cards_layout.addWidget(sourcing_card)
-
-        main_layout.addLayout(cards_layout)
+        main_layout.addLayout(self.cards_layout)
+        self._card_columns = 0
+        self._relayout_cards(1)
 
         # Bottom hint
         main_layout.addStretch()
@@ -362,6 +361,22 @@ class ModeSelectionPanel(QWidget):
         hint_label.setStyleSheet(f"color: {get_color('text_muted')};")
         hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         main_layout.addWidget(hint_label)
+
+    def _relayout_cards(self, columns: int) -> None:
+        columns = max(1, min(columns, len(self._cards)))
+        if columns == self._card_columns:
+            return
+        while self.cards_layout.count():
+            self.cards_layout.takeAt(0)
+        for index, card in enumerate(self._cards.values()):
+            self.cards_layout.addWidget(card, index // columns, index % columns)
+        self._card_columns = columns
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        width = event.size().width()
+        columns = 3 if width >= 1080 else 2 if width >= 660 else 1
+        self._relayout_cards(columns)
 
     def _on_mode_clicked(self, mode_id: str):
         """모드 선택 처리"""

@@ -53,14 +53,14 @@ class TopBarPanel(QFrame):
         layout.setSpacing(16)
 
         # Title
-        app_title = QLabel("쇼핑 숏폼 메이커 - 스튜디오")
-        app_title.setFont(QFont(
+        self.app_title = QLabel("쇼핑 숏폼 메이커 - 스튜디오")
+        self.app_title.setFont(QFont(
             d.typography.font_family_heading,
             d.typography.size_sm,
             QFont.Weight.Bold,
         ))
-        app_title.setStyleSheet(f"color: {c.text_primary}; letter-spacing: -0.5px;")
-        layout.addWidget(app_title)
+        self.app_title.setStyleSheet(f"color: {c.text_primary}; letter-spacing: -0.5px;")
+        layout.addWidget(self.app_title)
 
         layout.addStretch()
 
@@ -173,6 +173,14 @@ class TopBarPanel(QFrame):
         self.gui.subscribe_btn.clicked.connect(self.show_subscription_panel)
         self.gui.subscribe_btn.hide()
         layout.addWidget(self.gui.subscribe_btn)
+
+    def set_compact_mode(self, compact: bool) -> None:
+        """Keep primary account actions visible on narrow windows."""
+        self.app_title.setVisible(not compact)
+        self.gui.last_login_label.setVisible(not compact)
+        self.gui.connection_label.setVisible(not compact)
+        self.layout().setContentsMargins(12 if compact else 24, 12, 12 if compact else 24, 12)
+        self.layout().setSpacing(8 if compact else 16)
 
     def update_connection_status(self, connected: bool):
         """Update connection status dot and label."""

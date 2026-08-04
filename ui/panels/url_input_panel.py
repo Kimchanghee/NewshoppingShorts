@@ -6,7 +6,7 @@ Supports both single video mode and mix mode
 import os
 
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel,
+    QVBoxLayout, QHBoxLayout, QBoxLayout, QLabel,
     QTextEdit, QWidget, QFrame, QLineEdit,
     QPushButton, QScrollArea, QSizePolicy,
     QFileDialog
@@ -173,6 +173,7 @@ class URLInputPanel(QWidget):
 
         # --- Horizontal split: URL input (left 50%) | Local file (right 50%) ---
         single_split = QHBoxLayout()
+        self.single_split = single_split
         single_split.setSpacing(ds.spacing.space_4)
 
         # Left side: URL input
@@ -223,6 +224,7 @@ class URLInputPanel(QWidget):
 
         # Vertical divider
         divider = QFrame()
+        self.single_divider = divider
         divider.setFrameShape(QFrame.Shape.VLine)
         divider.setStyleSheet(f"color: {get_color('border_light')};")
         single_split.addWidget(divider)
@@ -305,6 +307,7 @@ class URLInputPanel(QWidget):
 
         # --- Horizontal split: URL input (left 50%) | Local file (right 50%) ---
         mix_split = QHBoxLayout()
+        self.mix_split = mix_split
         mix_split.setSpacing(ds.spacing.space_4)
 
         # Left side: URL entries
@@ -364,6 +367,7 @@ class URLInputPanel(QWidget):
 
         # Vertical divider
         mix_divider = QFrame()
+        self.mix_divider = mix_divider
         mix_divider.setFrameShape(QFrame.Shape.VLine)
         mix_divider.setStyleSheet(f"color: {get_color('border_light')};")
         mix_split.addWidget(mix_divider)
@@ -447,6 +451,20 @@ class URLInputPanel(QWidget):
 
         # Initialize with one mix entry
         self._add_mix_entry()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        stacked = event.size().width() < 720
+        direction = (
+            QBoxLayout.Direction.TopToBottom
+            if stacked
+            else QBoxLayout.Direction.LeftToRight
+        )
+        divider_shape = QFrame.Shape.HLine if stacked else QFrame.Shape.VLine
+        self.single_split.setDirection(direction)
+        self.mix_split.setDirection(direction)
+        self.single_divider.setFrameShape(divider_shape)
+        self.mix_divider.setFrameShape(divider_shape)
 
         # Enter key to add URL
         self.gui.url_entry.installEventFilter(self)

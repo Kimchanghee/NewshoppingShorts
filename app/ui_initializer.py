@@ -7,7 +7,8 @@ Extracted from main.py for cleaner separation of UI building logic.
 import os
 from typing import TYPE_CHECKING, Dict, Any
 
-from PyQt6.QtGui import QIcon, QFont
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QCursor, QIcon, QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QWidget,
@@ -16,6 +17,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QFrame,
     QStackedWidget,
+    QScrollArea,
     QSizePolicy,
 )
 
@@ -38,6 +40,7 @@ from ui.panels.multi_account_panel import MultiAccountPanel
 from ui.panels.topbar_panel import TopBarPanel
 from ui.components.status_bar import StatusBar
 from ui.components.step_nav import StepNav
+from ui.responsive import ResponsiveLayoutController, calculate_window_rect
 
 from utils.logging_config import get_logger
 logger = get_logger(__name__)
@@ -80,22 +83,13 @@ class UIInitializer:
         if os.path.exists(icon_path):
             gui.setWindowIcon(QIcon(icon_path))
 
-        # Screen-aware window sizing: fit within available screen area
-        screen = QApplication.primaryScreen()
+        # Screen-aware window sizing in logical pixels. Prefer the monitor where
+        # the user launched the app and clamp to availableGeometry *last*.
+        screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         if screen:
             available = screen.availableGeometry()
-            # Use 85% of available screen, capped at 1440x960
-            target_w = min(1440, int(available.width() * 0.85))
-            target_h = min(960, int(available.height() * 0.85))
-            # Minimum usable size
-            target_w = max(1024, target_w)
-            target_h = max(680, target_h)
-            gui.resize(target_w, target_h)
-            # Center on screen
-            gui.move(
-                available.x() + (available.width() - target_w) // 2,
-                available.y() + (available.height() - target_h) // 2,
-            )
+            initial_rect = calculate_window_rect(available)
+            gui.setGeometry(initial_rect)
         else:
             gui.resize(1280, 800)
 
@@ -113,6 +107,7 @@ class UIInitializer:
         left_container = QWidget()
         left_container.setObjectName("LeftContainer")
         left_container.setStyleSheet(f"#LeftContainer {{ background-color: {d.colors.bg_main}; }}")
+        left_container.setMinimumWidth(72)
         left_container.setMaximumWidth(280)
         left_layout = QVBoxLayout(left_container)
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -141,7 +136,7 @@ class UIInitializer:
 
         # 3. Log Panel (ProgressPanel) - Bottom left, takes remaining space
         progress_panel = ProgressPanel(gui, gui, theme_manager=self.theme_manager)
-        progress_panel.setMinimumHeight(360)
+        progress_panel.setMinimumHeight(150)
         progress_panel.setMaximumHeight(520)
         progress_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         left_layout.addWidget(progress_panel, stretch=1)
@@ -179,7 +174,21 @@ class UIInitializer:
         stack_layout.setContentsMargins(14, 10, 14, 10)
         stack_layout.addWidget(stack)
 
-        content_layout.addWidget(stack_wrapper)
+        # An outer safety scroll area keeps every page reachable on unusually
+        # short/portrait desktops. Pages that already scroll continue to size
+        # normally; this activates only when a page minimum exceeds the viewport.
+        content_scroll = QScrollArea()
+        content_scroll.setObjectName("MainContentScroll")
+        content_scroll.setWidgetResizable(True)
+        content_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        content_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        content_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        content_scroll.setStyleSheet(
+            "#MainContentScroll { border: none; background: transparent; }"
+            "#MainContentScroll > QWidget > QWidget { background: transparent; }"
+        )
+        content_scroll.setWidget(stack_wrapper)
+        content_layout.addWidget(content_scroll)
         right_layout.addWidget(content_container)
         main_layout.addWidget(right_container, stretch=1)
 
@@ -234,6 +243,16 @@ class UIInitializer:
         status_bar = StatusBar(gui, gui)
         right_layout.addWidget(status_bar)
 
+        gui.responsive_layout = ResponsiveLayoutController(
+            window=gui,
+            step_nav=step_nav,
+            left_container=left_container,
+            progress_panel=progress_panel,
+            stack_layout=stack_layout,
+            topbar=topbar,
+        )
+        gui.responsive_layout.apply(gui.size())
+
         # Return all widgets for gui to store
         return {
             "step_nav": step_nav,
@@ -242,6 +261,7 @@ class UIInitializer:
             "stack": stack,
             "page_index": page_index,
             "status_bar": status_bar,
+            "content_scroll": content_scroll,
             # Panels
             "mode_selection_panel": mode_selection_panel,
             "sourcing_panel": sourcing_panel,

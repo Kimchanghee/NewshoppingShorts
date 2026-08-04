@@ -64,6 +64,12 @@ class WindowEventsMixin:
         """Resume normal operation after resize."""
         self._is_resizing = False
         self.subscription_manager.resume_countdown()
+        responsive = getattr(self, "responsive_layout", None)
+        if responsive is not None:
+            responsive.apply(self.size())
+        tutorial = getattr(self, "_tutorial_manager", None)
+        if tutorial is not None and tutorial.is_running:
+            tutorial.refresh_layout()
 
     def showEvent(self, event):
         """Show tutorial on first launch + check for previous session."""

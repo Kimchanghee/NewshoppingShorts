@@ -46,11 +46,11 @@ class Login(QMainWindow, Ui_LoginWindow):
         
         if self.setPort():
             self.setupUi(self)
-            self.setFixedSize(self.WINDOW_WIDTH, self.WINDOW_HEIGHT)
             self._apply_version_label()
             ui_controller.userLoadInfo(self)
             self._connect_login_option_controls()
             self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+            self._center_on_active_screen()
             
             # Connect signals
             self.loginButton.clicked.connect(self._loginCheck)
@@ -63,6 +63,18 @@ class Login(QMainWindow, Ui_LoginWindow):
             QtCore.QTimer.singleShot(450, self._attempt_auto_login)
         else:
             raise RuntimeError("이미 실행 중이거나 단일 실행 포트를 사용할 수 없습니다.")
+
+    def _center_on_active_screen(self) -> None:
+        """Keep the frameless login window inside the monitor work area."""
+        screen = QApplication.screenAt(QtGui.QCursor.pos()) or QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        frame = self.frameGeometry()
+        frame.moveCenter(available.center())
+        frame.moveLeft(max(available.left(), min(frame.left(), available.right() - frame.width() + 1)))
+        frame.moveTop(max(available.top(), min(frame.top(), available.bottom() - frame.height() + 1)))
+        self.move(frame.topLeft())
 
     def _read_app_version(self) -> str:
         """

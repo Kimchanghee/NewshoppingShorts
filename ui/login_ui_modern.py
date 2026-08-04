@@ -30,6 +30,7 @@ from PyQt6.QtGui import QFont, QIcon, QPixmap
 
 from ui.design_system_v2 import get_design_system, ColorPalette
 from ui.components.custom_dialog import show_info, show_warning, show_error, show_success
+from ui.responsive import bounded_size
 
 # Initialize design system and ALWAYS use light palette for login
 ds = get_design_system()
@@ -223,9 +224,24 @@ class ModernLoginUi:
 
     def setupUi(self, LoginWindow: QMainWindow):
         LoginWindow.setObjectName("LoginWindow")
-        LoginWindow.resize(720, 760)
-        LoginWindow.setMinimumSize(QtCore.QSize(720, 760))
-        LoginWindow.setMaximumSize(QtCore.QSize(720, 760))
+        screen = (
+            QtWidgets.QApplication.screenAt(QtGui.QCursor.pos())
+            or QtWidgets.QApplication.primaryScreen()
+        )
+        available = screen.availableGeometry() if screen else QtCore.QRect(0, 0, 1280, 800)
+        login_size = bounded_size(
+            available,
+            QtCore.QSize(720, 760),
+            QtCore.QSize(600, 520),
+        )
+        LoginWindow.resize(login_size)
+        LoginWindow.setMinimumSize(
+            min(600, login_size.width()),
+            min(520, login_size.height()),
+        )
+        LoginWindow.setMaximumSize(QtWidgets.QWIDGETSIZE_MAX, QtWidgets.QWIDGETSIZE_MAX)
+        compact_width = login_size.width() < 680
+        compact_height = login_size.height() < 700
 
         self.centralwidget = QWidget(LoginWindow)
         self.centralwidget.setObjectName("centralwidget")
@@ -248,6 +264,7 @@ class ModernLoginUi:
         """)
         self.leftFrame.setFrameShape(QFrame.Shape.StyledPanel)
         root_layout.addWidget(self.leftFrame)
+        self.leftFrame.setVisible(not compact_width)
 
         left_layout = QVBoxLayout(self.leftFrame)
         left_layout.setContentsMargins(26, 28, 26, 24)
@@ -313,15 +330,16 @@ class ModernLoginUi:
         left_layout.addWidget(self.versionLabel)
 
         self.rightFrame = QFrame(self.centralwidget)
-        self.rightFrame.setMinimumWidth(420)
-        self.rightFrame.setMaximumWidth(420)
+        self.rightFrame.setMinimumWidth(360 if compact_width else 420)
+        self.rightFrame.setMaximumWidth(QtWidgets.QWIDGETSIZE_MAX)
         self.rightFrame.setStyleSheet(f"background-color: {login_color('surface')};")
         self.rightFrame.setFrameShape(QFrame.Shape.StyledPanel)
         root_layout.addWidget(self.rightFrame, 1)
 
         right_layout = QVBoxLayout(self.rightFrame)
-        right_layout.setContentsMargins(40, 18, 40, 24)
-        right_layout.setSpacing(10)
+        side_margin = 24 if compact_width or compact_height else 40
+        right_layout.setContentsMargins(side_margin, 14 if compact_height else 18, side_margin, 18 if compact_height else 24)
+        right_layout.setSpacing(8 if compact_height else 10)
 
         titlebar_layout = QHBoxLayout()
         titlebar_layout.addStretch(1)
@@ -498,8 +516,21 @@ class RegistrationRequestDialog(QWidget):
         self._connect_validation_signals()
 
     def _setup_ui(self):
-        self.resize(420, 760)
-        self.setMinimumSize(420, 760)
+        screen = (
+            QtWidgets.QApplication.screenAt(QtGui.QCursor.pos())
+            or QtWidgets.QApplication.primaryScreen()
+        )
+        available = screen.availableGeometry() if screen else QtCore.QRect(0, 0, 1280, 800)
+        dialog_size = bounded_size(
+            available,
+            QtCore.QSize(420, 760),
+            QtCore.QSize(360, 480),
+        )
+        self.resize(dialog_size)
+        self.setMinimumSize(
+            min(360, dialog_size.width()),
+            min(480, dialog_size.height()),
+        )
         self.setStyleSheet(f"background-color: {login_color('surface')};")
 
         root_layout = QVBoxLayout(self)
