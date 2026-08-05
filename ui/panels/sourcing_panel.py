@@ -21,6 +21,9 @@ from PyQt6.QtGui import QFont
 from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 from ui.components.automation_readiness import AutomationReadinessCard
 from utils.logging_config import get_logger
+from utils.url_security import is_official_coupang_url
+from utils.auth_helpers import extract_user_id
+from managers.work_quota import DurableWorkReservation
 
 logger = get_logger(__name__)
 
@@ -84,6 +87,8 @@ class SourcingPanel(QWidget):
     log_message = pyqtSignal(str)
     pipeline_progress = pyqtSignal(str, str, float)
     pipeline_finished = pyqtSignal(bool, object)
+    platform_result_ready = pyqtSignal(str)
+    platform_reset_requested = pyqtSignal()
 
     def __init__(self, parent, gui, theme_manager=None):
         super().__init__(parent)
@@ -95,6 +100,8 @@ class SourcingPanel(QWidget):
         self._step_indicators = {}
         self.pipeline_progress.connect(self._update_step)
         self.pipeline_finished.connect(self._on_pipeline_done)
+        self.platform_result_ready.connect(self._set_platform_result)
+        self.platform_reset_requested.connect(self._reset_platform_controls)
         self._setup_ui()
 
     def _setup_ui(self):
@@ -268,7 +275,7 @@ class SourcingPanel(QWidget):
         match_header.addWidget(match_label)
 
         self.match_threshold_spin = QSpinBox()
-        self.match_threshold_spin.setRange(0, 100)
+        self.match_threshold_spin.setRange(90, 100)
         self.match_threshold_spin.setSingleStep(5)
         self.match_threshold_spin.setSuffix("%")
         self.match_threshold_spin.setValue(int(match_policy.get("min_similarity_percent", 90)))
@@ -628,8 +635,11 @@ class SourcingPanel(QWidget):
 
     def _match_threshold_score(self) -> float:
         if hasattr(self, "match_threshold_spin"):
-            return max(0.0, min(1.0, self.match_threshold_spin.value() / 100.0))
-        return float(self._load_match_policy().get("min_similarity_score", 0.9))
+            return max(0.9, min(1.0, self.match_threshold_spin.value() / 100.0))
+        return max(
+            0.9,
+            min(1.0, float(self._load_match_policy().get("min_similarity_score", 0.9))),
+        )
 
     def _load_upload_interval_hours(self) -> int:
         try:
@@ -678,7 +688,7 @@ class SourcingPanel(QWidget):
     def _current_coupang_link_count(self) -> int:
         if not hasattr(self, "url_input"):
             return 0
-        return 1 if "coupang.com" in self.url_input.text().strip() else 0
+        return 1 if is_official_coupang_url(self.url_input.text().strip()) else 0
 
     def _update_next_links_count(self):
         next_count = len(self._extract_next_links())
@@ -727,9 +737,11 @@ class SourcingPanel(QWidget):
             return []
         raw = self.next_links_input.toPlainText()
         links = []
+        seen = set()
         for token in re.split(r"[\s,]+", raw):
             url = token.strip()
-            if url and "coupang.com" in url:
+            if url and url not in seen and is_official_coupang_url(url):
+                seen.add(url)
                 links.append(url)
         return links
 
@@ -898,8 +910,11 @@ class SourcingPanel(QWidget):
                     )
         except Exception as exc:
             logger.warning("[SourcingPanel] YouTube preflight failed: %s", exc)
-            # 예기치 못한 오류로는 차단하지 않는다(소싱/제작은 계속 가능).
-            return True
+            self.results_label.setText(
+                "YouTube 연결 설정을 확인하지 못해 자동 업로드를 시작하지 않았어요. 설정을 다시 확인해 주세요."
+            )
+            self.results_label.setStyleSheet(f"color: {get_color('error')};")
+            return False
 
         if not message:
             return True
@@ -947,8 +962,8 @@ class SourcingPanel(QWidget):
             self.results_label.setText("쿠팡 상품 링크를 붙여넣어 주세요.")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
-        if "coupang.com" not in url:
-            self.results_label.setText("쿠팡 링크가 맞는지 확인해 주세요. (coupang.com 주소여야 해요)")
+        if not is_official_coupang_url(url):
+            self.results_label.setText("공식 HTTPS 쿠팡 상품 링크인지 확인해 주세요.")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if self._running:
@@ -980,8 +995,8 @@ class SourcingPanel(QWidget):
     def _on_start_platform_video(self):
         """3플랫폼 방식: 쿠팡 링크 → 상품명 → 도우인/콰이쇼우/샤오홍슈 순차 검색·다운로드·재편집·업로드."""
         url = self.url_input.text().strip()
-        if not url or "coupang.com" not in url:
-            self.results_label.setText("쿠팡 상품 링크를 붙여넣어 주세요. (상품명으로 3채널을 검색합니다)")
+        if not is_official_coupang_url(url):
+            self.results_label.setText("공식 HTTPS 쿠팡 상품 링크를 붙여넣어 주세요. (상품명으로 3채널을 검색합니다)")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if self._running:
@@ -1000,9 +1015,48 @@ class SourcingPanel(QWidget):
         self.results_label.setText("상품명으로 도우인·콰이쇼우·샤오홍슈를 순서대로 검색할게요...")
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
-        threading.Thread(target=self._run_platform_pipeline, args=(url,), daemon=True).start()
+        min_similarity_score = self._match_threshold_score()
+        linktree_enabled = bool(
+            getattr(self, "chk_linktree", None) and self.chk_linktree.isChecked()
+        )
+        upload_enabled = bool(
+            getattr(self, "chk_upload", None) and self.chk_upload.isChecked()
+        )
+        gemini_client = getattr(self.gui, "genai_client", None)
+        youtube_manager = getattr(self.gui, "youtube_manager", None)
+        user_id = extract_user_id(getattr(self.gui, "login_data", None))
+        if not user_id:
+            self._reset_platform_controls()
+            self.results_label.setText("사용자 인증 정보를 확인할 수 없습니다. 다시 로그인해 주세요.")
+            self.results_label.setStyleSheet(f"color: {get_color('error')};")
+            return
+        work_job_key = f"platform:{url}"
+        threading.Thread(
+            target=self._run_platform_pipeline,
+            args=(
+                url,
+                min_similarity_score,
+                linktree_enabled,
+                upload_enabled,
+                gemini_client,
+                youtube_manager,
+                str(user_id),
+                work_job_key,
+            ),
+            daemon=True,
+        ).start()
 
-    def _run_platform_pipeline(self, coupang_url: str):
+    def _run_platform_pipeline(
+        self,
+        coupang_url: str,
+        min_similarity_score: float,
+        linktree_enabled: bool,
+        upload_enabled: bool,
+        gemini_client,
+        youtube_manager,
+        user_id: str,
+        work_job_key: str,
+    ):
         """백그라운드: 쿠팡 링크 → (core.platform_pipeline) 소싱·딥링크·재편집 → 링크트리 → YouTube 큐."""
         import asyncio as _aio
         from core.sourcing.platform_pipeline import run_platform_sourcing
@@ -1019,13 +1073,62 @@ class SourcingPanel(QWidget):
         except Exception:
             platforms = None
 
+        work_reservation = None
+        work_reserved = False
+        work_finalized = False
         loop = _aio.new_event_loop()
         try:
+            work_reservation, reservation = DurableWorkReservation.begin(
+                user_id, work_job_key
+            )
+            if not reservation.get("success"):
+                self._safe_set_results(
+                    str(
+                        reservation.get("message")
+                        or "작업 사용량을 예약하지 못해 자동 제작을 시작하지 않았어요."
+                    )
+                )
+                return
+            if reservation.get("reservation_status") == "completed":
+                work_finalized = True
+                if reservation.get("recovered_pending_delivery"):
+                    work_reserved = False
+                    self._safe_set_results(
+                        "영상 생성과 사용량 확정은 완료됐지만 전달 완료 여부가 불명확해요. "
+                        "중복 제작·발행 방지를 위해 자동 재실행하지 않았습니다. 저장된 영상을 확인해 주세요."
+                    )
+                    return
+                else:
+                    self._safe_set_results(
+                        "이 작업은 이전 실행에서 이미 완료 처리되었습니다. 중복 제작하지 않았어요."
+                    )
+                    return
+            else:
+                work_reserved = True
+
+            def finalize_before_commit(_video_path: str) -> None:
+                nonlocal work_finalized, work_reserved
+                if work_reservation.finalized:
+                    return
+                work_reservation.mark_pending_finalize()
+                transition = work_reservation.finalize()
+                if not transition.get("success"):
+                    raise RuntimeError(
+                        str(
+                            transition.get("message")
+                            or "완성 영상의 사용량 확정 응답을 기다리고 있습니다."
+                        )
+                    )
+                work_finalized = True
+                work_reserved = False
+
             report = loop.run_until_complete(run_platform_sourcing(
                 coupang_url,
                 progress=progress,
                 platforms=platforms,
-                gemini_client=getattr(self.gui, "genai_client", None),
+                gemini_client=gemini_client,
+                min_similarity_score=min_similarity_score,
+                before_commit=finalize_before_commit,
             ))
             if not report.get("ok"):
                 self._safe_set_results(report.get("error") or "3플랫폼 소싱에 실패했어요.")
@@ -1038,9 +1141,25 @@ class SourcingPanel(QWidget):
             # 수동 링크 > API 딥링크 > 원본 — platform_pipeline이 이미 결정.
             purchase_url = str(report.get("purchase_url") or deep_link or coupang_url)
 
+            # A usable edited file exists. Persist recovery intent and complete
+            # quota finalization before Linktree or any upload queue is touched.
+            if not work_reservation.finalized:
+                work_reservation.mark_pending_finalize()
+                finalized = work_reservation.finalize()
+                if not finalized.get("success"):
+                    self._safe_set_results(
+                        str(
+                            finalized.get("message")
+                            or "영상은 완성했지만 사용량 확정 응답이 없어 발행하지 않고 복구 대기합니다."
+                        )
+                    )
+                    return
+            work_finalized = True
+            work_reserved = False
+
             # ── 링크트리 발행(체크 시) — 기존 coupang 흐름과 동일 정책 ──
             linktree_url = ""
-            if getattr(self, "chk_linktree", None) and self.chk_linktree.isChecked():
+            if linktree_enabled:
                 progress("linktree_publish", "링크트리 발행 중...", 0.1)
                 try:
                     from managers.linktree_manager import get_linktree_manager
@@ -1055,27 +1174,48 @@ class SourcingPanel(QWidget):
                             linktree_url = lm.get_profile_url()
                         progress("linktree_publish",
                                  "링크트리 발행 완료" if ok else "링크트리 발행 실패", 1.0)
+                        if not ok:
+                            self._safe_set_results("링크트리 발행에 실패해 자동 업로드를 중단했어요.")
+                            return
                     else:
-                        progress("linktree_publish", "링크트리 미연결 - 건너뜀", 1.0)
+                        progress("linktree_publish", "링크트리 미연결", 1.0)
+                        self._safe_set_results("링크트리가 연결되지 않아 자동 업로드를 중단했어요.")
+                        return
                 except Exception as e:
                     logger.warning("[Sourcing] platform linktree publish 실패: %s", e)
                     progress("linktree_publish", f"링크트리 오류: {e}", 1.0)
+                    self._safe_set_results(f"링크트리 발행 오류로 자동 업로드를 중단했어요: {e}")
+                    return
 
-            yt = getattr(self.gui, "youtube_manager", None)
-            if yt is not None and hasattr(yt, "add_to_upload_queue"):
-                yt.add_to_upload_queue(
+            if upload_enabled:
+                if youtube_manager is None or not hasattr(
+                    youtube_manager, "add_to_upload_queue"
+                ):
+                    self._safe_set_results("YouTube 업로드 관리자를 사용할 수 없어 큐 등록을 중단했어요.")
+                    return
+                queued = youtube_manager.add_to_upload_queue(
                     video_path=edited, title="", description="",
                     product_info=product_name,
                     source_url=coupang_url,
                     coupang_deep_link=deep_link,
                     linktree_url=linktree_url,
-                    render_integrity=report.get("render_integrity") or {"ok": True, "source": "platform_video"},
-                    render_integrity_required=False,
+                    render_integrity=report.get("render_integrity") or {"ok": False, "source": "platform_video"},
+                    render_integrity_required=True,
                 )
-            progress("upload", "업로드 큐 등록 완료", 1.0)
+                if queued is not True:
+                    self._safe_set_results(
+                        "YouTube 업로드 큐가 영상을 승인하지 않아 전달 복구 상태로 보관했어요."
+                    )
+                    return
+                progress("upload", "업로드 큐 등록 완료", 1.0)
+                result_tail = "재편집·업로드 큐 등록했어요."
+            else:
+                progress("upload", "YouTube 자동 업로드 꺼짐 — 제작만 완료", 1.0)
+                result_tail = "재편집을 완료했어요. YouTube 자동 업로드는 꺼져 있어요."
+
+            work_reservation.complete_delivery()
             self._safe_set_results(
-                f"3플랫폼 방식 완료 — '{product_name[:20]}' 영상을 {hit.get('platform', '?')}에서 받아 "
-                f"재편집·업로드 큐 등록했어요."
+                f"3플랫폼 방식 완료 — '{product_name[:20]}' 영상을 {hit.get('platform', '?')}에서 받아 {result_tail}"
             )
         except Exception as e:
             logger.warning("[Sourcing] platform pipeline 실패: %s", e)
@@ -1085,27 +1225,32 @@ class SourcingPanel(QWidget):
                 loop.close()
             except Exception:
                 pass
-            self._running = False
+            if (
+                work_reserved
+                and not work_finalized
+                and work_reservation is not None
+                and work_reservation.can_release()
+            ):
+                work_reservation.release()
             self._reset_start_button()
 
     def _safe_set_results(self, text: str):
-        try:
-            from PyQt6.QtCore import QTimer as _QT
-            _QT.singleShot(0, lambda: (self.results_label.setText(text),
-                                       self.results_label.setStyleSheet(f"color: {get_color('text_secondary')};")))
-        except Exception:
-            pass
+        """Queue a platform result update onto the Qt UI thread."""
+        self.platform_result_ready.emit(str(text))
+
+    def _set_platform_result(self, text: str):
+        self.results_label.setText(text)
+        self.results_label.setStyleSheet(f"color: {get_color('text_secondary')};")
 
     def _reset_start_button(self):
-        try:
-            from PyQt6.QtCore import QTimer as _QT
-            def _r():
-                self.btn_start.setEnabled(True)
-                self.btn_start.setText("자동화 시작")
-                self._apply_button_style(disabled=False)
-            _QT.singleShot(0, _r)
-        except Exception:
-            pass
+        """Queue platform controls reset onto the Qt UI thread."""
+        self.platform_reset_requested.emit()
+
+    def _reset_platform_controls(self):
+        self._running = False
+        self.btn_start.setEnabled(True)
+        self.btn_start.setText("자동화 시작")
+        self._apply_button_style(disabled=False)
 
     def _run_pipeline(self, coupang_url: str, min_similarity_score: float):
         """Run sourcing pipeline in background thread with its own event loop."""

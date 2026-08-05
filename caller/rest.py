@@ -14,6 +14,7 @@ import jwt
 import threading
 import time
 import functools
+import uuid
 from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
@@ -1438,6 +1439,156 @@ def useWork(user_id: str) -> Dict[str, Any]:
     except Exception as e:
         logger.exception(f"Unexpected use work error: {e}")
         return {"success": False, "message": _ERROR_MESSAGES["unexpected"]}
+
+
+def consumeWork(user_id: str, idempotency_key: str) -> Dict[str, Any]:
+    """Atomically consume one work unit before rendering.
+
+    Transient failures are retried with the same key so a committed request
+    whose HTTP response was lost cannot charge the same render twice.
+    """
+    stored_token = _get_auth_token()
+    if not stored_token:
+        return {"success": False, "message": "No auth token", "remaining": None, "used": None}
+
+    try:
+        normalized_key = str(uuid.UUID(str(idempotency_key)))
+    except (TypeError, ValueError, AttributeError):
+        return {"success": False, "message": "Invalid idempotency key", "remaining": None, "used": None}
+
+    body = {
+        "user_id": str(user_id),
+        "token": stored_token,
+        "idempotency_key": normalized_key,
+    }
+    headers = {"Authorization": f"Bearer {stored_token}"}
+    last_message = _ERROR_MESSAGES["network"]
+
+    for attempt in range(3):
+        try:
+            response = _secure_session.post(
+                f"{main_server}/user/work/use-v2",
+                json=body,
+                headers=headers,
+                timeout=10,
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not isinstance(result, dict):
+                raise ValueError("Malformed work-consume response")
+            logger.info(
+                "Work consumed: remaining=%s replayed=%s",
+                result.get("remaining"),
+                result.get("idempotent_replay", result.get("replayed", False)),
+            )
+            return result
+        except requests.exceptions.Timeout:
+            last_message = _ERROR_MESSAGES["timeout"]
+            logger.warning("Consume work request timed out (%d/3)", attempt + 1)
+        except requests.exceptions.ConnectionError as exc:
+            last_message = _ERROR_MESSAGES["connection"]
+            logger.warning("Consume work connection error (%d/3): %s", attempt + 1, exc)
+        except requests.exceptions.RequestException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", 0) or 0
+            last_message = _ERROR_MESSAGES["network"]
+            if 400 <= status < 500 and status != 429:
+                logger.error("Consume work rejected with HTTP %s", status)
+                break
+            logger.warning("Consume work network error (%d/3): %s", attempt + 1, str(exc)[:100])
+        except (ValueError, json.JSONDecodeError) as exc:
+            logger.error("Consume work response parsing failed: %s", exc)
+            last_message = _ERROR_MESSAGES["parse"]
+            break
+        except Exception as exc:
+            logger.exception("Unexpected consume work error: %s", exc)
+            last_message = _ERROR_MESSAGES["unexpected"]
+            break
+
+        if attempt < 2:
+            time.sleep(0.5 * (attempt + 1))
+
+    return {"success": False, "message": last_message, "remaining": None, "used": None}
+
+
+def _transition_work_reservation(
+    user_id: str,
+    idempotency_key: str,
+    transition: str,
+) -> Dict[str, Any]:
+    """Retry one idempotent v3 reservation transition with the same UUID."""
+    endpoints = {
+        "reserve": "reserve-v3",
+        "finalize": "finalize-v3",
+        "release": "release-v3",
+    }
+    endpoint = endpoints.get(str(transition or "").strip().lower())
+    if not endpoint:
+        return {"success": False, "message": "Invalid reservation transition"}
+    stored_token = _get_auth_token()
+    if not stored_token:
+        return {"success": False, "message": "No auth token"}
+    try:
+        normalized_key = str(uuid.UUID(str(idempotency_key)))
+    except (TypeError, ValueError, AttributeError):
+        return {"success": False, "message": "Invalid idempotency key"}
+
+    body = {
+        "user_id": str(user_id),
+        "token": stored_token,
+        "idempotency_key": normalized_key,
+    }
+    headers = {"Authorization": f"Bearer {stored_token}"}
+    last_message = _ERROR_MESSAGES["network"]
+    for attempt in range(3):
+        try:
+            response = _secure_session.post(
+                f"{main_server}/user/work/{endpoint}",
+                json=body,
+                headers=headers,
+                timeout=10,
+            )
+            response.raise_for_status()
+            result = response.json()
+            if not isinstance(result, dict):
+                raise ValueError("Malformed work-reservation response")
+            return result
+        except requests.exceptions.Timeout:
+            last_message = _ERROR_MESSAGES["timeout"]
+        except requests.exceptions.ConnectionError:
+            last_message = _ERROR_MESSAGES["connection"]
+        except requests.exceptions.RequestException as exc:
+            status = getattr(getattr(exc, "response", None), "status_code", 0) or 0
+            last_message = _ERROR_MESSAGES["network"]
+            if 400 <= status < 500 and status != 429:
+                break
+        except (ValueError, json.JSONDecodeError):
+            last_message = _ERROR_MESSAGES["parse"]
+            break
+        except Exception:
+            logger.exception("Unexpected work reservation transition error")
+            last_message = _ERROR_MESSAGES["unexpected"]
+            break
+        if attempt < 2:
+            time.sleep(0.5 * (attempt + 1))
+    return {
+        "success": False,
+        "message": last_message,
+        "remaining": None,
+        "used": None,
+        "reservation_status": "unknown",
+    }
+
+
+def reserveWork(user_id: str, idempotency_key: str) -> Dict[str, Any]:
+    return _transition_work_reservation(user_id, idempotency_key, "reserve")
+
+
+def finalizeWork(user_id: str, idempotency_key: str) -> Dict[str, Any]:
+    return _transition_work_reservation(user_id, idempotency_key, "finalize")
+
+
+def releaseWork(user_id: str, idempotency_key: str) -> Dict[str, Any]:
+    return _transition_work_reservation(user_id, idempotency_key, "release")
 
 
 def setPort() -> bool:

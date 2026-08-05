@@ -537,19 +537,28 @@ class BatchHandler:
         try:
             login_data = self.app.login_data
             if not login_data or not isinstance(login_data, dict):
-                logger.warning("[BatchHandler] No login_data, skipping work count check")
-                user_id = ""
+                logger.warning("[BatchHandler] No login_data; work verification denied")
+                self.app.add_log("[로그인] 사용자 인증 정보를 확인할 수 없습니다.")
+                show_warning(
+                    self.app,
+                    "로그인 필요",
+                    "사용자 인증 정보를 확인할 수 없습니다. 다시 로그인해 주세요.",
+                )
+                return
             else:
                 user_id = login_data.get("data", {}).get("data", {}).get("id", "")
             if user_id:
                 work_check = rest.checkWorkAvailable(user_id)
-                if not work_check.get("success") and work_check.get("message") == "No auth token":
-                    self.app.add_log("[로그인] 인증 토큰이 없습니다. 다시 로그인해주세요.")
+                if not work_check.get("success"):
+                    message = str(
+                        work_check.get("message")
+                        or "작업 가능 여부를 서버에서 확인하지 못했습니다. 잠시 후 다시 시도해 주세요."
+                    )
+                    self.app.add_log(f"[작업] 서버 검증 실패: {message}")
                     show_warning(
                         self.app,
-                        "로그인 필요",
-                        "인증 토큰이 없거나 만료되었습니다.\n\n"
-                        "프로그램을 재시작한 뒤 다시 로그인해주세요.",
+                        "작업 확인 실패",
+                        f"{message}\n\n안전한 사용량 확인을 위해 작업을 시작하지 않았습니다.",
                     )
                     return
                 if work_check.get("success"):
@@ -624,8 +633,14 @@ class BatchHandler:
                     else:
                         self.app.add_log("[작업] 무료 횟수: 무제한")
         except Exception as e:
-            logger.warning(f"Work count check failed (continuing): {e}")
-            # 체크 실패 시 계속 진행 (네트워크 오류 등)
+            logger.error("Work count check failed; denying render: %s", e, exc_info=True)
+            self.app.add_log("[작업] 서버 사용량 확인 중 오류가 발생해 작업을 중단했습니다.")
+            show_warning(
+                self.app,
+                "작업 확인 실패",
+                "서버 사용량 확인 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.",
+            )
+            return
 
         # Gemini 클라이언트 초기화
         if not getattr(self.app, "genai_client", None):

@@ -22,6 +22,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 ProgressCb = Optional[Callable[[str, str, float], None]]
+BeforeCommitCb = Optional[Callable[[str], None]]
 
 # 재편집 기본값: 살짝 빠르게(Content ID 완화) — 원본 오디오 유지.
 DEFAULT_REEDIT_OPTIONS = {"speed": 1.03, "mirror": False, "mute": False, "bgm_path": None}
@@ -132,6 +133,8 @@ async def run_platform_sourcing(
     gemini_client: Any = None,
     product_name_hint: str = "",
     reedit_options: Optional[Dict[str, Any]] = None,
+    min_similarity_score: float = 0.9,
+    before_commit: BeforeCommitCb = None,
 ) -> Dict[str, Any]:
     """쿠팡 링크 → 3플랫폼 소싱 + 재편집. 결과 report dict 반환(업로드는 호출자 몫)."""
     from core.sourcing.coupang_scraper import scrape_product
@@ -198,6 +201,18 @@ async def run_platform_sourcing(
         keywords = await _convert_keywords(product_name, gemini_client)
         queries = build_queries(product_name, keywords)
         report["keywords"], report["queries"] = keywords, queries
+        relevance_references = [
+            product_name,
+            str(keywords.get("chinese") or ""),
+            str(keywords.get("english") or ""),
+        ]
+        from core.sourcing.product_searcher import _category_terms_for_keyword
+
+        category_terms = _category_terms_for_keyword(
+            str(keywords.get("english") or ""),
+            reference_name=product_name,
+            keyword_cn=str(keywords.get("chinese") or ""),
+        )
         _emit(progress, "keyword_convert",
               f"검색어: {' / '.join(q[:14] for q in queries[:3])}", 1.0)
 
@@ -207,10 +222,19 @@ async def run_platform_sourcing(
         try:
             from managers.uploaded_registry import get_uploaded_registry
             skip_ids = get_uploaded_registry().used_source_ids()
-        except Exception:
-            pass
+        except Exception as exc:
+            report["error"] = f"중복 업로드 기록을 확인할 수 없어 자동 제작을 중단했어요: {exc}"
+            _emit(progress, "overseas_search", report["error"], 0.0)
+            return report
         hit = await search_platform_shorts(
-            browser, queries, out_dir, platforms=platforms, skip_source_ids=skip_ids
+            browser,
+            queries,
+            out_dir,
+            platforms=platforms,
+            skip_source_ids=skip_ids,
+            relevance_references=relevance_references,
+            min_relevance_score=max(0.9, min(1.0, float(min_similarity_score))),
+            category_terms=category_terms,
         )
         if not hit:
             report["error"] = "세 채널 모두에서 쓸 수 있는 영상을 찾지 못했어요. (로그인 필요/안티봇/중복 가능)"
@@ -238,6 +262,15 @@ async def run_platform_sourcing(
             report["error"] = "재편집에 실패했어요."
             _emit(progress, "video_create", report["error"], 0.0)
             return report
+        quota_committed = False
+        if before_commit is not None:
+            try:
+                before_commit(edited)
+                quota_committed = True
+            except Exception as exc:
+                report["error"] = f"완성 영상의 사용량을 확정하지 못했어요: {exc}"
+                _emit(progress, "video_create", report["error"], 1.0)
+                return report
         report["final_video"] = edited
         report["render_integrity"] = {"ok": True, "source": "platform_video",
                                       "platform": hit["platform"], "via": hit.get("via", "")}
@@ -252,7 +285,20 @@ async def run_platform_sourcing(
                       "product_name": product_name[:80]},
             )
         except Exception as e:
-            logger.debug("[PlatformPipeline] 소스 기록 실패: %s", e)
+            logger.error("[PlatformPipeline] 소스 기록 실패로 자동 게시 중단: %s", e)
+            report["error"] = f"소스 중복 방지 기록을 저장하지 못했어요: {e}"
+            report["ok"] = False
+            if quota_committed:
+                # Quota is already finalized and the durable reservation now
+                # blocks a second render. Preserve the usable artifact so an
+                # operator can repair the registry and finish delivery.
+                report["manual_recovery_required"] = True
+            else:
+                try:
+                    os.remove(edited)
+                except OSError:
+                    pass
+            return report
         try:
             os.remove(hit["video_file"])
         except OSError:

@@ -171,6 +171,36 @@ def test_validate_source_video_probe_unavailable_uses_size(monkeypatch, tmp_path
     assert ok and why == "probe_unavailable"
 
 
+def test_candidate_relevance_requires_candidate_owned_evidence():
+    assert searcher.candidate_relevance_score("", ["미니 선풍기", "mini fan"]) is None
+    assert searcher.candidate_relevance_score("검색어와 무관한 고양이 영상", ["미니 선풍기"]) < 0.9
+    assert searcher.candidate_relevance_score(
+        "fan cat dancing compilation", ["fan"]
+    ) == 0.0
+
+
+def test_platform_auto_publish_threshold_never_drops_below_ninety_percent():
+    relevant, score = searcher._relevance_result(
+        "미니 선풍기 사용 후기",
+        ["미니 선풍기"],
+        0.1,
+        ["선풍기"],
+    )
+    assert relevant is True and score >= 0.9
+    relevant, _ = searcher._relevance_result(
+        "미니 선풍기 사용 후기",
+        ["미니 선풍기"],
+        0.1,
+        ["고양이"],
+    )
+    assert relevant is False
+
+
+def test_candidate_relevance_accepts_exact_multilingual_product_title():
+    assert searcher.candidate_relevance_score("미니 선풍기 사용 후기", ["미니 선풍기"]) >= 0.9
+    assert searcher.candidate_relevance_score("迷你风扇 产品演示", ["迷你风扇"]) >= 0.9
+
+
 # ── cleanup: 보존 기간 지난 산출물 정리 ──
 
 def test_cleanup_old_outputs(tmp_path):
@@ -212,3 +242,73 @@ def test_queue_get_sourcing_method_defaults_to_coupang(monkeypatch):
     import managers.settings_manager as sm
     monkeypatch.setattr(sm, "get_settings_manager", lambda: _Boom())
     assert queue_runner.get_sourcing_method() == "coupang"
+
+
+def test_registry_failure_after_quota_commit_preserves_video_and_checkpoint(
+    monkeypatch, tmp_path
+):
+    from core.sourcing import coupang_scraper
+    from managers.work_reservation_store import WorkReservationStore
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+    store = WorkReservationStore(tmp_path / "reservations.json")
+    key = store.get_or_create("platform:recovery", "42")
+
+    async def fake_scrape(_browser, _url):
+        return {"name": "recovery product"}
+
+    async def fake_keywords(_product_name, _client):
+        return {"chinese": "recovery", "english": "recovery"}
+
+    async def fake_search(*_args, **_kwargs):
+        return {
+            "platform": "douyin",
+            "video_file": str(source),
+            "video_url": "https://www.douyin.com/video/7351234567890123456",
+            "size_mb": 1,
+            "via": "test",
+        }
+
+    def fake_reedit(_source_path, output_path, **_kwargs):
+        with open(output_path, "wb") as handle:
+            handle.write(b"finished-video")
+        return True
+
+    class FailingRegistry:
+        def used_source_ids(self):
+            return set()
+
+        def record_source(self, *_args, **_kwargs):
+            raise OSError("registry unavailable")
+
+    def finalize(_path):
+        assert store.set_state(
+            "platform:recovery", key, "completed_pending_delivery", "42"
+        )
+
+    monkeypatch.setattr(coupang_scraper, "scrape_product", fake_scrape)
+    monkeypatch.setattr(pp, "_convert_keywords", fake_keywords)
+    monkeypatch.setattr(pp, "_resolve_purchase_link", lambda url: {
+        "purchase_url": url,
+        "deep_link": "",
+        "source": "original",
+    })
+    monkeypatch.setattr(searcher, "search_platform_shorts", fake_search)
+    monkeypatch.setattr(reeditor, "reedit", fake_reedit)
+    monkeypatch.setattr(reg_mod, "get_uploaded_registry", lambda: FailingRegistry())
+
+    report = asyncio.run(
+        pp.run_platform_sourcing(
+            "https://www.coupang.com/vp/products/1",
+            output_dir=str(tmp_path),
+            browser=object(),
+            before_commit=finalize,
+        )
+    )
+
+    assert report["ok"] is False
+    assert report["manual_recovery_required"] is True
+    assert report["final_video"]
+    assert os.path.exists(report["final_video"])
+    assert store.state("platform:recovery", "42") == "completed_pending_delivery"

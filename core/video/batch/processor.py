@@ -20,6 +20,8 @@ from typing import Dict, List, Optional, Tuple
 from PyQt6.QtCore import QTimer
 from utils.logging_config import get_logger
 from caller import rest
+from utils.auth_helpers import extract_user_id
+from managers.work_quota import DurableWorkReservation
 from utils.error_handlers import TrialLimitExceededError
 from core.video.batch.api_key_recovery import (
     show_api_key_error_and_wait,
@@ -39,6 +41,28 @@ MIX_MAX_URLS = 5
 MAX_FINAL_VIDEO_DURATION = 35.0
 MIX_MIN_SEGMENT_SECONDS = 2.0
 MIX_MAX_SEGMENT_SECONDS = 8.0
+
+
+class WorkFinalizationPendingError(RuntimeError):
+    """A usable output exists, but its durable quota finalization is unresolved."""
+
+
+class WorkDeliveryPendingError(RuntimeError):
+    """Quota is finalized, but one or more requested delivery steps failed."""
+
+
+def _queue_delivery_or_raise(label: str, callback, **payload) -> None:
+    """Persist a requested upload-queue item or keep delivery recovery pending."""
+    try:
+        accepted = callback(**payload)
+    except Exception as exc:
+        raise WorkDeliveryPendingError(
+            f"{label} 업로드 큐 저장에 실패했습니다."
+        ) from exc
+    if accepted is not True:
+        raise WorkDeliveryPendingError(
+            f"{label} 업로드 큐가 요청을 승인하지 않았습니다."
+        )
 
 
 def _extract_product_name(url: str) -> str:
@@ -640,6 +664,16 @@ def dynamic_batch_processing_thread(app):
             # URL 처리
             url = waiting_urls[0]
             processed_urls.add(url)
+            # Persist the key before contacting the server. A restored queue
+            # reuses it, so a crash after a committed transition cannot charge
+            # the same logical URL twice.
+            work_job_key = f"batch:{url}"
+            work_reservation = None
+            work_reserved = False
+            work_finalized = False
+            work_consume_result: Dict[str, object] = {}
+            finalize_result: Dict[str, object] = {}
+            user_id = extract_user_id(getattr(app, "login_data", None))
 
             # 500 오류 재시도 로직 (API 키 자동 전환)
             max_retries = 5
@@ -676,11 +710,100 @@ def dynamic_batch_processing_thread(app):
                     # 이전 결과 초기화
                     clear_all_previous_results(app)
 
+                    if not work_reserved:
+                        if not user_id:
+                            raise PermissionError("사용자 인증 정보를 확인할 수 없습니다.")
+
+                        work_reservation, work_consume_result = (
+                            DurableWorkReservation.begin(
+                                str(user_id), work_job_key
+                            )
+                        )
+                        if not work_consume_result.get("success"):
+                            remaining = work_consume_result.get("remaining")
+                            message = str(
+                                work_consume_result.get("message")
+                                or "서버에서 작업 사용량을 확인하지 못했습니다."
+                            )
+                            if remaining == 0 or "remaining" in message.lower():
+                                total = int(
+                                    app.login_data.get("data", {})
+                                    .get("data", {})
+                                    .get("work_count", 2)
+                                    or 2
+                                )
+                                raise TrialLimitExceededError(message, remaining=0, total=total)
+                            raise PermissionError(
+                                f"{message} 안전한 사용량 확인을 위해 작업을 시작하지 않았습니다."
+                            )
+
+                        reservation_status = str(
+                            work_consume_result.get("reservation_status") or ""
+                        )
+                        if reservation_status == "completed":
+                            work_finalized = True
+                            work_reserved = False
+                            if work_consume_result.get("recovered_pending_delivery"):
+                                _safe_set_url_status(app, url, "failed")
+                                app.url_status_message[url] = "완료 영상 전달 복구 확인 필요"
+                                app.add_log(
+                                    "[작업횟수] 영상 생성과 사용량 확정은 완료됐지만 전달 완료 여부가 "
+                                    "불명확합니다. 중복 제작·발행 방지를 위해 자동 재실행하지 않습니다."
+                                )
+                                app.batch_processing = False
+                                break
+                            else:
+                                _safe_set_url_status(app, url, "completed")
+                                successful_count += 1
+                                app.add_log(
+                                    "[작업횟수] 이전 실행에서 완료 확정된 작업을 복구했습니다."
+                                )
+                                try:
+                                    app._auto_save_session()
+                                except Exception as session_err:
+                                    logger.warning("[세션] 저장 실패: %s", session_err)
+                                break
+                        else:
+                            work_reserved = True
+
+                        app._active_work_reservation = work_reservation
+                        remaining = work_consume_result.get("remaining", -1)
+                        used = work_consume_result.get("used")
+                        if remaining == -1:
+                            logger.debug("[작업횟수] 무제한 사용자 작업 승인")
+                        else:
+                            app.add_log(f"[작업횟수] 작업 승인됨 · 잔여 {remaining}회")
+                        if app.login_data and used is not None:
+                            app.login_data.setdefault("data", {}).setdefault("data", {})[
+                                "work_used"
+                            ] = used
+                        update_sub_fn = getattr(app, "_update_subscription_info", None)
+                        if update_sub_fn is not None:
+                            _dispatch_ui_callback(app, update_sub_fn)
+
                     # 각 단계 처리 (메인의 메서드 호출)
                     _process_single_video(app, url, current_index, total_in_queue)
 
+                    if (
+                        work_reservation.finalized
+                        and _safe_get_url_status(app, url) == "failed"
+                    ):
+                        raise WorkDeliveryPendingError(
+                            str(
+                                getattr(app, "url_status_message", {}).get(url)
+                                or "요청된 자동 전달 단계가 완료되지 않았습니다."
+                            )
+                        )
+
                     # 성공 (단, 스킵된 경우는 상태 유지)
                     if _safe_get_url_status(app, url) == "skipped":
+                        release_result = work_reservation.release()
+                        if release_result.get("success"):
+                            work_reserved = False
+                        else:
+                            raise PermissionError(
+                                "건너뛴 작업의 사용량 예약을 해제하지 못했습니다."
+                            )
                         app.add_log(
                             f"[SKIP] [{current_index}/{total_in_queue}] 건너뜀 - 다음 영상으로 진행"
                         )
@@ -691,47 +814,18 @@ def dynamic_batch_processing_thread(app):
                             logger.warning("[세션] 저장 실패: %s", session_err)
                         break  # 다음 URL로
 
-                    # 성공 처리
-                    _safe_set_url_status(app, url, "completed")
-                    successful_count += 1
-                    app.add_log(f"[OK] [{current_index}/{total_in_queue}] 완료!")
-                    try:
-                        rest.log_user_action("영상 처리 완료", f"[{current_index}/{total_in_queue}] 영상 처리 완료")
-                    except Exception:
-                        pass
-
-                    # 작업 횟수 차감 (Work count decrement)
-                    try:
-                        user_id = (
-                            app.login_data.get("data", {}).get("data", {}).get("id", "")
-                            if app.login_data
-                            else ""
-                        )
-                        if user_id:
-                            work_result = rest.useWork(user_id)
-                            if work_result.get("success"):
-                                remaining = work_result.get("remaining", -1)
-                                if remaining == -1:
-                                    logger.debug("[작업횟수] 무제한")
-                                else:
-                                    app.add_log(f"[작업횟수] 잔여: {remaining}회")
-                                # Update local login_data for header display
-                                if app.login_data and "data" in app.login_data:
-                                    if "data" in app.login_data["data"]:
-                                        app.login_data["data"]["data"]["work_used"] = (
-                                            work_result.get("used", 0)
-                                        )
-                                # Refresh subscription info display
-                                update_sub_fn = getattr(app, "_update_subscription_info", None)
-                                if update_sub_fn is not None:
-                                    _dispatch_ui_callback(app, update_sub_fn)
-                            else:
-                                logger.warning(
-                                    "[작업횟수] 업데이트 실패: %s",
-                                    work_result.get("message", ""),
+                    if not work_reservation.finalized:
+                        work_reservation.mark_pending_finalize()
+                        finalize_result = work_reservation.finalize()
+                        if not finalize_result.get("success"):
+                            raise WorkFinalizationPendingError(
+                                str(
+                                    finalize_result.get("message")
+                                    or "완료된 작업의 사용량 확정 응답을 기다리고 있습니다."
                                 )
-                    except Exception as work_err:
-                        logger.warning("[작업횟수] 차감 실패 (무시됨): %s", work_err)
+                            )
+                    work_finalized = True
+                    work_reserved = False
 
                     try:
                         # 개별 작업 완료 시 팝업 없이 저장만 수행
@@ -765,6 +859,24 @@ def dynamic_batch_processing_thread(app):
                             exc_info=True,
                         )
                         ui_controller.write_error_log(e)
+                        raise RuntimeError("완성 영상을 로컬에 저장하지 못했습니다.") from e
+
+                    used = finalize_result.get("used")
+                    if app.login_data and used is not None:
+                        app.login_data.setdefault("data", {}).setdefault("data", {})[
+                            "work_used"
+                        ] = used
+
+                    work_reservation.complete_delivery()
+
+                    # 성공 처리
+                    _safe_set_url_status(app, url, "completed")
+                    successful_count += 1
+                    app.add_log(f"[OK] [{current_index}/{total_in_queue}] 완료!")
+                    try:
+                        rest.log_user_action("영상 처리 완료", f"[{current_index}/{total_in_queue}] 영상 처리 완료")
+                    except Exception:
+                        pass
 
                     # 세션 저장
                     try:
@@ -772,6 +884,28 @@ def dynamic_batch_processing_thread(app):
                     except Exception as session_err:
                         logger.warning("[세션] 저장 실패: %s", session_err)
 
+                    break
+
+                except WorkFinalizationPendingError as e:
+                    app.add_log(
+                        "[작업횟수] 영상은 완성되었지만 서버 확정 응답이 없어 "
+                        "발행하지 않고 복구 대기 상태로 보관합니다."
+                    )
+                    logger.warning("[WorkQuota] Finalization pending: %s", e)
+                    app.batch_processing = False
+                    _safe_set_url_status(app, url, "failed")
+                    app.url_status_message[url] = "사용량 확정 복구 대기"
+                    break
+
+                except WorkDeliveryPendingError as e:
+                    app.add_log(
+                        "[자동 발행] 사용량은 확정됐지만 요청된 전달 단계가 완료되지 않아 "
+                        "복구 키를 유지합니다."
+                    )
+                    logger.warning("[Delivery] Delivery pending: %s", e)
+                    app.batch_processing = False
+                    _safe_set_url_status(app, url, "failed")
+                    app.url_status_message[url] = "자동 발행 복구 대기"
                     break
 
                 except TrialLimitExceededError as e:
@@ -1051,6 +1185,23 @@ def dynamic_batch_processing_thread(app):
                         except Exception as session_err:
                             logger.warning("[세션] 저장 실패: %s", session_err)
                         break
+
+            if (
+                work_reserved
+                and not work_finalized
+                and user_id
+                and work_reservation is not None
+                and work_reservation.can_release()
+            ):
+                release_result = work_reservation.release()
+                if not release_result.get("success"):
+                    app.add_log(
+                        "[작업횟수] 실패 작업 예약 해제를 확인하지 못했습니다. "
+                        "같은 작업을 재개하면 동일 키로 복구합니다."
+                    )
+
+            if getattr(app, "_active_work_reservation", None) is work_reservation:
+                app._active_work_reservation = None
 
             # 정리
             try:
@@ -1611,8 +1762,23 @@ def _process_single_video(app, url, current_number, total_urls):
 
             # ★ 보이스별 즉시 저장: 완료 즉시 출력 폴더로 이동 (사용자에게 바로 보임)
             try:
+                active_reservation = getattr(app, "_active_work_reservation", None)
+                if active_reservation is not None and not active_reservation.finalized:
+                    # A rendered temp file now exists. Persist the recovery state
+                    # before exposing it, then finalize before any remote publish.
+                    active_reservation.mark_pending_finalize()
                 app.save_generated_videos_locally(show_popup=False)
                 logger.info("[LocalSave] 음성 %d/%d 즉시 저장 완료", idx_voice, total_voices)
+
+                if active_reservation is not None and not active_reservation.finalized:
+                    quota_result = active_reservation.finalize()
+                    if not quota_result.get("success"):
+                        raise WorkFinalizationPendingError(
+                            str(
+                                quota_result.get("message")
+                                or "완성 영상의 사용량 확정 응답을 기다리고 있습니다."
+                            )
+                        )
 
                 # ===============================================================
                 # AUTOMATION: Coupang, Inpock, YouTube Auto-Upload
@@ -1785,6 +1951,12 @@ def _process_single_video(app, url, current_number, total_urls):
                                         # Inpock 연동 실패가 YouTube 업로드 큐 추가를 막지 않도록 분리 처리
                                         logger.warning("[Automation] Inpock link update skipped: %s", inpock_err)
 
+                            if linktree_publish_blocked:
+                                raise WorkDeliveryPendingError(
+                                    linktree_publish_block_reason
+                                    or "Linktree 자동 발행이 완료되지 않았습니다."
+                                )
+
                             # 3. Add to YouTube Upload Queue
                             review_only_source = (
                                 str(sourcing_context.get("source") or "").lower() == "coupang_image"
@@ -1808,7 +1980,9 @@ def _process_single_video(app, url, current_number, total_urls):
                                 if update_fn is not None:
                                     _dispatch_ui_callback(app, update_fn)
                             elif yt_manager and yt_manager.get_upload_settings().enabled:
-                                yt_manager.add_to_upload_queue(
+                                _queue_delivery_or_raise(
+                                    "YouTube",
+                                    yt_manager.add_to_upload_queue,
                                     video_path=final_video_path,
                                     title=video_title,
                                     description=video_desc,
@@ -1828,6 +2002,7 @@ def _process_single_video(app, url, current_number, total_urls):
                                     pass
 
                             # 4. Add to Instagram Reels Upload Queue (official Graph API)
+                            ig_enabled = False
                             try:
                                 ig_manager = getattr(app, "instagram_manager", None)
                                 if ig_manager is None:
@@ -1850,7 +2025,9 @@ def _process_single_video(app, url, current_number, total_urls):
                                         or "Linktree 자동 발행 실패",
                                     )
                                 elif ig_enabled:
-                                    ig_manager.add_to_upload_queue(
+                                    _queue_delivery_or_raise(
+                                        "Instagram",
+                                        ig_manager.add_to_upload_queue,
                                         video_path=final_video_path,
                                         title=video_title,
                                         description=video_desc,
@@ -1873,8 +2050,13 @@ def _process_single_video(app, url, current_number, total_urls):
                                 logger.warning(
                                     "[Automation] Instagram upload queue step skipped: %s", ig_err
                                 )
+                                if ig_enabled:
+                                    raise WorkDeliveryPendingError(
+                                        "Instagram 업로드 큐 저장에 실패했습니다."
+                                    ) from ig_err
 
                             # 5. Add to TikTok Upload Queue (official Content Posting API)
+                            tt_enabled = False
                             try:
                                 tt_manager = getattr(app, "tiktok_manager", None)
                                 if tt_manager is None:
@@ -1896,7 +2078,9 @@ def _process_single_video(app, url, current_number, total_urls):
                                         linktree_publish_block_reason or "Linktree 자동 발행 실패",
                                     )
                                 elif tt_enabled:
-                                    tt_manager.add_to_upload_queue(
+                                    _queue_delivery_or_raise(
+                                        "TikTok",
+                                        tt_manager.add_to_upload_queue,
                                         video_path=final_video_path,
                                         title=video_title,
                                         description=video_desc,
@@ -1919,10 +2103,22 @@ def _process_single_video(app, url, current_number, total_urls):
                                 logger.warning(
                                     "[Automation] TikTok upload queue step skipped: %s", tt_err
                                 )
+                                if tt_enabled:
+                                    raise WorkDeliveryPendingError(
+                                        "TikTok 업로드 큐 저장에 실패했습니다."
+                                    ) from tt_err
 
+                except WorkDeliveryPendingError:
+                    raise
                 except Exception as auto_err:
                     logger.warning(f"[Automation] 자동화 단계 실패 (영상은 저장됨): {auto_err}")
+                    if active_reservation is not None and active_reservation.finalized:
+                        raise WorkDeliveryPendingError(
+                            "요청된 자동 발행 정보를 저장하지 못했습니다."
+                        ) from auto_err
 
+            except (WorkFinalizationPendingError, WorkDeliveryPendingError):
+                raise
             except Exception as _save_err:
                 logger.warning("[LocalSave] 즉시 저장 실패 (배치 종료 시 재시도): %s", _save_err)
 
