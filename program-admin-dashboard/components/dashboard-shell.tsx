@@ -9,7 +9,6 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
-  CircleUserRound,
   Clock3,
   Database,
   Gauge,
@@ -30,7 +29,7 @@ import {
   Wifi,
   X,
 } from 'lucide-react';
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   AdminActionResponse,
@@ -41,6 +40,7 @@ import type {
   User,
   UserListResponse,
 } from '@/lib/types';
+import { entitlementState, formatDate, projectedExpiry, remainingLabel } from '@/lib/user-state';
 
 const PROGRAMS: Array<{ key: ProgramKey; label: string; short: string }> = [
   { key: 'all', label: '전체 프로그램', short: 'ALL' },
@@ -55,7 +55,7 @@ const EMPTY_STATS: StatsResponse = {
 
 type FilterKey = 'all' | 'subscriber' | 'trial' | 'online' | 'inactive';
 type ConfirmState = {
-  kind: 'toggle' | 'revoke' | 'reduce' | 'delete';
+  kind: 'toggle' | 'extend' | 'revoke' | 'reduce' | 'delete';
   title: string;
   description: string;
   confirmLabel: string;
@@ -90,7 +90,7 @@ function apiErrorMessage(status: number, payload: ApiErrorPayload) {
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/admin/${path}`, { ...init, cache: 'no-store' });
   if (response.status === 401) {
-    window.location.assign('/login');
+    window.location.replace('/login');
     throw new Error('세션이 만료되었습니다.');
   }
   const payload = await response.json().catch(() => ({})) as ApiErrorPayload;
@@ -98,36 +98,6 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(apiErrorMessage(response.status, payload));
   }
   return payload as T;
-}
-
-function parseApiDate(value?: string | null) {
-  if (!value) return null;
-  const hasZone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
-  const date = new Date(hasZone ? value : `${value}Z`);
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function formatDate(value?: string | null, compact = false) {
-  const date = parseApiDate(value);
-  if (!date) return '—';
-  return new Intl.DateTimeFormat('ko-KR', {
-    timeZone: 'Asia/Seoul',
-    year: compact ? undefined : 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(date);
-}
-
-function remainingLabel(value?: string | null) {
-  const date = parseApiDate(value);
-  if (!date) return '만료일 없음';
-  const diff = Math.ceil((date.getTime() - Date.now()) / 86_400_000);
-  if (diff < 0) return `${Math.abs(diff)}일 전 만료`;
-  if (diff === 0) return '오늘 만료';
-  return `${diff}일 남음`;
 }
 
 function programLabel(key?: string) {
@@ -168,7 +138,11 @@ export function DashboardShell() {
 
   const loadData = useCallback(async (quiet = false) => {
     const requestId = ++requestSequence.current;
-    quiet ? setRefreshing(true) : setLoading(true);
+    if (quiet) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
     setError('');
     if (!quiet) {
       setUsers([]);
@@ -186,33 +160,39 @@ export function DashboardShell() {
       query.set('program_type', program);
       statsQuery.set('program_type', program);
     }
+    if (filter !== 'all') query.set('status', filter);
     if (deferredSearch) query.set('search', deferredSearch);
     try {
-      // The user-list call expires stale heartbeats. Read stats only after that
-      // cleanup commits so the online count cannot race ahead with old flags.
       const userData = await apiRequest<UserListResponse>(`users?${query}`);
-      if (requestId !== requestSequence.current) return;
+      if (requestId !== requestSequence.current) return false;
       const statsData = await apiRequest<StatsResponse>(`stats?${statsQuery}`);
-      if (requestId !== requestSequence.current) return;
+      if (requestId !== requestSequence.current) return false;
       setUsers(userData.users || []);
       setTotal(userData.total || 0);
       setStats(statsData);
       setLastUpdated(new Date());
+      return true;
     } catch (requestError) {
-      if (requestId !== requestSequence.current) return;
-      setUsers([]);
-      setTotal(0);
-      setStats(EMPTY_STATS);
+      if (requestId !== requestSequence.current) return false;
+      if (!quiet) {
+        setUsers([]);
+        setTotal(0);
+        setStats(EMPTY_STATS);
+      }
       setError(requestError instanceof Error ? requestError.message : '운영 데이터를 불러오지 못했습니다.');
+      return false;
     } finally {
-      if (requestId !== requestSequence.current) return;
-      setLoading(false);
-      setRefreshing(false);
+      if (requestId === requestSequence.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
-  }, [deferredSearch, page, pageSize, program]);
+  }, [deferredSearch, filter, page, pageSize, program]);
 
-  useEffect(() => { void loadData(false); }, [loadData]);
-  useEffect(() => { setPage(1); }, [deferredSearch, program]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadData(false), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadData]);
   useEffect(() => {
     const timer = window.setInterval(() => void loadData(true), 60_000);
     return () => window.clearInterval(timer);
@@ -223,16 +203,9 @@ export function DashboardShell() {
     return () => window.clearTimeout(timer);
   }, [toast]);
 
-  const filteredUsers = useMemo(() => users.filter((user) => {
-    if (filter === 'subscriber') return user.user_type === 'subscriber';
-    if (filter === 'trial') return user.user_type === 'trial';
-    if (filter === 'online') return user.is_online;
-    if (filter === 'inactive') return !user.is_active;
-    return true;
-  }), [filter, users]);
-
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const activeProgram = PROGRAMS.find((item) => item.key === program) || PROGRAMS[0];
+  const selectedEntitlement = selectedUser ? entitlementState(selectedUser) : null;
 
   async function openUser(user: User) {
     setSelectedUser(user);
@@ -263,6 +236,7 @@ export function DashboardShell() {
 
   async function mutate(path: string, method: 'POST' | 'DELETE', successMessage: string, body?: object) {
     if (!selectedUser) return;
+    const targetUserId = selectedUser.id;
     setActionBusy(true);
     try {
       const result = await apiRequest<AdminActionResponse>(path, {
@@ -271,31 +245,54 @@ export function DashboardShell() {
         body: body ? JSON.stringify(body) : undefined,
       });
       if (result.success === false) throw new Error(safeApiMessage(result.message, '작업이 적용되지 않았습니다.'));
-      showToast(successMessage);
-      if (method === 'DELETE') {
-        setSelectedUser(null);
-      } else {
-        await refreshSelected(selectedUser.id);
-      }
-      await loadData(true);
     } catch (requestError) {
       showToast(requestError instanceof Error ? requestError.message : '작업을 완료하지 못했습니다.', 'error');
-    } finally {
       setActionBusy(false);
       setConfirm(null);
       setDeleteText('');
+      return;
     }
+
+    // The mutation has already committed. Refresh failures must never be
+    // reported as mutation failures because retrying could apply it twice.
+    showToast(successMessage);
+    setConfirm(null);
+    setDeleteText('');
+    let detailRefreshed = true;
+    if (method === 'DELETE') {
+      setSelectedUser(null);
+    } else {
+      try {
+        await refreshSelected(targetUserId);
+      } catch {
+        detailRefreshed = false;
+      }
+    }
+    const listRefreshed = await loadData(true);
+    if (!detailRefreshed || !listRefreshed) {
+      showToast(`${successMessage} 화면 갱신에 실패했지만 작업은 다시 실행하지 마세요.`, 'error');
+    }
+    setActionBusy(false);
   }
 
-  async function extend(days: number) {
+  function extend(days: number) {
     if (!selectedUser || days < 1 || days > 3650) return;
-    await mutate(`users/${selectedUser.id}/extend`, 'POST', `${selectedUser.username} 구독을 ${days}일 연장했습니다.`, { days });
+    const nextExpiry = projectedExpiry(selectedUser.subscription_expires_at, days, 'extend');
+    setConfirm({
+      kind: 'extend',
+      title: '구독 기간 연장',
+      description: `${selectedUser.username}의 구독을 ${days}일 연장합니다. 예상 만료일: ${formatDate(nextExpiry)}.`,
+      confirmLabel: `${days}일 연장`,
+      days,
+    });
   }
 
   async function executeConfirmed() {
     if (!selectedUser || !confirm) return;
     if (confirm.kind === 'toggle') {
       await mutate(`users/${selectedUser.id}/toggle-active`, 'POST', `${selectedUser.username} 계정을 ${selectedUser.is_active ? '비활성화' : '활성화'}했습니다.`);
+    } else if (confirm.kind === 'extend') {
+      await mutate(`users/${selectedUser.id}/extend`, 'POST', `${selectedUser.username} 구독을 ${confirm.days}일 연장했습니다.`, { days: confirm.days });
     } else if (confirm.kind === 'revoke') {
       await mutate(`users/${selectedUser.id}/revoke-subscription`, 'POST', `${selectedUser.username} 구독을 회수했습니다.`);
     } else if (confirm.kind === 'reduce') {
@@ -335,7 +332,7 @@ export function DashboardShell() {
             <button
               className={`program-item ${program === item.key ? 'active' : ''}`}
               key={item.key}
-              onClick={() => { setProgram(item.key); setMobileNav(false); }}
+              onClick={() => { setProgram(item.key); setPage(1); setMobileNav(false); }}
             >
               <span className="program-avatar">{item.short}</span>
               <span>{item.label}</span>
@@ -381,31 +378,30 @@ export function DashboardShell() {
           <section className="data-panel">
             <div className="panel-head">
               <div><h3>사용자 DB</h3><p>검색 결과 {total.toLocaleString()}명</p></div>
-              <div className="search-box"><Search size={17} /><input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="아이디, 이름, 이메일, 전화번호 검색" aria-label="사용자 검색" />{search ? <button aria-label="검색어 지우기" onClick={() => setSearch('')}><X size={15} /></button> : null}</div>
+              <div className="search-box"><Search size={17} /><input value={search} onChange={(event) => { setSearch(event.target.value); setPage(1); }} placeholder="아이디, 이름, 이메일, 전화번호 검색" aria-label="사용자 검색" />{search ? <button aria-label="검색어 지우기" onClick={() => { setSearch(''); setPage(1); }}><X size={15} /></button> : null}</div>
             </div>
             <div className="filter-row" role="group" aria-label="사용자 상태 필터">
               {([
                 ['all', '전체'], ['subscriber', '구독자'], ['trial', '체험'], ['online', '온라인'], ['inactive', '비활성'],
-              ] as Array<[FilterKey, string]>).map(([key, label]) => <button className={filter === key ? 'active' : ''} onClick={() => setFilter(key)} key={key}>{label}</button>)}
+              ] as Array<[FilterKey, string]>).map(([key, label]) => <button className={filter === key ? 'active' : ''} onClick={() => { setFilter(key); setPage(1); }} key={key}>{label}</button>)}
             </div>
 
             <div className="table-wrap">
               <table>
-                <thead><tr><th>사용자</th><th>프로그램</th><th>플랜</th><th>작업 사용량</th><th>계정 상태</th><th>마지막 로그인</th><th>구독 만료</th><th><span className="sr-only">작업</span></th></tr></thead>
+                <thead><tr><th>사용자</th><th>프로그램</th><th>플랜</th><th>작업 사용량</th><th>계정 상태</th><th>마지막 로그인</th><th>권한 만료</th><th><span className="sr-only">작업</span></th></tr></thead>
                 <tbody>
-                  {loading ? <TableSkeleton /> : filteredUsers.length ? filteredUsers.map((user) => {
+                  {loading ? <TableSkeleton /> : users.length ? users.map((user) => {
                     const state = userState(user);
-                    const expiry = parseApiDate(user.subscription_expires_at);
-                    const expired = Boolean(expiry && expiry.getTime() < Date.now());
+                    const entitlement = entitlementState(user);
                     return (
                       <tr key={user.id} onClick={() => void openUser(user)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') void openUser(user); }}>
                         <td><div className="user-cell"><span className="user-avatar">{user.username.slice(0, 2).toUpperCase()}</span><div><strong>{user.username}</strong><span>{user.name || user.email || `ID ${user.id}`}</span></div></div></td>
                         <td><span className="program-chip">{programLabel(user.program_type)}</span></td>
-                        <td><span className={`status-pill ${user.user_type === 'subscriber' && !expired ? 'positive' : 'neutral'}`}>{user.user_type === 'subscriber' && !expired ? '구독' : '체험'}</span></td>
+                        <td><span className={`status-pill ${entitlement.tone}`}>{entitlement.label}</span></td>
                         <td><div className="usage-cell"><strong>{user.work_used.toLocaleString()}</strong><span>{user.work_count === -1 ? '무제한' : `/ ${user.work_count}`}</span></div></td>
                         <td><span className={`status-pill ${state.tone}`}><i />{state.label}</span></td>
                         <td><span className="date-primary">{formatDate(user.last_login_at, true)}</span><small>{user.login_count.toLocaleString()}회 로그인</small></td>
-                        <td><span className={expired ? 'date-danger' : 'date-primary'}>{formatDate(user.subscription_expires_at, true)}</span><small>{remainingLabel(user.subscription_expires_at)}</small></td>
+                        <td><span className={entitlement.expired ? 'date-danger' : 'date-primary'}>{formatDate(user.subscription_expires_at, true)}</span><small>{entitlement.expiryLabel} · {remainingLabel(user.subscription_expires_at)}</small></td>
                         <td><button className="icon-button" aria-label={`${user.username} 상세 보기`} onClick={(event) => { event.stopPropagation(); void openUser(user); }}><MoreHorizontal size={18} /></button></td>
                       </tr>
                     );
@@ -434,15 +430,15 @@ export function DashboardShell() {
             <div className="drawer-scroll">
               <section className="detail-section">
                 <div className="detail-title"><h4>계정 정보</h4><span>{formatDate(selectedUser.created_at)} 가입</span></div>
-                <dl className="detail-grid"><div><dt>이메일</dt><dd>{selectedUser.email || '—'}</dd></div><div><dt>전화번호</dt><dd>{selectedUser.phone || '—'}</dd></div><div><dt>앱 버전</dt><dd>{selectedUser.app_version || '—'}</dd></div><div><dt>마지막 IP</dt><dd>{selectedUser.last_login_ip || '—'}</dd></div></dl>
+                 <dl className="detail-grid"><div><dt>이메일</dt><dd>{selectedUser.email || '—'}</dd></div><div><dt>전화번호</dt><dd>{selectedUser.phone || '—'}</dd></div><div><dt>앱 버전</dt><dd>{selectedUser.app_version || '—'}</dd></div><div><dt>마지막 IP (마스킹)</dt><dd>{selectedUser.last_login_ip || '—'}</dd></div></dl>
               </section>
 
               <section className="detail-section subscription-card">
-                <div className="detail-title"><h4>구독 관리</h4><span className={`status-pill ${selectedUser.user_type === 'subscriber' ? 'positive' : 'neutral'}`}>{selectedUser.user_type === 'subscriber' ? '구독자' : '체험'}</span></div>
-                <div className="expiry-block"><div><span>현재 만료일</span><strong>{formatDate(selectedUser.subscription_expires_at)}</strong></div><span>{remainingLabel(selectedUser.subscription_expires_at)}</span></div>
-                <div className="quick-actions"><span>빠른 연장</span><div>{[7, 30, 90, 365].map((days) => <button key={days} disabled={actionBusy} onClick={() => void extend(days)}>+{days}일</button>)}</div></div>
-                <div className="custom-action"><input type="number" min={1} max={3650} value={customDays} onChange={(event) => setCustomDays(Math.max(1, Number(event.target.value) || 1))} aria-label="구독 일수" /><button className="button primary" disabled={actionBusy} onClick={() => void extend(customDays)}>{actionBusy ? <LoaderCircle className="spin" size={15} /> : <ArrowUpFromLine size={15} />} 연장</button></div>
-                <div className="secondary-actions"><button disabled={selectedUser.user_type !== 'subscriber'} onClick={() => setConfirm({ kind: 'reduce', title: '구독 기간 축소', description: `${selectedUser.username}의 구독을 ${customDays}일 줄입니다. 만료일이 지나면 체험 계정으로 전환됩니다.`, confirmLabel: `${customDays}일 축소`, days: customDays, danger: true })}><ArrowDownToLine size={15} /> {customDays}일 축소</button><button disabled={selectedUser.user_type !== 'subscriber'} onClick={() => setConfirm({ kind: 'revoke', title: '구독 회수', description: `${selectedUser.username}을 체험 계정으로 전환하고 작업 횟수를 초기화합니다.`, confirmLabel: '구독 회수', danger: true })}><Ban size={15} /> 구독 회수</button></div>
+                <div className="detail-title"><h4>구독 관리</h4><span className={`status-pill ${selectedEntitlement?.tone}`}>{selectedEntitlement?.label}</span></div>
+                <div className="expiry-block"><div><span>{selectedEntitlement?.expiryLabel}</span><strong>{formatDate(selectedUser.subscription_expires_at)}</strong></div><span>{remainingLabel(selectedUser.subscription_expires_at)}</span></div>
+                <div className="quick-actions"><span>빠른 연장</span><div>{[7, 30, 90, 365].map((days) => <button key={days} disabled={actionBusy} onClick={() => extend(days)}>+{days}일</button>)}</div></div>
+                <div className="custom-action"><input type="number" min={1} max={3650} value={customDays} onChange={(event) => setCustomDays(Math.min(3650, Math.max(1, Number(event.target.value) || 1)))} aria-label="구독 일수" /><button className="button primary" disabled={actionBusy} onClick={() => extend(customDays)}>{actionBusy ? <LoaderCircle className="spin" size={15} /> : <ArrowUpFromLine size={15} />} 연장</button></div>
+                <div className="secondary-actions"><button disabled={!selectedEntitlement?.canManageSubscription} onClick={() => setConfirm({ kind: 'reduce', title: '구독 기간 축소', description: `${selectedUser.username}의 구독을 ${customDays}일 줄입니다. 예상 만료일: ${formatDate(projectedExpiry(selectedUser.subscription_expires_at, customDays, 'reduce'))}. 만료 시 체험 계정으로 전환됩니다.`, confirmLabel: `${customDays}일 축소`, days: customDays, danger: true })}><ArrowDownToLine size={15} /> {customDays}일 축소</button><button disabled={!selectedEntitlement?.canManageSubscription} onClick={() => setConfirm({ kind: 'revoke', title: '구독 회수', description: `${selectedUser.username}을 체험 계정으로 전환하고 작업 횟수를 초기화합니다. 이 작업은 자동 갱신되지 않습니다.`, confirmLabel: '구독 회수', danger: true })}><Ban size={15} /> 구독 회수</button></div>
               </section>
 
               <section className="detail-section">
