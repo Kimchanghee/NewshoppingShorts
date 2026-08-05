@@ -26,6 +26,10 @@ def test_build_codex_cli_args_with_model_and_workdir(monkeypatch):
     args = build_codex_cli_args("run step now")
     assert args == [
         "/usr/local/bin/codex",
+        "exec",
+        "--sandbox",
+        "read-only",
+        "--skip-git-repo-check",
         "--cd",
         "/tmp/worker-space",
         "--model",

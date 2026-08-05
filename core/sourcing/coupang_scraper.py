@@ -11,6 +11,7 @@ from typing import Any, Dict, Optional
 
 from core.sourcing.report_cache import find_cached_product_info, normalize_image_url
 from utils.logging_config import get_logger
+from utils.url_security import is_official_coupang_url
 
 logger = get_logger(__name__)
 
@@ -39,7 +40,7 @@ async def scrape_product(browser: Any, product_url: str) -> Optional[Dict[str, s
     Returns:
         Dict with keys: name, image, price, url.  None on failure.
     """
-    if "coupang.com" not in product_url:
+    if not is_official_coupang_url(product_url):
         logger.warning("[CoupangScraper] Not a Coupang URL: %s", product_url)
         return None
 
@@ -81,6 +82,10 @@ async def scrape_product(browser: Any, product_url: str) -> Optional[Dict[str, s
                     continue
                 last_error = "상품 정보 추출 실패"
                 break
+
+            if not is_official_coupang_url(str(data.get("url") or "")):
+                logger.error("[CoupangScraper] Navigation left an official Coupang host")
+                return None
 
             # Clean up name
             name = re.sub(r'\s*\|\s*쿠팡\s*$', '', data["name"]).strip()

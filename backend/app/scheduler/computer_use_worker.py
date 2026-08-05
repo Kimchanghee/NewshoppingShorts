@@ -17,6 +17,21 @@ from app.models.user_log import UserLog
 
 logger = logging.getLogger(__name__)
 
+_SAFE_ENV_KEYS = {
+    "PATH", "PATHEXT", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP",
+    "LANG", "LC_ALL", "TERM", "USERPROFILE", "LOCALAPPDATA", "APPDATA",
+}
+
+
+def build_worker_env(source: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+    """Return the minimal OS environment required to launch the CLI."""
+    source_env = source if source is not None else os.environ
+    return {
+        key: str(value)
+        for key, value in source_env.items()
+        if key.upper() in _SAFE_ENV_KEYS and value is not None
+    }
+
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
@@ -29,7 +44,8 @@ def build_codex_cli_args(prompt: str) -> List[str]:
     workdir = str(settings.COMPUTER_USE_WORKER_WORKDIR or "").strip()
     model_name = str(settings.COMPUTER_USE_WORKER_MODEL or "").strip()
 
-    args: List[str] = [cli_path]
+    sandbox = str(settings.COMPUTER_USE_WORKER_SANDBOX or "read-only").strip()
+    args: List[str] = [cli_path, "exec", "--sandbox", sandbox, "--skip-git-repo-check"]
     if workdir:
         args.extend(["--cd", workdir])
     if model_name:
@@ -211,6 +227,7 @@ async def _execute_codex_job(job: Dict[str, str], worker_id: str) -> None:
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workdir,
+            env=build_worker_env(),
         )
     except Exception as exc:
         _mark_job_result(

@@ -3,14 +3,18 @@ from __future__ import annotations
 import re
 import time
 import ipaddress
+import http.client
+import socket
+import ssl
 from urllib.parse import urlparse, urlunparse, unquote, urljoin, parse_qs
-from urllib.request import Request, urlopen, build_opener, HTTPRedirectHandler
+from urllib.request import Request, build_opener, HTTPRedirectHandler
 import html
 from typing import Dict, List, Optional, Tuple, Iterable, Set, FrozenSet
 import random
 
 from utils import DriverConfig
 from utils.logging_config import get_logger
+from utils.url_security import is_public_http_url, resolve_public_http_url
 
 logger = get_logger(__name__)
 
@@ -85,8 +89,7 @@ def validate_download_url(url: str) -> bool:
     try:
         parsed = urlparse(url)
 
-        # Only allow http/https schemes
-        if parsed.scheme not in ('http', 'https'):
+        if parsed.scheme not in ("http", "https"):
             logger.warning("[보안] 허용되지 않은 스킴: %s", parsed.scheme)
             return False
 
@@ -94,22 +97,141 @@ def validate_download_url(url: str) -> bool:
         if not hostname:
             logger.warning("[보안] 호스트명 없음")
             return False
-
-        # Block IP addresses in private/local ranges
         if _is_ip_blocked(hostname):
             logger.warning("[보안] 차단된 IP 범위: %s", hostname)
             return False
-
-        # Check if domain is in allowlist
         if not _is_domain_allowed(hostname):
             logger.warning("[보안] 허용되지 않은 도메인: %s", hostname)
             return False
-
+        if not is_public_http_url(url, allowed_domains=ALLOWED_DOWNLOAD_DOMAINS):
+            logger.warning("[보안] 공개 네트워크 주소 검증 실패: %s", hostname)
+            return False
         return True
-
-    except Exception as e:
-        logger.warning("[보안] URL 검증 오류: %s", str(e))
+    except Exception as exc:
+        logger.warning("[보안] URL 검증 오류: %s", exc)
         return False
+
+
+class _PinnedHTTPConnection(http.client.HTTPConnection):
+    def __init__(self, hostname: str, pinned_ip: str, *, port: int, timeout: float):
+        super().__init__(hostname, port=port, timeout=timeout)
+        self._pinned_ip = pinned_ip
+
+    def connect(self):
+        self.sock = socket.create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
+
+
+class _PinnedHTTPSConnection(http.client.HTTPSConnection):
+    def __init__(self, hostname: str, pinned_ip: str, *, port: int, timeout: float):
+        super().__init__(
+            hostname,
+            port=port,
+            timeout=timeout,
+            context=ssl.create_default_context(),
+        )
+        self._pinned_ip = pinned_ip
+
+    def connect(self):
+        raw_socket = socket.create_connection(
+            (self._pinned_ip, self.port),
+            self.timeout,
+            self.source_address,
+        )
+        self.sock = self._context.wrap_socket(raw_socket, server_hostname=self.host)
+
+
+class _PinnedResponse:
+    """Small context-managed facade over an http.client response."""
+
+    def __init__(self, response, connection, final_url: str):
+        self._response = response
+        self._connection = connection
+        self._final_url = final_url
+        self.headers = response.headers
+        self.status = response.status
+
+    def read(self, amount: int = -1):
+        return self._response.read(amount)
+
+    def geturl(self) -> str:
+        return self._final_url
+
+    def close(self):
+        try:
+            self._response.close()
+        finally:
+            self._connection.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, traceback):
+        self.close()
+
+
+def open_validated_url(
+    url: str,
+    *,
+    headers: Optional[Dict[str, str]] = None,
+    timeout: float = 60,
+    max_redirects: int = 5,
+):
+    """Open an allowlisted URL with validated redirects and DNS pinning."""
+    current_url = str(url or "").strip()
+    request_headers = dict(headers or {})
+
+    for redirect_count in range(max_redirects + 1):
+        parsed, approved_ips = resolve_public_http_url(
+            current_url,
+            allowed_domains=ALLOWED_DOWNLOAD_DOMAINS,
+        )
+        if not approved_ips:
+            raise ValueError(f"[보안] 공개 IP를 확인할 수 없습니다: {current_url[:120]}")
+
+        hostname = parsed.hostname or ""
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        connection_type = (
+            _PinnedHTTPSConnection if parsed.scheme == "https" else _PinnedHTTPConnection
+        )
+        connection = connection_type(
+            hostname,
+            approved_ips[0],
+            port=port,
+            timeout=timeout,
+        )
+        path = parsed.path or "/"
+        if parsed.params:
+            path = f"{path};{parsed.params}"
+        if parsed.query:
+            path = f"{path}?{parsed.query}"
+        hop_headers = dict(request_headers)
+        hop_headers["Host"] = hostname if parsed.port is None else parsed.netloc
+
+        try:
+            connection.request("GET", path, headers=hop_headers)
+            response = connection.getresponse()
+        except Exception:
+            connection.close()
+            raise
+
+        if response.status not in {301, 302, 303, 307, 308}:
+            return _PinnedResponse(response, connection, current_url)
+
+        location = response.headers.get("Location")
+        response.close()
+        connection.close()
+        if not location:
+            raise ValueError("[보안] Location이 없는 리다이렉트 응답입니다.")
+        if redirect_count >= max_redirects:
+            raise ValueError("[보안] 다운로드 리다이렉트가 너무 많습니다.")
+        next_url = urljoin(current_url, location)
+        if not validate_download_url(next_url):
+            raise ValueError(f"[보안] 허용되지 않은 리다이렉트입니다: {next_url[:120]}")
+        current_url = next_url
 
 def _extract_quality_metrics(url: str) -> Tuple[int, int, int]:
     """
@@ -262,8 +384,7 @@ def download_file(url: str, dest_path: str, referer: str, platform: str = ""):
                 })
                 time.sleep(random.uniform(1, 3))  # 랜덤 대기
             
-            req = Request(url, headers=headers)
-            with urlopen(req, timeout=60) as resp, open(dest_path, "wb") as f:
+            with open_validated_url(url, headers=headers, timeout=60) as resp, open(dest_path, "wb") as f:
                 total_size = 0
                 while True:
                     chunk = resp.read(1024 * 256)

@@ -746,9 +746,13 @@ def _decide_filename(platform: str, meta: Dict[str, str], timestamp: str) -> str
 def _download_hls_m3u8(m3u8_url: str, dest_path: str, headers: Dict[str, str],
                            target_height: Optional[int] = None, prefer_small: bool = False) -> None:
         """두 번째 파일의 download_hls_m3u8 그대로"""
+        if not Tool.validate_download_url(m3u8_url):
+            raise ValueError(f"[보안] 허용되지 않은 HLS URL: {m3u8_url[:120]}")
         # M3U8 플레이리스트 가져오기
-        req = Request(m3u8_url, headers=headers)
-        with urlopen(req, timeout=60) as resp:
+        with Tool.open_validated_url(m3u8_url, headers=headers, timeout=60) as resp:
+            final_url = str(resp.geturl() or m3u8_url)
+            if not Tool.validate_download_url(final_url):
+                raise ValueError(f"[보안] HLS 리다이렉트가 허용되지 않았습니다: {final_url[:120]}")
             text = resp.read().decode("utf-8", errors="ignore")
         
         lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
@@ -771,6 +775,8 @@ def _download_hls_m3u8(m3u8_url: str, dest_path: str, headers: Dict[str, str],
                         j += 1
                     if j < len(lines):
                         uri = urljoin(m3u8_url, lines[j])
+                        if not Tool.validate_download_url(uri):
+                            raise ValueError(f"[보안] 허용되지 않은 HLS 변형 URL: {uri[:120]}")
                         variants.append((bw, uri))
                         variants_wh.append((height, bw, uri))
                     i = j
@@ -814,8 +820,12 @@ def _download_hls_m3u8(m3u8_url: str, dest_path: str, headers: Dict[str, str],
         
         with open(dest_path, "wb") as out:
             for idx, seg in enumerate(segments, 1):
-                req_s = Request(seg, headers=headers)
-                with urlopen(req_s, timeout=60) as rseg:
+                if not Tool.validate_download_url(seg):
+                    raise ValueError(f"[보안] 허용되지 않은 HLS 세그먼트 URL: {seg[:120]}")
+                with Tool.open_validated_url(seg, headers=headers, timeout=60) as rseg:
+                    final_seg = str(rseg.geturl() or seg)
+                    if not Tool.validate_download_url(final_seg):
+                        raise ValueError(f"[보안] HLS 세그먼트 리다이렉트 차단: {final_seg[:120]}")
                     while True:
                         chunk = rseg.read(1024 * 256)
                         if not chunk:
@@ -881,8 +891,12 @@ def _json_walk_urls(obj) -> List[str]:
     
     
 def _stream_download(to_url: str, dest_path: str, headers: Dict[str, str]) -> Tuple[int, str, Optional[int]]:
-        req = Request(to_url, headers=headers)
-        with urlopen(req, timeout=60) as resp, open(dest_path, "wb") as f:
+        if not Tool.validate_download_url(to_url):
+            raise ValueError(f"[보안] 허용되지 않은 영상 URL: {to_url[:120]}")
+        with Tool.open_validated_url(to_url, headers=headers, timeout=60) as resp, open(dest_path, "wb") as f:
+            final_url = str(resp.geturl() or to_url)
+            if not Tool.validate_download_url(final_url):
+                raise ValueError(f"[보안] 영상 리다이렉트가 허용되지 않았습니다: {final_url[:120]}")
             ct = resp.headers.get("Content-Type") or ""
             total = resp.headers.get("Content-Length")
             total_i = int(total) if total and total.isdigit() else None

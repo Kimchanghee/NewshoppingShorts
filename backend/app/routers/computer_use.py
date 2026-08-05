@@ -12,7 +12,6 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from pydantic import BaseModel, Field
-from slowapi import Limiter
 from sqlalchemy.orm import Session
 
 from app.configuration import get_settings
@@ -21,13 +20,12 @@ from app.dependencies import get_current_user_id
 from app.models.computer_use_job import ComputerUseJob, ComputerUseJobStatus
 from app.models.user import User
 from app.models.user_log import UserLog
-from app.utils.ip_utils import get_client_ip
 from app.utils.subscription_utils import is_subscription_active
+from app.utils.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
-limiter = Limiter(key_func=get_client_ip)
 router = APIRouter(prefix="/v1/computer-use", tags=["computer_use_bridge"])
 
 
@@ -38,7 +36,8 @@ class ComputerUseJobCreate(BaseModel):
     scope: str = Field(default="all", max_length=64)
     step_id: str = Field(default="", max_length=96)
     step_title: str = Field(default="", max_length=200)
-    prompt: str = Field(min_length=20, max_length=12000)
+    template_id: str = Field(default="", max_length=96)
+    prompt: Optional[str] = Field(default=None, min_length=20, max_length=12000)
 
 
 class ComputerUseJobResponse(BaseModel):
@@ -94,13 +93,36 @@ def is_paid_entitled_user(user: User) -> bool:
 
 
 def _verify_optional_bridge_key(x_bridge_api_key: Optional[str]) -> None:
-    """Enforce bridge API key when configured on server."""
+    """Fail closed unless a dedicated bridge key is configured and supplied."""
     required = str(settings.COMPUTER_USE_BRIDGE_API_KEY or "").strip()
     if not required:
-        return
+        raise HTTPException(status_code=503, detail="Computer Use bridge is not configured")
     provided = str(x_bridge_api_key or "").strip()
     if not provided or not secrets.compare_digest(provided, required):
         raise HTTPException(status_code=401, detail="Invalid bridge API key")
+
+
+def resolve_computer_use_prompt(payload: ComputerUseJobCreate) -> str:
+    """Resolve a server-owned template, or explicitly enabled freeform text."""
+    try:
+        templates = json.loads(settings.COMPUTER_USE_PROMPT_TEMPLATES_JSON or "{}")
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=503, detail="Computer Use templates are invalid") from exc
+    if not isinstance(templates, dict):
+        raise HTTPException(status_code=503, detail="Computer Use templates are invalid")
+
+    template_id = str(payload.template_id or "").strip()
+    if template_id:
+        template = templates.get(template_id)
+        if not isinstance(template, str) or len(template.strip()) < 20:
+            raise HTTPException(status_code=400, detail="Unknown Computer Use template")
+        return template.strip()
+
+    if settings.COMPUTER_USE_ALLOW_FREEFORM_PROMPTS:
+        prompt = str(payload.prompt or "").strip()
+        if len(prompt) >= 20:
+            return prompt
+    raise HTTPException(status_code=400, detail="A permitted server template is required")
 
 
 def _iso_utc(value: Optional[datetime]) -> Optional[str]:
@@ -126,12 +148,14 @@ async def create_computer_use_job(
     x_bridge_api_key: Optional[str] = Header(
         default=None,
         alias="X-Bridge-API-Key",
-        description="Optional server-side bridge key",
+        description="Required dedicated server-side bridge key",
     ),
     db: Session = Depends(get_db),
 ):
     """Create one centralized computer-use job for a paid user."""
     _verify_optional_bridge_key(x_bridge_api_key)
+    if not settings.COMPUTER_USE_WORKER_ENABLED:
+        raise HTTPException(status_code=503, detail="Computer Use worker is disabled")
 
     user_id = int(current_user_id)
     if payload.user_id is not None and int(payload.user_id) != user_id:
@@ -146,7 +170,7 @@ async def create_computer_use_job(
 
     job_id = str(uuid4())
     now = datetime.now(timezone.utc)
-    prompt_text = str(payload.prompt or "")
+    prompt_text = resolve_computer_use_prompt(payload)
     prompt_hash = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
 
     log_body = {
@@ -206,7 +230,7 @@ async def get_computer_use_job_status(
     x_bridge_api_key: Optional[str] = Header(
         default=None,
         alias="X-Bridge-API-Key",
-        description="Optional server-side bridge key",
+        description="Required dedicated server-side bridge key",
     ),
     db: Session = Depends(get_db),
 ):
