@@ -22,6 +22,17 @@ def test_vercel_build_fails_closed_on_migration_error():
     assert '"buildCommand": "cd backend && python -m alembic upgrade head"' in text
 
 
+def test_vercel_function_requirements_match_backend_requirements():
+    def normalized(relative: str) -> list[str]:
+        return [
+            line.strip()
+            for line in (ROOT / relative).read_text(encoding="utf-8").splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+
+    assert normalized("api/requirements.txt") == normalized("backend/requirements.txt")
+
+
 def test_version_update_workflows_never_forward_full_admin_key():
     for relative in (
         ".github/workflows/build-and-deploy.yml",
