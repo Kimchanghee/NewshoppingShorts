@@ -15,7 +15,8 @@ def create_access_token(user_id: int, ip_address: str) -> tuple[str, str, dateti
     expires_at = datetime.now(timezone.utc) + timedelta(hours=settings.JWT_EXPIRATION_HOURS)
 
     payload = {
-        "sub": user_id,  # Subject (user ID)
+        # RFC 7519 defines sub as a string; PyJWT 2.10+ enforces it.
+        "sub": str(user_id),  # Subject (user ID)
         "jti": jti,  # JWT ID (for revocation)
         "ip": ip_address,  # IP binding
         "exp": expires_at,  # Expiration

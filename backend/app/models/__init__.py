@@ -22,6 +22,9 @@ from app.models.payment_error import PaymentErrorLog, UserPaymentStats
 from app.models.user_log import UserLog
 from app.models.computer_use_job import ComputerUseJob, ComputerUseJobStatus
 from app.models.user_settings import UserSettings
+from app.models.admin_session import AdminSession
+from app.models.work_usage import WorkUsage
+from app.models.system_setting import SystemSetting
 
 __all__ = [
     'User',
@@ -40,4 +43,7 @@ __all__ = [
     'ComputerUseJob',
     'ComputerUseJobStatus',
     'UserSettings',
+    'AdminSession',
+    'WorkUsage',
+    'SystemSetting',
 ]

@@ -9,6 +9,7 @@ import asyncio
 import time
 import urllib.error
 import urllib.request
+from contextlib import asynccontextmanager
 from uuid import uuid4
 from fastapi import FastAPI, Request, Header, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
@@ -24,12 +25,13 @@ from app.errors import AppError
 from app.routers import auth, registration, admin, subscription, payment, logs, computer_use
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
-from app.database import init_db
-from app.utils.billing_crypto import decrypt_billing_key, validate_billing_crypto_startup
+from app.database import SessionLocal, init_db, verify_database_revision
+from app.models.system_setting import SystemSetting
+from app.utils.billing_crypto import validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
 from app.scheduler.computer_use_worker import run_computer_use_worker_loop
 
-# 濡쒓퉭 ?ㅼ젙 - 紐⑤뱺 濡쒓렇瑜??곕??먯뿉 異쒕젰
+# 로깅 설정 - 모든 로그를 표준 출력에 기록
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
@@ -37,12 +39,11 @@ logging.basicConfig(
     handlers=[logging.StreamHandler(sys.stdout)],
 )
 
-# SQLAlchemy 濡쒓렇 ?덈꺼 議곗젙 (?덈Т 留롮? 濡쒓렇 諛⑹?)
+# SQLAlchemy 로그 레벨 조정(과도한 SQL 로그 방지)
 logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-_SQL_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 _auth_cleanup_stop_event: Optional[asyncio.Event] = None
 _auth_cleanup_task: Optional[asyncio.Task] = None
 _computer_use_worker_stop_event: Optional[asyncio.Event] = None
@@ -54,178 +55,20 @@ docs_url = "/docs" if not _is_prod else None
 redoc_url = "/redoc" if not _is_prod else None
 openapi_url = "/openapi.json" if not _is_prod else None
 
-app = FastAPI(
-    title="SSMaker Auth API",
-    version="2.0.0",
-    docs_url=docs_url,
-    redoc_url=redoc_url,
-    openapi_url=openapi_url,
-)
-
-
-from sqlalchemy import text
-from app.database import engine
-
-
-def _calc_billing_key_hash(enc_bill: str) -> str:
-    return hashlib.sha256(enc_bill.encode("utf-8")).hexdigest()
-
-
-def _ensure_billing_key_hash_index(conn) -> None:
-    """Backfill billing key hashes and add the duplicate-protection index."""
-    try:
-        rows = conn.execute(
-            text(
-                """
-                SELECT id, enc_bill
-                FROM `billing_keys`
-                WHERE enc_bill_hash IS NULL OR enc_bill_hash = ''
-                """
-            )
-        ).fetchall()
-    except Exception as e:
-        logger.debug("billing_keys hash backfill skipped: %s", e)
-        return
-
-    for row in rows:
-        try:
-            raw_enc_bill = decrypt_billing_key(row[1])
-            conn.execute(
-                text("UPDATE `billing_keys` SET enc_bill_hash = :hash WHERE id = :id"),
-                {"hash": _calc_billing_key_hash(raw_enc_bill), "id": row[0]},
-            )
-        except Exception as e:
-            logger.warning("billing_keys hash backfill skipped for id=%s: %s", row[0], e)
-
-    try:
-        missing_count = conn.execute(
-            text(
-                """
-                SELECT COUNT(*)
-                FROM `billing_keys`
-                WHERE enc_bill_hash IS NULL OR enc_bill_hash = ''
-                """
-            )
-        ).scalar() or 0
-    except Exception:
-        missing_count = 1
-
-    if missing_count:
-        logger.warning("billing_keys hash index skipped because %s rows are not backfilled", missing_count)
-        return
-
-    try:
-        conn.execute(text("ALTER TABLE `billing_keys` DROP INDEX `uq_user_enc_bill`"))
-    except Exception as e:
-        msg = str(e).lower()
-        if "1091" not in msg and "can't drop" not in msg and "check that column/key exists" not in msg:
-            logger.debug("Old billing key index drop skipped: %s", e)
-
-    try:
-        conn.execute(
-            text(
-                """
-                CREATE UNIQUE INDEX `uq_user_enc_bill_hash`
-                ON `billing_keys` (`user_id`, `enc_bill_hash`)
-                """
-            )
-        )
-        logger.info("billing_keys hash unique index ensured.")
-    except Exception as e:
-        msg = str(e).lower()
-        if "1061" in msg or "duplicate key name" in msg or "already exists" in msg:
-            logger.debug("billing_keys hash unique index already exists.")
-        else:
-            logger.warning("billing_keys hash unique index creation skipped: %s", e)
-
-
-def run_auto_migration():
-    """Directly attempt to add missing columns and ignore if already exists (1060)"""
-    logger.info("Starting schema auto-migration...")
-    
-    # Use AUTOCOMMIT for DDL operations to prevent transaction issues
-    try:
-        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            # Tables and columns to ensure
-            migrations = {
-                "users": [
-                    ("user_type", "ENUM('trial', 'subscriber', 'admin') DEFAULT 'trial' NOT NULL"),
-                    ("current_task", "VARCHAR(255) NULL"),
-                    ("is_online", "BOOLEAN DEFAULT FALSE"),
-                    ("last_heartbeat", "TIMESTAMP NULL"),
-                    ("app_version", "VARCHAR(20) NULL"),
-                    ("trial_cycle_started_at", "TIMESTAMP NULL"),
-                    ("program_type", "ENUM('ssmaker', 'stmaker') DEFAULT 'ssmaker' NOT NULL"),
-                    ("ym_news_opt_in", "BOOLEAN DEFAULT FALSE"),
-                ],
-                "registration_requests": [
-                    ("email", "VARCHAR(255) NULL"),
-                    ("ym_news_opt_in", "BOOLEAN DEFAULT FALSE"),
-                ],
-                "billing_keys": [
-                    # SHA-256 hex of enc_bill for duplicate checks without indexing encrypted secret material.
-                    ("enc_bill_hash", "CHAR(64) NOT NULL DEFAULT ''"),
-                ],
-            }
-            
-            # Ensure user_logs table exists
-            try:
-                conn.execute(text("""
-                    CREATE TABLE IF NOT EXISTS `user_logs` (
-                        `id` INTEGER NOT NULL AUTO_INCREMENT,
-                        `user_id` INTEGER NOT NULL,
-                        `level` VARCHAR(20) NOT NULL DEFAULT 'INFO',
-                        `action` VARCHAR(255) NOT NULL,
-                        `content` TEXT NULL,
-                        `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                        PRIMARY KEY (`id`),
-                        INDEX `ix_user_logs_user_id` (`user_id`),
-                        INDEX `ix_user_logs_created_at` (`created_at`)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                """))
-                logger.info("user_logs table ensured.")
-            except Exception as e:
-                logger.warning(f"user_logs table creation warning: {e}")
-
-            for table, columns in migrations.items():
-                for col, type_def in columns:
-                    try:
-                        # Defensive guard: only allow safe SQL identifiers.
-                        if not _SQL_IDENTIFIER_RE.fullmatch(table) or not _SQL_IDENTIFIER_RE.fullmatch(col):
-                            raise ValueError(f"Unsafe identifier detected: {table}.{col}")
-                        # Direct ALTER TABLE attempt
-                        conn.execute(text(f"ALTER TABLE `{table}` ADD COLUMN `{col}` {type_def}"))
-                        logger.info(f"Successfully added column {table}.{col}")
-                    except Exception as e:
-                        # Ignore "Duplicate column name" error (1060)
-                        msg = str(e).lower()
-                        if "1060" in msg or "duplicate column" in msg:
-                            logger.debug(f"Column {table}.{col} already exists.")
-                        else:
-                            # Log other errors but try to proceed
-                            logger.warning(f"Migration warning for {table}.{col}: {e}")
-
-            _ensure_billing_key_hash_index(conn)
-                            
-    except Exception as e:
-        logger.error(f"Migration critical error: {e}", exc_info=True)
-    
-    logger.info("Schema auto-migration finished.")
-
-@app.on_event("startup")
 async def startup_event():
     """Initialize database tables and run migrations on startup"""
     logger.info("Initializing SSMaker Auth API...")
     
     try:
-        # 1. First ensure tables exist
-        init_db()
+        # Production schema changes are exclusively managed by Alembic. Local
+        # development and tests may bootstrap an empty database for convenience.
+        if settings.ENVIRONMENT != "production":
+            init_db()
+        else:
+            verify_database_revision()
         
-        # 2. Then ensure columns exist (migrations)
-        run_auto_migration()
-        # 3. Ensure settings table for persistent app metadata.
-        _ensure_system_settings_table()
-        # 4. Validate billing key crypto at startup (fail fast on bad Fernet key).
+        # Schema changes are applied by Alembic before application startup.
+        # Validate billing key crypto at startup (fail fast on bad Fernet key).
         validate_billing_crypto_startup(
             require_key=(settings.ENVIRONMENT == "production")
         )
@@ -254,7 +97,6 @@ async def startup_event():
         raise
 
 
-@app.on_event("shutdown")
 async def shutdown_event():
     """Gracefully stop background maintenance tasks."""
     global _auth_cleanup_task
@@ -273,6 +115,28 @@ async def shutdown_event():
             await asyncio.wait_for(_computer_use_worker_task, timeout=5)
         except Exception:
             _computer_use_worker_task.cancel()
+    _auth_cleanup_task = None
+    _computer_use_worker_task = None
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    """Own startup/shutdown resources through FastAPI's supported lifecycle."""
+    await startup_event()
+    try:
+        yield
+    finally:
+        await shutdown_event()
+
+
+app = FastAPI(
+    title="SSMaker Auth API",
+    version="2.0.0",
+    docs_url=docs_url,
+    redoc_url=redoc_url,
+    openapi_url=openapi_url,
+    lifespan=lifespan,
+)
 
 
 # Register rate limiter with app state
@@ -396,7 +260,7 @@ async def validation_error_handler(request: Request, exc: RequestValidationError
             "success": False,
             "error": {
                 "code": "VALIDATION_ERROR",
-                "message": "?낅젰媛믪씠 ?щ컮瑜댁? ?딆뒿?덈떎.",
+                "message": "입력값이 올바르지 않습니다.",
                 "requestId": request_id,
                 "details": safe_details,
             },
@@ -419,7 +283,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
             "success": False,
             "error": {
                 "code": "INTERNAL_ERROR",
-                "message": "?쒕쾭 ?ㅻ쪟媛 諛쒖깮?덉뒿?덈떎.",
+                "message": "서버 오류가 발생했습니다.",
                 "requestId": request_id,
             },
         },
@@ -430,13 +294,13 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     """Log all API requests and responses"""
 
     async def dispatch(self, request: Request, call_next) -> Response:
-        # ?붿껌 濡쒓퉭
+        # 요청 로깅
         client_ip = request.client.host if request.client else "unknown"
         logger.info(f">>> {request.method} {request.url.path} | IP: {client_ip}")
 
         try:
             response = await call_next(request)
-            # ?묐떟 濡쒓퉭
+            # 응답 로깅
             logger.info(
                 f"<<< {request.method} {request.url.path} | Status: {response.status_code}"
             )
@@ -567,7 +431,7 @@ async def health():
     return {"status": "healthy"}
 
 # ===== Auto Update API =====
-# 理쒖떊 踰꾩쟾 ?뺣낫 (諛고룷 ????媛믪쓣 ?낅뜲?댄듃)
+# 최신 버전 정보(배포 시 환경 변수 또는 API로 갱신)
 _DEFAULT_APP_VERSION = (os.getenv("APP_LATEST_VERSION", "1.4.50") or "1.4.50").strip()
 _DEFAULT_DOWNLOAD_URL = os.getenv(
     "APP_DOWNLOAD_URL",
@@ -594,47 +458,16 @@ APP_VERSION_INFO = {
 _APP_VERSION_INFO_SETTING_KEY = "app_version_info_v1"
 
 
-def _ensure_system_settings_table() -> None:
-    """Ensure key-value settings table exists for small persistent config."""
-    try:
-        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            conn.execute(
-                text(
-                    """
-                    CREATE TABLE IF NOT EXISTS `system_settings` (
-                        `setting_key` VARCHAR(128) NOT NULL,
-                        `setting_value` TEXT NOT NULL,
-                        `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                        PRIMARY KEY (`setting_key`)
-                    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
-                    """
-                )
-            )
-    except Exception as e:
-        logger.warning("system_settings ensure warning: %s", e)
-
-
 def _load_app_version_info_from_db(default_info: dict) -> dict:
     """Load persisted app version info from DB, fallback to defaults."""
     try:
-        _ensure_system_settings_table()
-        with engine.connect() as conn:
-            row = conn.execute(
-                text(
-                    """
-                    SELECT setting_value
-                    FROM system_settings
-                    WHERE setting_key = :setting_key
-                    LIMIT 1
-                    """
-                ),
-                {"setting_key": _APP_VERSION_INFO_SETTING_KEY},
-            ).fetchone()
+        with SessionLocal() as db:
+            row = db.get(SystemSetting, _APP_VERSION_INFO_SETTING_KEY)
 
         if not row:
             return default_info
 
-        raw_value = row[0]
+        raw_value = row.setting_value
         if not raw_value:
             return default_info
 
@@ -663,22 +496,15 @@ def _load_app_version_info_from_db(default_info: dict) -> dict:
 def _persist_app_version_info_to_db(version_info: dict) -> None:
     """Persist app version info so restarts do not lose update metadata."""
     try:
-        _ensure_system_settings_table()
         payload = json.dumps(version_info, ensure_ascii=False)
-        with engine.connect().execution_options(isolation_level="AUTOCOMMIT") as conn:
-            conn.execute(
-                text(
-                    """
-                    INSERT INTO system_settings (setting_key, setting_value)
-                    VALUES (:setting_key, :setting_value)
-                    ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
-                    """
-                ),
-                {
-                    "setting_key": _APP_VERSION_INFO_SETTING_KEY,
-                    "setting_value": payload,
-                },
-            )
+        with SessionLocal() as db:
+            row = db.get(SystemSetting, _APP_VERSION_INFO_SETTING_KEY)
+            if row is None:
+                row = SystemSetting(setting_key=_APP_VERSION_INFO_SETTING_KEY, setting_value=payload)
+                db.add(row)
+            else:
+                row.setting_value = payload
+            db.commit()
     except Exception as e:
         logger.warning("Failed persisting APP_VERSION_INFO to DB: %s", e)
 
@@ -811,7 +637,7 @@ class VersionUpdateRequest(BaseModel):
 async def get_app_version():
     """
     Get latest app version info for auto-update.
-    ?먮룞 ?낅뜲?댄듃瑜??꾪븳 理쒖떊 ??踰꾩쟾 ?뺣낫 諛섑솚.
+    자동 업데이트를 위한 최신 앱 버전 정보를 반환합니다.
 
     Returns:
         {
@@ -834,15 +660,6 @@ async def get_legacy_free_lately(item: Optional[int] = Query(None)):
     }
 
 
-@app.get("/free/lately/")
-async def get_legacy_free_lately(item: Optional[int] = Query(None)):
-    """Legacy desktop-client version endpoint compatibility."""
-    return {
-        **APP_VERSION_INFO,
-        "item": item,
-    }
-
-
 @app.post("/app/version/update")
 async def update_app_version(
     request: VersionUpdateRequest,
@@ -851,7 +668,7 @@ async def update_app_version(
 ):
     """
     Update app version info (CI/CD endpoint).
-    GitHub Actions?먯꽌 鍮뚮뱶 ??踰꾩쟾 ?뺣낫瑜??낅뜲?댄듃?섎뒗 ?붾뱶?ъ씤??
+    GitHub Actions에서 빌드 후 버전 정보를 갱신하는 엔드포인트입니다.
 
     Requires Bearer token authentication.
     """
@@ -926,7 +743,7 @@ async def update_app_version(
 async def check_app_version(current_version: str = Query(..., max_length=20)):
     """
     Check if update is available.
-    ?낅뜲?댄듃 媛???щ? ?뺤씤.
+    현재 버전과 최신 버전을 비교해 업데이트 가능 여부를 확인합니다.
     
     Args:
         current_version: Current client version (e.g., "1.0.0")

@@ -4,7 +4,7 @@ Registration Request Schemas
 
 Pydantic 모델을 사용한 요청/응답 검증
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -95,8 +95,7 @@ class RegistrationRequestResponse(BaseModel):
     reviewed_at: Optional[datetime] = None
     rejection_reason: Optional[str] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class RegistrationRequestList(BaseModel):

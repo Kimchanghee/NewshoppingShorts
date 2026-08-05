@@ -33,6 +33,8 @@ _TEST_ENV = {
     "DB_NAME": "test_db",
     "JWT_SECRET_KEY": "a" * 64,
     "ADMIN_API_KEY": "b" * 64,
+    "ADMIN_PASSWORD_HASH": "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.G6tHnCvWNeQvKy",
+    "ADMIN_SESSION_PEPPER": "p" * 64,
     "APP_VERSION_UPDATE_API_KEY": "d" * 64,
     "SSMAKER_API_KEY": "c" * 32,
     "BILLING_KEY_ENCRYPTION_KEY": "uKVciQZlzUKtZPwuiKHl3wVCJJhQrWL6TqrFRClcEOI=",
@@ -54,9 +56,7 @@ for mod_name in list(sys.modules.keys()):
 with patch("app.database.engine", MagicMock()), \
      patch("app.database.init_db", MagicMock()):
     from app import main as app_main
-    test_app = app_main.app
-    # Remove startup events to prevent DB connection attempts
-    test_app.router.on_startup.clear()
+    security_app = app_main.app
 
 from fastapi.testclient import TestClient
 
@@ -64,7 +64,7 @@ from fastapi.testclient import TestClient
 @pytest.fixture
 def client():
     """Create test client without DB"""
-    return TestClient(test_app, raise_server_exceptions=False)
+    return TestClient(security_app, raise_server_exceptions=False)
 
 
 # ===== 1. Validation Error Sanitization =====
@@ -262,8 +262,9 @@ class TestAuthentication:
     def test_admin_endpoint_requires_api_key(self, client):
         """Admin endpoints must reject missing API key"""
         response = client.get("/user/admin/users")
-        # 422 = missing required header
-        assert response.status_code == 422
+        # Both Bearer admin sessions and the legacy API key are optional
+        # headers; absence of both is an authentication failure.
+        assert response.status_code == 401
 
     def test_admin_endpoint_rejects_invalid_key(self, client):
         """Admin endpoints must reject wrong API key"""

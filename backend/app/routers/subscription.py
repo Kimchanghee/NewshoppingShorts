@@ -14,7 +14,6 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Query, Header
-from slowapi import Limiter
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -48,13 +47,10 @@ from app.services.auth_service import AuthService
 logger = logging.getLogger(__name__)
 
 
-# Use the secure get_client_ip from ip_utils for consistent IP extraction
-# 보안: IP 스푸핑 방지를 위해 통일된 get_client_ip 사용
-from app.utils.ip_utils import get_client_ip
+from app.utils.rate_limit import limiter
 
 
 # Rate limiter
-limiter = Limiter(key_func=get_client_ip)
 
 router = APIRouter(prefix="/user/subscription", tags=["subscription"])
 

@@ -4,9 +4,11 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_, update
+from sqlalchemy.exc import IntegrityError
 from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
+from app.models.work_usage import WorkUsage
 from app.models.payment_session import PaymentSession, PaymentStatus
 from app.utils.password import verify_password, get_dummy_hash, hash_password
 from app.utils.subscription_utils import (
@@ -729,7 +731,33 @@ class AuthService:
                 remaining = -1
                 can_work = True
             else:
-                remaining = max(0, work_count - work_used)
+                now = datetime.now(timezone.utc)
+                expired_count = self.db.query(WorkUsage).filter(
+                    WorkUsage.user_id == int(user_id),
+                    WorkUsage.status == "reserved",
+                    WorkUsage.lease_expires_at <= now,
+                ).update(
+                    {
+                        WorkUsage.status: "expired",
+                        WorkUsage.success: False,
+                        WorkUsage.message: "Reservation lease expired",
+                        WorkUsage.completed_at: now,
+                    },
+                    synchronize_session=False,
+                )
+                active_reservations = (
+                    self.db.query(func.count(WorkUsage.id))
+                    .filter(
+                        WorkUsage.user_id == int(user_id),
+                        WorkUsage.status == "reserved",
+                        WorkUsage.lease_expires_at > now,
+                    )
+                    .scalar()
+                    or 0
+                )
+                if expired_count:
+                    self.db.commit()
+                remaining = max(0, work_count - work_used - int(active_reservations))
                 can_work = remaining > 0
 
             return {
@@ -932,6 +960,419 @@ class AuthService:
                 "remaining": None,
                 "used": None,
             }
+
+    async def use_work_v2(self, user_id: str, token: str, idempotency_key: str) -> dict:
+        """Consume one unit exactly once for a user-scoped UUID request."""
+        key = str(idempotency_key)
+
+        def response(record: WorkUsage, replay: bool) -> dict:
+            return {
+                "success": bool(record.success),
+                "message": record.message or "Work usage is still being processed",
+                "remaining": record.remaining,
+                "used": record.used,
+                "idempotency_key": key,
+                "idempotent_replay": replay,
+            }
+
+        try:
+            payload = decode_access_token(token)
+            if str(payload.get("sub")) != str(user_id):
+                raise ValueError("Token mismatch")
+            numeric_user_id = int(user_id)
+            session = (
+                self.db.query(SessionModel)
+                .filter(
+                    SessionModel.token_jti == payload.get("jti"),
+                    SessionModel.is_active.is_(True),
+                    SessionModel.expires_at > datetime.now(timezone.utc),
+                )
+                .first()
+            )
+            if not session:
+                raise ValueError("Session expired or revoked")
+
+            user = self.db.query(User).filter(User.id == numeric_user_id).first()
+            if not user:
+                raise ValueError("User not found")
+            self.apply_trial_monthly_reset(user)
+
+            existing = (
+                self.db.query(WorkUsage)
+                .filter(
+                    WorkUsage.user_id == numeric_user_id,
+                    WorkUsage.idempotency_key == key,
+                )
+                .first()
+            )
+            if existing:
+                return response(existing, True)
+
+            usage = WorkUsage(user_id=numeric_user_id, idempotency_key=key)
+            self.db.add(usage)
+            try:
+                self.db.flush()
+            except IntegrityError:
+                self.db.rollback()
+                existing = (
+                    self.db.query(WorkUsage)
+                    .filter(
+                        WorkUsage.user_id == numeric_user_id,
+                        WorkUsage.idempotency_key == key,
+                    )
+                    .first()
+                )
+                if existing:
+                    return response(existing, True)
+                raise
+
+            expiry = getattr(user, "subscription_expires_at", None)
+            user_type = getattr(user, "user_type", UserType.TRIAL)
+            user_type_value = user_type.value if hasattr(user_type, "value") else str(user_type)
+            work_count = int(getattr(user, "work_count", 0) or 0)
+            is_paid = _has_paid_entitlement(user_type_value, work_count, expiry)
+
+            if user_type_value == "trial" and expiry is not None and not is_subscription_active(expiry):
+                result = None
+                message = "Subscription expired"
+            elif is_paid or work_count == -1:
+                result = self.db.execute(
+                    update(User)
+                    .where(User.id == numeric_user_id)
+                    .values(work_used=User.work_used + 1)
+                )
+                message = "Work count updated"
+            else:
+                result = self.db.execute(
+                    update(User)
+                    .where(User.id == numeric_user_id, User.work_used < User.work_count)
+                    .values(work_used=User.work_used + 1)
+                )
+                message = "Work count updated" if result.rowcount else "No remaining work count"
+
+            succeeded = bool(result is not None and result.rowcount)
+            self.db.expire(user)
+            refreshed = self.db.query(User).filter(User.id == numeric_user_id).first()
+            used = int(getattr(refreshed, "work_used", 0) or 0)
+            current_limit = -1 if is_paid else int(getattr(refreshed, "work_count", work_count) or 0)
+            remaining = -1 if current_limit == -1 else max(0, current_limit - used)
+            usage.success = succeeded
+            usage.message = message
+            usage.used = used
+            usage.remaining = remaining
+            usage.completed_at = datetime.now(timezone.utc)
+            self.db.commit()
+            return response(usage, False)
+        except ValueError as exc:
+            self.db.rollback()
+            return {
+                "success": False,
+                "message": str(exc),
+                "remaining": None,
+                "used": None,
+                "idempotency_key": key,
+                "idempotent_replay": False,
+            }
+        except Exception:
+            self.db.rollback()
+            logger.exception("Idempotent work usage failed")
+            return {
+                "success": False,
+                "message": "Internal error",
+                "remaining": None,
+                "used": None,
+                "idempotency_key": key,
+                "idempotent_replay": False,
+            }
+
+    def _locked_work_user(self, user_id: str, token: str) -> tuple[User, int]:
+        """Authenticate a work request and lock its user quota row."""
+        payload = decode_access_token(token)
+        if str(payload.get("sub")) != str(user_id):
+            raise ValueError("Token mismatch")
+        numeric_user_id = int(user_id)
+        session = (
+            self.db.query(SessionModel)
+            .filter(
+                SessionModel.token_jti == payload.get("jti"),
+                SessionModel.is_active.is_(True),
+                SessionModel.expires_at > datetime.now(timezone.utc),
+            )
+            .first()
+        )
+        if not session:
+            raise ValueError("Session expired or revoked")
+
+        # The legacy monthly reset helper may commit, so run it before taking
+        # the quota lock and then reload the row inside this transaction.
+        preliminary = self.db.query(User).filter(User.id == numeric_user_id).first()
+        if not preliminary:
+            raise ValueError("User not found")
+        self.apply_trial_monthly_reset(preliminary)
+        user = (
+            self.db.query(User)
+            .filter(User.id == numeric_user_id)
+            .with_for_update()
+            .one()
+        )
+        return user, numeric_user_id
+
+    @staticmethod
+    def _reservation_response(
+        usage: WorkUsage,
+        *,
+        replay: bool,
+        success: Optional[bool] = None,
+    ) -> dict:
+        return {
+            "success": bool(usage.success if success is None else success),
+            "message": usage.message or "Work reservation updated",
+            "remaining": usage.remaining,
+            "used": usage.used,
+            "idempotency_key": usage.idempotency_key,
+            "idempotent_replay": replay,
+            "reservation_status": usage.status,
+            "lease_expires_at": usage.lease_expires_at,
+        }
+
+    @staticmethod
+    def _reservation_error(key: str, message: str, status: str = "denied") -> dict:
+        return {
+            "success": False,
+            "message": message,
+            "remaining": None,
+            "used": None,
+            "idempotency_key": key,
+            "idempotent_replay": False,
+            "reservation_status": status,
+            "lease_expires_at": None,
+        }
+
+    async def reserve_work_v3(self, user_id: str, token: str, idempotency_key: str) -> dict:
+        """Reserve capacity atomically; stale leases are recovered automatically."""
+        key = str(idempotency_key)
+        now = datetime.now(timezone.utc)
+        try:
+            user, numeric_user_id = self._locked_work_user(user_id, token)
+            self.db.query(WorkUsage).filter(
+                WorkUsage.user_id == numeric_user_id,
+                WorkUsage.status == "reserved",
+                WorkUsage.lease_expires_at <= now,
+            ).update(
+                {
+                    WorkUsage.status: "expired",
+                    WorkUsage.success: False,
+                    WorkUsage.message: "Reservation lease expired",
+                    WorkUsage.completed_at: now,
+                },
+                synchronize_session=False,
+            )
+
+            existing = (
+                self.db.query(WorkUsage)
+                .filter(
+                    WorkUsage.user_id == numeric_user_id,
+                    WorkUsage.idempotency_key == key,
+                )
+                .with_for_update()
+                .first()
+            )
+            if existing:
+                self.db.commit()
+                return self._reservation_response(
+                    existing,
+                    replay=True,
+                    success=existing.status in {"reserved", "completed"},
+                )
+
+            expiry = getattr(user, "subscription_expires_at", None)
+            user_type = getattr(user, "user_type", UserType.TRIAL)
+            user_type_value = user_type.value if hasattr(user_type, "value") else str(user_type)
+            work_count = int(getattr(user, "work_count", 0) or 0)
+            unlimited = _has_paid_entitlement(user_type_value, work_count, expiry) or work_count == -1
+            if user_type_value == "trial" and expiry is not None and not is_subscription_active(expiry):
+                self.db.rollback()
+                return self._reservation_error(key, "Subscription expired")
+
+            active_reservations = (
+                self.db.query(func.count(WorkUsage.id))
+                .filter(
+                    WorkUsage.user_id == numeric_user_id,
+                    WorkUsage.status == "reserved",
+                    WorkUsage.lease_expires_at > now,
+                )
+                .scalar()
+                or 0
+            )
+            used = int(getattr(user, "work_used", 0) or 0)
+            if not unlimited and used + int(active_reservations) >= work_count:
+                self.db.rollback()
+                return self._reservation_error(key, "No remaining work count")
+
+            lease_expires_at = now + timedelta(hours=4)
+            remaining = -1 if unlimited else max(
+                0, work_count - used - int(active_reservations) - 1
+            )
+            usage = WorkUsage(
+                user_id=numeric_user_id,
+                idempotency_key=key,
+                success=True,
+                message="Work reserved",
+                used=used,
+                remaining=remaining,
+                status="reserved",
+                reserved_at=now,
+                lease_expires_at=lease_expires_at,
+            )
+            self.db.add(usage)
+            self.db.commit()
+            self.db.refresh(usage)
+            return self._reservation_response(usage, replay=False)
+        except ValueError as exc:
+            self.db.rollback()
+            return self._reservation_error(key, str(exc))
+        except IntegrityError:
+            self.db.rollback()
+            existing = (
+                self.db.query(WorkUsage)
+                .filter(
+                    WorkUsage.user_id == int(user_id),
+                    WorkUsage.idempotency_key == key,
+                )
+                .first()
+            )
+            if existing:
+                return self._reservation_response(
+                    existing,
+                    replay=True,
+                    success=existing.status in {"reserved", "completed"},
+                )
+            return self._reservation_error(key, "Reservation conflict")
+        except Exception:
+            self.db.rollback()
+            logger.exception("Work reservation failed")
+            return self._reservation_error(key, "Internal error")
+
+    async def finalize_work_v3(self, user_id: str, token: str, idempotency_key: str) -> dict:
+        """Finalize a successful reservation and charge exactly once."""
+        key = str(idempotency_key)
+        now = datetime.now(timezone.utc)
+        try:
+            user, numeric_user_id = self._locked_work_user(user_id, token)
+            usage = (
+                self.db.query(WorkUsage)
+                .filter(
+                    WorkUsage.user_id == numeric_user_id,
+                    WorkUsage.idempotency_key == key,
+                )
+                .with_for_update()
+                .first()
+            )
+            if not usage:
+                self.db.rollback()
+                return self._reservation_error(key, "Reservation not found")
+            if usage.status == "completed":
+                self.db.commit()
+                return self._reservation_response(usage, replay=True)
+            if usage.status not in {"reserved", "expired"}:
+                self.db.commit()
+                return self._reservation_response(usage, replay=True, success=False)
+
+            recovering_expired = usage.status == "expired"
+            lease = usage.lease_expires_at
+            if usage.status == "reserved" and lease is not None:
+                if lease.tzinfo is None:
+                    lease = lease.replace(tzinfo=timezone.utc)
+                if lease <= now:
+                    usage.status = "expired"
+                    usage.success = False
+                    usage.message = "Reservation lease expired"
+                    usage.completed_at = now
+                    self.db.flush()
+                    recovering_expired = True
+
+            expiry = getattr(user, "subscription_expires_at", None)
+            user_type = getattr(user, "user_type", UserType.TRIAL)
+            user_type_value = user_type.value if hasattr(user_type, "value") else str(user_type)
+            work_count = int(getattr(user, "work_count", 0) or 0)
+            unlimited = _has_paid_entitlement(user_type_value, work_count, expiry) or work_count == -1
+            current_used = int(getattr(user, "work_used", 0) or 0)
+            if recovering_expired and not unlimited:
+                active_reservations = (
+                    self.db.query(func.count(WorkUsage.id))
+                    .filter(
+                        WorkUsage.user_id == numeric_user_id,
+                        WorkUsage.status == "reserved",
+                        WorkUsage.lease_expires_at > now,
+                    )
+                    .scalar()
+                    or 0
+                )
+                if current_used + int(active_reservations) >= work_count:
+                    self.db.commit()
+                    return self._reservation_response(
+                        usage,
+                        replay=True,
+                        success=False,
+                    )
+
+            user.work_used = current_used + 1
+            usage.status = "completed"
+            usage.success = True
+            usage.message = "Work completed"
+            usage.used = user.work_used
+            usage.remaining = -1 if unlimited else max(0, work_count - user.work_used)
+            usage.completed_at = now
+            self.db.commit()
+            return self._reservation_response(usage, replay=False)
+        except ValueError as exc:
+            self.db.rollback()
+            return self._reservation_error(key, str(exc))
+        except Exception:
+            self.db.rollback()
+            logger.exception("Work finalization failed")
+            return self._reservation_error(key, "Internal error")
+
+    async def release_work_v3(self, user_id: str, token: str, idempotency_key: str) -> dict:
+        """Release a failed reservation idempotently without charging quota."""
+        key = str(idempotency_key)
+        now = datetime.now(timezone.utc)
+        try:
+            _user, numeric_user_id = self._locked_work_user(user_id, token)
+            usage = (
+                self.db.query(WorkUsage)
+                .filter(
+                    WorkUsage.user_id == numeric_user_id,
+                    WorkUsage.idempotency_key == key,
+                )
+                .with_for_update()
+                .first()
+            )
+            if not usage:
+                self.db.rollback()
+                return self._reservation_error(key, "Reservation not found")
+            if usage.status == "reserved":
+                usage.status = "released"
+                usage.success = True
+                usage.message = "Work reservation released"
+                usage.completed_at = now
+                self.db.commit()
+                return self._reservation_response(usage, replay=False)
+            self.db.commit()
+            return self._reservation_response(
+                usage,
+                replay=True,
+                success=usage.status in {"released", "expired"},
+            )
+
+        except ValueError as exc:
+            self.db.rollback()
+            return self._reservation_error(key, str(exc))
+        except Exception:
+            self.db.rollback()
+            logger.exception("Work reservation release failed")
+            return self._reservation_error(key, "Internal error")
+
     async def cleanup_offline_users(self):
         """
         Mark users as offline if they haven't sent a heartbeat for more than 2 minutes.

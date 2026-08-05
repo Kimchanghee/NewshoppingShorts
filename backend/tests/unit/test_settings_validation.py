@@ -50,6 +50,8 @@ def test_production_accepts_valid_configuration():
         {
             "ENVIRONMENT": "production",
             "ADMIN_API_KEY": "b" * 64,
+            "ADMIN_PASSWORD_HASH": "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.G6tHnCvWNeQvKy",
+            "ADMIN_SESSION_PEPPER": "p" * 64,
             "APP_VERSION_UPDATE_API_KEY": "c" * 64,
             "BILLING_KEY_ENCRYPTION_KEY": "uKVciQZlzUKtZPwuiKHl3wVCJJhQrWL6TqrFRClcEOI=",
         }

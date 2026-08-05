@@ -23,13 +23,13 @@ from urllib.parse import parse_qs
 import requests as http_requests
 from fastapi import APIRouter, Depends, HTTPException, Request, Query, Header
 from fastapi.responses import PlainTextResponse
-from slowapi import Limiter
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field, field_validator
 import re
 
 from app.database import get_db
 from app.utils.ip_utils import get_client_ip
+from app.utils.rate_limit import limiter
 from app.utils.subscription_utils import calculate_subscription_expiry, _ensure_aware
 from app.utils.promotion import get_new_subscriber_promotion_days
 from app.utils.payment_plans import (
@@ -72,7 +72,6 @@ from app.utils.subscription_manager import (
 logger = logging.getLogger(__name__)
 
 # Rate limiter
-limiter = Limiter(key_func=get_client_ip)
 
 router = APIRouter(prefix="/payments", tags=["payment"])
 
@@ -1399,14 +1398,14 @@ class CardRegisterRequest(BaseModel):
     def validate_buyer_auth_no(cls, v):
         v = v.strip()
         if not v.isdigit() or len(v) not in (6, 10):
-            raise ValueError("?앸뀈?붿씪(6?먮━) ?먮뒗 ?ъ뾽?먮쾲??10?먮━)瑜??낅젰?댁＜?몄슂")
+            raise ValueError("생년월일(6자리) 또는 사업자번호(10자리)를 입력해주세요")
         return v
 
     @field_validator("card_pw")
     @classmethod
     def validate_card_pw(cls, v):
         if not v.isdigit() or len(v) != 2:
-            raise ValueError("移대뱶 鍮꾨?踰덊샇 ??2?먮━瑜??낅젰?댁＜?몄슂")
+            raise ValueError("카드 비밀번호 앞 2자리를 입력해주세요")
         return v
 
     @field_validator("buyer_phone")
@@ -1414,7 +1413,7 @@ class CardRegisterRequest(BaseModel):
     def validate_buyer_phone(cls, v):
         v = v.replace("-", "").strip()
         if not re.match(r'^01[016789]\d{7,8}$', v):
-            raise ValueError("?좏슚???대??곕쾲?몃? ?낅젰?댁＜?몄슂")
+            raise ValueError("유효한 휴대전화번호를 입력해주세요")
         return v
 
 
@@ -1430,7 +1429,7 @@ class CardPayRequest(BaseModel):
     def validate_phone(cls, v):
         v = v.replace("-", "").strip()
         if not re.match(r'^01[016789]\d{7,8}$', v):
-            raise ValueError("?좏슚???대??곕쾲?몃? ?낅젰?댁＜?몄슂")
+            raise ValueError("유효한 휴대전화번호를 입력해주세요")
         return v
 
 
@@ -1453,7 +1452,7 @@ class SubscribeCreateRequest(BaseModel):
     def validate_phone(cls, v):
         v = v.replace("-", "").strip()
         if not re.match(r'^01[016789]\d{7,8}$', v):
-            raise ValueError("?좏슚???대??곕쾲?몃? ?낅젰?댁＜?몄슂")
+            raise ValueError("유효한 휴대전화번호를 입력해주세요")
         return v
 
     @field_validator("cycle_type")
@@ -1538,7 +1537,7 @@ async def register_card(
     logger.info(f"[PayApp Card] Register request: user={user_id}, card={masked_card}")
 
     if not PAYAPP_USERID:
-        return {"success": False, "message": "寃곗젣 ?ㅼ젙???꾨즺?섏? ?딆븯?듬땲??"}
+        return {"success": False, "message": "결제 설정이 완료되지 않았습니다."}
     if not has_encryption_key():
         logger.error("[PayApp Card] Billing key encryption not configured")
         return {"success": False, "message": "결제 보안 설정이 완료되지 않았습니다."}
@@ -1549,7 +1548,7 @@ async def register_card(
         BillingKey.is_active == True,
     ).count()
     if active_count >= MAX_CARDS_PER_USER:
-        return {"success": False, "message": f"理쒕? {MAX_CARDS_PER_USER}媛쒖쓽 移대뱶留??깅줉?????덉뒿?덈떎."}
+        return {"success": False, "message": f"카드는 최대 {MAX_CARDS_PER_USER}개까지 등록할 수 있습니다."}
 
     params = {
         "cmd": "billRegist",
@@ -1632,7 +1631,7 @@ async def register_card(
                     _call_payapp_api({"cmd": "billDelete", "userid": PAYAPP_USERID, "encBill": enc_bill})
                 except Exception:
                     logger.critical(f"[PayApp Card] ORPHANED billing key for user={user_id}")
-                return {"success": False, "message": "移대뱶 ?깅줉 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+                return {"success": False, "message": "카드 등록 처리 중 오류가 발생했습니다. 다시 시도해주세요."}
 
             logger.info(f"[PayApp Card] Card registered: user={user_id}, card_name={card_name}")
             return {
@@ -1701,7 +1700,7 @@ async def pay_with_card(
     logger.info(f"[PayApp Card] Pay request: user={user_id}, plan={data.plan_id}")
 
     if not PAYAPP_USERID:
-        return {"success": False, "message": "寃곗젣 ?ㅼ젙???꾨즺?섏? ?딆븯?듬땲??"}
+        return {"success": False, "message": "결제 설정이 완료되지 않았습니다."}
 
     # 鍮뚮쭅???뚯쑀???뺤씤 (Verify billing key ownership via card_id)
     billing_key = (
@@ -1714,7 +1713,7 @@ async def pay_with_card(
         .first()
     )
     if not billing_key:
-        raise HTTPException(status_code=404, detail="?깅줉??移대뱶瑜?李얠쓣 ???놁뒿?덈떎.")
+        raise HTTPException(status_code=404, detail="등록된 카드를 찾을 수 없습니다.")
 
     payapp_enc_bill = _decrypt_enc_bill_or_raise(billing_key.enc_bill)
     if not is_encrypted(billing_key.enc_bill) and has_encryption_key():
@@ -1799,14 +1798,14 @@ async def pay_with_card(
                         "userid": PAYAPP_USERID,
                         "linkkey": PAYAPP_LINKKEY,
                         "mul_no": mul_no,
-                        "cancelmemo": "DB ?ㅻ쪟濡??명븳 ?먮룞 痍⑥냼",
+                        "cancelmemo": "DB 오류로 인한 자동 취소",
                         "partcancel": "0",
                     })
                 except Exception:
                     logger.critical(
                         f"[PayApp Card] ORPHANED payment: mul_no={mul_no}, user={user_id}, amount={plan_price}"
                     )
-                return {"success": False, "message": "移대뱶 寃곗젣 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+                return {"success": False, "message": "카드 결제 처리 중 오류가 발생했습니다. 다시 시도해주세요."}
 
             logger.info(f"[PayApp Card] Payment initiated: mul_no={mul_no}, payment_id={local_payment_id}")
             return {
@@ -1879,7 +1878,7 @@ async def delete_card(
     logger.info(f"[PayApp Card] Delete request: user={user_id}")
 
     if not PAYAPP_USERID:
-        return {"success": False, "message": "寃곗젣 ?ㅼ젙???꾨즺?섏? ?딆븯?듬땲??"}
+        return {"success": False, "message": "결제 설정이 완료되지 않았습니다."}
 
     # ?쒖꽦 ?뺢린寃곗젣 ?뺤씤 (Check for active recurring subscriptions)
     active_subs = db.query(RecurringSubscription).filter(
@@ -1889,7 +1888,7 @@ async def delete_card(
     if active_subs > 0:
         return {
             "success": False,
-            "message": "?쒖꽦 ?뺢린寃곗젣媛 ?덈뒗 寃쎌슦 移대뱶瑜???젣?????놁뒿?덈떎. 癒쇱? ?뺢린寃곗젣瑜?痍⑥냼?댁＜?몄슂."
+            "message": "활성 정기결제가 있으면 카드를 삭제할 수 없습니다. 먼저 정기결제를 취소해주세요."
         }
 
     # 鍮뚮쭅???뚯쑀???뺤씤 (Verify billing key ownership via card_id)
@@ -1903,7 +1902,7 @@ async def delete_card(
         .first()
     )
     if not billing_key:
-        raise HTTPException(status_code=404, detail="?깅줉??移대뱶瑜?李얠쓣 ???놁뒿?덈떎.")
+        raise HTTPException(status_code=404, detail="등록된 카드를 찾을 수 없습니다.")
 
     payapp_enc_bill = _decrypt_enc_bill_or_raise(billing_key.enc_bill)
     if not is_encrypted(billing_key.enc_bill) and has_encryption_key():
@@ -1930,17 +1929,17 @@ async def delete_card(
             db.commit()
 
             logger.info(f"[PayApp Card] Card deleted: user={user_id}")
-            return {"success": True, "message": "移대뱶媛 ??젣?섏뿀?듬땲??"}
+            return {"success": True, "message": "카드가 삭제되었습니다."}
         else:
-            error_msg = result.get("errorMessage", "移대뱶 ??젣 ?ㅽ뙣")
+            error_msg = result.get("errorMessage", "카드 삭제 실패")
             logger.warning(f"[PayApp Card] Delete failed: {error_msg}")
-            return {"success": False, "message": "移대뱶 ??젣???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+            return {"success": False, "message": "카드 삭제에 실패했습니다. 다시 시도해주세요."}
 
     except RuntimeError as e:
         return {"success": False, "message": str(e)}
     except Exception as e:
         logger.error(f"[PayApp Card] Delete error: {e}", exc_info=True)
-        return {"success": False, "message": "移대뱶 ??젣 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎."}
+        return {"success": False, "message": "카드 삭제 처리 중 오류가 발생했습니다."}
 
 
 @router.get("/payapp/card/list")
@@ -2014,7 +2013,7 @@ async def create_subscription(
     )
 
     if not PAYAPP_USERID:
-        return {"success": False, "message": "寃곗젣 ?ㅼ젙???꾨즺?섏? ?딆븯?듬땲??"}
+        return {"success": False, "message": "결제 설정이 완료되지 않았습니다."}
 
     # ?뚮옖 媛寃?議고쉶 (Get plan price)
     plan_price = get_sellable_plan_price(data.plan_id)
@@ -2078,7 +2077,7 @@ async def create_subscription(
                     _call_payapp_api({"cmd": "rebillCancel", "userid": PAYAPP_USERID, "linkkey": PAYAPP_LINKKEY, "rebill_no": rebill_no})
                 except Exception:
                     logger.critical(f"[PayApp Subscribe] ORPHANED subscription rebill_no={rebill_no} for user={user_id}")
-                return {"success": False, "message": "?뺢린寃곗젣 ?깅줉 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+                return {"success": False, "message": "정기결제 등록 처리 중 오류가 발생했습니다. 다시 시도해주세요."}
 
             logger.info(f"[PayApp Subscribe] Subscription created: rebill_no={rebill_no}")
             return {
@@ -2159,10 +2158,10 @@ async def cancel_subscription(
         .first()
     )
     if not subscription:
-        raise HTTPException(status_code=404, detail="?뺢린寃곗젣瑜?李얠쓣 ???놁뒿?덈떎.")
+        raise HTTPException(status_code=404, detail="정기결제를 찾을 수 없습니다.")
 
     if subscription.status == SubscriptionStatus.CANCELLED:
-        return {"success": False, "message": "?대? 痍⑥냼???뺢린寃곗젣?낅땲??"}
+        return {"success": False, "message": "이미 취소된 정기결제입니다."}
 
     params = {
         "cmd": "rebillCancel",
@@ -2179,17 +2178,17 @@ async def cancel_subscription(
             db.commit()
 
             logger.info(f"[PayApp Subscribe] Cancelled: rebill_no={data.rebill_no}")
-            return {"success": True, "message": "?뺢린寃곗젣媛 痍⑥냼?섏뿀?듬땲??"}
+            return {"success": True, "message": "정기결제가 취소되었습니다."}
         else:
-            error_msg = result.get("errorMessage", "?뺢린寃곗젣 痍⑥냼 ?ㅽ뙣")
+            error_msg = result.get("errorMessage", "정기결제 취소 실패")
             logger.warning(f"[PayApp Subscribe] Cancel failed: {error_msg}")
-            return {"success": False, "message": "?뺢린寃곗젣 痍⑥냼???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+            return {"success": False, "message": "정기결제 취소에 실패했습니다. 다시 시도해주세요."}
 
     except RuntimeError as e:
         return {"success": False, "message": str(e)}
     except Exception as e:
         logger.error(f"[PayApp Subscribe] Cancel error: {e}", exc_info=True)
-        return {"success": False, "message": "?뺢린寃곗젣 痍⑥냼 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎."}
+        return {"success": False, "message": "정기결제 취소 처리 중 오류가 발생했습니다."}
 
 
 @router.post("/payapp/subscribe/stop")
@@ -2227,10 +2226,10 @@ async def stop_subscription(
         .first()
     )
     if not subscription:
-        raise HTTPException(status_code=404, detail="?뺢린寃곗젣瑜?李얠쓣 ???놁뒿?덈떎.")
+        raise HTTPException(status_code=404, detail="정기결제를 찾을 수 없습니다.")
 
     if subscription.status != SubscriptionStatus.ACTIVE:
-        return {"success": False, "message": f"?꾩옱 ?곹깭({subscription.status.value})?먯꽌??以묒??????놁뒿?덈떎."}
+        return {"success": False, "message": f"현재 상태({subscription.status.value})에서는 중지할 수 없습니다."}
 
     params = {
         "cmd": "rebillStop",
@@ -2247,17 +2246,17 @@ async def stop_subscription(
             db.commit()
 
             logger.info(f"[PayApp Subscribe] Stopped: rebill_no={data.rebill_no}")
-            return {"success": True, "message": "?뺢린寃곗젣媛 ?쇱떆以묒??섏뿀?듬땲??"}
+            return {"success": True, "message": "정기결제가 일시 중지되었습니다."}
         else:
-            error_msg = result.get("errorMessage", "?뺢린寃곗젣 以묒? ?ㅽ뙣")
+            error_msg = result.get("errorMessage", "정기결제 중지 실패")
             logger.warning(f"[PayApp Subscribe] Stop failed: {error_msg}")
-            return {"success": False, "message": "?뺢린寃곗젣 以묒????ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+            return {"success": False, "message": "정기결제 중지에 실패했습니다. 다시 시도해주세요."}
 
     except RuntimeError as e:
         return {"success": False, "message": str(e)}
     except Exception as e:
         logger.error(f"[PayApp Subscribe] Stop error: {e}", exc_info=True)
-        return {"success": False, "message": "?뺢린寃곗젣 以묒? 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎."}
+        return {"success": False, "message": "정기결제 중지 처리 중 오류가 발생했습니다."}
 
 
 @router.post("/payapp/subscribe/start")
@@ -2295,10 +2294,10 @@ async def start_subscription(
         .first()
     )
     if not subscription:
-        raise HTTPException(status_code=404, detail="?뺢린寃곗젣瑜?李얠쓣 ???놁뒿?덈떎.")
+        raise HTTPException(status_code=404, detail="정기결제를 찾을 수 없습니다.")
 
     if subscription.status != SubscriptionStatus.STOPPED:
-        return {"success": False, "message": f"?꾩옱 ?곹깭({subscription.status.value})?먯꽌???ш컻?????놁뒿?덈떎."}
+        return {"success": False, "message": f"현재 상태({subscription.status.value})에서는 재개할 수 없습니다."}
 
     params = {
         "cmd": "rebillStart",
@@ -2315,17 +2314,17 @@ async def start_subscription(
             db.commit()
 
             logger.info(f"[PayApp Subscribe] Resumed: rebill_no={data.rebill_no}")
-            return {"success": True, "message": "?뺢린寃곗젣媛 ?ш컻?섏뿀?듬땲??"}
+            return {"success": True, "message": "정기결제가 재개되었습니다."}
         else:
-            error_msg = result.get("errorMessage", "?뺢린寃곗젣 ?ш컻 ?ㅽ뙣")
+            error_msg = result.get("errorMessage", "정기결제 재개 실패")
             logger.warning(f"[PayApp Subscribe] Start failed: {error_msg}")
-            return {"success": False, "message": "?뺢린寃곗젣 ?ш컻???ㅽ뙣?덉뒿?덈떎. ?ㅼ떆 ?쒕룄?댁＜?몄슂."}
+            return {"success": False, "message": "정기결제 재개에 실패했습니다. 다시 시도해주세요."}
 
     except RuntimeError as e:
         return {"success": False, "message": str(e)}
     except Exception as e:
         logger.error(f"[PayApp Subscribe] Start error: {e}", exc_info=True)
-        return {"success": False, "message": "?뺢린寃곗젣 ?ш컻 泥섎━ 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎."}
+        return {"success": False, "message": "정기결제 재개 처리 중 오류가 발생했습니다."}
 
 
 @router.get("/payapp/subscribe/status")

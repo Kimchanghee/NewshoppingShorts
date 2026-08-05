@@ -1,6 +1,8 @@
 import re
+from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 from typing import Optional, Union
+from uuid import UUID
 
 
 class LoginRequest(BaseModel):
@@ -56,12 +58,28 @@ class UseWorkRequest(BaseModel):
     token: str = Field("", max_length=1024, description="JWT token (legacy body field)")
 
 
+class UseWorkV2Request(UseWorkRequest):
+    """Exactly-once work usage request scoped to one user."""
+
+    idempotency_key: UUID
+
+
 class UseWorkResponse(BaseModel):
     """Work usage response."""
     success: bool
     message: str
     remaining: Optional[int] = None  # -1 = unlimited
     used: Optional[int] = None
+
+
+class UseWorkV2Response(UseWorkResponse):
+    idempotency_key: UUID
+    idempotent_replay: bool = False
+
+
+class WorkReservationResponse(UseWorkV2Response):
+    reservation_status: str
+    lease_expires_at: Optional[datetime] = None
 
 
 class CheckWorkResponse(BaseModel):

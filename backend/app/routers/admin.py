@@ -10,15 +10,15 @@ Security:
 """
 import logging
 import ipaddress
+import secrets
 from typing import Optional, List
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, Request, Query, HTTPException
-from slowapi import Limiter
+from fastapi import APIRouter, Depends, Request, Query, HTTPException, Header
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
@@ -27,6 +27,10 @@ from app.models.login_attempt import LoginAttempt
 from app.utils.subscription_utils import calculate_subscription_expiry
 from app.services.auth_service import AuthService
 from app.config.constants import FREE_TRIAL_WORK_COUNT
+from app.configuration import get_settings
+from app.models.admin_session import AdminSession, hash_admin_token
+from app.utils.password import verify_password
+from app.utils.rate_limit import limiter
 
 
 logger = logging.getLogger(__name__)
@@ -34,9 +38,8 @@ logger = logging.getLogger(__name__)
 
 from app.utils.ip_utils import get_client_ip
 
-limiter = Limiter(key_func=get_client_ip)
-
 router = APIRouter(prefix="/user/admin", tags=["admin"])
+settings = get_settings()
 
 
 # ===== Schemas =====
@@ -68,8 +71,7 @@ class UserResponse(BaseModel):
     current_task: Optional[str] = None
     app_version: Optional[str] = None  # 사용자가 사용 중인 앱 버전
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class UserListResponse(BaseModel):
@@ -80,23 +82,19 @@ class UserListResponse(BaseModel):
 
 class ExtendSubscriptionRequest(BaseModel):
     """구독 연장 요청 스키마"""
-    days: int
+    days: int = Field(..., ge=1, le=3650)
 
 
 class ReduceSubscriptionRequest(BaseModel):
     """구독 기간 축소 요청 스키마"""
-    days: int  # Must be > 0 and <= 365, validated by Field
-
-    class Config:
-        json_schema_extra = {"example": {"days": 30}}
-
-    from pydantic import field_validator
+    days: int = Field(..., ge=1, le=3650)
+    model_config = ConfigDict(json_schema_extra={"example": {"days": 30}})
 
     @field_validator("days")
     @classmethod
     def validate_days(cls, v):
-        if v <= 0 or v > 365:
-            raise ValueError("days must be between 1 and 365")
+        if v <= 0 or v > 3650:
+            raise ValueError("days must be between 1 and 3650")
         return v
 
 
@@ -107,6 +105,20 @@ class AdminActionResponse(BaseModel):
     data: Optional[dict] = None
 
 
+class AdminLoginRequest(BaseModel):
+    password: str = Field(..., min_length=1, max_length=256)
+
+
+def verify_admin_password(password: str, password_hash: str) -> bool:
+    """Verify against a server-side bcrypt hash and hide malformed hashes."""
+    if not password or not password_hash:
+        return False
+    try:
+        return verify_password(password, password_hash)
+    except (ValueError, TypeError):
+        return False
+
+
 class LoginHistoryItem(BaseModel):
     """로그인 이력 아이템"""
     id: int
@@ -115,8 +127,7 @@ class LoginHistoryItem(BaseModel):
     attempted_at: datetime
     success: bool
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 class LoginHistoryResponse(BaseModel):
     """로그인 이력 응답"""
@@ -149,7 +160,86 @@ def _to_user_response(user: User) -> UserResponse:
     payload["last_login_ip"] = _mask_ip(payload.get("last_login_ip"))
     return UserResponse(**payload)
 
+
+def apply_user_status_filter(query, status_value: Optional[str]):
+    """Apply one documented dashboard status filter."""
+    value = (status_value or "all").strip().lower()
+    if value == "all":
+        return query
+    filters = {
+        "active": User.is_active.is_(True),
+        "inactive": User.is_active.is_(False),
+        "online": User.is_online.is_(True),
+        "offline": User.is_online.is_(False),
+        "trial": User.user_type == UserType.TRIAL,
+        "subscriber": User.user_type == UserType.SUBSCRIBER,
+        "admin": User.user_type == UserType.ADMIN,
+        "expired": User.subscription_expires_at <= datetime.now(timezone.utc),
+    }
+    if value not in filters:
+        raise ValueError("Unsupported user status filter")
+    return query.filter(filters[value])
+
 # ===== Endpoints =====
+
+@router.post("/session/login")
+@limiter.limit("10/minute")
+async def create_admin_session(
+    request: Request,
+    data: AdminLoginRequest,
+    db: Session = Depends(get_db),
+):
+    password_hash = (settings.ADMIN_PASSWORD_HASH or "").strip()
+    pepper = (settings.ADMIN_SESSION_PEPPER or "").strip()
+    if not password_hash or not pepper:
+        raise HTTPException(status_code=503, detail="Admin login is not configured")
+    if not verify_admin_password(data.password, password_hash):
+        raise HTTPException(status_code=401, detail="Invalid administrator credentials")
+
+    opaque_token = secrets.token_urlsafe(48)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=int(settings.ADMIN_SESSION_TTL_HOURS))
+    db.add(
+        AdminSession(
+            token_hash=hash_admin_token(opaque_token, pepper),
+            created_ip=get_client_ip(request),
+            is_active=True,
+            created_at=now,
+            last_used_at=now,
+            expires_at=expires_at,
+        )
+    )
+    db.commit()
+    return {
+        "access_token": opaque_token,
+        "token_type": "bearer",
+        "expires_in": int(settings.ADMIN_SESSION_TTL_HOURS) * 3600,
+        "expires_at": expires_at.isoformat(),
+    }
+
+
+@router.get("/session/verify")
+async def verify_admin_session(_admin: bool = Depends(verify_admin_api_key)):
+    return {"authenticated": True}
+
+
+@router.post("/session/logout")
+async def logout_admin_session(
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
+    _admin: bool = Depends(verify_admin_api_key),
+):
+    if authorization and authorization.startswith("Bearer "):
+        token_hash = hash_admin_token(
+            authorization[7:].strip(),
+            (settings.ADMIN_SESSION_PEPPER or "").strip(),
+        )
+        session = db.query(AdminSession).filter(AdminSession.token_hash == token_hash).first()
+        if session:
+            session.is_active = False
+            session.revoked_at = datetime.now(timezone.utc)
+            db.commit()
+    return {"success": True}
 
 @router.get("/users", response_model=UserListResponse)
 @limiter.limit("600/hour")
@@ -157,6 +247,7 @@ async def list_users(
     request: Request,
     search: Optional[str] = Query(None, description="아이디 검색"),
     program_type: Optional[str] = Query(None, description="프로그램 유형 필터 (ssmaker/stmaker)"),
+    status: Optional[str] = Query(None, description="User status filter"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     page_size: int = Query(50, ge=1, le=100, description="페이지 크기"),
     db: Session = Depends(get_db),
@@ -168,14 +259,16 @@ async def list_users(
 
     Requires X-Admin-API-Key header.
     """
-    # 자동 오프라인 처리 (2분 이상 활동 없음)
-    await AuthService(db).cleanup_offline_users()
-    
     query = db.query(User)
 
     # Filter by program type
     if program_type and program_type in ('ssmaker', 'stmaker'):
         query = query.filter(User.program_type == program_type)
+
+    try:
+        query = apply_user_status_filter(query, status)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # Search by username, name, email, or phone
     # Security: Escape LIKE wildcards and validate input length

@@ -7,6 +7,7 @@ API 인증 및 권한 검사를 위한 의존성 함수들
 import logging
 import secrets
 from datetime import datetime, timezone
+from typing import Optional
 from fastapi import Depends, Header, HTTPException, status
 from sqlalchemy.orm import Session
 from app.configuration import get_settings
@@ -86,7 +87,9 @@ async def get_current_user_id(
 
 
 async def verify_admin_api_key(
-    x_admin_api_key: str = Header(..., alias="X-Admin-API-Key", description="Admin API Key")
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    x_admin_api_key: Optional[str] = Header(None, alias="X-Admin-API-Key"),
+    db: Session = Depends(get_db),
 ) -> bool:
     """
     Admin API Key 검증 의존성
@@ -103,18 +106,40 @@ async def verify_admin_api_key(
     """
     # Admin API key verification -- no bypass allowed in any environment.
 
-    if not settings.ADMIN_API_KEY:
+    configured_key = (settings.ADMIN_API_KEY or "").strip()
+    provided_key = (x_admin_api_key or "").strip()
+    if configured_key and provided_key and secrets.compare_digest(provided_key, configured_key):
+        return True
+
+    if authorization and authorization.startswith("Bearer "):
+        from app.models.admin_session import AdminSession, hash_admin_token
+
+        opaque_token = authorization[7:].strip()
+        pepper = (settings.ADMIN_SESSION_PEPPER or "").strip()
+        if opaque_token and pepper:
+            token_hash = hash_admin_token(opaque_token, pepper)
+            now = datetime.now(timezone.utc)
+            session = (
+                db.query(AdminSession)
+                .filter(
+                    AdminSession.token_hash == token_hash,
+                    AdminSession.is_active.is_(True),
+                    AdminSession.expires_at > now,
+                )
+                .first()
+            )
+            if session:
+                session.last_used_at = now
+                db.commit()
+                return True
+
+    if not configured_key and not (settings.ADMIN_SESSION_PEPPER or "").strip():
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Admin API key not configured on server",
+            detail="Admin authentication is not configured on server",
         )
-
-    # Use constant-time comparison to prevent timing attacks
-    if not secrets.compare_digest((x_admin_api_key or "").strip(), settings.ADMIN_API_KEY):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid admin API key",
-            headers={"WWW-Authenticate": "API-Key"},
-        )
-
-    return True
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Invalid administrator credentials",
+        headers={"WWW-Authenticate": "Bearer, API-Key"},
+    )

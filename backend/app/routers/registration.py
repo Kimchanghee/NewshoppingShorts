@@ -16,7 +16,6 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Query
-from slowapi import Limiter
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from app.utils.password import hash_password
@@ -85,9 +84,9 @@ logger = logging.getLogger(__name__)
 
 
 from app.utils.ip_utils import get_client_ip
+from app.utils.rate_limit import limiter
 
 # Rate limiter
-limiter = Limiter(key_func=get_client_ip)
 
 router = APIRouter(prefix="/user", tags=["registration"])
 

@@ -4,7 +4,7 @@ Subscription Request Schemas
 
 체험판 사용자의 구독 신청 관련 Pydantic 모델
 """
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -34,8 +34,7 @@ class SubscriptionRequestResponse(BaseModel):
     created_at: datetime
     reviewed_at: Optional[datetime] = None
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SubscriptionRequestList(BaseModel):

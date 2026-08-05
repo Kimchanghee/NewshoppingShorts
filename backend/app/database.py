@@ -2,12 +2,12 @@ import logging
 import os
 from sqlalchemy import create_engine, URL
 from sqlalchemy.engine import make_url
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 from app.configuration import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
+EXPECTED_ALEMBIC_REVISION = "20260805_0002"
 
 # Connection pool configuration
 # Using URL.create() instead of f-string to prevent password from appearing in stack traces
@@ -96,6 +96,29 @@ def init_db():
         user_log,
         computer_use_job,
         user_settings,
+        admin_session,
+        work_usage,
+        system_setting,
     )
     from app.models import billing  # 빌링키 및 정기결제 모델
     Base.metadata.create_all(bind=engine)
+
+
+def verify_database_revision() -> None:
+    """Fail production startup unless the deployed schema is at this build's head."""
+    from sqlalchemy import text
+
+    try:
+        with engine.connect() as connection:
+            revision = connection.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar_one()
+    except Exception as exc:
+        raise RuntimeError(
+            "Database migrations are missing; run `python -m alembic upgrade head`"
+        ) from exc
+    if revision != EXPECTED_ALEMBIC_REVISION:
+        raise RuntimeError(
+            f"Database revision {revision!r} does not match expected "
+            f"{EXPECTED_ALEMBIC_REVISION!r}"
+        )

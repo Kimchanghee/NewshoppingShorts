@@ -8,7 +8,6 @@ from typing import Any, Dict, Optional, List
 
 from fastapi import APIRouter, Depends, Request, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
-from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
@@ -21,7 +20,10 @@ from app.schemas.auth import (
     LogoutRequest,
     CheckRequest,
     UseWorkRequest,
+    UseWorkV2Request,
     UseWorkResponse,
+    UseWorkV2Response,
+    WorkReservationResponse,
     CheckWorkResponse,
     ChangePasswordRequest,
 )
@@ -35,6 +37,7 @@ from app.utils.billing_crypto import (
     has_encryption_key,
     is_encrypted,
 )
+from app.utils.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -134,8 +137,6 @@ def get_client_ip(request: Request) -> str:
 
 
 # Create rate limiter instance using the secure IP extraction
-limiter = Limiter(key_func=get_client_ip)
-
 router = APIRouter(prefix="/user", tags=["auth"])
 
 
@@ -430,3 +431,65 @@ async def use_work(
     token = _resolve_token(authorization, data.token)
     service = AuthService(db)
     return await service.use_work(user_id=data.user_id, token=token)
+
+
+@router.post("/work/use-v2", response_model=UseWorkV2Response)
+@limiter.limit("60/minute")
+async def use_work_v2(
+    request: Request,
+    data: UseWorkV2Request,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """Atomically consume one work unit, safe to retry with the same UUID."""
+    token = _resolve_token(authorization, data.token)
+    return await AuthService(db).use_work_v2(
+        user_id=data.user_id,
+        token=token,
+        idempotency_key=str(data.idempotency_key),
+    )
+
+
+@router.post("/work/reserve-v3", response_model=WorkReservationResponse)
+@limiter.limit("60/minute")
+async def reserve_work_v3(
+    request: Request,
+    data: UseWorkV2Request,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """Reserve one work slot without charging a failed render."""
+    token = _resolve_token(authorization, data.token)
+    return await AuthService(db).reserve_work_v3(
+        data.user_id, token, str(data.idempotency_key)
+    )
+
+
+@router.post("/work/finalize-v3", response_model=WorkReservationResponse)
+@limiter.limit("60/minute")
+async def finalize_work_v3(
+    request: Request,
+    data: UseWorkV2Request,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """Charge a successfully completed reserved work slot exactly once."""
+    token = _resolve_token(authorization, data.token)
+    return await AuthService(db).finalize_work_v3(
+        data.user_id, token, str(data.idempotency_key)
+    )
+
+
+@router.post("/work/release-v3", response_model=WorkReservationResponse)
+@limiter.limit("60/minute")
+async def release_work_v3(
+    request: Request,
+    data: UseWorkV2Request,
+    authorization: Optional[str] = Header(None, alias="Authorization"),
+    db: Session = Depends(get_db),
+):
+    """Release a failed work reservation without charging it."""
+    token = _resolve_token(authorization, data.token)
+    return await AuthService(db).release_work_v3(
+        data.user_id, token, str(data.idempotency_key)
+    )

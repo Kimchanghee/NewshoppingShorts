@@ -1,6 +1,7 @@
 import logging
 import os
-from pydantic_settings import BaseSettings
+import json
+from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import field_validator, model_validator
 from functools import lru_cache
 from typing import Union
@@ -10,6 +11,11 @@ logger = logging.getLogger(__name__)
 
 
 class Settings(BaseSettings):
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
     # Database
     # Preferred for serverless platforms (for example, a managed MySQL URL).
     # When omitted, the legacy Cloud SQL socket/TCP configuration is used.
@@ -66,12 +72,23 @@ class Settings(BaseSettings):
     # Admin API Key for protected endpoints
     # Generate with: openssl rand -hex 32
     ADMIN_API_KEY: str = ""
+    ADMIN_PASSWORD_HASH: str = ""
+    ADMIN_SESSION_PEPPER: str = ""
+    ADMIN_SESSION_TTL_HOURS: int = 8
 
     @field_validator("ADMIN_API_KEY")
     @classmethod
     def validate_admin_api_key(cls, v):
         """Normalize API key value."""
         return v
+
+    @field_validator("ADMIN_SESSION_TTL_HOURS")
+    @classmethod
+    def validate_admin_session_ttl(cls, v):
+        value = int(v or 0)
+        if value < 1 or value > 24:
+            raise ValueError("ADMIN_SESSION_TTL_HOURS must be between 1 and 24")
+        return value
 
     # Dedicated key for CI/CD app-version metadata updates.
     # Keep separate from ADMIN_API_KEY to reduce blast radius if leaked.
@@ -87,8 +104,8 @@ class Settings(BaseSettings):
     # If set, /app/version/update requires a matching X-Update-Signature header.
     APP_VERSION_UPDATE_HMAC_KEY: str = ""
 
-    # Optional bridge key for centralized Computer Use job intake endpoint.
-    # If empty, bridge endpoint accepts authenticated paid users without this header.
+    # Required bridge key for centralized Computer Use job intake. If it is
+    # empty, the bridge endpoint fails closed even for authenticated users.
     COMPUTER_USE_BRIDGE_API_KEY: str = ""
 
     @field_validator("COMPUTER_USE_BRIDGE_API_KEY")
@@ -105,6 +122,9 @@ class Settings(BaseSettings):
     COMPUTER_USE_WORKER_CLI_PATH: str = "codex"
     COMPUTER_USE_WORKER_MODEL: str = ""
     COMPUTER_USE_WORKER_WORKDIR: str = ""
+    COMPUTER_USE_WORKER_SANDBOX: str = "read-only"
+    COMPUTER_USE_ALLOW_FREEFORM_PROMPTS: bool = False
+    COMPUTER_USE_PROMPT_TEMPLATES_JSON: str = "{}"
 
     @field_validator(
         "COMPUTER_USE_WORKER_POLL_SECONDS",
@@ -116,6 +136,14 @@ class Settings(BaseSettings):
         value = int(v or 0)
         if value <= 0:
             raise ValueError("Computer Use worker numeric settings must be > 0")
+        return value
+
+    @field_validator("COMPUTER_USE_WORKER_SANDBOX")
+    @classmethod
+    def validate_computer_use_sandbox(cls, v):
+        value = str(v or "").strip()
+        if value not in {"read-only", "workspace-write"}:
+            raise ValueError("COMPUTER_USE_WORKER_SANDBOX must be read-only or workspace-write")
         return value
 
     # Billing key encryption (Fernet key)
@@ -169,6 +197,21 @@ class Settings(BaseSettings):
                     "Set DATABASE_URL, or set both DB_USER and DB_PASSWORD for legacy MySQL"
                 )
 
+        if self.COMPUTER_USE_WORKER_ENABLED:
+            if len((self.COMPUTER_USE_BRIDGE_API_KEY or "").strip()) < 32:
+                raise ValueError("Computer Use worker requires a 32+ character bridge API key")
+            workdir = (self.COMPUTER_USE_WORKER_WORKDIR or "").strip()
+            if not workdir or not os.path.isabs(workdir):
+                raise ValueError("Computer Use worker requires an absolute work directory")
+            try:
+                templates = json.loads(self.COMPUTER_USE_PROMPT_TEMPLATES_JSON or "{}")
+            except json.JSONDecodeError as exc:
+                raise ValueError("COMPUTER_USE_PROMPT_TEMPLATES_JSON must be valid JSON") from exc
+            if not isinstance(templates, dict):
+                raise ValueError("Computer Use prompt templates must be a JSON object")
+            if not self.COMPUTER_USE_ALLOW_FREEFORM_PROMPTS and not templates:
+                raise ValueError("Computer Use requires server templates or explicit freeform opt-in")
+
         env = (self.ENVIRONMENT or "development").lower().strip()
         if env != "production":
             return self
@@ -176,6 +219,11 @@ class Settings(BaseSettings):
         admin_key = (self.ADMIN_API_KEY or "").strip()
         if len(admin_key) < 32:
             raise ValueError("ADMIN_API_KEY must be at least 32 characters in production")
+
+        if not (self.ADMIN_PASSWORD_HASH or "").startswith(("$2a$", "$2b$", "$2y$")):
+            raise ValueError("ADMIN_PASSWORD_HASH must be a bcrypt hash in production")
+        if len((self.ADMIN_SESSION_PEPPER or "").strip()) < 32:
+            raise ValueError("ADMIN_SESSION_PEPPER must be at least 32 characters in production")
 
         update_key = (self.APP_VERSION_UPDATE_API_KEY or "").strip()
         if len(update_key) < 32:
@@ -187,11 +235,6 @@ class Settings(BaseSettings):
             raise ValueError("BILLING_KEY_ENCRYPTION_KEY is required in production")
 
         return self
-
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
-
 
 @lru_cache()
 def get_settings() -> Settings:
