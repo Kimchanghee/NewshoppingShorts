@@ -53,6 +53,7 @@ def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):
         connection.execute(text("INSERT INTO user_logs VALUES (1, 7, 'legacy-log')"))
         connection.execute(text("CREATE TABLE admin_sessions (session_token VARCHAR(255) PRIMARY KEY, created_at DATETIME)"))
         connection.execute(text("INSERT INTO admin_sessions VALUES ('legacy-session-token', CURRENT_TIMESTAMP)"))
+        connection.execute(text("CREATE INDEX ix_admin_sessions_expires_at ON admin_sessions(created_at)"))
 
     _run_alembic(url, "upgrade", "head")
 

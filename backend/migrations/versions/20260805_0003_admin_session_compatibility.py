@@ -13,6 +13,11 @@ branch_labels = None
 depends_on = None
 
 LEGACY_TABLE_NAME = "admin_sessions_legacy_20260805"
+CURRENT_INDEX_NAMES = {
+    "ix_admin_sessions_token_hash",
+    "ix_admin_sessions_expires_at",
+    "ix_admin_sessions_is_active",
+}
 
 
 def _column_map() -> dict[str, dict]:
@@ -59,7 +64,14 @@ def upgrade() -> None:
             raise RuntimeError(
                 f"cannot archive admin_sessions because {LEGACY_TABLE_NAME} already exists"
             )
+        conflicting_indexes = {
+            index.get("name")
+            for index in inspector.get_indexes("admin_sessions")
+            if index.get("name") in CURRENT_INDEX_NAMES
+        }
         op.rename_table("admin_sessions", LEGACY_TABLE_NAME)
+        for index_name in conflicting_indexes:
+            op.drop_index(index_name, table_name=LEGACY_TABLE_NAME)
         _create_current_table()
         return
 
