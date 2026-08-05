@@ -18,14 +18,15 @@ def _run_alembic(database_url: str, *args: str) -> None:
         DATABASE_URL=database_url,
         JWT_SECRET_KEY="a" * 64,
     )
-    subprocess.run(
+    completed = subprocess.run(
         [sys.executable, "-m", "alembic", *args],
         cwd=BACKEND_ROOT,
         env=environment,
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    assert completed.returncode == 0, completed.stdout + completed.stderr
 
 
 def test_empty_database_upgrades_to_current_head(tmp_path):
@@ -36,7 +37,7 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
 
     assert {"users", "admin_sessions", "work_usages", "system_settings"} <= tables
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260805_0002"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260805_0003"
 
 
 def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):
@@ -50,8 +51,35 @@ def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):
         connection.execute(text("INSERT INTO system_settings VALUES ('legacy', 'keep-me')"))
         connection.execute(text("CREATE TABLE user_logs (id INTEGER PRIMARY KEY, user_id INTEGER, action VARCHAR(100))"))
         connection.execute(text("INSERT INTO user_logs VALUES (1, 7, 'legacy-log')"))
+        connection.execute(text("CREATE TABLE admin_sessions (id INTEGER PRIMARY KEY, session_token VARCHAR(255), created_at DATETIME)"))
+        connection.execute(text("INSERT INTO admin_sessions VALUES (5, 'legacy-session-token', CURRENT_TIMESTAMP)"))
 
     _run_alembic(url, "upgrade", "head")
+
+    admin_columns = {column["name"] for column in inspect(engine).get_columns("admin_sessions")}
+    assert {
+        "session_token",
+        "token_hash",
+        "created_ip",
+        "is_active",
+        "created_at",
+        "last_used_at",
+        "expires_at",
+        "revoked_at",
+    } <= admin_columns
+    with engine.connect() as connection:
+        session = connection.execute(
+            text(
+                "SELECT session_token, token_hash, is_active, expires_at, revoked_at "
+                "FROM admin_sessions WHERE id=5"
+            )
+        ).mappings().one()
+        assert session["session_token"] == "legacy-session-token"
+        assert len(session["token_hash"]) == 64
+        assert not session["is_active"]
+        assert session["expires_at"] is not None
+        assert session["revoked_at"] is not None
+
     _run_alembic(url, "downgrade", "base")
 
     with engine.connect() as connection:
