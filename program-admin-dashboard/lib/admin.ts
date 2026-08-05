@@ -1,7 +1,24 @@
 export const SESSION_COOKIE_NAME = 'ssmaker_program_admin_session';
 
+const INTERNAL_ERROR_PATTERN = /traceback|psycopg|sqlalchemy|\[sql:|\[parameters:|exception|stack|invalid input value for enum/i;
+const ADMIN_PROXY_ALLOWLIST = [
+  ['GET', /^users$/],
+  ['GET', /^users\/\d+$/],
+  ['GET', /^users\/\d+\/history$/],
+  ['GET', /^stats$/],
+  ['POST', /^users\/\d+\/(?:extend|toggle-active|revoke-subscription|reduce-subscription)$/],
+  ['DELETE', /^users\/\d+$/],
+] as const;
+
 export function authApiBaseUrl() {
-  return (process.env.AUTH_API_BASE_URL || 'https://newshopping-shorts-auth.vercel.app').replace(/\/+$/, '');
+  const configured = process.env.AUTH_API_BASE_URL?.trim();
+  if (!configured) throw new Error('AUTH_API_BASE_URL is required');
+  const url = new URL(configured);
+  if (process.env.NODE_ENV === 'production' && url.protocol !== 'https:') {
+    throw new Error('AUTH_API_BASE_URL must use HTTPS in production');
+  }
+  if (!['https:', 'http:'].includes(url.protocol)) throw new Error('AUTH_API_BASE_URL protocol is invalid');
+  return configured.replace(/\/+$/, '');
 }
 
 export function sameOrigin(request: Request) {
@@ -25,8 +42,16 @@ export function sameOrigin(request: Request) {
 export function backendErrorMessage(payload: unknown, fallback: string) {
   if (!payload || typeof payload !== 'object') return fallback;
   const value = payload as Record<string, unknown>;
-  if (typeof value.message === 'string' && value.message.trim()) return value.message;
-  if (typeof value.detail === 'string' && value.detail.trim()) return value.detail;
-  if (typeof value.error === 'string' && value.error.trim()) return value.error;
+  for (const candidate of [value.message, value.detail, value.error]) {
+    if (typeof candidate !== 'string') continue;
+    const message = candidate.trim();
+    if (message && message.length <= 200 && !INTERNAL_ERROR_PATTERN.test(message)) return message;
+  }
   return fallback;
+}
+
+export function adminProxyAllowed(method: string, path: string) {
+  return ADMIN_PROXY_ALLOWLIST.some(([allowedMethod, pattern]) => (
+    allowedMethod === method && pattern.test(path)
+  ));
 }
