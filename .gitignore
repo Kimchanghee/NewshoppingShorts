@@ -139,3 +139,4 @@ tiktok_settings.json
 # Virtual environments
 .venv/
 venv*/
+.vercel

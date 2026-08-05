@@ -27,3 +27,4 @@ venv311
 *.m4a
 .env
 backend/.env
+/requirements.txt
