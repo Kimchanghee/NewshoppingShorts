@@ -51,14 +51,14 @@ def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):
         connection.execute(text("INSERT INTO system_settings VALUES ('legacy', 'keep-me')"))
         connection.execute(text("CREATE TABLE user_logs (id INTEGER PRIMARY KEY, user_id INTEGER, action VARCHAR(100))"))
         connection.execute(text("INSERT INTO user_logs VALUES (1, 7, 'legacy-log')"))
-        connection.execute(text("CREATE TABLE admin_sessions (id INTEGER PRIMARY KEY, session_token VARCHAR(255), created_at DATETIME)"))
-        connection.execute(text("INSERT INTO admin_sessions VALUES (5, 'legacy-session-token', CURRENT_TIMESTAMP)"))
+        connection.execute(text("CREATE TABLE admin_sessions (session_token VARCHAR(255) PRIMARY KEY, created_at DATETIME)"))
+        connection.execute(text("INSERT INTO admin_sessions VALUES ('legacy-session-token', CURRENT_TIMESTAMP)"))
 
     _run_alembic(url, "upgrade", "head")
 
     admin_columns = {column["name"] for column in inspect(engine).get_columns("admin_sessions")}
     assert {
-        "session_token",
+        "id",
         "token_hash",
         "created_ip",
         "is_active",
@@ -68,20 +68,16 @@ def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):
         "revoked_at",
     } <= admin_columns
     with engine.connect() as connection:
-        session = connection.execute(
-            text(
-                "SELECT session_token, token_hash, is_active, expires_at, revoked_at "
-                "FROM admin_sessions WHERE id=5"
-            )
-        ).mappings().one()
-        assert session["session_token"] == "legacy-session-token"
-        assert len(session["token_hash"]) == 64
-        assert not session["is_active"]
-        assert session["expires_at"] is not None
-        assert session["revoked_at"] is not None
+        assert connection.execute(text("SELECT COUNT(*) FROM admin_sessions")).scalar_one() == 0
+        assert connection.execute(
+            text("SELECT session_token FROM admin_sessions_legacy_20260805")
+        ).scalar_one() == "legacy-session-token"
 
     _run_alembic(url, "downgrade", "base")
 
     with engine.connect() as connection:
         assert connection.execute(text("SELECT setting_value FROM system_settings WHERE setting_key='legacy'")).scalar_one() == "keep-me"
         assert connection.execute(text("SELECT action FROM user_logs WHERE id=1")).scalar_one() == "legacy-log"
+        assert connection.execute(
+            text("SELECT session_token FROM admin_sessions_legacy_20260805")
+        ).scalar_one() == "legacy-session-token"

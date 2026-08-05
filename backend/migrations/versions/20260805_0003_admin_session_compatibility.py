@@ -12,6 +12,8 @@ down_revision = "20260805_0002"
 branch_labels = None
 depends_on = None
 
+LEGACY_TABLE_NAME = "admin_sessions_legacy_20260805"
+
 
 def _column_map() -> dict[str, dict]:
     inspector = sa.inspect(op.get_bind())
@@ -28,8 +30,39 @@ def _valid_digest(value: object) -> bool:
     return len(text) == 64 and all(character in string.hexdigits for character in text)
 
 
+def _create_current_table() -> None:
+    op.create_table(
+        "admin_sessions",
+        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+        sa.Column("token_hash", sa.String(64), nullable=False),
+        sa.Column("created_ip", sa.String(45), nullable=True),
+        sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.true()),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("last_used_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("revoked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.UniqueConstraint("token_hash", name="uq_admin_sessions_token_hash"),
+    )
+    op.create_index("ix_admin_sessions_token_hash", "admin_sessions", ["token_hash"])
+    op.create_index("ix_admin_sessions_expires_at", "admin_sessions", ["expires_at"])
+    op.create_index("ix_admin_sessions_is_active", "admin_sessions", ["is_active"])
+
+
 def upgrade() -> None:
     columns = _column_map()
+    inspector = sa.inspect(op.get_bind())
+    primary_key = inspector.get_pk_constraint("admin_sessions").get(
+        "constrained_columns"
+    ) or []
+    if "id" not in columns or primary_key != ["id"]:
+        if LEGACY_TABLE_NAME in inspector.get_table_names():
+            raise RuntimeError(
+                f"cannot archive admin_sessions because {LEGACY_TABLE_NAME} already exists"
+            )
+        op.rename_table("admin_sessions", LEGACY_TABLE_NAME)
+        _create_current_table()
+        return
+
     additions = (
         sa.Column("token_hash", sa.String(64), nullable=True),
         sa.Column("created_ip", sa.String(45), nullable=True),
