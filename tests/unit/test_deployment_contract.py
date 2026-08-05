@@ -19,7 +19,7 @@ def test_cloud_run_deploy_migrates_before_traffic_switch():
 
 def test_vercel_build_fails_closed_on_migration_error():
     text = (ROOT / "vercel.json").read_text(encoding="utf-8")
-    assert '"buildCommand": "uv pip install --system -r backend/requirements.txt && cd backend && python -m alembic upgrade head"' in text
+    assert '"buildCommand": "cd backend && uv run --python 3.14 --with-requirements requirements.txt python -m alembic upgrade head"' in text
 
 
 def test_vercel_function_requirements_match_backend_requirements():
