@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "cd backend && python -m alembic upgrade head",
+  "buildCommand": "uv pip install --system -r backend/requirements.txt && cd backend && python -m alembic upgrade head",
   "functions": {
     "api/index.py": {
       "includeFiles": "backend/**",
