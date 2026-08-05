@@ -33,6 +33,10 @@ def test_vercel_function_requirements_match_backend_requirements():
     assert normalized("api/requirements.txt") == normalized("backend/requirements.txt")
 
 
+def test_vercel_python_runtime_is_pinned_to_supported_dependency_abi():
+    assert (ROOT / ".python-version").read_text(encoding="utf-8").strip() == "3.12"
+
+
 def test_version_update_workflows_never_forward_full_admin_key():
     for relative in (
         ".github/workflows/build-and-deploy.yml",
