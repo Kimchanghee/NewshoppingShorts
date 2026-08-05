@@ -1,0 +1,129 @@
+name: Backend Portability
+
+on:
+  pull_request:
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-portability.yml'
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-portability.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-portable-databases:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ssmaker_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ssmaker_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: ssmaker_ci
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping -h localhost -proot"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+
+    defaults:
+      run:
+        working-directory: backend
+
+    env:
+      JWT_SECRET_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Run backend tests without PYTHONUTF8
+        run: |
+          unset PYTHONUTF8
+          python -m pytest -q
+
+      - name: Verify PostgreSQL Alembic upgrade
+        env:
+          DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/ssmaker_ci?sslmode=disable
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(50), password_hash VARCHAR(255))"))
+              connection.execute(text("CREATE TABLE registration_requests (id INTEGER PRIMARY KEY)"))
+              connection.execute(text("CREATE TABLE billing_keys (id INTEGER PRIMARY KEY, user_id VARCHAR(100), enc_bill VARCHAR(1024))"))
+          PY
+          python -m alembic upgrade head
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          inspector = inspect(create_engine(os.environ["DATABASE_URL"]))
+          tables = set(inspector.get_table_names())
+          required = {"admin_sessions", "work_usages", "system_settings", "user_logs", "alembic_version"}
+          assert required <= tables, required - tables
+          unique = {tuple(item["column_names"]) for item in inspector.get_unique_constraints("work_usages")}
+          assert ("user_id", "idempotency_key") in unique
+          print("PostgreSQL migration smoke passed")
+          PY
+
+      - name: Verify MySQL Alembic upgrade
+        env:
+          DATABASE_URL: mysql+pymysql://root:root@127.0.0.1:3306/ssmaker_ci?charset=utf8mb4
+        run: |
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, text
+
+          engine = create_engine(os.environ["DATABASE_URL"])
+          with engine.begin() as connection:
+              connection.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(50), password_hash VARCHAR(255))"))
+              connection.execute(text("CREATE TABLE registration_requests (id INTEGER PRIMARY KEY)"))
+              connection.execute(text("CREATE TABLE billing_keys (id INTEGER PRIMARY KEY, user_id VARCHAR(100), enc_bill VARCHAR(1024))"))
+          PY
+          python -m alembic upgrade head
+          python - <<'PY'
+          import os
+          from sqlalchemy import create_engine, inspect
+
+          inspector = inspect(create_engine(os.environ["DATABASE_URL"]))
+          tables = set(inspector.get_table_names())
+          required = {"admin_sessions", "work_usages", "system_settings", "user_logs", "alembic_version"}
+          assert required <= tables, required - tables
+          unique = {tuple(item["column_names"]) for item in inspector.get_unique_constraints("work_usages")}
+          assert ("user_id", "idempotency_key") in unique
+          print("MySQL migration smoke passed")
+          PY

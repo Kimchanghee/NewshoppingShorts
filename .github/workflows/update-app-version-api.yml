@@ -59,7 +59,6 @@ jobs:
           RELEASE_NOTES: ${{ github.event.inputs.release_notes }}
           APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
           APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}
-          ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
           APP_VERSION_UPDATE_HMAC_KEY: ${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}
         run: |
           import hashlib
@@ -67,11 +66,20 @@ jobs:
           import json
           import os
           import urllib.error
+          import urllib.parse
           import urllib.request
 
           version = os.environ["VERSION"].strip()
           repository = os.environ["REPOSITORY"].strip()
           api_base_url = (os.environ.get("APP_VERSION_API_BASE_URL") or "https://project-user-dashboard-api.vercel.app").rstrip("/")
+          parsed_api = urllib.parse.urlparse(api_base_url)
+          allowed_origins = {
+              "https://project-user-dashboard-api.vercel.app",
+              "https://newshopping-shorts-auth.vercel.app",
+          }
+          origin = f"{parsed_api.scheme}://{parsed_api.netloc}"
+          if origin not in allowed_origins or parsed_api.path not in ("", "/") or parsed_api.query or parsed_api.fragment:
+              raise SystemExit("APP_VERSION_API_BASE_URL is not an approved update origin")
           download_url = f"https://github.com/{repository}/releases/download/v{version}/SSMaker_Setup_v{version}.exe"
 
           payload = {
@@ -83,42 +91,30 @@ jobs:
           }
           body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
-          token_candidates = [
-              ("APP_VERSION_UPDATE_API_KEY", os.environ.get("APP_VERSION_UPDATE_API_KEY", "").strip()),
-              ("ADMIN_API_KEY", os.environ.get("ADMIN_API_KEY", "").strip()),
-          ]
+          token = os.environ.get("APP_VERSION_UPDATE_API_KEY", "").strip()
+          if not token:
+              raise SystemExit("APP_VERSION_UPDATE_API_KEY is required")
           signing_key = os.environ.get("APP_VERSION_UPDATE_HMAC_KEY", "").strip()
           signature = ""
           if signing_key:
               signature = hmac.new(signing_key.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
-          last_error = None
-          for token_name, token in token_candidates:
-              if not token:
-                  continue
-              headers = {
-                  "Content-Type": "application/json",
-                  "Authorization": f"Bearer {token}",
-              }
-              if signature:
-                  headers["X-Update-Signature"] = signature
-              request = urllib.request.Request(
-                  f"{api_base_url}/app/version/update",
-                  data=body,
-                  headers=headers,
-                  method="POST",
-              )
-              try:
-                  with urllib.request.urlopen(request, timeout=30) as response:
-                      print(f"Server version updated with {token_name}: {response.status}")
-                      print(response.read().decode("utf-8", errors="replace"))
-                      break
-              except urllib.error.HTTPError as error:
-                  error_body = error.read().decode("utf-8", errors="replace")
-                  last_error = f"{token_name} failed: HTTP {error.code} {error_body}"
-                  print(last_error)
-              except Exception as error:
-                  last_error = f"{token_name} failed: {error}"
-                  print(last_error)
-          else:
-              raise SystemExit(last_error or "No usable update token configured")
+          headers = {
+              "Content-Type": "application/json",
+              "Authorization": f"Bearer {token}",
+          }
+          if signature:
+              headers["X-Update-Signature"] = signature
+          request = urllib.request.Request(
+              f"{api_base_url}/app/version/update",
+              data=body,
+              headers=headers,
+              method="POST",
+          )
+          class RejectRedirects(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  raise urllib.error.HTTPError(req.full_url, code, "Redirect refused", headers, fp)
+          opener = urllib.request.build_opener(RejectRedirects)
+          with opener.open(request, timeout=30) as response:
+              print(f"Server version updated: {response.status}")
+              print(response.read().decode("utf-8", errors="replace"))

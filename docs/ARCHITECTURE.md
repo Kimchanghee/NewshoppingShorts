@@ -6,11 +6,11 @@ NewshoppingShortsMaker 시스템 아키텍처
 
 ## 시스템 개요
 
-NewshoppingShortsMaker는 **레이어드 아키텍처**를 따르는 PyQt5 기반 데스크톱 애플리케이션입니다.
+NewshoppingShortsMaker는 **레이어드 아키텍처**를 따르는 PyQt6 기반 데스크톱 애플리케이션입니다.
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│                  UI Layer (PyQt5)                   │
+│                  UI Layer (PyQt6)                   │
 │        Panels, Components, Theme Management         │
 └─────────────────────────────────────────────────────┘
                          ↓
@@ -54,7 +54,7 @@ ui/
 ```
 
 **특징**:
-- PyQt5 기반 GUI
+- PyQt6 기반 GUI
 - 반응형 레이아웃
 - 실시간 진행 상황 표시
 - 다크/라이트 테마 지원
@@ -384,7 +384,7 @@ Safe Processing
 
 | Category | Technology | Purpose |
 |----------|------------|---------|
-| **UI** | PyQt5 | Desktop GUI |
+| **UI** | PyQt6 | Desktop GUI |
 | **Video** | MoviePy, OpenCV | Video processing |
 | **OCR** | Tesseract, RapidOCR | Text detection |
 | **GPU** | CuPy, CUDA | Acceleration |

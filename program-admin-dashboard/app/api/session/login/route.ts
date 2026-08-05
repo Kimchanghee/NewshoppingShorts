@@ -13,7 +13,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const upstream = await fetch(`${authApiBaseUrl()}/api/auth/login`, {
+    const upstream = await fetch(`${authApiBaseUrl()}/user/admin/session/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ password }),

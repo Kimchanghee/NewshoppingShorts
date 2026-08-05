@@ -114,10 +114,10 @@ class StartupValidator:
         version = sys.version_info
         version_str = f"{version.major}.{version.minor}.{version.micro}"
 
-        if version.major == 3 and version.minor >= 12:
+        if version.major == 3 and version.minor >= 11:
             return True, f"Python {version_str} {SYMBOL_OK}"
         else:
-            return False, f"Python {version_str} (require 3.12+)"
+            return False, f"Python {version_str} (require 3.11+)"
 
     def _check_required_packages(self) -> Tuple[bool, str]:
         """Check required Python packages"""

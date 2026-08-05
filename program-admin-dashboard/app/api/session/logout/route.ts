@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
   const token = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (token) {
     try {
-      await fetch(`${authApiBaseUrl()}/api/auth/logout`, {
+      await fetch(`${authApiBaseUrl()}/user/admin/session/logout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
         cache: 'no-store',

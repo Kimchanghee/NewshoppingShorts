@@ -14,6 +14,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 COPY static ./static
+COPY alembic.ini ./alembic.ini
+COPY migrations ./migrations
 
 # Cloud Run uses PORT environment variable
 ENV PORT=8080

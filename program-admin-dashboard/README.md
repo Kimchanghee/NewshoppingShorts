@@ -21,3 +21,17 @@ npm run dev
 ```
 
 `AUTH_API_BASE_URL`은 서버 전용 환경변수이며 브라우저 번들에 포함되지 않습니다.
+대시보드는 이 주소의 다음 백엔드 계약을 사용합니다.
+
+- `POST /user/admin/session/login` — `{ "password": "..." }`로 로그인
+- `GET /user/admin/session/verify` — Bearer 세션 검증
+- `POST /user/admin/session/logout` — Bearer 세션 종료
+- `/user/admin/*` — Bearer 세션을 전달하는 관리자 API
+
+`ADMIN_API_KEY`는 대시보드 환경변수나 브라우저에 두지 않습니다. 백엔드가 발급한 짧은 수명의 관리자 세션만 HTTP-only 쿠키에 저장합니다.
+
+## 검증
+
+```bash
+npm run verify
+```

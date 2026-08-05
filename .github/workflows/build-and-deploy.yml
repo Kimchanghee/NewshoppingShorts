@@ -25,7 +25,7 @@ jobs:
       uses: actions/cache@v4
       with:
         path: ~\AppData\Local\pip\Cache
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'backend/requirements.txt') }}
         restore-keys: |
           ${{ runner.os }}-pip-
 
@@ -33,6 +33,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         python -m pip install -r requirements.txt
+        python -m pip install -r backend/requirements.txt
         python -m pip install pyinstaller
         python -c "import sys; import PyInstaller; print('python=', sys.executable); print('pyinstaller=', PyInstaller.__version__)"
 
@@ -92,9 +93,46 @@ jobs:
 
     - name: Run Backend Test Suite
       shell: pwsh
+      working-directory: backend
+      env:
+        DB_USER: test
+        DB_PASSWORD: test
+        JWT_SECRET_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+        ADMIN_API_KEY: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+        APP_VERSION_UPDATE_API_KEY: test_update_api_key_for_ci_abcdefghijklmnopqrstuvwxyz123456
+        BILLING_KEY_ENCRYPTION_KEY: uKVciQZlzUKtZPwuiKHl3wVCJJhQrWL6TqrFRClcEOI=
       run: |
-        $env:APP_VERSION_UPDATE_API_KEY = "test_update_api_key_for_ci_abcdefghijklmnopqrstuvwxyz123456"
-        pytest -q backend/tests
+        Remove-Item Env:PYTHONUTF8 -ErrorAction SilentlyContinue
+        python -m pytest -q
+
+    - name: Verify portable Alembic migration
+      shell: pwsh
+      working-directory: backend
+      env:
+        JWT_SECRET_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      run: |
+        $dbPath = Join-Path $env:RUNNER_TEMP "backend-migration.db"
+        $env:DATABASE_URL = "sqlite:///$($dbPath.Replace('\', '/'))"
+        @'
+        import os
+        from sqlalchemy import create_engine, text
+        engine = create_engine(os.environ["DATABASE_URL"])
+        with engine.begin() as connection:
+            connection.execute(text("CREATE TABLE users (id INTEGER PRIMARY KEY, username VARCHAR(50), password_hash VARCHAR(255))"))
+            connection.execute(text("CREATE TABLE registration_requests (id INTEGER PRIMARY KEY)"))
+            connection.execute(text("CREATE TABLE billing_keys (id INTEGER PRIMARY KEY, user_id VARCHAR(100), enc_bill VARCHAR(1024))"))
+        '@ | python -
+        python -m alembic upgrade head
+        @'
+        import os
+        from sqlalchemy import create_engine, inspect
+        tables = set(inspect(create_engine(os.environ["DATABASE_URL"])).get_table_names())
+        required = {"admin_sessions", "work_usages", "system_settings", "user_logs", "alembic_version"}
+        missing = required - tables
+        if missing:
+            raise SystemExit(f"Missing migrated tables: {sorted(missing)}")
+        print("Alembic portability smoke passed")
+        '@ | python -
 
     - name: Download Whisper models
       run: python scripts/download_whisper_models.py
@@ -219,7 +257,6 @@ jobs:
         RELEASE_NOTES_SUMMARY: ${{ steps.notes.outputs.SUMMARY }}
         APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
         APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}
-        ADMIN_API_KEY: ${{ secrets.ADMIN_API_KEY }}
         APP_VERSION_UPDATE_HMAC_KEY: ${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}
       run: |
         import hashlib
@@ -227,11 +264,20 @@ jobs:
         import json
         import os
         import urllib.error
+        import urllib.parse
         import urllib.request
 
         version = os.environ["VERSION"].strip()
         repository = os.environ["REPOSITORY"].strip()
         api_base_url = (os.environ.get("APP_VERSION_API_BASE_URL") or "https://project-user-dashboard-api.vercel.app").rstrip("/")
+        parsed_api = urllib.parse.urlparse(api_base_url)
+        allowed_origins = {
+            "https://project-user-dashboard-api.vercel.app",
+            "https://newshopping-shorts-auth.vercel.app",
+        }
+        origin = f"{parsed_api.scheme}://{parsed_api.netloc}"
+        if origin not in allowed_origins or parsed_api.path not in ("", "/") or parsed_api.query or parsed_api.fragment:
+            raise SystemExit("APP_VERSION_API_BASE_URL is not an approved update origin")
         download_url = f"https://github.com/{repository}/releases/download/v{version}/SSMaker_Setup_v{version}.exe"
 
         payload = {
@@ -243,42 +289,30 @@ jobs:
         }
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
-        token_candidates = [
-            ("APP_VERSION_UPDATE_API_KEY", os.environ.get("APP_VERSION_UPDATE_API_KEY", "").strip()),
-            ("ADMIN_API_KEY", os.environ.get("ADMIN_API_KEY", "").strip()),
-        ]
+        token = os.environ.get("APP_VERSION_UPDATE_API_KEY", "").strip()
+        if not token:
+            raise SystemExit("APP_VERSION_UPDATE_API_KEY is required")
         signing_key = os.environ.get("APP_VERSION_UPDATE_HMAC_KEY", "").strip()
         signature = ""
         if signing_key:
             signature = hmac.new(signing_key.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
-        last_error = None
-        for token_name, token in token_candidates:
-            if not token:
-                continue
-            headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-            }
-            if signature:
-                headers["X-Update-Signature"] = signature
-            request = urllib.request.Request(
-                f"{api_base_url}/app/version/update",
-                data=body,
-                headers=headers,
-                method="POST",
-            )
-            try:
-                with urllib.request.urlopen(request, timeout=30) as response:
-                    print(f"Server version updated with {token_name}: {response.status}")
-                    print(response.read().decode("utf-8", errors="replace"))
-                    break
-            except urllib.error.HTTPError as error:
-                error_body = error.read().decode("utf-8", errors="replace")
-                last_error = f"{token_name} failed: HTTP {error.code} {error_body}"
-                print(last_error)
-            except Exception as error:
-                last_error = f"{token_name} failed: {error}"
-                print(last_error)
-        else:
-            raise SystemExit(last_error or "No usable update token configured")
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {token}",
+        }
+        if signature:
+            headers["X-Update-Signature"] = signature
+        request = urllib.request.Request(
+            f"{api_base_url}/app/version/update",
+            data=body,
+            headers=headers,
+            method="POST",
+        )
+        class RejectRedirects(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                raise urllib.error.HTTPError(req.full_url, code, "Redirect refused", headers, fp)
+        opener = urllib.request.build_opener(RejectRedirects)
+        with opener.open(request, timeout=30) as response:
+            print(f"Server version updated: {response.status}")
+            print(response.read().decode("utf-8", errors="replace"))
