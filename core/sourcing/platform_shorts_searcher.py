@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import asyncio
+from difflib import SequenceMatcher
 import os
 import re
 import subprocess
@@ -34,6 +35,7 @@ from core.sourcing.product_searcher import (
     _download_video,
     _extract_video_urls,
     _page_has_access_challenge,
+    _passes_category_guard,
 )
 
 logger = get_logger(__name__)
@@ -46,6 +48,51 @@ DEFAULT_PLATFORM_ORDER = ["douyin", "kuaishou", "xiaohongshu", "bilibili"]
 MIN_SOURCE_SECONDS = 4.0
 MAX_SOURCE_SECONDS = 90.0
 MIN_SOURCE_SHORT_SIDE = 480
+
+
+def _normalized_relevance_text(value: str) -> str:
+    return " ".join(re.findall(r"[0-9a-zA-Z가-힣\u3400-\u9fff]+", str(value or "").lower()))
+
+
+def candidate_relevance_score(evidence: str, references: List[str]) -> Optional[float]:
+    """Score candidate-owned title/caption evidence against product references.
+
+    Search queries are deliberately not accepted as evidence.  The caller may
+    provide product-derived multilingual names as references, while *evidence*
+    must come from yt-dlp or the candidate page itself.
+    """
+    candidate = _normalized_relevance_text(evidence)
+    if not candidate:
+        return None
+    candidate_tokens = set(candidate.split())
+    best = 0.0
+    for raw_reference in references or []:
+        reference = _normalized_relevance_text(raw_reference)
+        if not reference:
+            continue
+        reference_tokens = set(reference.split())
+        compact_reference = reference.replace(" ", "")
+        # A generic one-word translation such as "fan" is not a product
+        # identity. Letting it reach 100% coverage made unrelated videos pass.
+        if len(reference_tokens) < 2 and len(compact_reference) < 4:
+            continue
+        coverage = len(candidate_tokens & reference_tokens) / max(1, len(reference_tokens))
+        sequence = SequenceMatcher(None, candidate, reference).ratio()
+        best = max(best, coverage, (0.7 * coverage) + (0.3 * sequence))
+    return min(1.0, max(0.0, best)) if best > 0 else 0.0
+
+
+def _relevance_result(
+    evidence: str,
+    references: List[str],
+    min_score: float,
+    category_terms: Optional[List[str]] = None,
+) -> tuple[bool, Optional[float]]:
+    if not _passes_category_guard(evidence, category_terms or []):
+        return False, 0.0
+    score = candidate_relevance_score(evidence, references)
+    threshold = max(0.9, min(1.0, min_score))
+    return score is not None and score >= threshold, score
 
 # 플랫폼별 검색 URL 템플릿 + 다운로드 referer.
 _SEARCH_URL = {
@@ -615,8 +662,11 @@ async def search_one_platform(
     page_wait: float = 4.0,
     skip_source_ids: Optional[Set[str]] = None,
     budget_seconds: float = PER_PLATFORM_BUDGET,
+    relevance_references: Optional[List[str]] = None,
+    min_relevance_score: float = 0.9,
+    category_terms: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """단일 플랫폼에서 쿼리들로 검색, 첫 '검증 통과' 영상 반환."""
+    """Return the first technically valid candidate that also passes relevance."""
     import time as _time
 
     tmpl = _SEARCH_URL.get(platform)
@@ -659,7 +709,9 @@ async def search_one_platform(
         hit = None
         try:
             hit = await _search_query_on_tab(
-                browser, tab, platform, q, url, output_dir, page_wait, skip, deadline
+                browser, tab, platform, q, url, output_dir, page_wait, skip, deadline,
+                relevance_references or [], min_relevance_score,
+                category_terms or [],
             )
         except Exception as e:
             # 쿼리 하나가 죽어도 다음 쿼리/플랫폼은 계속 — 전체 소싱을 무너뜨리지 않는다.
@@ -677,6 +729,8 @@ async def search_one_platform(
 async def _search_query_on_tab(
     browser: Any, tab: Any, platform: str, q: str, url: str,
     output_dir: str, page_wait: float, skip: Set[str], deadline: float,
+    relevance_references: List[str], min_relevance_score: float,
+    category_terms: List[str],
 ) -> Optional[Dict[str, Any]]:
     """열린 탭에서 챌린지 확인→링크 추출→다운로드까지. 성공 시 hit dict."""
     import time as _time
@@ -745,11 +799,31 @@ async def _search_query_on_tab(
                     continue
                 size_mb = os.path.getsize(got["local_path"]) / (1024 * 1024)
                 via = str(got.get("via") or "yt-dlp")
+                evidence = str(got.get("title") or "").strip()
+                relevant, relevance_score = _relevance_result(
+                    evidence,
+                    relevance_references,
+                    min_relevance_score,
+                    category_terms,
+                )
+                if not relevant:
+                    logger.warning(
+                        "[PlatformSearch] 상품 연관성 미달/알 수 없음 score=%s title=%r",
+                        relevance_score,
+                        evidence[:80],
+                    )
+                    try:
+                        os.remove(got["local_path"])
+                    except OSError:
+                        pass
+                    continue
                 logger.info("[PlatformSearch] %s %s 성공 %.1fMB: %s", platform, via, size_mb, link[:60])
                 return {
                     "platform": platform, "query": q, "video_url": link,
                     "video_file": got["local_path"], "size_mb": round(size_mb, 1),
-                    "via": via, "title": got.get("title", ""),
+                    "via": via, "title": evidence,
+                    "relevance_score": relevance_score,
+                    "relevance_evidence": "candidate_title",
                 }
 
         # ── 전략 2(폴백): 직접 mp4 추출 → requests 다운로드 ──
@@ -785,11 +859,15 @@ async def _search_query_on_tab(
                 except OSError:
                     pass
                 continue
-            logger.info("[PlatformSearch] %s 다운로드 성공 %.1fMB", platform, size)
-            return {
-                "platform": platform, "query": q, "video_url": vurl,
-                "video_file": filepath, "size_mb": size, "via": "direct",
-            }
+            # Direct media URLs do not carry candidate-owned title/caption
+            # evidence.  Treat them as unknown instead of trusting the search
+            # query that happened to reveal the URL.
+            logger.warning("[PlatformSearch] 후보 메타데이터 없음 — 자동 게시 안전 게이트로 차단")
+            try:
+                os.remove(filepath)
+            except OSError:
+                pass
+            continue
     return None
 
 
@@ -797,11 +875,21 @@ async def search_platform_shorts(
     browser: Any, queries: List[str], output_dir: str,
     platforms: Optional[List[str]] = None,
     skip_source_ids: Optional[Set[str]] = None,
+    relevance_references: Optional[List[str]] = None,
+    min_relevance_score: float = 0.9,
+    category_terms: Optional[List[str]] = None,
 ) -> Optional[Dict[str, Any]]:
-    """플랫폼을 순서대로 시도, 먼저 성공하는 곳의 영상 반환(first-hit-wins)."""
+    """Try platforms in order and return the first relevance-safe candidate."""
     for platform in (platforms or DEFAULT_PLATFORM_ORDER):
         hit = await search_one_platform(
-            browser, platform, queries, output_dir, skip_source_ids=skip_source_ids
+            browser,
+            platform,
+            queries,
+            output_dir,
+            skip_source_ids=skip_source_ids,
+            relevance_references=relevance_references,
+            min_relevance_score=min_relevance_score,
+            category_terms=category_terms,
         )
         if hit:
             return hit
@@ -820,7 +908,12 @@ async def collect_by_keyword(
         own = True
     try:
         return await search_platform_shorts(
-            browser, queries, output_dir, platforms, skip_source_ids=skip_source_ids
+            browser,
+            queries,
+            output_dir,
+            platforms,
+            skip_source_ids=skip_source_ids,
+            relevance_references=list(queries),
         )
     finally:
         if own:

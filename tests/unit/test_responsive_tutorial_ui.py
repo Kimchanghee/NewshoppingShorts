@@ -1,9 +1,10 @@
 import os
+import threading
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import QPoint, QRect, QSize
-from PyQt6.QtWidgets import QApplication, QWidget
+from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
 
 from ui.components.step_nav import StepNav
 from ui.components.tutorial_manager import TutorialManager
@@ -148,3 +149,31 @@ def test_tutorial_prepare_reveals_nested_settings_sections():
 
     assert gui.settings_tab.connect_selected is True
     assert gui.settings_tab.api_selected is True
+
+
+def test_platform_worker_updates_are_queued_to_qt_thread(monkeypatch):
+    from ui.panels.sourcing_panel import SourcingPanel
+
+    def setup_minimal_ui(panel):
+        panel.results_label = QLabel()
+        panel.btn_start = QPushButton()
+        panel._apply_button_style = lambda *, disabled: None
+
+    monkeypatch.setattr(SourcingPanel, "_setup_ui", setup_minimal_ui)
+    panel = SourcingPanel(None, None)
+    panel._running = True
+    panel.btn_start.setEnabled(False)
+
+    worker = threading.Thread(
+        target=lambda: (
+            panel._safe_set_results("백그라운드 작업 완료"),
+            panel._reset_start_button(),
+        )
+    )
+    worker.start()
+    worker.join(timeout=2)
+    _app().processEvents()
+
+    assert panel.results_label.text() == "백그라운드 작업 완료"
+    assert panel.btn_start.isEnabled() is True
+    assert panel._running is False

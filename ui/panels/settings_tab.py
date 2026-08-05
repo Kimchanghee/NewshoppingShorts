@@ -32,6 +32,7 @@ from managers.settings_manager import get_settings_manager
 from managers.coupang_manager import get_coupang_manager
 from managers.linktree_manager import get_linktree_manager
 from managers.tiktok_manager import get_tiktok_manager
+from utils.url_security import is_trusted_service_url
 import config
 
 # Gemini API 키 패턴 검증
@@ -60,9 +61,39 @@ COUPANG_DEEPLINK_WEBHOOK_NOTICE_URL = (
 
 # 유료 구독자 Computer Use를 처리하는 서버(브리지) 기본 주소.
 # 서버에 올린 Codex CLI가 POST {URL}/v1/computer-use/jobs 를 받아 실행한다.
-# 서버 주소가 바뀌면 이 한 줄만 수정하면 된다. (사용자 설정값이 있으면 그게 우선)
-DEFAULT_COMPUTER_USE_BRIDGE_URL = "https://project-user-dashboard-api.vercel.app"
+# 서버 주소가 바뀌면 이 한 줄만 수정하면 된다.
+DEFAULT_COMPUTER_USE_BRIDGE_URL = "https://newshopping-shorts-auth.vercel.app"
 logger = get_logger(__name__)
+
+
+def _trusted_computer_use_bridge_urls() -> List[str]:
+    """Build the operator-controlled allowlist for bearer-token bridge calls."""
+    trusted = [DEFAULT_COMPUTER_USE_BRIDGE_URL]
+    try:
+        from caller import rest
+
+        trusted.append(str(rest.main_server or ""))
+    except Exception:
+        pass
+    trusted.extend(
+        part.strip()
+        for part in os.getenv("COMPUTER_USE_TRUSTED_BRIDGE_ORIGINS", "").split(",")
+        if part.strip()
+    )
+    return trusted
+
+
+def require_trusted_computer_use_bridge_url(url: str) -> str:
+    """Validate a bridge before any login token or bridge key is transmitted."""
+    normalized = str(url or "").strip().rstrip("/")
+    if not normalized or not is_trusted_service_url(
+        normalized, _trusted_computer_use_bridge_urls()
+    ):
+        raise ValueError(
+            "승인된 HTTPS 자동 설정 서버만 사용할 수 있습니다. "
+            "관리자는 COMPUTER_USE_TRUSTED_BRIDGE_ORIGINS로 서버를 등록해야 합니다."
+        )
+    return normalized
 
 
 class SettingsSection(QFrame):
@@ -832,7 +863,9 @@ class SettingsTab(QWidget, ThemedMixin):
             btn.setToolTip(cu_tooltip)
             btn.clicked.connect(
                 lambda _checked=False, t=target, lb=label: self._run_computer_use_prompt(
-                    self._build_computer_use_prompt_for_target(t), lb
+                    self._build_computer_use_prompt_for_target(t),
+                    lb,
+                    template_id=f"setup_target_{t}",
                 )
             )
             return btn
@@ -1549,11 +1582,13 @@ class SettingsTab(QWidget, ThemedMixin):
         bridge_row = QHBoxLayout()
         bridge_row.setSpacing(8)
         self.setup_computer_use_bridge_url_input = QLineEdit()
-        self.setup_computer_use_bridge_url_input.setPlaceholderText("공용 브리지 URL (예: https://api.yourserver.com)")
-        self.setup_computer_use_bridge_url_input.setToolTip("유료 사용자 Computer Use 요청을 서버로 위임할 때 사용합니다.")
+        self.setup_computer_use_bridge_url_input.setPlaceholderText(DEFAULT_COMPUTER_USE_BRIDGE_URL)
+        self.setup_computer_use_bridge_url_input.setToolTip(
+            "로그인 토큰 보호를 위해 관리자가 승인한 HTTPS 서버만 사용할 수 있습니다."
+        )
         bridge_row.addWidget(self.setup_computer_use_bridge_url_input, stretch=1)
         self.setup_computer_use_bridge_key_input = QLineEdit()
-        self.setup_computer_use_bridge_key_input.setPlaceholderText("브리지 API 키 (선택)")
+        self.setup_computer_use_bridge_key_input.setPlaceholderText("브리지 API 키 (필수)")
         self.setup_computer_use_bridge_key_input.setEchoMode(QLineEdit.EchoMode.Password)
         bridge_row.addWidget(self.setup_computer_use_bridge_key_input, stretch=1)
         setup_input_layout.addLayout(bridge_row)
@@ -3036,6 +3071,18 @@ class SettingsTab(QWidget, ThemedMixin):
         if hasattr(self, "setup_computer_use_bridge_checkbox"):
             bridge_enabled = bool(self.setup_computer_use_bridge_checkbox.isChecked())
 
+        if bridge_enabled:
+            try:
+                bridge_url = require_trusted_computer_use_bridge_url(
+                    bridge_url or DEFAULT_COMPUTER_USE_BRIDGE_URL
+                )
+            except ValueError as exc:
+                show_error(self, "저장 실패", str(exc))
+                return
+            if not bridge_api_key:
+                show_error(self, "저장 실패", "공용 서버 브리지를 사용하려면 브리지 API 키가 필요합니다.")
+                return
+
         try:
             mgr = get_settings_manager()
             ok = mgr.set_codex_cli_settings(path=path_value, model=model_value)
@@ -3141,8 +3188,9 @@ class SettingsTab(QWidget, ThemedMixin):
             "Authorization": f"Bearer {login_token}",
         }
         bridge_token = str(api_key or "").strip()
-        if bridge_token:
-            headers["X-Bridge-API-Key"] = bridge_token
+        if not bridge_token:
+            raise ValueError("브리지 API 키가 없어 자동 설정 서버에 요청할 수 없습니다.")
+        headers["X-Bridge-API-Key"] = bridge_token
         return headers
 
     def _start_computer_use_job_monitor(self, bridge_url: str, api_key: str, job_id: str, label: str) -> None:
@@ -3174,7 +3222,7 @@ class SettingsTab(QWidget, ThemedMixin):
         job_id: str,
     ) -> Dict[str, Any]:
         """Fetch one bridge job status."""
-        base = str(bridge_url or "").strip().rstrip("/")
+        base = require_trusted_computer_use_bridge_url(bridge_url)
         jid = str(job_id or "").strip()
         if not base or not jid:
             raise ValueError("자동 설정 작업 ID가 없습니다.")
@@ -3472,7 +3520,12 @@ class SettingsTab(QWidget, ThemedMixin):
             "Then proceed step-by-step until this current step is done."
         )
 
-    def _submit_computer_use_bridge_job(self, bridge_url: str, api_key: str, prompt: str) -> Dict[str, Any]:
+    def _submit_computer_use_bridge_job(
+        self,
+        bridge_url: str,
+        api_key: str,
+        template_id: str,
+    ) -> Dict[str, Any]:
         """Submit one computer-use job to a remote bridge server."""
         user_id = self._extract_logged_in_user_id()
         step_id = self._get_active_setup_step_id()
@@ -3481,10 +3534,12 @@ class SettingsTab(QWidget, ThemedMixin):
             "scope": str(self._setup_scope or "all"),
             "step_id": step_id,
             "step_title": self.SETUP_STEP_DEFS.get(step_id, {}).get("title", ""),
-            "prompt": prompt,
+            "template_id": str(template_id or "").strip(),
         }
+        if not payload["template_id"]:
+            raise ValueError("서버 자동 설정에는 승인된 작업 템플릿이 필요합니다.")
 
-        base = str(bridge_url or "").strip().rstrip("/")
+        base = require_trusted_computer_use_bridge_url(bridge_url)
         url = f"{base}/v1/computer-use/jobs"
         response = requests.post(
             url,
@@ -3620,9 +3675,19 @@ class SettingsTab(QWidget, ThemedMixin):
             "4) If you obtain a key/URL/code, the app auto-reads the clipboard.\n"
             "5) Never perform destructive or irreversible actions."
         )
-        self._run_computer_use_prompt(prompt, "YouTube + Instagram 자동 설정")
+        self._run_computer_use_prompt(
+            prompt,
+            "YouTube + Instagram 자동 설정",
+            template_id="setup_all",
+        )
 
-    def _run_computer_use_prompt(self, prompt: str, label: str) -> None:
+    def _run_computer_use_prompt(
+        self,
+        prompt: str,
+        label: str,
+        *,
+        template_id: str = "",
+    ) -> None:
         """Shared Computer Use runner: paid gate → bridge or local Codex CLI.
 
         Used by the per-integration '자동으로 설정' buttons. Mirrors the gating of
@@ -3653,7 +3718,11 @@ class SettingsTab(QWidget, ThemedMixin):
 
         if bridge_enabled and bridge_url:
             try:
-                result = self._submit_computer_use_bridge_job(bridge_url, bridge_api_key, prompt)
+                result = self._submit_computer_use_bridge_job(
+                    bridge_url,
+                    bridge_api_key,
+                    template_id,
+                )
             except Exception as exc:
                 show_error(self, "연결 오류", f"자동 설정 서버에 연결하지 못했어요.\n잠시 후 다시 시도해주세요.\n\n({exc})")
                 return
@@ -3729,7 +3798,11 @@ class SettingsTab(QWidget, ThemedMixin):
         prompt = self._build_codex_prompt_for_current_step()
         step_id = self._get_active_setup_step_id()
         label = self.SETUP_STEP_DEFS.get(step_id, {}).get("title", "자동 설정")
-        self._run_computer_use_prompt(prompt, label)
+        self._run_computer_use_prompt(
+            prompt,
+            label,
+            template_id=f"setup_step_{step_id}",
+        )
 
     def _on_setup_done_clicked(self):
         """Handle '완료했어요' click for waiting-user steps."""
