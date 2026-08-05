@@ -26,7 +26,7 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 # 현재 앱 버전(배포 시 version.json이 우선)
-CURRENT_VERSION = "1.5.45"
+CURRENT_VERSION = "1.5.46"
 
 # 버전 확인 API 기본 주소
 _DEFAULT_UPDATE_BASE_URL = (
