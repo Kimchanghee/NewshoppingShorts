@@ -645,7 +645,7 @@ class TikTokManager:
         render_integrity: Optional[Dict[str, Any]] = None,
         render_integrity_required: bool = False,
         upload_number: Optional[int] = None,
-    ) -> None:
+    ) -> bool:
         """
         Add video to upload queue (caption auto-built).
 
@@ -653,7 +653,7 @@ class TikTokManager:
         """
         if render_integrity_required and not (render_integrity or {}).get("ok"):
             logger.warning("[TikTok] Upload blocked: render integrity was not verified.")
-            return
+            return False
 
         purchase_link = coupang_deep_link or source_url
         caption = self.build_caption(
@@ -679,6 +679,7 @@ class TikTokManager:
 
         if self._upload_settings.enabled and self.is_connected() and not self._upload_running:
             self.start_auto_upload()
+        return True
 
     @staticmethod
     def _sanitize_caption_text(text: str) -> str:

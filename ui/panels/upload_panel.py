@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog, QLineEdit,
-    QStackedWidget
+    QStackedWidget, QInputDialog
 )
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
@@ -1105,6 +1105,22 @@ class UploadPanel(QFrame, ThemedMixin):
         upload_section.add_widget(self._yt_upload_settings)
         layout.addWidget(upload_section)
 
+        self.youtube_uncertain_status = QLabel(
+            "업로드 응답이 끊긴 경우 YouTube Studio 확인 후 여기서 안전하게 복구할 수 있어요."
+        )
+        self.youtube_uncertain_status.setWordWrap(True)
+        self.youtube_reconcile_btn = QPushButton("불명확한 업로드 확인·복구")
+        self.youtube_reconcile_btn.clicked.connect(self._reconcile_youtube_uncertain_upload)
+        recovery_section = UploadWorkflowSection(
+            "안전 복구",
+            "응답이 끊긴 업로드 확인",
+            "같은 영상을 다시 올리지 않도록 YouTube Studio의 실제 결과와 대조합니다.",
+            parent=page,
+        )
+        recovery_section.add_widget(self.youtube_uncertain_status)
+        recovery_section.add_widget(self.youtube_reconcile_btn)
+        layout.addWidget(recovery_section)
+
         self._yt_prompts = PromptInputGroup("youtube", parent=page)
         prompt_section = UploadWorkflowSection(
             "3단계",
@@ -1139,11 +1155,68 @@ class UploadPanel(QFrame, ThemedMixin):
         actual = verification.get("actual") or ""
         if not expected:
             label.setText("올릴 계정 이메일을 저장해 두면, 그 구글 계정으로만 영상을 자동으로 올려요.")
-        elif verification.get("ok"):
+            return
+        if verification.get("ok"):
             label.setText(f"계정 확인 완료: {actual}")
-        else:
-            message = verification.get("message") or "YouTube 계정 이메일 확인이 필요합니다."
-            label.setText(message)
+            return
+        message = verification.get("message") or "YouTube 계정 이메일 확인이 필요합니다."
+        label.setText(message)
+
+    def _reconcile_youtube_uncertain_upload(self) -> None:
+        """Resolve one quarantined upload using an explicit YouTube Studio check."""
+        from ui.components.custom_dialog import show_error, show_info, show_question
+
+        manager = getattr(self.gui, "youtube_manager", None) if self.gui else None
+        if manager is None or not hasattr(manager, "get_uncertain_uploads"):
+            show_error(self, "복구할 수 없어요", "YouTube 업로드 관리자를 찾지 못했습니다.")
+            return
+        items = manager.get_uncertain_uploads()
+        if not items:
+            show_info(self, "확인 완료", "현재 확인이 필요한 불명확한 업로드가 없습니다.")
+            return
+        item = items[0]
+        reservation_id = str(item.get("upload_registry_reservation_id") or "")
+        product = str(item.get("product_info") or "알 수 없는 상품")
+        uploaded = show_question(
+            self,
+            "YouTube Studio 결과 확인",
+            f"'{product[:60]}' 영상이 YouTube Studio에 실제로 게시되어 있나요?\n\n"
+            "예: 게시됨으로 확정 · 아니오: 게시되지 않음으로 확정하고 안전하게 재시도",
+        )
+        video_id = ""
+        if uploaded:
+            video_id, accepted = QInputDialog.getText(
+                self,
+                "YouTube 영상 ID",
+                "게시된 영상 주소의 ID를 입력해 주세요:",
+            )
+            if not accepted:
+                return
+            video_id = str(video_id or "").strip()
+            if not video_id:
+                show_error(self, "영상 ID 필요", "게시 완료 확정에는 YouTube 영상 ID가 필요합니다.")
+                return
+        elif not show_question(
+            self,
+            "미게시 상태 재확인",
+            "YouTube Studio에서 해당 영상이 게시되지 않았음을 직접 확인했나요?\n\n"
+            "확인한 경우에만 '예'를 눌러 재업로드 가능 상태로 바꿔 주세요.",
+        ):
+            return
+        try:
+            manager.reconcile_uncertain_upload(
+                reservation_id,
+                uploaded=uploaded,
+                video_id=video_id,
+            )
+        except Exception as exc:
+            show_error(self, "복구 실패", str(exc))
+            return
+        show_info(
+            self,
+            "복구 완료",
+            "게시 완료로 기록했습니다." if uploaded else "미게시 상태로 확인해 업로드 큐를 다시 열었습니다.",
+        )
 
     def _save_youtube_expected_account_email(self) -> None:
         """Persist the required YouTube Google account email."""

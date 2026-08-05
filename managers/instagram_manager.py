@@ -1009,7 +1009,7 @@ class InstagramManager:
         render_integrity: Optional[Dict[str, Any]] = None,
         render_integrity_required: bool = False,
         upload_number: Optional[int] = None,
-    ) -> None:
+    ) -> bool:
         """
         Add video to Reels upload queue (caption auto-built).
 
@@ -1017,7 +1017,7 @@ class InstagramManager:
         """
         if render_integrity_required and not (render_integrity or {}).get("ok"):
             logger.warning("[Instagram] Upload blocked: render integrity was not verified.")
-            return
+            return False
 
         purchase_link = coupang_deep_link or source_url
         caption = self.build_caption(
@@ -1043,6 +1043,7 @@ class InstagramManager:
 
         if self._upload_settings.enabled and self.is_connected() and not self._upload_running:
             self.start_auto_upload()
+        return True
 
     def start_auto_upload(self) -> None:
         """Start auto-upload background thread."""

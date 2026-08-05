@@ -66,14 +66,43 @@ def _text_looks_corrupted(text: str) -> bool:
     s = str(text or "")
     if not s:
         return False
-    if "�" in s:  # Unicode replacement character
+    if "�" in s:  # Unicode replacement character; utf8-guard-allow
         return True
     # A run of 2+ '?' (real Korean titles use at most a single trailing '?').
     if re.search(r"\?{2,}", s):
         return True
     # Many scattered '?' relative to length also indicates lossy encoding.
     q = s.count("?")
-    return q >= 3 and q >= (len(s.replace(" ", "")) * 0.25)
+    if q >= 3 and q >= (len(s.replace(" ", "")) * 0.25):
+        return True
+
+    # Detect valid-Unicode mojibake where Korean UTF-8/CP949 bytes were decoded
+    # as Latin-1/Windows-1252. Attempt the bounded reversible conversions for
+    # every short public string: common damage such as ``ê°êµ¬`` does not
+    # contain the old hand-maintained marker characters.  # utf8-guard-allow
+    original_hangul = len(re.findall(r"[가-힣]", s))
+    original_latin_noise = sum(1 for char in s if 0x80 <= ord(char) <= 0xFF)
+    for source_codec, target_codec in (
+        ("latin-1", "utf-8"),
+        ("cp1252", "utf-8"),
+        ("latin-1", "cp949"),
+        ("cp1252", "cp949"),
+    ):
+        try:
+            repaired = s.encode(source_codec).decode(target_codec)
+        except (UnicodeEncodeError, UnicodeDecodeError):
+            continue
+        repaired_hangul = len(re.findall(r"[가-힣]", repaired))
+        repaired_latin_noise = sum(
+            1 for char in repaired if 0x80 <= ord(char) <= 0xFF
+        )
+        if (
+            repaired_hangul > original_hangul
+            and repaired_hangul >= 1
+            and repaired_latin_noise < original_latin_noise
+        ):
+            return True
+    return False
 
 # YouTube API imports (optional)
 try:
@@ -152,6 +181,7 @@ class YouTubeManager:
         # Auto-upload thread
         self._upload_thread: Optional[threading.Thread] = None
         self._upload_queue: List[Dict[str, Any]] = []
+        self._uncertain_uploads: List[Dict[str, Any]] = []
         self._upload_running = False
         self._last_upload_time: Optional[datetime] = None
 
@@ -1276,7 +1306,7 @@ class YouTubeManager:
         render_integrity: Optional[Dict[str, Any]] = None,
         render_integrity_required: bool = False,
         upload_number: Optional[int] = None,
-    ) -> None:
+    ) -> bool:
         """
         Add video to upload queue.
 
@@ -1334,13 +1364,13 @@ class YouTubeManager:
 
         if render_integrity_required and not (render_integrity or {}).get("ok"):
             logger.warning("[YouTube] Upload blocked: render integrity was not verified.")
-            return
+            return False
 
         account_guard = self._account_guard_message()
         if account_guard:
             logger.warning("[YouTube] Upload blocked: %s", account_guard)
             self._last_error_message = account_guard
-            return
+            return False
 
         self._upload_queue.append({
             "video_path": video_path,
@@ -1362,6 +1392,74 @@ class YouTubeManager:
         # 업로드 활성화 상태인데 스레드가 꺼져 있으면 자동 재시작
         if self._upload_settings.enabled and self.is_connected() and not self._upload_running:
             self.start_auto_upload()
+        return True
+
+    def get_uncertain_uploads(self) -> List[Dict[str, Any]]:
+        """Return quarantined/stale upload outcomes that require operator review."""
+        items = [dict(item) for item in getattr(self, "_uncertain_uploads", [])]
+        known = {
+            str(item.get("upload_registry_reservation_id") or "") for item in items
+        }
+        try:
+            from managers.uploaded_registry import get_uploaded_registry
+
+            for reservation_id, record in get_uploaded_registry().stale_reservations().items():
+                if reservation_id not in known:
+                    items.append(
+                        {
+                            "upload_registry_reservation_id": reservation_id,
+                            "product_info": str(record.get("key") or "알 수 없는 상품"),
+                            "upload_outcome_uncertain": True,
+                            "stale_registry_only": True,
+                        }
+                    )
+        except Exception as exc:
+            logger.warning("[YouTube] 불명 업로드 예약 조회 실패: %s", exc)
+        return items
+
+    def reconcile_uncertain_upload(
+        self,
+        reservation_id: str,
+        *,
+        uploaded: bool,
+        video_id: str = "",
+    ) -> bool:
+        """Apply an operator-confirmed YouTube Studio outcome and unblock queues."""
+        normalized_id = str(reservation_id or "").strip()
+        if not normalized_id:
+            return False
+        normalized_video_id = str(video_id or "").strip()
+        if uploaded and not re.fullmatch(r"[A-Za-z0-9_-]{6,32}", normalized_video_id):
+            raise ValueError("올바른 YouTube 영상 ID가 필요합니다.")
+
+        from managers.uploaded_registry import get_uploaded_registry
+
+        get_uploaded_registry().reconcile_reservation(
+            normalized_id,
+            uploaded=bool(uploaded),
+            video_id=normalized_video_id,
+        )
+        quarantined = getattr(self, "_uncertain_uploads", [])
+        matched = None
+        for item in list(quarantined):
+            if str(item.get("upload_registry_reservation_id") or "") == normalized_id:
+                matched = item
+                quarantined.remove(item)
+                break
+        if matched is not None:
+            matched.pop("upload_outcome_uncertain", None)
+            matched.pop("upload_uncertain_message", None)
+            matched.pop("upload_registry_reservation_id", None)
+            if uploaded:
+                matched["video_id"] = normalized_video_id
+                matched["video_url"] = f"https://youtu.be/{normalized_video_id}"
+                matched["upload_reconciled_complete"] = True
+                callback = getattr(self, "_on_upload_complete", None)
+                if callback:
+                    callback(matched)
+            else:
+                self._upload_queue.append(matched)
+        return True
 
     def start_auto_upload(self) -> None:
         """Start auto-upload background thread"""
@@ -1414,10 +1512,19 @@ class YouTubeManager:
                         if self._on_upload_complete:
                             self._on_upload_complete(item)
                     else:
-                        # Put back to queue on failure
-                        self._upload_queue.insert(0, item)
+                        # Unknown remote outcomes are quarantined so one item
+                        # cannot block or duplicate every later queue entry.
+                        if item.get("upload_outcome_uncertain"):
+                            self._uncertain_uploads.append(item)
+                        else:
+                            self._upload_queue.insert(0, item)
                         if self._on_upload_error:
-                            self._on_upload_error(item, "Upload failed")
+                            message = (
+                                "Upload completed; duplicate registry repair pending"
+                                if item.get("upload_completed_registry_repair_required")
+                                else "Upload failed"
+                            )
+                            self._on_upload_error(item, message)
 
                 time.sleep(10)  # Check every 10 seconds
 
@@ -1435,20 +1542,7 @@ class YouTubeManager:
         Returns:
             True if upload successful
         """
-        if not self._youtube_service and not self._ensure_youtube_service():
-            return False
-
         video_path = item.get("video_path", "")
-        if not os.path.exists(video_path):
-            logger.warning(f"[YouTube] 비디오 파일 없음: {video_path}")
-            return False
-
-        if item.get("render_integrity_required") and not (
-            item.get("render_integrity") or {}
-        ).get("ok"):
-            logger.warning("[YouTube] Upload blocked: render integrity guard failed.")
-            return False
-
         # 중복 차단: 동일 상품/유사 영상은 업로드하지 않음(‘3연속 똑같은거’ 방지).
         product_key = ""
         try:
@@ -1458,16 +1552,80 @@ class YouTubeManager:
                 item.get("coupang_deep_link", "") or item.get("source_url", ""),
             )
             registry = get_uploaded_registry()
-            is_dup, reason = registry.is_duplicate(
-                product_key=product_key, video_path=video_path, platform="youtube"
-            )
-            if is_dup:
-                logger.warning("[YouTube] 중복 업로드 차단: %s — %s", reason, item.get("title", "")[:40])
-                item["skipped_duplicate"] = reason
-                return True  # 성공 처리(큐에서 제거)하되 업로드는 생략
-        except Exception as dup_exc:
-            logger.debug("[YouTube] 중복 검사 건너뜀: %s", dup_exc)
+            if item.get("upload_completed_registry_repair_required"):
+                reservation_id = str(item.get("upload_registry_reservation_id") or "")
+                if reservation_id:
+                    registry.finalize_reservation(
+                        reservation_id,
+                        video_id=str(item.get("video_id") or ""),
+                    )
+                else:
+                    registry.record(
+                        product_key=product_key,
+                        video_path=video_path if os.path.exists(video_path) else "",
+                        platform="youtube",
+                        video_id=str(item.get("video_id") or ""),
+                    )
+                item.pop("registry_error", None)
+                item.pop("upload_completed_registry_repair_required", None)
+                item.pop("upload_registry_reservation_id", None)
+                logger.info("[YouTube] 업로드 이력 복구 완료: %s", item.get("video_id", ""))
+                return True
 
+            if item.get("upload_reconciled_complete"):
+                return True
+
+            if item.get("upload_outcome_uncertain"):
+                logger.error(
+                    "[YouTube] 이전 업로드의 원격 결과가 불명확해 자동 재시도를 차단했습니다. "
+                    "YouTube Studio 확인 후 예약을 명시적으로 조정하세요."
+                )
+                return False
+
+            if not os.path.exists(video_path):
+                logger.warning(f"[YouTube] 비디오 파일 없음: {video_path}")
+                return False
+        except Exception as dup_exc:
+            # Duplicate protection is a publishing safety boundary.  If its
+            # state cannot be read, uploading would risk the exact duplicate
+            # incident this guard exists to prevent.
+            logger.error("[YouTube] 중복 보호 상태 확인 실패로 업로드 중단: %s", dup_exc)
+            item["registry_error"] = str(dup_exc)
+            return False
+
+        if item.get("render_integrity_required") and not (
+            item.get("render_integrity") or {}
+        ).get("ok"):
+            logger.warning("[YouTube] Upload blocked: render integrity guard failed.")
+            return False
+
+        if not self._youtube_service and not self._ensure_youtube_service():
+            return False
+
+        reservation_id = str(item.get("upload_registry_reservation_id") or "")
+        try:
+            if not reservation_id:
+                reservation_id, reason = registry.reserve(
+                    product_key=product_key,
+                    video_path=video_path,
+                    platform="youtube",
+                )
+                if not reservation_id:
+                    logger.warning(
+                        "[YouTube] 중복 업로드 차단: %s — %s",
+                        reason,
+                        item.get("title", "")[:40],
+                    )
+                    item["skipped_duplicate"] = reason
+                    return True
+                item["upload_registry_reservation_id"] = reservation_id
+        except Exception as reserve_exc:
+            logger.error("[YouTube] 업로드 전 예약 실패: %s", reserve_exc)
+            item["registry_error"] = str(reserve_exc)
+            return False
+
+        remote_uploaded = False
+        upload_started = False
         try:
             # Add hashtags to description
             tags = [
@@ -1478,7 +1636,7 @@ class YouTubeManager:
             safe_title = self._sanitize_public_text(item.get("title", ""), limit=100) or "쇼핑 추천 영상"
             description = self._sanitize_public_text(item.get("description", ""), limit=5000)
 
-            # 인코딩 손상(????? / �) 제목이 업로드되지 않도록 방어: 손상 감지 시 재생성.
+            # 인코딩 손상(????? / �) 제목이 업로드되지 않도록 방어: 손상 감지 시 재생성.  # utf8-guard-allow
             if _text_looks_corrupted(safe_title):
                 logger.warning("[YouTube] 손상된 제목 감지, 재생성 시도: %r", safe_title)
                 rebuilt = self.generate_seo_title(item.get("product_info", "") or "")
@@ -1525,11 +1683,21 @@ class YouTubeManager:
 
             response = None
             while response is None:
+                # From this point onward a timeout can mean that YouTube
+                # committed the chunk even though the client lost the response.
+                # Persist an uncertain state and never auto-release/re-upload it.
+                upload_started = True
+                item["upload_outcome_uncertain"] = True
                 status, response = request.next_chunk()
                 if status:
                     logger.debug(f"[YouTube] 업로드 진행: {int(status.progress() * 100)}%")
 
             video_id = response.get("id", "")
+            if not video_id:
+                raise RuntimeError("YouTube가 업로드 영상 ID를 반환하지 않았습니다.")
+            remote_uploaded = True
+            item.pop("upload_outcome_uncertain", None)
+            item.pop("upload_uncertain_message", None)
             logger.info(f"[YouTube] 업로드 완료: https://youtu.be/{video_id}")
 
             if video_id:
@@ -1538,17 +1706,32 @@ class YouTubeManager:
                 self._try_post_auto_comment(video_id, item)
                 # 업로드 이력 기록(다음번 중복 차단용).
                 try:
-                    from managers.uploaded_registry import get_uploaded_registry
-                    get_uploaded_registry().record(
-                        product_key=product_key, video_path=video_path,
-                        platform="youtube", video_id=video_id,
-                    )
+                    registry.finalize_reservation(reservation_id, video_id=video_id)
+                    item.pop("upload_registry_reservation_id", None)
                 except Exception as rec_exc:
-                    logger.debug("[YouTube] 업로드 이력 기록 건너뜀: %s", rec_exc)
+                    # The video is already live. Keep this queue item in a
+                    # repair-only state so the next pass records it without
+                    # ever sending another YouTube upload request.
+                    logger.error("[YouTube] 업로드 이력 기록 실패: %s", rec_exc)
+                    item["registry_error"] = str(rec_exc)
+                    item["upload_completed_registry_repair_required"] = True
+                    return False
             return True
 
         except Exception as e:
             logger.error(f"[YouTube] 업로드 실패: {e}")
+            if reservation_id and not remote_uploaded and not upload_started:
+                try:
+                    registry.release_reservation(reservation_id)
+                    item.pop("upload_registry_reservation_id", None)
+                except Exception as release_exc:
+                    logger.error("[YouTube] 실패한 업로드 예약 해제 오류: %s", release_exc)
+            elif reservation_id and upload_started and not remote_uploaded:
+                item["upload_outcome_uncertain"] = True
+                item["upload_uncertain_message"] = str(e)
+                logger.error(
+                    "[YouTube] 원격 결과 불명 상태를 보존했습니다. 자동 재업로드하지 않습니다."
+                )
             return False
 
     @staticmethod
