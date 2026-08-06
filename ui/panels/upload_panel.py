@@ -10,7 +10,7 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 from PyQt6.QtWidgets import (
     QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog, QLineEdit,
-    QStackedWidget, QInputDialog
+    QStackedWidget, QInputDialog, QApplication
 )
 from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
@@ -37,6 +37,7 @@ class _YouTubeOAuthWorker(QObject):
     """Runs potentially slow YouTube OAuth work off the UI thread."""
 
     finished = pyqtSignal(bool, object, str)
+    authorization_url_ready = pyqtSignal(str)
 
     def __init__(self, youtube_manager: Any, source_path: str):
         super().__init__()
@@ -45,8 +46,15 @@ class _YouTubeOAuthWorker(QObject):
 
     def run(self):
         try:
+            if hasattr(self._youtube_manager, "set_oauth_url_callback"):
+                self._youtube_manager.set_oauth_url_callback(
+                    self.authorization_url_ready.emit
+                )
             installed_json = self._youtube_manager.install_client_secrets(self._source_path)
-            success = self._youtube_manager.connect_channel(client_secrets_file=installed_json)
+            success = self._youtube_manager.connect_channel(
+                client_secrets_file=installed_json,
+                force_reauth=True,
+            )
             if not success:
                 error_message = self._youtube_manager.get_last_error() or (
                     "고른 인증 파일로 연결하지 못했어요.\n"
@@ -56,6 +64,22 @@ class _YouTubeOAuthWorker(QObject):
                 return
 
             channel_info = self._youtube_manager.get_channel_info() or {}
+            channel_id = str(
+                channel_info.get("id") or channel_info.get("channel_id") or ""
+            ).strip()
+            channel_name = str(
+                channel_info.get("title")
+                or channel_info.get("channel_name")
+                or ""
+            ).strip()
+            if not channel_id or not channel_name:
+                self.finished.emit(
+                    False,
+                    {},
+                    "Google 승인은 완료됐지만 실제 YouTube 채널 ID와 채널명을 확인하지 못했습니다. "
+                    "YouTube에서 채널을 만든 뒤 다시 연결해 주세요.",
+                )
+                return
             self.finished.emit(True, channel_info, "")
         except PermissionError:
             logger.error("[UploadPanel] OAuth JSON 저장 권한 오류")
@@ -66,8 +90,24 @@ class _YouTubeOAuthWorker(QObject):
                 "앱을 다시 켠 뒤 한 번 더 시도해 주세요.",
             )
         except Exception as e:
-            logger.error(f"[UploadPanel] OAuth JSON 연결 워커 실패: {e}")
-            self.finished.emit(False, {}, str(e))
+            logger.error(
+                "[UploadPanel] OAuth JSON connection worker failed: %s",
+                type(e).__name__,
+            )
+            safe_message = ""
+            try:
+                safe_message = self._youtube_manager.get_last_error() or ""
+            except Exception:
+                pass
+            self.finished.emit(
+                False,
+                {},
+                safe_message
+                or "YouTube 연결 중 예상하지 못한 오류가 발생했습니다. 프로그램을 다시 실행한 뒤 재시도해 주세요.",
+            )
+        finally:
+            if hasattr(self._youtube_manager, "set_oauth_url_callback"):
+                self._youtube_manager.set_oauth_url_callback(None)
 
 
 class _InstagramOAuthWorker(QObject):
@@ -2113,12 +2153,17 @@ class UploadPanel(QFrame, ThemedMixin):
         ds = self.ds
         c = ds.colors
         selected_file = {"path": ""}
-        connection_state = {"running": False, "thread": None, "worker": None}
+        connection_state = {
+            "running": False,
+            "thread": None,
+            "worker": None,
+            "authorization_url": "",
+        }
 
         dialog = QDialog(self)
         dialog.setWindowTitle("유튜브 채널 연결")
         dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
-        dialog.setFixedSize(520, 330)
+        dialog.setFixedSize(560, 500)
         dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
         layout = QVBoxLayout(dialog)
@@ -2174,6 +2219,64 @@ class UploadPanel(QFrame, ThemedMixin):
         status_label.setFont(QFont(ds.typography.font_family_primary, 10))
         status_label.setStyleSheet(f"color: {c.text_muted};")
         layout.addWidget(status_label)
+
+        auth_link_panel = QFrame(dialog)
+        auth_link_panel.setVisible(False)
+        auth_link_panel.setStyleSheet(
+            f"background-color: {c.surface_variant}; border: 1px solid {c.border_light}; "
+            f"border-radius: {ds.radius.sm}px;"
+        )
+        auth_layout = QVBoxLayout(auth_link_panel)
+        auth_layout.setContentsMargins(12, 10, 12, 10)
+        auth_layout.setSpacing(8)
+
+        auth_help = QLabel(
+            "브라우저가 멈추거나 열리지 않으면 아래 승인 링크를 복사하거나 다른 브라우저로 여세요. "
+            "Google 로그인과 2단계 인증은 직접 완료해야 합니다."
+        )
+        auth_help.setWordWrap(True)
+        auth_help.setStyleSheet("border: none; background: transparent;")
+        auth_layout.addWidget(auth_help)
+
+        auth_url_input = QLineEdit()
+        auth_url_input.setReadOnly(True)
+        auth_url_input.setPlaceholderText("Google 승인 링크를 준비하는 중입니다...")
+        auth_layout.addWidget(auth_url_input)
+
+        auth_actions = QHBoxLayout()
+        copy_auth_btn = QPushButton("승인 링크 복사")
+        default_browser_btn = QPushButton("기본 브라우저로 열기")
+        edge_browser_btn = QPushButton("Microsoft Edge로 열기")
+        for auth_button in (copy_auth_btn, default_browser_btn, edge_browser_btn):
+            auth_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            auth_actions.addWidget(auth_button)
+        auth_layout.addLayout(auth_actions)
+        layout.addWidget(auth_link_panel)
+
+        def copy_authorization_url():
+            url = str(connection_state.get("authorization_url") or "")
+            if not url:
+                return
+            QApplication.clipboard().setText(url)
+            status_label.setText("Google 승인 링크를 복사했어요.")
+
+        def reopen_authorization_url(browser: str):
+            if not yt_manager or not hasattr(yt_manager, "open_oauth_authorization_url"):
+                show_error(dialog, "브라우저 열기 실패", "승인 링크를 다시 열 수 없어요. 링크를 복사해 직접 열어 주세요.")
+                return
+            if not yt_manager.open_oauth_authorization_url(browser):
+                browser_label = "Microsoft Edge" if browser == "edge" else "기본 브라우저"
+                show_error(
+                    dialog,
+                    "브라우저 열기 실패",
+                    f"{browser_label}를 열지 못했어요. 승인 링크를 복사해 직접 열어 주세요.",
+                )
+
+        copy_auth_btn.clicked.connect(copy_authorization_url)
+        default_browser_btn.clicked.connect(
+            lambda: reopen_authorization_url("default")
+        )
+        edge_browser_btn.clicked.connect(lambda: reopen_authorization_url("edge"))
 
         btn_layout = QHBoxLayout()
         btn_layout.addStretch()
@@ -2265,6 +2368,14 @@ class UploadPanel(QFrame, ThemedMixin):
             )
             show_error(self, "연결 실패", detail)
 
+        def on_authorization_url_ready(url: str):
+            connection_state["authorization_url"] = str(url or "")
+            auth_url_input.setText(connection_state["authorization_url"])
+            auth_link_panel.setVisible(bool(connection_state["authorization_url"]))
+            status_label.setText(
+                "브라우저에서 Google 로그인과 권한 승인을 완료해 주세요. 최대 10분 동안 기다립니다."
+            )
+
         def do_connect():
             if connection_state["running"]:
                 return
@@ -2282,6 +2393,7 @@ class UploadPanel(QFrame, ThemedMixin):
             thread = QThread(dialog)
             worker.moveToThread(thread)
             thread.started.connect(worker.run)
+            worker.authorization_url_ready.connect(on_authorization_url_ready)
             worker.finished.connect(on_connect_finished)
             worker.finished.connect(thread.quit)
             worker.finished.connect(worker.deleteLater)

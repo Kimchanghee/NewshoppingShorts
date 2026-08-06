@@ -22,7 +22,13 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.design_system_v2 import get_design_system, get_color
-from managers.account_registry import AccountRegistry, Account, MAX_ACCOUNTS, data_dir
+from managers.account_registry import (
+    AccountRegistry,
+    Account,
+    MAX_ACCOUNTS,
+    data_dir,
+    secure_account_token_key,
+)
 
 
 class _ConnectWorker(QObject):
@@ -38,7 +44,7 @@ class _ConnectWorker(QObject):
     def run(self):
         try:
             if self._platform == "youtube":
-                ok = bool(self._manager.connect_channel())
+                ok = bool(self._manager.connect_channel(force_reauth=True))
                 info = self._manager.get_channel_info() if ok else {}
             else:
                 ok = bool(self._manager.connect_account())
@@ -660,8 +666,21 @@ class MultiAccountPanel(QWidget):
         name = (info.get("channel_name") or info.get("title") or info.get("username")
                 or info.get("name") or f"{_PLATFORM_LABEL.get(platform, platform)} 계정")
         try:
-            acc = self.registry.add(platform=platform, name=str(name).strip(),
-                                    niche="", connected=True)
+            self.registry.load()
+            if platform == "youtube":
+                channel_id = str(info.get("id") or info.get("channel_id") or "").strip()
+                if not channel_id:
+                    raise ValueError("연결된 YouTube 채널 ID를 확인하지 못했습니다.")
+                acc = self.registry.upsert_connected_channel(
+                    platform="youtube",
+                    channel_id=channel_id,
+                    name=str(name).strip(),
+                    account_email=str(info.get("account_email") or "").strip(),
+                    credential_key="youtube_oauth_token_json_v1",
+                )
+            else:
+                acc = self.registry.add(platform=platform, name=str(name).strip(),
+                                        niche="", connected=True)
         except Exception as exc:
             self._show_toast(str(exc), "warning")
             return
@@ -670,10 +689,22 @@ class MultiAccountPanel(QWidget):
         self._rerender_soon()
 
     def _persist_account_token(self, platform: str, account_id: str) -> bool:
-        """Copy the just-connected single token to a per-account path so future
-        per-account upload routing can use the right credential."""
+        """Persist per-account credentials without plaintext YouTube token files."""
         try:
-            src_name = "youtube_token.json" if platform == "youtube" else "instagram_settings.json"
+            if platform == "youtube":
+                from utils.secrets_manager import get_secrets_manager
+
+                secure_store = get_secrets_manager()
+                payload = secure_store.get_credential("youtube_oauth_token_json_v1")
+                if not payload:
+                    return False
+                credential_key = secure_account_token_key(platform, account_id)
+                if not secure_store.set_credential(credential_key, payload):
+                    return False
+                self.registry.update(account_id, credential_key=credential_key)
+                return True
+
+            src_name = "instagram_settings.json"
             src = os.path.join(data_dir(), src_name)
             if not os.path.exists(src):
                 return False
