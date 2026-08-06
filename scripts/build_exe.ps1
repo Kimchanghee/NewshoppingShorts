@@ -401,9 +401,17 @@ try {
   $previousRuntimeReport = $env:SSMAKER_YOUTUBE_RUNTIME_REPORT
   try {
     $env:SSMAKER_YOUTUBE_RUNTIME_REPORT = $youtubeRuntimeReport
-    Invoke-Native "[3.5/5] Running frozen YouTube OAuth runtime smoke test..." $ssmakerExe @(
-      "--youtube-runtime-smoke"
-    )
+    try {
+      Invoke-Native "[3.5/5] Running frozen YouTube OAuth runtime smoke test..." $ssmakerExe @(
+        "--youtube-runtime-smoke"
+      )
+    } catch {
+      if (Test-Path $youtubeRuntimeReport) {
+        $failedRuntimeData = Get-Content -LiteralPath $youtubeRuntimeReport -Raw | ConvertFrom-Json
+        throw "Frozen YouTube OAuth runtime validation failed: $($failedRuntimeData.error)"
+      }
+      throw
+    }
   } finally {
     $env:SSMAKER_YOUTUBE_RUNTIME_REPORT = $previousRuntimeReport
   }

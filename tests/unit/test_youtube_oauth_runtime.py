@@ -1,4 +1,5 @@
 import json
+import re
 from pathlib import Path
 
 from managers.youtube_manager import (
@@ -80,6 +81,7 @@ def test_oauth_json_with_non_google_endpoints_is_rejected(tmp_path):
 
 def test_release_build_runs_source_and_frozen_youtube_smoke_checks():
     build_script = (ROOT / "scripts" / "build_exe.ps1").read_text(encoding="utf-8-sig")
+    spec = (ROOT / "ssmaker.spec").read_text(encoding="utf-8")
 
     assert "validate_youtube_runtime.py" in build_script
     assert "--youtube-runtime-smoke" in build_script
@@ -92,6 +94,9 @@ def test_release_build_runs_source_and_frozen_youtube_smoke_checks():
         "oauthlib",
     ):
         assert f'"{package}"' in build_script
+    excludes_match = re.search(r"excludes=\[(.*?)\]", spec, re.DOTALL)
+    assert excludes_match is not None
+    assert "'unittest'" not in excludes_match.group(1)
 
 
 def test_oauth_transport_dependencies_are_explicit_requirements():

@@ -250,7 +250,10 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=['tkinter', 'test', 'unittest', 'matplotlib', 'onnxruntime'],
+    # unittest is a runtime dependency of pyparsing.testing, imported by
+    # httplib2 -> googleapiclient. Excluding it breaks YouTube OAuth only in
+    # frozen builds even though every Google package folder is present.
+    excludes=['tkinter', 'test', 'matplotlib', 'onnxruntime'],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
