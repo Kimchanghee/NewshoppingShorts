@@ -15,6 +15,7 @@ import re
 import shutil
 import stat
 import subprocess
+import sys
 import threading
 import time
 from datetime import datetime
@@ -104,16 +105,121 @@ def _text_looks_corrupted(text: str) -> bool:
             return True
     return False
 
-# YouTube API imports (optional)
+# YouTube API imports (optional at application startup, required when the user
+# connects a channel). Keep the original import error so packaged-app users get
+# an actionable repair message instead of a vague "library not installed" line.
+YOUTUBE_API_IMPORT_ERROR = ""
 try:
+    import googleapiclient as _googleapiclient
+    from google.auth.credentials import AnonymousCredentials
     from google.oauth2.credentials import Credentials
     from google_auth_oauthlib.flow import InstalledAppFlow
     from google.auth.transport.requests import Request
     from googleapiclient.discovery import build
     from googleapiclient.http import MediaFileUpload
     YOUTUBE_API_AVAILABLE = True
-except ImportError:
+except ImportError as exc:
+    _googleapiclient = None
+    AnonymousCredentials = None
+    Credentials = None
+    InstalledAppFlow = None
+    Request = None
+    build = None
+    MediaFileUpload = None
     YOUTUBE_API_AVAILABLE = False
+    YOUTUBE_API_IMPORT_ERROR = str(exc)
+
+
+def get_youtube_runtime_diagnostics() -> Dict[str, Any]:
+    """Validate the complete offline YouTube OAuth runtime.
+
+    This deliberately exercises more than Python imports. A broken frozen build
+    can contain ``googleapiclient`` bytecode while omitting the bundled YouTube
+    v3 discovery document, which only fails later on an end-user PC.
+    """
+    report: Dict[str, Any] = {
+        "ok": False,
+        "frozen": bool(getattr(sys, "frozen", False)),
+        "missing_module": "",
+        "discovery_document": "",
+        "error": "",
+    }
+
+    if not YOUTUBE_API_AVAILABLE:
+        missing_match = re.search(r"No module named ['\"]([^'\"]+)", YOUTUBE_API_IMPORT_ERROR)
+        if missing_match:
+            report["missing_module"] = missing_match.group(1)
+        report["error"] = YOUTUBE_API_IMPORT_ERROR or "YouTube OAuth imports are unavailable."
+        return report
+
+    try:
+        package_root = os.path.dirname(os.path.abspath(_googleapiclient.__file__))
+        discovery_path = os.path.join(
+            package_root,
+            "discovery_cache",
+            "documents",
+            "youtube.v3.json",
+        )
+        report["discovery_document"] = discovery_path
+        if not os.path.isfile(discovery_path):
+            raise FileNotFoundError("googleapiclient YouTube v3 discovery document is missing")
+
+        with open(discovery_path, "r", encoding="utf-8") as discovery_file:
+            discovery_data = json.load(discovery_file)
+        if discovery_data.get("name") != "youtube" or discovery_data.get("version") != "v3":
+            raise ValueError("googleapiclient YouTube v3 discovery document is invalid")
+
+        # Build both halves of the runtime without opening a browser or making a
+        # network request: OAuth authorization URL + YouTube v3 service object.
+        smoke_config = {
+            "installed": {
+                "client_id": "runtime-smoke.apps.googleusercontent.com",
+                "client_secret": "runtime-smoke-secret",
+                "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+                "token_uri": "https://oauth2.googleapis.com/token",
+                "redirect_uris": ["http://localhost"],
+            }
+        }
+        flow = InstalledAppFlow.from_client_config(smoke_config, [YouTubeManager.SCOPES[1]])
+        authorization_url, _ = flow.authorization_url()
+        if not authorization_url.startswith("https://accounts.google.com/"):
+            raise RuntimeError("Google OAuth authorization URL could not be created")
+
+        service = build(
+            "youtube",
+            "v3",
+            credentials=AnonymousCredentials(),
+            cache_discovery=False,
+            static_discovery=True,
+        )
+        if not callable(getattr(service, "channels", None)):
+            raise RuntimeError("YouTube v3 service could not be created")
+
+        report["ok"] = True
+        return report
+    except Exception as exc:
+        report["error"] = f"{type(exc).__name__}: {exc}"
+        return report
+
+
+def get_youtube_runtime_error_message(report: Optional[Dict[str, Any]] = None) -> str:
+    """Return a safe repair instruction for a broken packaged OAuth runtime."""
+    report = report or get_youtube_runtime_diagnostics()
+    if report.get("ok"):
+        return ""
+
+    missing_module = str(report.get("missing_module") or "").strip()
+    component = f" ({missing_module})" if missing_module else ""
+    if bool(report.get("frozen")):
+        return (
+            f"유튜브 연결 구성요소가 설치 파일에서 누락되었거나 손상됐어요{component}.\n"
+            "최신 SSMaker 설치 파일로 '복구 설치'한 뒤 다시 연결해 주세요. "
+            "Python이나 별도 YouTube 프로그램을 사용자가 설치할 필요는 없습니다."
+        )
+    return (
+        f"유튜브 연결 개발 의존성이 없거나 손상됐습니다{component}.\n"
+        "venv311 환경에서 requirements.txt를 다시 설치해 주세요."
+    )
 
 
 @dataclass
@@ -158,6 +264,7 @@ class YouTubeManager:
     ]
     OAUTH_FLOW_TIMEOUT_SECONDS = 180
     CLIENT_SECRETS_KEY = "youtube_client_secrets_json_v1"
+    MAX_CLIENT_SECRETS_BYTES = 512 * 1024
 
     def __init__(self, gui=None, settings_file: str = "youtube_settings.json"):
         """
@@ -438,6 +545,68 @@ class YouTubeManager:
                 "message": f"YouTube 계정 검증 상태를 확인하지 못했습니다: {exc}",
             }
 
+    @staticmethod
+    def get_runtime_diagnostics() -> Dict[str, Any]:
+        """Return packaged YouTube OAuth runtime health without network access."""
+        return get_youtube_runtime_diagnostics()
+
+    @staticmethod
+    def _friendly_connection_error(error: Exception) -> str:
+        """Translate common Google OAuth failures into user-actionable Korean."""
+        raw = str(error or "").strip()
+        lowered = raw.lower()
+
+        if isinstance(error, (ImportError, ModuleNotFoundError)) or "no module named" in lowered:
+            return get_youtube_runtime_error_message()
+        if "redirect_uri_mismatch" in lowered:
+            return (
+                "구글 인증 파일의 리디렉션 주소가 맞지 않아요.\n"
+                "Google Cloud에서 OAuth 클라이언트 유형을 '데스크톱 앱'으로 다시 만든 뒤 "
+                "새 JSON 파일을 내려받아 연결해 주세요."
+            )
+        if "access_denied" in lowered or "authorization denied" in lowered:
+            return (
+                "구글 계정 승인이 취소되었어요. 다시 연결하고 브라우저의 모든 권한 요청에서 "
+                "'계속' 또는 '허용'을 눌러 주세요."
+            )
+        if "invalid_client" in lowered or "unauthorized_client" in lowered:
+            return (
+                "구글 OAuth 클라이언트 정보가 유효하지 않아요.\n"
+                "삭제되거나 다른 프로젝트의 JSON이 아닌지 확인하고 새 데스크톱 앱용 JSON을 받아 주세요."
+            )
+        if "invalid_grant" in lowered:
+            return "기존 구글 승인이 만료되었어요. 다시 연결해 새로 승인해 주세요."
+        if (
+            "timed out" in lowered
+            or "timeout" in lowered
+            or ("nonetype" in lowered and "replace" in lowered)
+        ):
+            return (
+                "유튜브 승인을 기다리는 시간이 끝났어요.\n"
+                "다시 연결한 뒤 열린 브라우저에서 3분 안에 구글 계정 승인까지 완료해 주세요."
+            )
+        if "winerror 10013" in lowered or "address already in use" in lowered:
+            return (
+                "브라우저 승인 결과를 받을 로컬 연결을 열 수 없어요.\n"
+                "Windows 방화벽에서 SSMaker의 개인 네트워크 통신을 허용한 뒤 다시 시도해 주세요."
+            )
+        if "ssl" in lowered and (
+            "certificate" in lowered or "cert" in lowered or "verify" in lowered
+        ):
+            return (
+                "구글 서버의 보안 인증서를 확인하지 못했어요.\n"
+                "Windows 날짜와 시간을 자동으로 맞춘 뒤 최신 SSMaker로 복구 설치해 주세요."
+            )
+        if "unknown api name or version" in lowered or "discovery" in lowered:
+            return get_youtube_runtime_error_message(
+                {
+                    "ok": False,
+                    "frozen": bool(getattr(sys, "frozen", False)),
+                    "missing_module": "",
+                }
+            )
+        return raw or "유튜브 채널 연결 중 알 수 없는 오류가 발생했습니다."
+
     def connect_channel(
         self,
         client_secrets_file: str = None,
@@ -454,9 +623,10 @@ class YouTubeManager:
             True if connection successful
         """
         self._last_error_message = ""
-        if not YOUTUBE_API_AVAILABLE:
-            logger.warning("[YouTube] YouTube API library is not installed.")
-            self._last_error_message = "YouTube API 라이브러리가 설치되지 않았습니다."
+        runtime_report = get_youtube_runtime_diagnostics()
+        if not runtime_report.get("ok"):
+            logger.warning("[YouTube] OAuth runtime validation failed: %s", runtime_report.get("error"))
+            self._last_error_message = get_youtube_runtime_error_message(runtime_report)
             return False
         try:
             self._migrate_legacy_oauth_files()
@@ -540,10 +710,7 @@ class YouTubeManager:
                         )
                     except Exception as oauth_error:
                         if "NoneType" in str(oauth_error) and "replace" in str(oauth_error):
-                            self._last_error_message = (
-                                "YouTube OAuth 승인이 완료되지 않았습니다. "
-                                "브라우저에서 Google 계정 승인 후 다시 시도하세요."
-                            )
+                            self._last_error_message = self._friendly_connection_error(oauth_error)
                             logger.warning("[YouTube] OAuth approval timed out or was cancelled")
                             return False
                         raise
@@ -563,7 +730,13 @@ class YouTubeManager:
             self._credentials = creds
 
             # Build YouTube service
-            self._youtube_service = build('youtube', 'v3', credentials=creds)
+            self._youtube_service = build(
+                'youtube',
+                'v3',
+                credentials=creds,
+                cache_discovery=False,
+                static_discovery=True,
+            )
             account_email = self._fetch_oauth_account_email(creds)
 
             # Get channel info
@@ -589,7 +762,7 @@ class YouTubeManager:
             return False
         except Exception as e:
             logger.error("[YouTube] Connection failed: %s", e)
-            self._last_error_message = str(e) or "YouTube 채널 연결 중 알 수 없는 오류가 발생했습니다."
+            self._last_error_message = self._friendly_connection_error(e)
             return False
 
     def disconnect_channel(self) -> None:
@@ -637,14 +810,88 @@ class YouTubeManager:
         return os.path.join(self._get_app_base_dir(), "client_secrets.json")
 
     @staticmethod
-    def _is_valid_client_secret_config(config: Dict[str, Any]) -> bool:
-        """Validate minimal OAuth client JSON schema."""
+    def _validate_client_secret_config(config: Dict[str, Any]) -> tuple[bool, str]:
+        """Validate that a Google OAuth JSON is usable by the desktop loopback flow."""
         if not isinstance(config, dict):
-            return False
-        installed = config.get("installed") or config.get("web")
+            return False, "구글 인증 JSON의 최상위 형식이 올바르지 않아요."
+        if "installed" not in config and "web" in config:
+            return (
+                False,
+                "'웹 애플리케이션'용 OAuth JSON은 사용할 수 없어요. "
+                "Google Cloud에서 애플리케이션 유형을 '데스크톱 앱'으로 만든 뒤 새 JSON을 받아 주세요.",
+            )
+
+        installed = config.get("installed")
         if not isinstance(installed, dict):
-            return False
-        return bool(installed.get("client_id")) and bool(installed.get("client_secret"))
+            return False, "'데스크톱 앱'용 OAuth 클라이언트 JSON이 아니에요."
+
+        missing_fields = [
+            field
+            for field in ("client_id", "client_secret", "auth_uri", "token_uri")
+            if not str(installed.get(field) or "").strip()
+        ]
+        if missing_fields:
+            return (
+                False,
+                "구글 인증 JSON에 필수 정보가 빠져 있어요: " + ", ".join(missing_fields),
+            )
+
+        client_id = str(installed.get("client_id") or "").strip().lower()
+        if not client_id.endswith(".apps.googleusercontent.com"):
+            return False, "Google Cloud에서 발급한 OAuth 클라이언트 JSON이 아니에요."
+
+        auth_uri = str(installed.get("auth_uri") or "").strip().lower().rstrip("/")
+        token_uri = str(installed.get("token_uri") or "").strip().lower().rstrip("/")
+        allowed_auth_uris = {
+            "https://accounts.google.com/o/oauth2/auth",
+            "https://accounts.google.com/o/oauth2/v2/auth",
+        }
+        allowed_token_uris = {
+            "https://oauth2.googleapis.com/token",
+            "https://www.googleapis.com/oauth2/v4/token",
+        }
+        if auth_uri not in allowed_auth_uris or token_uri not in allowed_token_uris:
+            return (
+                False,
+                "인증 서버 주소가 Google 공식 OAuth 주소와 다릅니다. "
+                "Google Cloud Console에서 JSON을 다시 내려받아 주세요.",
+            )
+
+        redirect_uris = installed.get("redirect_uris")
+        if not isinstance(redirect_uris, list) or not any(
+            str(uri or "").lower().startswith(("http://localhost", "http://127.0.0.1"))
+            for uri in redirect_uris
+        ):
+            return (
+                False,
+                "구글 인증 JSON에 데스크톱 앱용 localhost 리디렉션 주소가 없어요. "
+                "OAuth 클라이언트를 '데스크톱 앱' 유형으로 다시 만들어 주세요.",
+            )
+        return True, ""
+
+    @classmethod
+    def _is_valid_client_secret_config(cls, config: Dict[str, Any]) -> bool:
+        """Return whether a Google OAuth JSON supports the desktop flow."""
+        valid, _ = cls._validate_client_secret_config(config)
+        return valid
+
+    @classmethod
+    def validate_client_secrets_file(cls, source_path: str) -> tuple[bool, str]:
+        """Check a user-selected OAuth JSON without copying or storing it."""
+        if not source_path or not os.path.isfile(source_path):
+            return False, "OAuth JSON 파일을 찾을 수 없어요."
+        try:
+            if os.path.getsize(source_path) > cls.MAX_CLIENT_SECRETS_BYTES:
+                return False, "구글 인증 JSON 파일이 비정상적으로 커서 안전하게 열 수 없어요."
+            with open(source_path, "r", encoding="utf-8") as source_file:
+                config = json.load(source_file)
+        except UnicodeDecodeError:
+            return False, "구글 인증 JSON 파일의 문자 인코딩을 읽을 수 없어요."
+        except json.JSONDecodeError:
+            return False, "선택한 파일이 올바른 JSON 형식이 아니에요."
+        except OSError as exc:
+            return False, f"구글 인증 JSON 파일을 읽지 못했어요: {exc}"
+        return cls._validate_client_secret_config(config)
 
     def _load_client_secret_config_from_file(self, source_path: str) -> Optional[Dict[str, Any]]:
         """Load OAuth client config from JSON file."""
@@ -811,9 +1058,21 @@ class YouTubeManager:
             raise FileNotFoundError("OAuth JSON 파일 경로가 올바르지 않습니다.")
 
         source_abs = os.path.abspath(source_path)
-        config = self._load_client_secret_config_from_file(source_abs)
-        if not config:
-            raise OSError("OAuth JSON 형식이 올바르지 않습니다.")
+        try:
+            if os.path.getsize(source_abs) > self.MAX_CLIENT_SECRETS_BYTES:
+                raise OSError("구글 인증 JSON 파일이 비정상적으로 커서 안전하게 열 수 없어요.")
+            with open(source_abs, "r", encoding="utf-8") as source_file:
+                config = json.load(source_file)
+        except UnicodeDecodeError as exc:
+            raise OSError("구글 인증 JSON 파일의 문자 인코딩을 읽을 수 없어요.") from exc
+        except json.JSONDecodeError as exc:
+            raise OSError("선택한 파일이 올바른 JSON 형식이 아니에요.") from exc
+        except OSError:
+            raise
+
+        valid, validation_message = self._validate_client_secret_config(config)
+        if not valid:
+            raise OSError(validation_message)
 
         if not self._store_client_secret_config_securely(config):
             raise OSError("OAuth JSON을 안전 저장소에 저장하지 못했습니다.")

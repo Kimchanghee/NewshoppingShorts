@@ -94,6 +94,14 @@ try {
   Write-Host "Package target: $PackageTarget"
   Push-Location $Root
 
+  # Validate the exact build interpreter before deleting a known-good dist.
+  # This catches stale local venvs and missing YouTube discovery data that
+  # PyInstaller's import analysis alone cannot detect.
+  Invoke-Native "[0.5/5] Validating YouTube OAuth build runtime..." $Python @(
+    (Join-Path $Root "scripts\validate_youtube_runtime.py"),
+    "--requirements", (Join-Path $Root "requirements.txt")
+  )
+
   Write-Host "`n[1/5] Cleaning build artifacts..."
   Remove-Item -Path `
     (Join-Path $Root "build"), `
@@ -285,6 +293,14 @@ try {
 
     # ── Python packages (Network / API) ──
     "requests",
+    "google",
+    "googleapiclient",
+    "google_auth_oauthlib",
+    "google_auth_httplib2",
+    "httplib2",
+    "requests_oauthlib",
+    "oauthlib",
+    "googleapiclient\discovery_cache\documents\youtube.v3.json",
 
     # ── Python packages (Automation) ──
     "selenium",
@@ -376,6 +392,29 @@ try {
   if (-not $imageioMeta) {
     throw "imageio package metadata (dist-info/METADATA) not found in build output."
   }
+
+  # Execute the frozen EXE itself in a non-UI, non-network diagnostic mode.
+  # This proves PyInstaller included all dynamic OAuth imports and YouTube v3
+  # discovery data, not merely that similarly named folders exist.
+  $youtubeRuntimeReport = Join-Path $Root "build\youtube_runtime_frozen.json"
+  Remove-Item -LiteralPath $youtubeRuntimeReport -Force -ErrorAction SilentlyContinue
+  $previousRuntimeReport = $env:SSMAKER_YOUTUBE_RUNTIME_REPORT
+  try {
+    $env:SSMAKER_YOUTUBE_RUNTIME_REPORT = $youtubeRuntimeReport
+    Invoke-Native "[3.5/5] Running frozen YouTube OAuth runtime smoke test..." $ssmakerExe @(
+      "--youtube-runtime-smoke"
+    )
+  } finally {
+    $env:SSMAKER_YOUTUBE_RUNTIME_REPORT = $previousRuntimeReport
+  }
+  if (-not (Test-Path $youtubeRuntimeReport)) {
+    throw "Frozen YouTube runtime smoke report was not created: $youtubeRuntimeReport"
+  }
+  $youtubeRuntimeData = Get-Content -LiteralPath $youtubeRuntimeReport -Raw | ConvertFrom-Json
+  if (-not $youtubeRuntimeData.ok) {
+    throw "Frozen YouTube OAuth runtime validation failed: $($youtubeRuntimeData.error)"
+  }
+  Write-Host "OK: frozen YouTube OAuth runtime smoke test passed."
 
   # Sensitive files must NOT be in the output
   $mustNotContain = @(

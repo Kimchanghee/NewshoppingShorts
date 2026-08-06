@@ -2097,6 +2097,19 @@ class UploadPanel(QFrame, ThemedMixin):
         from ui.components.custom_dialog import show_info, show_error
         from PyQt6.QtWidgets import QDialog
 
+        yt_manager = getattr(self.gui, "youtube_manager", None) if self.gui else None
+        if yt_manager is not None and hasattr(yt_manager, "get_runtime_diagnostics"):
+            runtime_report = yt_manager.get_runtime_diagnostics()
+            if not runtime_report.get("ok"):
+                from managers.youtube_manager import get_youtube_runtime_error_message
+
+                show_error(
+                    self,
+                    "유튜브 연결 구성요소 복구 필요",
+                    get_youtube_runtime_error_message(runtime_report),
+                )
+                return
+
         ds = self.ds
         c = ds.colors
         selected_file = {"path": ""}
@@ -2222,6 +2235,14 @@ class UploadPanel(QFrame, ThemedMixin):
             )
             if not file_path:
                 return
+            if yt_manager is not None and hasattr(yt_manager, "validate_client_secrets_file"):
+                valid, validation_message = yt_manager.validate_client_secrets_file(file_path)
+                if not valid:
+                    selected_file["path"] = ""
+                    file_info.setText("고른 파일: 사용할 수 없는 JSON")
+                    connect_btn.setEnabled(False)
+                    show_error(dialog, "인증 파일 확인 필요", validation_message)
+                    return
             selected_file["path"] = file_path
             file_info.setText(f"고른 파일: {file_path}")
             connect_btn.setEnabled(True)

@@ -1,8 +1,21 @@
+import json
 import os
 import stat
 from pathlib import Path
 
 from managers.youtube_manager import AutoUploadSettings, YouTubeChannel, YouTubeManager
+
+
+def _desktop_oauth_config(client_id="client-id", client_secret="client-secret"):
+    return {
+        "installed": {
+            "client_id": f"{client_id}.apps.googleusercontent.com",
+            "client_secret": client_secret,
+            "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "redirect_uris": ["http://localhost"],
+        }
+    }
 
 
 class _TestYouTubeManager(YouTubeManager):
@@ -27,7 +40,10 @@ def test_install_client_secrets_replaces_readonly_destination(tmp_path):
     manager = _TestYouTubeManager(user_dir=user_dir, app_dir=app_dir)
 
     source = tmp_path / "client_secrets_source.json"
-    source.write_text('{"installed": {"client_id": "new", "client_secret": "abc"}}', encoding="utf-8")
+    source.write_text(
+        json.dumps(_desktop_oauth_config("new", "abc")),
+        encoding="utf-8",
+    )
 
     secure_store = {}
 
@@ -49,7 +65,8 @@ def test_install_client_secrets_replaces_readonly_destination(tmp_path):
     installed_path = manager.install_client_secrets(str(source))
 
     assert Path(installed_path) == destination
-    assert '"client_id": "new"' in secure_store[manager.CLIENT_SECRETS_KEY]
+    stored_config = json.loads(secure_store[manager.CLIENT_SECRETS_KEY])
+    assert stored_config["installed"]["client_id"] == "new.apps.googleusercontent.com"
     assert not Path(installed_path).exists()
 
 
@@ -68,7 +85,7 @@ def test_migrate_legacy_oauth_files_to_user_profile(tmp_path):
     legacy_secret_dir.mkdir(parents=True, exist_ok=True)
     legacy_secret = legacy_secret_dir / "client_secrets.json"
     legacy_secret.write_text(
-        '{"installed": {"client_id": "legacy", "client_secret": "secret"}}',
+        json.dumps(_desktop_oauth_config("legacy", "secret")),
         encoding="utf-8",
     )
 
@@ -95,7 +112,8 @@ def test_migrate_legacy_oauth_files_to_user_profile(tmp_path):
 
     assert token_path.exists()
     assert '"token": "legacy"' in token_path.read_text(encoding="utf-8")
-    assert '"client_id": "legacy"' in secure_store[manager.CLIENT_SECRETS_KEY]
+    stored_config = json.loads(secure_store[manager.CLIENT_SECRETS_KEY])
+    assert stored_config["installed"]["client_id"] == "legacy.apps.googleusercontent.com"
     assert not secret_path.exists()
 
 

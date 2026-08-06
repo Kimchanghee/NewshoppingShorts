@@ -150,6 +150,26 @@ def install_keyboardinterrupt_hook():
 
     sys.excepthook = _hook
 
+
+def run_youtube_runtime_smoke() -> int:
+    """Exercise the bundled YouTube OAuth stack without UI or network access."""
+    import json
+
+    from managers.youtube_manager import get_youtube_runtime_diagnostics
+
+    report = get_youtube_runtime_diagnostics()
+    report_path = os.environ.get("SSMAKER_YOUTUBE_RUNTIME_REPORT", "").strip()
+    if report_path:
+        try:
+            report_dir = os.path.dirname(os.path.abspath(report_path))
+            if report_dir:
+                os.makedirs(report_dir, exist_ok=True)
+            with open(report_path, "w", encoding="utf-8") as report_file:
+                json.dump(report, report_file, ensure_ascii=False, indent=2)
+        except OSError:
+            return 2
+    return 0 if report.get("ok") else 1
+
 class StartupWorker(QtCore.QThread):
     progress = QtCore.pyqtSignal(int)
     status = QtCore.pyqtSignal(str)
@@ -203,6 +223,9 @@ class StartupWorker(QtCore.QThread):
             logging.error(f"Worker exception: {e}", exc_info=True)
 
 if __name__ == "__main__":
+    if "--youtube-runtime-smoke" in sys.argv:
+        sys.exit(run_youtube_runtime_smoke())
+
     # Setup logging first
     log_file = setup_logging()
     install_keyboardinterrupt_hook()
