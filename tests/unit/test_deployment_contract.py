@@ -75,7 +75,9 @@ def test_version_update_workflows_use_live_vercel_origin_and_fail_closed():
         update_section = text[text.index("Update server version API"):]
         assert "https://newshopping-shorts-auth.vercel.app" in update_section
         assert "https://project-user-dashboard-api.vercel.app" not in update_section
-        assert '.strip().rstrip("/")' in update_section
+        assert 'lstrip("\\ufeff")' in update_section
+        assert 'clean_secret("APP_VERSION_UPDATE_API_KEY")' in update_section
+        assert 'clean_secret("APP_VERSION_UPDATE_HMAC_KEY")' in update_section
     release_workflow = (ROOT / ".github/workflows/build-and-deploy.yml").read_text(
         encoding="utf-8"
     )

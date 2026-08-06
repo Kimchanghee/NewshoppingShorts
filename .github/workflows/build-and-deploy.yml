@@ -268,7 +268,10 @@ jobs:
 
         version = os.environ["VERSION"].strip()
         repository = os.environ["REPOSITORY"].strip()
-        api_base_url = (os.environ.get("APP_VERSION_API_BASE_URL") or "https://newshopping-shorts-auth.vercel.app").strip().rstrip("/")
+        def clean_secret(name, default=""):
+            return (os.environ.get(name) or default).strip().lstrip("\ufeff").strip()
+
+        api_base_url = clean_secret("APP_VERSION_API_BASE_URL", "https://newshopping-shorts-auth.vercel.app").rstrip("/")
         parsed_api = urllib.parse.urlparse(api_base_url)
         allowed_origins = {
             "https://newshopping-shorts-auth.vercel.app",
@@ -287,10 +290,10 @@ jobs:
         }
         body = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
 
-        token = os.environ.get("APP_VERSION_UPDATE_API_KEY", "").strip()
+        token = clean_secret("APP_VERSION_UPDATE_API_KEY")
         if not token:
             raise SystemExit("APP_VERSION_UPDATE_API_KEY is required")
-        signing_key = os.environ.get("APP_VERSION_UPDATE_HMAC_KEY", "").strip()
+        signing_key = clean_secret("APP_VERSION_UPDATE_HMAC_KEY")
         signature = ""
         if signing_key:
             signature = hmac.new(signing_key.encode("utf-8"), body, hashlib.sha256).hexdigest()
