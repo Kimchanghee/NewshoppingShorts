@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Optional
 
 from utils.logging_config import get_logger
+from utils.windows_package import is_msix_package
 
 logger = get_logger(__name__)
 
@@ -55,6 +56,16 @@ def set_launch_on_startup(enabled: bool, command: Optional[str] = None) -> bool:
             0,
             winreg.KEY_SET_VALUE,
         ) as key:
+            if is_msix_package():
+                # The MSIX manifest owns the startup task. Remove an entry left
+                # by a previous Inno Setup installation so the app cannot launch
+                # twice and a versioned WindowsApps path is never persisted.
+                try:
+                    winreg.DeleteValue(key, RUN_VALUE_NAME)
+                except FileNotFoundError:
+                    pass
+                logger.info("[Autostart] Microsoft Store startup task is managed by Windows")
+                return True
             if enabled:
                 winreg.SetValueEx(
                     key,
@@ -78,6 +89,9 @@ def set_launch_on_startup(enabled: bool, command: Optional[str] = None) -> bool:
 def get_registered_command() -> str:
     """Return the registered Run command, or an empty string when absent."""
     if not is_supported_platform():
+        return ""
+
+    if is_msix_package():
         return ""
 
     try:

@@ -7,6 +7,7 @@ from datetime import datetime
 import os
 from utils.tts_config import get_safe_tts_base_dir
 from utils.logging_config import get_logger
+from utils.user_paths import default_output_directory
 
 logger = get_logger(__name__)
 
@@ -104,15 +105,11 @@ class AppState:
 
         # Output folder configuration
         try:
-            desktop_path = os.path.join(os.path.expanduser("~"), "Desktop")
-            if not os.path.isdir(desktop_path):
-                desktop_path = os.path.join(os.getcwd(), "outputs")
-        except Exception as e:
-            logger.warning("Failed to get desktop path, using outputs folder: %s", e)
-            desktop_path = os.path.join(os.getcwd(), "outputs")
-
-        os.makedirs(desktop_path, exist_ok=True)
-        self.output_folder_path = desktop_path
+            default_output_path = default_output_directory()
+        except OSError as exc:
+            logger.error("Failed to find a writable output directory: %s", exc)
+            raise
+        self.output_folder_path = str(default_output_path)
 
         # Analysis and processing results
         self.analysis_result: Dict[str, Any] = {}

@@ -68,10 +68,30 @@ if (Test-Path $versionJson) {
   $AppVersion = $vdata.version
 }
 
+$autoUpdaterPath = Join-Path $Root "utils\auto_updater.py"
+$autoUpdaterText = Get-Content -LiteralPath $autoUpdaterPath -Raw
+if ($autoUpdaterText -notmatch 'CURRENT_VERSION\s*=\s*["'']([^"'']+)["'']') {
+  throw "Could not read CURRENT_VERSION from $autoUpdaterPath"
+}
+$EmbeddedAppVersion = $Matches[1]
+if ($EmbeddedAppVersion -ne $AppVersion) {
+  throw "Version mismatch: version.json=$AppVersion but auto_updater.py=$EmbeddedAppVersion"
+}
+
+$PackageTarget = "installer"
+if (-not [string]::IsNullOrWhiteSpace($env:SSMAKER_PACKAGE_TARGET)) {
+  $PackageTarget = $env:SSMAKER_PACKAGE_TARGET.Trim().ToLowerInvariant()
+}
+if ($PackageTarget -notin @("installer", "msix")) {
+  throw "Unsupported SSMAKER_PACKAGE_TARGET: $PackageTarget (expected installer or msix)."
+}
+$StorePackageBuild = $PackageTarget -eq "msix"
+
 try {
   Write-Host "Project root: $Root"
   Write-Host "Python: $Python"
   Write-Host "App version: $AppVersion"
+  Write-Host "Package target: $PackageTarget"
   Push-Location $Root
 
   Write-Host "`n[1/5] Cleaning build artifacts..."
@@ -173,37 +193,44 @@ try {
     throw "Build output missing: ${ssmakerExe}"
   }
 
-  # Enforce code-signing prerequisites for release artifacts.
+  # Direct-download artifacts need Authenticode here. Microsoft signs Store
+  # MSIX packages after Partner Center certification, so those payloads do not
+  # require a private PFX in CI.
   $signThumb = ""
-  if ($null -ne $env:SIGN_CERT_THUMBPRINT) {
-    $signThumb = $env:SIGN_CERT_THUMBPRINT.Trim()
-  }
-  if ([string]::IsNullOrWhiteSpace($signThumb)) {
-    throw "SIGN_CERT_THUMBPRINT is required for release builds."
-  }
-  $signtool = (Get-Command signtool -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue)
-  if (-not $signtool) {
-    $sdkBins = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Directory -ErrorAction SilentlyContinue |
-      Sort-Object -Property Name -Descending
-    foreach ($sdkBin in $sdkBins) {
-      $candidate = Join-Path $sdkBin.FullName "x64\signtool.exe"
-      if (Test-Path $candidate) {
-        $signtool = $candidate
-        break
+  $signtool = $null
+  if (-not $StorePackageBuild) {
+    if ($null -ne $env:SIGN_CERT_THUMBPRINT) {
+      $signThumb = $env:SIGN_CERT_THUMBPRINT.Trim()
+    }
+    if ([string]::IsNullOrWhiteSpace($signThumb)) {
+      throw "SIGN_CERT_THUMBPRINT is required for direct-download release builds."
+    }
+    $signtool = (Get-Command signtool -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue)
+    if (-not $signtool) {
+      $sdkBins = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Directory -ErrorAction SilentlyContinue |
+        Sort-Object -Property Name -Descending
+      foreach ($sdkBin in $sdkBins) {
+        $candidate = Join-Path $sdkBin.FullName "x64\signtool.exe"
+        if (Test-Path $candidate) {
+          $signtool = $candidate
+          break
+        }
       }
     }
-  }
-  if (-not $signtool) {
-    throw "signtool.exe not found in PATH. Install Windows SDK Signing Tools."
-  }
+    if (-not $signtool) {
+      throw "signtool.exe not found in PATH. Install Windows SDK Signing Tools."
+    }
 
-  Invoke-Native "[2.5/5] Code signing ssmaker.exe..." $signtool @(
-    "sign",
-    "/fd", "sha256",
-    "/t", "http://timestamp.digicert.com",
-    "/sha1", $signThumb,
-    $ssmakerExe
-  )
+    Invoke-Native "[2.5/5] Code signing ssmaker.exe..." $signtool @(
+      "sign",
+      "/fd", "sha256",
+      "/t", "http://timestamp.digicert.com",
+      "/sha1", $signThumb,
+      $ssmakerExe
+    )
+  } else {
+    Write-Host "`n[2.5/5] Store build: package signing is delegated to Microsoft Store."
+  }
 
   # ── Verify output directory contents ───────────────────────────────────────
   Write-Host "`n[3/5] Verifying build output in dist\ssmaker\..."
@@ -394,6 +421,12 @@ try {
   $fileCount = ($allFiles | Measure-Object).Count
   $totalSizeMB = [math]::Round(((Get-ChildItem -Path $distDir -Recurse -File | Measure-Object -Property Length -Sum).Sum / 1MB), 1)
   Write-Host "OK: build output verified. ($fileCount files, ${totalSizeMB} MB)"
+
+  if ($StorePackageBuild) {
+    Write-Host "`n[5/5] Store application payload build complete."
+    Write-Host "Package source: $distDir"
+    return
+  }
 
   # ── Inno Setup: create installer ───────────────────────────────────────────
   Write-Host "`n[4/5] Building Windows installer with Inno Setup..."

@@ -22,11 +22,12 @@ from urllib.parse import urlparse
 
 import requests
 from utils.logging_config import get_logger
+from utils.windows_package import is_msix_package
 
 logger = get_logger(__name__)
 
 # 현재 앱 버전(배포 시 version.json이 우선)
-CURRENT_VERSION = "1.5.46"
+CURRENT_VERSION = "1.5.47"
 
 # 버전 확인 API 기본 주소
 _DEFAULT_UPDATE_BASE_URL = (
@@ -309,6 +310,11 @@ class UpdateChecker:
             "is_mandatory": False,
             "error": None
         }
+
+        if is_msix_package():
+            logger.info("Microsoft Store package detected; updates are managed by the Store")
+            self._update_info = result
+            return result
         
         try:
             logger.info(f"Checking for updates at: {self.check_url}")
@@ -384,6 +390,9 @@ class UpdateChecker:
         ``progress_callback`` receives downloaded and total byte counts.
         Returns the local file path, or ``None`` when validation fails.
         """
+        if is_msix_package():
+            logger.info("Ignoring legacy installer download in Microsoft Store package")
+            return None
         if not download_url:
             logger.error("Download URL is empty")
             return None
@@ -475,6 +484,9 @@ class UpdateChecker:
         When this returns ``True``, the caller must exit so the installer can
         replace application files and restart the app.
         """
+        if is_msix_package():
+            logger.info("Ignoring legacy installer launch in Microsoft Store package")
+            return False
         if not installer_path or not installer_path.exists():
             logger.error("Installer file not found")
             return False

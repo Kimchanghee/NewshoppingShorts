@@ -358,7 +358,13 @@ class SettingsTab(QWidget, ThemedMixin):
         startup_layout.setContentsMargins(0, 0, 0, 0)
         startup_layout.setSpacing(ds.spacing.space_2)
 
-        self.launch_on_startup_checkbox = QCheckBox("컴퓨터를 켤 때 SSMaker 자동 실행")
+        from utils.windows_package import is_msix_package
+
+        packaged_store_build = is_msix_package()
+        startup_checkbox_text = "컴퓨터를 켤 때 SSMaker 자동 실행"
+        if packaged_store_build:
+            startup_checkbox_text = "Microsoft Store 버전: Windows 시작 프로그램에서 관리"
+        self.launch_on_startup_checkbox = QCheckBox(startup_checkbox_text)
         self.launch_on_startup_checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
         self.launch_on_startup_checkbox.setStyleSheet(
             f"color: {c.text_primary}; spacing: 8px; border: none; background: transparent;"
@@ -369,11 +375,18 @@ class SettingsTab(QWidget, ThemedMixin):
         self.launch_on_startup_checkbox.toggled.connect(
             self._on_launch_on_startup_toggled
         )
+        if packaged_store_build:
+            self.launch_on_startup_checkbox.setChecked(False)
+            self.launch_on_startup_checkbox.setEnabled(False)
         startup_layout.addWidget(self.launch_on_startup_checkbox)
 
-        startup_desc = QLabel(
-            "켜두면 Windows 로그인 후 프로그램이 자동으로 다시 실행됩니다."
+        startup_description = (
+            "Microsoft Store 버전은 Windows 설정 > 앱 > 시작 프로그램에서 "
+            "SSMaker 자동 실행을 관리합니다."
+            if packaged_store_build
+            else "켜두면 Windows 로그인 후 프로그램이 자동으로 다시 실행됩니다."
         )
+        startup_desc = QLabel(startup_description)
         startup_desc.setWordWrap(True)
         startup_desc.setStyleSheet(
             f"color: {c.text_secondary}; border: none; background: transparent; font-size: 12px; padding-bottom: 3px;"
@@ -1261,6 +1274,10 @@ class SettingsTab(QWidget, ThemedMixin):
 
     def _on_launch_on_startup_toggled(self, checked: bool):
         """Persist and apply the Windows launch-on-startup toggle."""
+        from utils.windows_package import is_msix_package
+
+        if is_msix_package():
+            return
         ok = get_settings_manager().set_launch_on_startup(bool(checked))
         if not ok:
             self.launch_on_startup_checkbox.blockSignals(True)
@@ -4580,7 +4597,9 @@ class SettingsTab(QWidget, ThemedMixin):
         super().showEvent(event)
         try:
             checkbox = getattr(self, "launch_on_startup_checkbox", None)
-            if checkbox is not None:
+            from utils.windows_package import is_msix_package
+
+            if checkbox is not None and not is_msix_package():
                 checkbox.blockSignals(True)
                 try:
                     checkbox.setChecked(get_settings_manager().get_launch_on_startup())

@@ -16,6 +16,7 @@ from urllib.parse import urlparse
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QMessageBox
 from utils.logging_config import get_logger
+from utils.windows_package import get_package_full_name, is_msix_package
 from utils.auto_updater import compare_versions
 from user_facing_errors import sanitize_user_message
 from .initializer import Initializer
@@ -504,7 +505,14 @@ class AppController:
 
     def start(self) -> None:
         """Start the app ??show login first, but check updates before login."""
-        if getattr(sys, "frozen", False) and sys.platform == "win32":
+        packaged = is_msix_package()
+        if packaged:
+            logger.info(
+                "Microsoft Store package detected: %s; Windows manages package trust and updates",
+                get_package_full_name(),
+            )
+
+        if getattr(sys, "frozen", False) and sys.platform == "win32" and not packaged:
             signature_required = _env_truthy("APP_SIGNATURE_REQUIRED", default=False)
             signature_strict = _env_truthy("APP_SIGNATURE_STRICT", default=False)
             signer_thumbprints = (os.getenv("APP_SIGNER_THUMBPRINTS", "") or "").strip()
@@ -541,7 +549,7 @@ class AppController:
 
         # Pre-login update check: ensures users on broken versions can still
         # receive updates even when the login flow itself is broken.
-        if getattr(sys, "frozen", False):
+        if getattr(sys, "frozen", False) and not packaged:
             self._check_update_before_login()
         else:
             self._show_login()
@@ -619,10 +627,10 @@ class AppController:
         """After login: check for updates, then proceed to main app."""
         self.login_data = login_data
 
-        if getattr(sys, "frozen", False):
+        if getattr(sys, "frozen", False) and not is_msix_package():
             self._check_update_after_login()
         else:
-            logger.info("Development mode: Skipping update check")
+            logger.info("Store-managed or development build: skipping legacy update check")
             self._proceed_to_loading()
 
     # ???? Post-login update check (game-like auto-update) ????
@@ -963,6 +971,11 @@ class AppController:
         silent mode (/VERYSILENT) which handles closing the app, replacing files,
         and restarting automatically.
         """
+        if is_msix_package():
+            logger.info("Microsoft Store package: refusing legacy installer update")
+            self._fallback_after_update_failure()
+            return
+
         from ui.windows.update_dialog import UpdateProgressDialog
 
         if not download_url:
@@ -1029,6 +1042,11 @@ class AppController:
         2. Replacing all files in the install directory
         3. Restarting the app after installation (skipifnotsilent Run entry)
         """
+        if is_msix_package():
+            logger.info("Microsoft Store package: refusing legacy installer launch")
+            self._fallback_after_update_failure()
+            return
+
         import subprocess
 
         if hasattr(self, "update_progress_dialog") and self.update_progress_dialog:

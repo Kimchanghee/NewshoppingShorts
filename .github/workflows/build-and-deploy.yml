@@ -227,7 +227,7 @@ jobs:
         echo "FILE_HASH=$hash" >> $env:GITHUB_OUTPUT
 
     - name: Create Release
-      uses: softprops/action-gh-release@v1
+      uses: softprops/action-gh-release@v3
       with:
         files: dist/SSMaker_Setup_v${{ steps.version.outputs.VERSION }}.exe
         name: Release v${{ steps.version.outputs.VERSION }}

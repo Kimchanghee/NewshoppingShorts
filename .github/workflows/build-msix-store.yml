@@ -1,0 +1,98 @@
+name: Build Microsoft Store MSIX
+
+on:
+  workflow_dispatch:
+    inputs:
+      identity_name:
+        description: Partner Center Product identity > Package/Identity/Name
+        required: true
+        type: string
+      publisher:
+        description: Partner Center Product identity > Package/Identity/Publisher
+        required: true
+        type: string
+      publisher_display_name:
+        description: Partner Center Product identity > Package/Properties/PublisherDisplayName
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: microsoft-store-msix-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build-store-package:
+    runs-on: windows-latest
+    timeout-minutes: 90
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.11
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Cache pip packages
+      uses: actions/cache@v4
+      with:
+        path: ~\AppData\Local\pip\Cache
+        key: ${{ runner.os }}-store-pip-${{ hashFiles('requirements.txt') }}
+        restore-keys: |
+          ${{ runner.os }}-store-pip-
+          ${{ runner.os }}-pip-
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        python -m pip install -r requirements.txt
+        python -m pip install pyinstaller
+
+    - name: Install Tesseract OCR
+      shell: pwsh
+      run: |
+        choco install tesseract --no-progress -y
+        $candidate = Get-Command tesseract -ErrorAction SilentlyContinue
+        if (-not $candidate) {
+          $candidate = Get-ChildItem -Path "C:\ProgramData\chocolatey" -Recurse -Filter "tesseract.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        }
+        if (-not $candidate) {
+          throw "Tesseract executable was not found after installation."
+        }
+        $tesseractExe = if ($candidate.Source) { $candidate.Source } else { $candidate.FullName }
+        Split-Path $tesseractExe -Parent | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+    - name: Download build assets
+      shell: pwsh
+      run: |
+        python scripts/download_all_fonts_final.py
+        python scripts/download_whisper_models.py
+
+    - name: Run desktop test suite
+      run: pytest -q
+
+    - name: Build Store application payload
+      shell: pwsh
+      env:
+        SSMAKER_PACKAGE_TARGET: msix
+      run: ./scripts/build_exe.ps1
+
+    - name: Build unsigned Store MSIX
+      shell: pwsh
+      env:
+        MSIX_IDENTITY_NAME: ${{ inputs.identity_name }}
+        MSIX_PUBLISHER: ${{ inputs.publisher }}
+        MSIX_PUBLISHER_DISPLAY_NAME: ${{ inputs.publisher_display_name }}
+      run: ./scripts/build_msix.ps1
+
+    - name: Upload Store submission package
+      uses: actions/upload-artifact@v4
+      with:
+        name: SSMaker-Microsoft-Store-MSIX
+        path: dist/store/*.msix
+        if-no-files-found: error
+        retention-days: 14
