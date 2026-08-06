@@ -64,3 +64,20 @@ def test_version_update_workflows_never_forward_full_admin_key():
         assert "secrets.ADMIN_API_KEY" not in update_section
         assert "token_candidates" not in update_section
         assert "RejectRedirects" in update_section
+
+
+def test_version_update_workflows_use_live_vercel_origin_and_fail_closed():
+    for relative in (
+        ".github/workflows/build-and-deploy.yml",
+        ".github/workflows/update-app-version-api.yml",
+    ):
+        text = (ROOT / relative).read_text(encoding="utf-8")
+        update_section = text[text.index("Update server version API"):]
+        assert "https://newshopping-shorts-auth.vercel.app" in update_section
+        assert "https://project-user-dashboard-api.vercel.app" not in update_section
+        assert '.strip().rstrip("/")' in update_section
+    release_workflow = (ROOT / ".github/workflows/build-and-deploy.yml").read_text(
+        encoding="utf-8"
+    )
+    update_section = release_workflow[release_workflow.index("Update server version API"):]
+    assert "continue-on-error: true" not in update_section
