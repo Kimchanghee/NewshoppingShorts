@@ -17,12 +17,17 @@ YOUTUBE_DISTRIBUTIONS = {
     canonicalize_name(name)
     for name in (
         "google-api-python-client",
+        "google-api-core",
+        "google-genai",
         "google-auth",
         "google-auth-oauthlib",
         "google-auth-httplib2",
         "httplib2",
         "requests-oauthlib",
         "oauthlib",
+        "requests",
+        "httpx",
+        "keyring",
     )
 }
 

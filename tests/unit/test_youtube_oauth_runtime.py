@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from pathlib import Path
 
@@ -28,6 +29,28 @@ def test_offline_youtube_runtime_is_complete():
 
     assert report["ok"] is True, report
     assert Path(report["discovery_document"]).is_file()
+    assert report["app_version"]
+    for distribution in (
+        "google-api-python-client",
+        "google-auth",
+        "google-auth-oauthlib",
+        "google-api-core",
+        "google-genai",
+        "requests",
+        "httpx",
+    ):
+        assert report["package_versions"].get(distribution), report
+    runtime_modules = [
+        "requests",
+        "httpx",
+        "google.genai",
+        "google.api_core",
+        "keyring",
+    ]
+    if os.name == "nt":
+        runtime_modules.append("keyring.backends.Windows")
+    for module_name in runtime_modules:
+        assert report["runtime_imports"].get(module_name) is True, report
 
 
 def test_desktop_oauth_json_is_accepted(tmp_path):
@@ -114,3 +137,51 @@ def test_oauth_transport_dependencies_are_explicit_requirements():
             line.strip().lower().startswith(distribution)
             for line in requirements.splitlines()
         )
+
+
+def test_release_google_runtime_stack_is_pinned_and_actual_module_folders_are_checked():
+    requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+    spec = (ROOT / "ssmaker.spec").read_text(encoding="utf-8")
+    build_script = (ROOT / "scripts" / "build_exe.ps1").read_text(encoding="utf-8-sig")
+
+    for pinned in (
+        "google-genai==2.8.0",
+        "google-api-core==2.34.0",
+        "google-api-python-client==2.198.0",
+        "google-auth==2.56.3",
+        "google-auth-oauthlib==1.4.0",
+        "google-auth-httplib2==0.4.1",
+        "httplib2==0.32.0",
+        "requests-oauthlib==2.0.0",
+        "oauthlib==3.3.1",
+        "requests==2.34.2",
+        "httpx==0.28.1",
+        "keyring==25.7.0",
+    ):
+        assert pinned in requirements
+
+    for package in (
+        "google.genai",
+        "google.api_core",
+        "google.auth",
+        "google.oauth2",
+        "keyring",
+    ):
+        assert f"'{package}'" in spec
+
+    assert "$mustHaveDirectories" in build_script
+    directory_check = build_script[
+        build_script.index("$mustHaveDirectories"):build_script.index("$requiredFontItems")
+    ]
+    assert '"httpx"' not in directory_check
+    assert '"google_auth_httplib2"' not in directory_check
+    for directory in (
+        r"google\genai",
+        r"google\api_core",
+        r"google\auth",
+        r"google\oauth2",
+        "googleapiclient",
+        "google_auth_oauthlib",
+        "keyring",
+    ):
+        assert f'"{directory}"' in build_script

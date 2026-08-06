@@ -28,7 +28,9 @@ packages_to_collect = [
     'imageio_ffmpeg',
     'openai',
     'google.genai',
+    'google.api_core',
     'google.auth',
+    'google.oauth2',
     'googleapiclient',
     'google_auth_oauthlib',
     'google_auth_httplib2',
@@ -52,6 +54,7 @@ packages_to_collect = [
     # JWT / Security
     'jwt',
     'cryptography',
+    'keyring',
     # System / Utilities
     'psutil',
     'colorama',
@@ -191,6 +194,12 @@ for mod_name in (
     "colorama",
     "dotenv",
     "cryptography",
+    "keyring",
+    "keyring.backends.Windows",
+    "google.genai",
+    "google.api_core",
+    "google.auth",
+    "google.oauth2",
     "googleapiclient",
     "google_auth_oauthlib",
     "google_auth_httplib2",
@@ -208,7 +217,23 @@ for mod_name in (
 
 # Some packages (e.g. imageio) call importlib.metadata at runtime.
 # PyInstaller does not include package metadata unless explicitly requested.
-for dist_name in ("imageio", "imageio-ffmpeg", "moviepy"):
+for dist_name in (
+    "imageio",
+    "imageio-ffmpeg",
+    "moviepy",
+    "google-genai",
+    "google-api-core",
+    "google-auth",
+    "google-api-python-client",
+    "google-auth-oauthlib",
+    "google-auth-httplib2",
+    "httplib2",
+    "requests-oauthlib",
+    "oauthlib",
+    "requests",
+    "httpx",
+    "keyring",
+):
     try:
         datas += copy_metadata(dist_name)
     except Exception:

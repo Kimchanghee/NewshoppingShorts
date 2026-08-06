@@ -2,7 +2,8 @@
 
 # UI & HTTP
 PyQt6>=6.6.0
-requests>=2.32.5
+requests==2.34.2
+httpx==0.28.1
 psutil>=5.9.0
 
 # OCR & Vision
@@ -42,22 +43,24 @@ python-magic>=0.4.27; sys_platform != 'win32'
 python-magic-bin>=0.4.14; sys_platform == 'win32'
 
 # AI APIs
-google-genai>=2.4.0,<2.9.0
-google-cloud-aiplatform>=1.153.1
-google-auth>=2.53.0
-google-api-python-client>=2.196.0
-google-auth-oauthlib>=1.4.0
-google-auth-httplib2>=0.4.0
+google-genai==2.8.0
+google-cloud-aiplatform==1.163.0
+google-api-core==2.34.0
+google-auth==2.56.3
+google-api-python-client==2.198.0
+google-auth-oauthlib==1.4.0
+google-auth-httplib2==0.4.1
 # Explicit OAuth transport dependencies: release builds must not rely on a
 # developer machine's incidental/transitive packages.
-httplib2>=0.31.0,<1
-requests-oauthlib>=2.0.0,<3
-oauthlib>=3.3.1,<4
+httplib2==0.32.0
+requests-oauthlib==2.0.0
+oauthlib==3.3.1
 anthropic>=0.18.0
 
 # JWT / Security
 PyJWT==2.13.0
 cryptography>=44.0.1
+keyring==25.7.0
 
 # Backend (FastAPI stack) - keep aligned with backend/requirements.txt
 fastapi==0.141.1

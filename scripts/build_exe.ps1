@@ -314,6 +314,30 @@ try {
     "certifi"
   )
 
+  # Exact package-folder checks prevent a dist-info-only build from passing a
+  # loose substring test. These are the import roots used by YouTube OAuth and
+  # the Google GenAI provider on an end-user PC.
+  $mustHaveDirectories = @(
+    "google\genai",
+    "google\api_core",
+    "google\auth",
+    "google\oauth2",
+    "googleapiclient",
+    "google_auth_oauthlib",
+    "httplib2",
+    "requests_oauthlib",
+    "oauthlib",
+    "requests",
+    "keyring"
+  )
+
+  foreach ($directory in $mustHaveDirectories) {
+    $directoryPath = Join-Path $distDir $directory
+    if (-not (Test-Path -LiteralPath $directoryPath -PathType Container)) {
+      throw "Missing required Python package directory in dist\ssmaker\: ${directory}"
+    }
+  }
+
   $requiredFontItems = @(
     "fonts\NotoSansKR-Variable.ttf",
     "fonts\SUIT-Heavy.ttf",
