@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -30,6 +30,7 @@ from app.models.system_setting import SystemSetting
 from app.utils.billing_crypto import validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
 from app.scheduler.computer_use_worker import run_computer_use_worker_loop
+from app.public_pages import render_privacy_policy
 
 # 로깅 설정 - 모든 로그를 표준 출력에 기록
 logging.basicConfig(
@@ -415,6 +416,15 @@ else:
 @app.get("/")
 async def root():
     return {"status": "ok", "service": "SSMaker Auth API"}
+
+
+@app.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+async def privacy_policy():
+    """Public privacy policy for SSMaker users and Store certification."""
+    return HTMLResponse(
+        content=render_privacy_policy(),
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
 
 
 # Include routers
