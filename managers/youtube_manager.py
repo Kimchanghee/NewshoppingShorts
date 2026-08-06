@@ -18,9 +18,12 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from datetime import datetime
+from importlib import import_module, metadata
 from typing import Any, Callable, Dict, List, Optional
 from dataclasses import dataclass
+from urllib.parse import urlsplit
 
 import requests
 
@@ -130,6 +133,27 @@ except ImportError as exc:
     YOUTUBE_API_IMPORT_ERROR = str(exc)
 
 
+def _get_runtime_app_version() -> str:
+    """Read the embedded app version without importing UI/updater modules."""
+    candidates = [
+        os.path.join(str(getattr(sys, "_MEIPASS", "") or ""), "version.json"),
+        os.path.join(os.path.dirname(sys.executable), "version.json"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "version.json"),
+    ]
+    for candidate in candidates:
+        if not candidate or not os.path.isfile(candidate):
+            continue
+        try:
+            with open(candidate, "r", encoding="utf-8-sig") as version_file:
+                payload = json.load(version_file)
+            version = str(payload.get("version", "") or "").strip()
+            if version:
+                return version
+        except Exception:
+            continue
+    return "unknown"
+
+
 def get_youtube_runtime_diagnostics() -> Dict[str, Any]:
     """Validate the complete offline YouTube OAuth runtime.
 
@@ -140,10 +164,32 @@ def get_youtube_runtime_diagnostics() -> Dict[str, Any]:
     report: Dict[str, Any] = {
         "ok": False,
         "frozen": bool(getattr(sys, "frozen", False)),
+        "app_version": _get_runtime_app_version(),
+        "package_versions": {},
+        "runtime_imports": {},
         "missing_module": "",
         "discovery_document": "",
         "error": "",
     }
+
+    for distribution in (
+        "google-api-python-client",
+        "google-auth",
+        "google-auth-oauthlib",
+        "google-auth-httplib2",
+        "google-api-core",
+        "google-genai",
+        "httplib2",
+        "requests-oauthlib",
+        "oauthlib",
+        "requests",
+        "httpx",
+        "keyring",
+    ):
+        try:
+            report["package_versions"][distribution] = metadata.version(distribution)
+        except metadata.PackageNotFoundError:
+            report["package_versions"][distribution] = ""
 
     if not YOUTUBE_API_AVAILABLE:
         missing_match = re.search(r"No module named ['\"]([^'\"]+)", YOUTUBE_API_IMPORT_ERROR)
@@ -153,6 +199,21 @@ def get_youtube_runtime_diagnostics() -> Dict[str, Any]:
         return report
 
     try:
+        required_runtime_modules = [
+            "requests",
+            "httpx",
+            "google.genai",
+            "google.api_core",
+            "keyring",
+        ]
+        if os.name == "nt":
+            required_runtime_modules.append("keyring.backends.Windows")
+        for module_name in required_runtime_modules:
+            module = import_module(module_name)
+            if not getattr(module, "__file__", None):
+                raise ImportError(f"{module_name} module body is unavailable")
+            report["runtime_imports"][module_name] = True
+
         package_root = os.path.dirname(os.path.abspath(_googleapiclient.__file__))
         discovery_path = os.path.join(
             package_root,
@@ -248,6 +309,23 @@ class AutoUploadSettings:
     made_for_kids: bool = False
 
 
+class _OAuthBrowserController:
+    """webbrowser-compatible bridge that exposes the generated Google URL to the UI."""
+
+    def __init__(self, manager: "YouTubeManager"):
+        self._manager = manager
+
+    def open(self, url: str, new: int = 0, autoraise: bool = True) -> bool:
+        del new, autoraise
+        return self._manager._handle_oauth_browser_open(url)
+
+    def open_new(self, url: str) -> bool:
+        return self.open(url, new=1)
+
+    def open_new_tab(self, url: str) -> bool:
+        return self.open(url, new=2)
+
+
 class YouTubeManager:
     """
     YouTube channel management and auto-upload functionality
@@ -262,8 +340,9 @@ class YouTubeManager:
         "https://www.googleapis.com/auth/youtube.force-ssl",
         "https://www.googleapis.com/auth/userinfo.email",
     ]
-    OAUTH_FLOW_TIMEOUT_SECONDS = 180
+    OAUTH_FLOW_TIMEOUT_SECONDS = 600
     CLIENT_SECRETS_KEY = "youtube_client_secrets_json_v1"
+    OAUTH_TOKEN_KEY = "youtube_oauth_token_json_v1"
     MAX_CLIENT_SECRETS_BYTES = 512 * 1024
 
     def __init__(self, gui=None, settings_file: str = "youtube_settings.json"):
@@ -282,8 +361,21 @@ class YouTubeManager:
         self._youtube_service: Optional[Any] = None
         self._channel: Optional[YouTubeChannel] = None
         self._last_error_message: str = ""
+        self._oauth_url_callback: Optional[Callable[[str], None]] = None
+        self._last_oauth_authorization_url: str = ""
         self._upload_settings = AutoUploadSettings()
         self._secrets_manager = get_secrets_manager()
+
+        self._runtime_report = get_youtube_runtime_diagnostics()
+        logger.info(
+            "[YouTube] Runtime startup diagnostic: app=%s frozen=%s ok=%s "
+            "missing_module=%s packages=%s",
+            self._runtime_report.get("app_version"),
+            self._runtime_report.get("frozen"),
+            self._runtime_report.get("ok"),
+            self._runtime_report.get("missing_module") or "none",
+            self._runtime_report.get("package_versions"),
+        )
 
         # Auto-upload thread
         self._upload_thread: Optional[threading.Thread] = None
@@ -296,6 +388,9 @@ class YouTubeManager:
         self._on_upload_complete: Optional[Callable] = None
         self._on_upload_error: Optional[Callable] = None
         self._on_connection_changed: Optional[Callable] = None
+
+        # Migrate sensitive OAuth artifacts before connection state is restored.
+        self._migrate_legacy_oauth_files()
 
         # Load settings
         self._load_settings()
@@ -407,7 +502,7 @@ class YouTubeManager:
             connected = bool(
                 self._channel
                 and self._channel.channel_id
-                and os.path.exists(self._get_token_path())
+                and self._has_stored_credentials()
             )
             if connected:
                 settings.set_youtube_connected(
@@ -464,7 +559,11 @@ class YouTubeManager:
 
     def is_connected(self) -> bool:
         """Check if YouTube channel is connected"""
-        return self._channel is not None and self._channel.channel_id != ""
+        return bool(
+            self._channel is not None
+            and self._channel.channel_id
+            and self._has_stored_credentials()
+        )
 
     def get_channel_info(self) -> Dict[str, Any]:
         """Get connected channel info as dictionary"""
@@ -492,6 +591,92 @@ class YouTubeManager:
         """Return the latest YouTube connection error message."""
         return self._last_error_message
 
+    def set_oauth_url_callback(self, callback: Optional[Callable[[str], None]]) -> None:
+        """Publish the active Google approval URL without logging its query string."""
+        self._oauth_url_callback = callback
+
+    def get_oauth_authorization_url(self) -> str:
+        """Return the active Google approval URL for copy/reopen controls."""
+        return str(getattr(self, "_last_oauth_authorization_url", "") or "")
+
+    @staticmethod
+    def _is_google_oauth_url(url: str) -> bool:
+        try:
+            parsed = urlsplit(str(url or ""))
+            return bool(
+                parsed.scheme == "https"
+                and parsed.hostname == "accounts.google.com"
+                and parsed.path.startswith("/o/oauth2/")
+            )
+        except Exception:
+            return False
+
+    def _handle_oauth_browser_open(self, url: str) -> bool:
+        """Capture the generated URL, notify the UI, then open the default browser."""
+        if not self._is_google_oauth_url(url):
+            logger.warning("[YouTube] Refused to open a non-Google OAuth URL")
+            return False
+        self._last_oauth_authorization_url = url
+        callback = getattr(self, "_oauth_url_callback", None)
+        if callback:
+            try:
+                callback(url)
+            except Exception as exc:
+                logger.debug("[YouTube] OAuth URL callback failed: %s", type(exc).__name__)
+        return self._launch_oauth_url(url, "default")
+
+    def open_oauth_authorization_url(self, browser: str = "default") -> bool:
+        """Reopen the current approval URL in the default browser or Microsoft Edge."""
+        url = self.get_oauth_authorization_url()
+        if not self._is_google_oauth_url(url):
+            return False
+        return self._launch_oauth_url(url, browser)
+
+    @staticmethod
+    def _launch_oauth_url(url: str, browser: str = "default") -> bool:
+        """Open an already-validated Google OAuth URL without a shell command."""
+        if not YouTubeManager._is_google_oauth_url(url):
+            return False
+        browser = str(browser or "default").strip().lower()
+        try:
+            if browser == "edge":
+                candidates = [
+                    shutil.which("msedge"),
+                    os.path.join(
+                        os.environ.get("PROGRAMFILES(X86)", ""),
+                        "Microsoft",
+                        "Edge",
+                        "Application",
+                        "msedge.exe",
+                    ),
+                    os.path.join(
+                        os.environ.get("PROGRAMFILES", ""),
+                        "Microsoft",
+                        "Edge",
+                        "Application",
+                        "msedge.exe",
+                    ),
+                    os.path.join(
+                        os.environ.get("LOCALAPPDATA", ""),
+                        "Microsoft",
+                        "Edge",
+                        "Application",
+                        "msedge.exe",
+                    ),
+                ]
+                edge_path = next((path for path in candidates if path and os.path.isfile(path)), None)
+                if not edge_path:
+                    return False
+                subprocess.Popen([edge_path, url], close_fds=True)
+                return True
+            if os.name == "nt" and hasattr(os, "startfile"):
+                os.startfile(url)  # type: ignore[attr-defined]
+                return True
+            return bool(webbrowser.open(url, new=1, autoraise=True))
+        except Exception as exc:
+            logger.warning("[YouTube] Browser launch failed: %s", type(exc).__name__)
+            return False
+
     def _fetch_oauth_account_email(self, creds: Optional[Any] = None) -> str:
         """Return the Google account email granted to the OAuth token, if available."""
         creds = creds or self._credentials
@@ -506,9 +691,8 @@ class YouTubeManager:
             )
             if response.status_code != 200:
                 logger.debug(
-                    "[YouTube] OAuth account email lookup failed: status=%s body=%s",
+                    "[YouTube] OAuth account email lookup failed: status=%s",
                     response.status_code,
-                    response.text[:200],
                 )
                 return ""
             payload = response.json() if response.content else {}
@@ -551,9 +735,26 @@ class YouTubeManager:
         return get_youtube_runtime_diagnostics()
 
     @staticmethod
+    def _sanitize_oauth_error(error: Any) -> str:
+        """Redact tokens, client secrets, authorization codes, and CSRF state."""
+        text = str(error or "").strip()
+        text = re.sub(
+            r"(?i)\bBearer\s+[^\s,;]+",
+            "Bearer [REDACTED]",
+            text,
+        )
+        text = re.sub(
+            r"(?i)([\"']?(?:access_token|refresh_token|client_secret|id_token|code|state)"
+            r"[\"']?\s*[:=]\s*[\"']?)([^\"',&\s}\]]+)",
+            r"\1[REDACTED]",
+            text,
+        )
+        return text
+
+    @staticmethod
     def _friendly_connection_error(error: Exception) -> str:
         """Translate common Google OAuth failures into user-actionable Korean."""
-        raw = str(error or "").strip()
+        raw = YouTubeManager._sanitize_oauth_error(error)
         lowered = raw.lower()
 
         if isinstance(error, (ImportError, ModuleNotFoundError)) or "no module named" in lowered:
@@ -583,7 +784,7 @@ class YouTubeManager:
         ):
             return (
                 "유튜브 승인을 기다리는 시간이 끝났어요.\n"
-                "다시 연결한 뒤 열린 브라우저에서 3분 안에 구글 계정 승인까지 완료해 주세요."
+                "다시 연결한 뒤 열린 브라우저에서 10분 안에 구글 계정 승인까지 완료해 주세요."
             )
         if "winerror 10013" in lowered or "address already in use" in lowered:
             return (
@@ -610,7 +811,8 @@ class YouTubeManager:
     def connect_channel(
         self,
         client_secrets_file: str = None,
-        oauth_timeout_seconds: Optional[int] = None
+        oauth_timeout_seconds: Optional[int] = None,
+        force_reauth: bool = False,
     ) -> bool:
         """
         Connect to YouTube channel using OAuth 2.0.
@@ -623,6 +825,22 @@ class YouTubeManager:
             True if connection successful
         """
         self._last_error_message = ""
+        self._last_oauth_authorization_url = ""
+        previous_credentials = self._credentials
+        previous_service = self._youtube_service
+        previous_channel = self._channel
+        candidate_state_active = False
+
+        def restore_previous_state() -> None:
+            self._credentials = previous_credentials
+            self._youtube_service = previous_service
+            self._channel = previous_channel
+            try:
+                self._save_settings()
+                self._sync_settings_manager_state()
+            except Exception:
+                pass
+
         runtime_report = get_youtube_runtime_diagnostics()
         if not runtime_report.get("ok"):
             logger.warning("[YouTube] OAuth runtime validation failed: %s", runtime_report.get("error"))
@@ -632,13 +850,15 @@ class YouTubeManager:
             self._migrate_legacy_oauth_files()
 
             # Check for existing credentials
-            token_path = self._get_token_path()
             creds = None
 
-            if os.path.exists(token_path):
-                creds = Credentials.from_authorized_user_file(token_path, self.SCOPES)
+            if not force_reauth and self._has_stored_credentials():
+                creds = self._load_stored_credentials()
+                if creds is None:
+                    logger.warning("[YouTube] Stored OAuth token is damaged; removing it for reauthentication")
+                    self._delete_stored_credentials()
                 try:
-                    has_scopes = bool(getattr(creds, "has_scopes", None))
+                    has_scopes = bool(creds and getattr(creds, "has_scopes", None))
                     if has_scopes and not creds.has_scopes(self.SCOPES):
                         logger.info("[YouTube] OAuth 권한(scope) 업데이트로 재인증이 필요합니다.")
                         creds = None
@@ -655,10 +875,7 @@ class YouTubeManager:
                         if "invalid_grant" not in str(refresh_error):
                             raise
                         logger.info("[YouTube] OAuth 토큰이 만료/폐기되어 재인증을 진행합니다.")
-                        try:
-                            os.remove(token_path)
-                        except OSError:
-                            pass
+                        self._delete_stored_credentials()
                         creds = None
 
                 if not creds or not creds.valid:
@@ -702,10 +919,25 @@ class YouTubeManager:
                     }:
                         auth_kwargs["prompt"] = "consent select_account"
 
+                    browser_name = (
+                        f"ssmaker-youtube-oauth-{id(self):x}-{threading.get_ident()}"
+                    )
+                    webbrowser.register(
+                        browser_name,
+                        None,
+                        _OAuthBrowserController(self),
+                        preferred=False,
+                    )
                     try:
                         creds = flow.run_local_server(
                             port=0,
                             timeout_seconds=timeout_seconds,
+                            authorization_prompt_message=None,
+                            success_message=(
+                                "SSMaker YouTube 채널 연결이 완료되었습니다. "
+                                "이 창을 닫고 프로그램으로 돌아가세요."
+                            ),
+                            browser=browser_name,
                             **auth_kwargs,
                         )
                     except Exception as oauth_error:
@@ -714,6 +946,10 @@ class YouTubeManager:
                             logger.warning("[YouTube] OAuth approval timed out or was cancelled")
                             return False
                         raise
+                    finally:
+                        unregister = getattr(webbrowser, "unregister", None)
+                        if callable(unregister):
+                            unregister(browser_name)
                     if creds is None:
                         self._last_error_message = (
                             "YouTube OAuth 승인이 완료되지 않았습니다. "
@@ -722,12 +958,8 @@ class YouTubeManager:
                         logger.warning("[YouTube] OAuth returned no credentials")
                         return False
 
-                # Save credentials
-                self._ensure_writable_dir(os.path.dirname(token_path))
-                with open(token_path, "w", encoding="utf-8") as token:
-                    token.write(creds.to_json())
-
             self._credentials = creds
+            candidate_state_active = True
 
             # Build YouTube service
             self._youtube_service = build(
@@ -740,20 +972,50 @@ class YouTubeManager:
             account_email = self._fetch_oauth_account_email(creds)
 
             # Get channel info
-            self._fetch_channel_info(account_email=account_email)
+            if not self._fetch_channel_info(account_email=account_email):
+                if not self._last_error_message:
+                    self._last_error_message = (
+                        "Google 계정에서 실제 YouTube 채널을 확인하지 못했습니다. "
+                        "YouTube에서 채널을 만든 뒤 다시 연결해 주세요."
+                    )
+                if force_reauth:
+                    restore_previous_state()
+                return False
             account_guard = self._account_guard_message()
             if account_guard:
                 self._last_error_message = account_guard
                 logger.warning("[YouTube] Connection account verification failed: %s", account_guard)
+                if force_reauth:
+                    restore_previous_state()
                 return False
+
+            # Commit the new token only after a real channel ID/name was verified.
+            if not self._store_credentials_securely(creds):
+                self._last_error_message = (
+                    "YouTube OAuth 토큰을 Windows 보안 저장소에 저장하지 못했습니다. "
+                    "앱을 다시 실행한 뒤 다시 연결해 주세요."
+                )
+                if force_reauth:
+                    restore_previous_state()
+                return False
+            self._sync_settings_manager_state()
+            self._sync_connected_account_registry()
 
             # Notify callback
             if self._on_connection_changed:
-                self._on_connection_changed(True)
+                try:
+                    self._on_connection_changed(True)
+                except Exception as callback_error:
+                    logger.debug(
+                        "[YouTube] Connection callback failed: %s",
+                        type(callback_error).__name__,
+                    )
 
             return True
 
         except PermissionError as e:
+            if force_reauth and candidate_state_active:
+                restore_previous_state()
             logger.error("[YouTube] Connection permission error: %s", e)
             self._last_error_message = (
                 "OAuth 파일 저장 권한이 없어 연결에 실패했습니다.\n"
@@ -761,23 +1023,26 @@ class YouTubeManager:
             )
             return False
         except Exception as e:
-            logger.error("[YouTube] Connection failed: %s", e)
+            if force_reauth and candidate_state_active:
+                restore_previous_state()
+            logger.error("[YouTube] Connection failed: %s", type(e).__name__)
             self._last_error_message = self._friendly_connection_error(e)
             return False
 
     def disconnect_channel(self) -> None:
         """Disconnect YouTube channel"""
+        channel_id = self._channel.channel_id if self._channel else ""
+
+        # Remove the account slot and its per-account secure token before
+        # clearing the in-memory channel identity.
+        self._remove_connected_account_registry(channel_id)
+
         self._credentials = None
         self._youtube_service = None
         self._channel = None
 
-        # Remove token file
-        token_path = self._get_token_path()
-        if os.path.exists(token_path):
-            try:
-                os.remove(token_path)
-            except Exception as e:
-                logger.debug(f"[YouTube] 토큰 파일 삭제 실패: {e}")
+        # Remove secure and legacy token artifacts.
+        self._delete_stored_credentials()
 
         self._save_settings()
         self._sync_settings_manager_state()
@@ -790,8 +1055,62 @@ class YouTubeManager:
             self._on_connection_changed(False)
 
     def _get_token_path(self) -> str:
-        """Get OAuth token file path"""
+        """Return the legacy plaintext OAuth token path used for migration only."""
         return os.path.join(self._get_user_data_dir(), "youtube_token.json")
+
+    def _store_credentials_securely(self, credentials: Any) -> bool:
+        """Persist Google OAuth credentials in OS keyring/encrypted fallback storage."""
+        try:
+            payload = credentials.to_json()
+            if not self._secrets_manager.set_credential(self.OAUTH_TOKEN_KEY, payload):
+                return False
+            legacy_path = self._get_token_path()
+            if os.path.exists(legacy_path):
+                self._make_path_writable(legacy_path)
+                os.remove(legacy_path)
+            return True
+        except Exception as exc:
+            logger.warning("[YouTube] Secure OAuth token save failed: %s", type(exc).__name__)
+            return False
+
+    def _load_stored_credentials(self, scopes: Optional[List[str]] = None) -> Optional[Any]:
+        """Load Google OAuth credentials without exposing token material to logs."""
+        try:
+            payload = self._secrets_manager.get_credential(self.OAUTH_TOKEN_KEY)
+            if not payload:
+                return None
+            data = json.loads(payload)
+            if not isinstance(data, dict):
+                return None
+            requested_scopes = self.SCOPES if scopes is None else scopes
+            return Credentials.from_authorized_user_info(data, requested_scopes or None)
+        except Exception as exc:
+            logger.warning("[YouTube] Secure OAuth token load failed: %s", type(exc).__name__)
+            return None
+
+    def _has_stored_credentials(self) -> bool:
+        """Return whether a non-empty OAuth token exists in secure storage."""
+        try:
+            return bool(self._secrets_manager.get_credential(self.OAUTH_TOKEN_KEY))
+        except Exception:
+            return False
+
+    def _delete_stored_credentials(self) -> bool:
+        """Remove secure and legacy OAuth token artifacts."""
+        deleted = False
+        try:
+            deleted = bool(self._secrets_manager.delete_credential(self.OAUTH_TOKEN_KEY))
+        except Exception:
+            pass
+        for path in (self._get_token_path(), self._get_legacy_token_path()):
+            try:
+                if os.path.exists(path):
+                    self._make_path_writable(path)
+                    os.remove(path)
+                    deleted = True
+            except OSError:
+                pass
+        return deleted
 
     def _get_legacy_token_path(self) -> str:
         """Legacy OAuth token path stored next to executable/project root."""
@@ -975,15 +1294,45 @@ class YouTubeManager:
 
     def _migrate_legacy_oauth_files(self) -> None:
         """Migrate OAuth artifacts from legacy app-root paths to user profile path."""
-        token_path = self._get_token_path()
-        if not os.path.exists(token_path):
-            self._copy_file_best_effort(
-                self._get_legacy_token_path(),
-                token_path,
-                "OAuth 토큰",
-            )
+        token_paths = (self._get_token_path(), self._get_legacy_token_path())
+        if not self._has_stored_credentials():
+            for token_path in token_paths:
+                if not os.path.isfile(token_path):
+                    continue
+                try:
+                    if os.path.getsize(token_path) > self.MAX_CLIENT_SECRETS_BYTES:
+                        raise ValueError("legacy token file is unexpectedly large")
+                    with open(token_path, "r", encoding="utf-8") as token_file:
+                        token_data = json.load(token_file)
+                    if not isinstance(token_data, dict) or not (
+                        token_data.get("token") or token_data.get("refresh_token")
+                    ):
+                        raise ValueError("legacy token JSON is invalid")
+                    payload = json.dumps(token_data, ensure_ascii=False)
+                    if not self._secrets_manager.set_credential(self.OAUTH_TOKEN_KEY, payload):
+                        raise OSError("secure credential store rejected the token")
+                    logger.info("[YouTube] Legacy OAuth token migrated to secure storage")
+                    break
+                except Exception as exc:
+                    logger.warning(
+                        "[YouTube] Legacy OAuth token migration skipped: %s",
+                        type(exc).__name__,
+                    )
+
+        if self._has_stored_credentials():
+            for token_path in token_paths:
+                try:
+                    if os.path.exists(token_path):
+                        self._make_path_writable(token_path)
+                        os.remove(token_path)
+                except OSError as exc:
+                    logger.warning(
+                        "[YouTube] Plaintext OAuth token cleanup failed: %s",
+                        type(exc).__name__,
+                    )
 
         if self._load_client_secret_config_securely():
+            self._delete_legacy_client_secret_files()
             return
 
         for legacy_path in (
@@ -997,12 +1346,26 @@ class YouTubeManager:
             if not config:
                 continue
             if self._store_client_secret_config_securely(config):
-                try:
+                self._delete_legacy_client_secret_files()
+                break
+
+    def _delete_legacy_client_secret_files(self) -> None:
+        """Remove app-managed plaintext OAuth client JSON after secure storage."""
+        legacy_paths = {
+            os.path.abspath(self._get_client_secrets_path()),
+            os.path.abspath(self._get_legacy_managed_client_secrets_path()),
+            os.path.abspath(self._get_legacy_client_secrets_path()),
+        }
+        for legacy_path in legacy_paths:
+            try:
+                if os.path.isfile(legacy_path):
                     self._make_path_writable(legacy_path)
                     os.remove(legacy_path)
-                except Exception:
-                    pass
-                break
+            except OSError as exc:
+                logger.warning(
+                    "[YouTube] Plaintext OAuth client cleanup failed: %s",
+                    type(exc).__name__,
+                )
 
     def _protect_credentials_file(self, path: str) -> None:
         """Apply basic protection flags to credentials file."""
@@ -1077,22 +1440,20 @@ class YouTubeManager:
         if not self._store_client_secret_config_securely(config):
             raise OSError("OAuth JSON을 안전 저장소에 저장하지 못했습니다.")
 
-        # Remove plaintext managed file if it exists.
+        # Remove every app-managed plaintext legacy copy. The user-selected
+        # source file is left untouched unless it is itself one of those known
+        # legacy locations.
         destination_abs = os.path.abspath(self._get_client_secrets_path())
-        try:
-            if os.path.exists(destination_abs):
-                self._make_path_writable(destination_abs)
-                os.remove(destination_abs)
-        except Exception:
-            pass
+        self._delete_legacy_client_secret_files()
 
         logger.info("[YouTube] OAuth JSON securely stored (keyring/encrypted storage)")
         return destination_abs
 
-    def _fetch_channel_info(self, account_email: str = "") -> None:
-        """Fetch connected channel information"""
+    def _fetch_channel_info(self, account_email: str = "") -> bool:
+        """Fetch and persist a real channel; never accept an empty API response."""
         if not self._youtube_service:
-            return
+            self._last_error_message = "YouTube API 서비스를 시작하지 못했습니다."
+            return False
 
         try:
             response = self._youtube_service.channels().list(
@@ -1100,29 +1461,97 @@ class YouTubeManager:
                 mine=True
             ).execute()
 
-            if response.get("items"):
-                item = response["items"][0]
-                snippet = item.get("snippet", {})
-                stats = item.get("statistics", {})
-                previous_email = self._channel.account_email if self._channel else ""
-                account_email = str(account_email or previous_email or "").strip().lower()
-
-                self._channel = YouTubeChannel(
-                    channel_id=item.get("id", ""),
-                    channel_name=snippet.get("title", ""),
-                    account_email=account_email,
-                    thumbnail_url=snippet.get("thumbnails", {}).get("default", {}).get("url", ""),
-                    subscriber_count=stats.get("subscriberCount", "0"),
-                    video_count=stats.get("videoCount", "0"),
-                    connected_at=datetime.now().isoformat()
+            items = response.get("items") if isinstance(response, dict) else None
+            if not isinstance(items, list) or not items:
+                self._last_error_message = (
+                    "선택한 Google 계정에서 YouTube 채널을 찾지 못했습니다. "
+                    "YouTube에서 채널을 만든 뒤 다시 연결해 주세요."
                 )
+                return False
 
-                self._save_settings()
-                self._sync_settings_manager_state()
-                logger.info(f"[YouTube] 채널 연결: {self._channel.channel_name}")
+            item = items[0] if isinstance(items[0], dict) else {}
+            snippet = item.get("snippet", {}) if isinstance(item.get("snippet"), dict) else {}
+            stats = item.get("statistics", {}) if isinstance(item.get("statistics"), dict) else {}
+            channel_id = str(item.get("id", "") or "").strip()
+            channel_name = str(snippet.get("title", "") or "").strip()
+            if not channel_id or not channel_name:
+                self._last_error_message = (
+                    "YouTube가 채널 ID 또는 채널명을 반환하지 않았습니다. 잠시 후 다시 연결해 주세요."
+                )
+                return False
+
+            previous_email = self._channel.account_email if self._channel else ""
+            account_email = str(account_email or previous_email or "").strip().lower()
+
+            self._channel = YouTubeChannel(
+                channel_id=channel_id,
+                channel_name=channel_name,
+                account_email=account_email,
+                thumbnail_url=snippet.get("thumbnails", {}).get("default", {}).get("url", ""),
+                subscriber_count=stats.get("subscriberCount", "0"),
+                video_count=stats.get("videoCount", "0"),
+                connected_at=datetime.now().isoformat(),
+            )
+
+            self._save_settings()
+            self._sync_settings_manager_state()
+            logger.info("[YouTube] 채널 연결 확인 완료")
+            return True
 
         except Exception as e:
-            logger.error(f"[YouTube] 채널 정보 조회 실패: {e}")
+            logger.error("[YouTube] 채널 정보 조회 실패: %s", type(e).__name__)
+            self._last_error_message = self._friendly_connection_error(e)
+            return False
+
+    def _sync_connected_account_registry(self) -> bool:
+        """Reflect a verified YouTube channel in the shared 0/5 account slots."""
+        if not self._channel or not self._channel.channel_id or not self._channel.channel_name:
+            return False
+        try:
+            from managers.account_registry import AccountRegistry, secure_account_token_key
+
+            registry = AccountRegistry()
+            account = registry.upsert_connected_channel(
+                platform="youtube",
+                channel_id=self._channel.channel_id,
+                name=self._channel.channel_name,
+                account_email=self._channel.account_email,
+                credential_key=self.OAUTH_TOKEN_KEY,
+            )
+            payload = self._secrets_manager.get_credential(self.OAUTH_TOKEN_KEY)
+            if payload:
+                account_key = secure_account_token_key("youtube", account.id)
+                if self._secrets_manager.set_credential(account_key, payload):
+                    registry.update(account.id, credential_key=account_key)
+            return True
+        except Exception as exc:
+            logger.warning(
+                "[YouTube] Connected account slot sync failed: %s",
+                type(exc).__name__,
+            )
+            return False
+
+    def _remove_connected_account_registry(self, channel_id: str) -> bool:
+        """Remove a disconnected YouTube channel and its scoped secure token."""
+        channel_id = str(channel_id or "").strip()
+        if not channel_id:
+            return False
+        try:
+            from managers.account_registry import AccountRegistry, secure_account_token_key
+
+            registry = AccountRegistry()
+            removed_accounts = registry.remove_connected_channel("youtube", channel_id)
+            for account in removed_accounts:
+                expected_key = secure_account_token_key("youtube", account.id)
+                if account.credential_key == expected_key:
+                    self._secrets_manager.delete_credential(expected_key)
+            return bool(removed_accounts)
+        except Exception as exc:
+            logger.warning(
+                "[YouTube] Disconnected account slot cleanup failed: %s",
+                type(exc).__name__,
+            )
+            return False
 
     def _ensure_youtube_service(self) -> bool:
         """
@@ -1138,9 +1567,21 @@ class YouTubeManager:
 
         try:
             self._migrate_legacy_oauth_files()
-            token_path = self._get_token_path()
-            if not os.path.exists(token_path):
-                logger.warning("[YouTube] OAuth 토큰이 없어 업로드를 시작할 수 없습니다.")
+            had_stored_credentials = self._has_stored_credentials()
+            creds = self._load_stored_credentials()
+            if creds is None:
+                if had_stored_credentials:
+                    self._delete_stored_credentials()
+                    self._last_error_message = (
+                        "저장된 YouTube 인증 정보가 손상되어 안전하게 제거했습니다. "
+                        "YouTube 채널을 다시 연결해 주세요."
+                    )
+                    self._credentials = None
+                    self._youtube_service = None
+                    self._sync_settings_manager_state()
+                    logger.warning("[YouTube] Damaged OAuth token removed from secure storage")
+                else:
+                    logger.warning("[YouTube] OAuth 토큰이 없어 업로드를 시작할 수 없습니다.")
                 return False
 
             def _refresh_if_needed(creds: Any) -> bool:
@@ -1148,16 +1589,13 @@ class YouTubeManager:
                     return True
                 if creds.expired and creds.refresh_token:
                     creds.refresh(Request())
-                    try:
-                        with open(token_path, "w", encoding="utf-8") as token:
-                            token.write(creds.to_json())
-                    except Exception as save_err:
-                        logger.debug("[YouTube] 갱신 토큰 저장 실패: %s", save_err)
-                    return True
+                    if not self._store_credentials_securely(creds):
+                        logger.warning("[YouTube] 갱신된 OAuth 토큰을 안전하게 저장하지 못했습니다.")
+                        return False
+                    return bool(creds.valid)
                 logger.warning("[YouTube] OAuth 토큰이 유효하지 않습니다. 채널을 다시 연결해주세요.")
                 return False
 
-            creds = Credentials.from_authorized_user_file(token_path, self.SCOPES)
             try:
                 if not _refresh_if_needed(creds):
                     return False
@@ -1167,14 +1605,25 @@ class YouTubeManager:
                 logger.warning(
                     "[YouTube] OAuth 토큰 scope가 기존 연결과 달라 저장된 scope로 복원합니다."
                 )
-                creds = Credentials.from_authorized_user_file(token_path)
+                creds = self._load_stored_credentials(scopes=[])
+                if creds is None:
+                    return False
                 if not _refresh_if_needed(creds):
                     return False
 
             self._credentials = creds
-            self._youtube_service = build("youtube", "v3", credentials=creds)
+            self._youtube_service = build(
+                "youtube",
+                "v3",
+                credentials=creds,
+                cache_discovery=False,
+                static_discovery=True,
+            )
             if not self._channel or not self._channel.channel_id:
-                self._fetch_channel_info(account_email=self._fetch_oauth_account_email(creds))
+                if not self._fetch_channel_info(
+                    account_email=self._fetch_oauth_account_email(creds)
+                ):
+                    return False
             elif not self._channel.account_email:
                 account_email = self._fetch_oauth_account_email(creds)
                 if account_email:
@@ -1184,12 +1633,21 @@ class YouTubeManager:
             return self._youtube_service is not None
         except Exception as e:
             if "invalid_grant" in str(e).lower():
-                logger.warning("[YouTube] OAuth 토큰이 만료/폐기되었습니다. 채널을 다시 연결해주세요.")
+                self._last_error_message = (
+                    "저장된 YouTube 인증이 만료되었거나 취소되었습니다. "
+                    "YouTube 채널을 다시 연결해 주세요."
+                )
+                logger.warning("[YouTube] OAuth token expired or was revoked; reconnect required")
                 try:
                     self.disconnect_channel()
                 except Exception:
                     pass
-            logger.warning("[YouTube] 저장된 토큰으로 서비스 복원 실패: %s", e)
+            elif not self._last_error_message:
+                self._last_error_message = self._friendly_connection_error(e)
+            logger.warning(
+                "[YouTube] Saved OAuth token restore failed: %s",
+                type(e).__name__,
+            )
             return False
 
     # ============ Upload Settings ============

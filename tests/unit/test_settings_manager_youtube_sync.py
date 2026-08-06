@@ -3,7 +3,7 @@ import json
 from managers.settings_manager import SettingsManager
 
 
-def test_youtube_connection_syncs_from_token_and_channel_files(monkeypatch, tmp_path):
+def test_youtube_connection_syncs_from_secure_token_and_channel_file(monkeypatch, tmp_path):
     monkeypatch.setattr(SettingsManager, "_get_settings_dir", lambda self: str(tmp_path))
     monkeypatch.setattr(
         SettingsManager,
@@ -11,7 +11,15 @@ def test_youtube_connection_syncs_from_token_and_channel_files(monkeypatch, tmp_
         lambda self: str(tmp_path / "legacy_ui_preferences.json"),
     )
 
-    (tmp_path / "youtube_token.json").write_text('{"token": "demo"}', encoding="utf-8")
+    secure_store = type(
+        "SecureStore",
+        (),
+        {"get_credential": lambda self, key: '{"token":"demo"}'},
+    )()
+    monkeypatch.setattr(
+        "managers.settings_manager.get_secrets_manager",
+        lambda: secure_store,
+    )
     (tmp_path / "youtube_settings.json").write_text(
         json.dumps(
             {

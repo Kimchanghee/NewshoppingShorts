@@ -17,6 +17,7 @@ from managers.settings_manager import get_settings_manager
 from managers.summer_coupang_queue_status import build_summer_coupang_queue_snapshot
 from ui.components.custom_dialog import show_info, show_question, show_warning
 from utils.logging_config import get_logger
+from utils.secrets_manager import get_secrets_manager
 
 logger = get_logger(__name__)
 
@@ -198,6 +199,11 @@ class QueueManager:
 
     @staticmethod
     def _youtube_upload_token_exists() -> bool:
+        try:
+            if get_secrets_manager().get_credential("youtube_oauth_token_json_v1"):
+                return True
+        except Exception:
+            pass
         return (Path.home() / ".ssmaker" / "youtube_token.json").exists()
 
     def _find_queue_key_by_display(self, display_value: str) -> str:

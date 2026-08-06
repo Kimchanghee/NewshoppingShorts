@@ -10,6 +10,9 @@ import threading
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
+from utils.secrets_manager import get_secrets_manager
+
+YOUTUBE_OAUTH_TOKEN_KEY = "youtube_oauth_token_json_v1"
 
 logger = get_logger(__name__)
 
@@ -843,7 +846,9 @@ class SettingsManager:
         try:
             settings_dir = self._get_settings_dir()
             token_path = os.path.join(settings_dir, "youtube_token.json")
-            token_exists = os.path.exists(token_path) and os.path.getsize(token_path) > 0
+            token_exists = bool(
+                get_secrets_manager().get_credential(YOUTUBE_OAUTH_TOKEN_KEY)
+            ) or (os.path.exists(token_path) and os.path.getsize(token_path) > 0)
 
             channel: Dict[str, Any] = {}
             upload_settings: Dict[str, Any] = {}

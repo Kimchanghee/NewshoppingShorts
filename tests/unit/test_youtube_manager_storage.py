@@ -110,8 +110,8 @@ def test_migrate_legacy_oauth_files_to_user_profile(tmp_path):
 
     manager._migrate_legacy_oauth_files()
 
-    assert token_path.exists()
-    assert '"token": "legacy"' in token_path.read_text(encoding="utf-8")
+    assert not token_path.exists()
+    assert json.loads(secure_store[manager.OAUTH_TOKEN_KEY])["token"] == "legacy"
     stored_config = json.loads(secure_store[manager.CLIENT_SECRETS_KEY])
     assert stored_config["installed"]["client_id"] == "legacy.apps.googleusercontent.com"
     assert not secret_path.exists()
@@ -239,6 +239,11 @@ def test_sync_settings_preserves_existing_youtube_account_email_when_channel_ema
         account_email="",
     )
     manager._upload_settings = AutoUploadSettings(enabled=True)
+    manager._secrets_manager = type(
+        "StoredToken",
+        (),
+        {"get_credential": lambda self, key: '{"token":"stored"}'},
+    )()
 
     token_path = tmp_path / "youtube_token.json"
     token_path.write_text("{}", encoding="utf-8")
