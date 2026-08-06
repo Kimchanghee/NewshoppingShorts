@@ -2,21 +2,15 @@
 """
 Multi-account registry (TRIAL) for SSMaker.
 
-Additive, standalone data layer for managing up to 10 upload account
-profiles across YouTube / Instagram. It does NOT modify the existing
-single-account managers (youtube_manager / instagram_manager). It only
-persists account profile metadata + niche routing to
-``~/.ssmaker/accounts.json`` so the multi-account console UI has
-something to read and write.
-
-OAuth/token wiring per account is intentionally out of scope for this
-trial — this layer just records which accounts exist, their niche, and
-their per-lane stagger offset. Removing this file + the console panel
-fully reverts the trial.
+Registry for up to 5 upload account profiles across YouTube / Instagram.
+It stores non-sensitive channel metadata and secure-store credential keys in
+``~/.ssmaker/accounts.json``. OAuth token material remains in the OS keyring or
+encrypted fallback storage and is never written into this registry.
 """
 from __future__ import annotations
 
 import json
+import hashlib
 import os
 import re
 import threading
@@ -24,9 +18,16 @@ import time
 from dataclasses import asdict, dataclass, field
 from typing import Dict, List, Optional
 
-MAX_ACCOUNTS = 10
+MAX_ACCOUNTS = 5
 PLATFORMS = ("youtube", "instagram")
 DEFAULT_STAGGER_MINUTES = 8
+
+
+def secure_account_token_key(platform: str, account_id: str) -> str:
+    """Return a bounded keyring identifier without embedding user-controlled text."""
+    platform = re.sub(r"[^a-z0-9]", "", str(platform or "").lower()) or "social"
+    digest = hashlib.sha256(str(account_id or "").encode("utf-8")).hexdigest()[:32]
+    return f"{platform}_oauth_{digest}_v1"
 
 
 def data_dir() -> str:
@@ -55,11 +56,14 @@ class Account:
     title_prompt: str = ""
     hashtag_prompt: str = ""
     connected: bool = False      # 실제 채널 로그인(OAuth) 연동 여부
+    channel_id: str = ""          # YouTube/Instagram external channel identifier
+    account_email: str = ""       # OAuth account email when available
+    credential_key: str = ""      # secure-store key; never contains token material
     queue: list = field(default_factory=list)  # 이 계정 전용 대기열: [{title,time,status}]
 
     @property
     def token_path(self) -> str:
-        """Where this account's OAuth token WOULD live (follow-up work)."""
+        """Deprecated legacy path; new OAuth tokens use ``credential_key``."""
         return os.path.join(data_dir(), f"{self.platform}_token_{self.id}.json")
 
 
@@ -162,6 +166,44 @@ class AccountRegistry:
             self.save()
             return acc
 
+    def upsert_connected_channel(
+        self,
+        platform: str,
+        channel_id: str,
+        name: str,
+        account_email: str = "",
+        credential_key: str = "",
+    ) -> Account:
+        """Create/update the slot backed by a verified OAuth channel."""
+        platform = str(platform or "").strip().lower()
+        channel_id = str(channel_id or "").strip()
+        name = str(name or "").strip()
+        account_email = str(account_email or "").strip().lower()
+        credential_key = str(credential_key or "").strip()
+        if platform not in PLATFORMS:
+            raise ValueError(f"지원하지 않는 플랫폼입니다: {platform}")
+        if not channel_id or not name:
+            raise ValueError("연결된 채널 ID와 채널명이 필요합니다.")
+
+        with self._lock:
+            for account in self._accounts:
+                if account.platform == platform and account.channel_id == channel_id:
+                    account.name = name
+                    account.account_email = account_email
+                    account.credential_key = credential_key
+                    account.connected = True
+                    account.status = "ok"
+                    self.save()
+                    return account
+            return self.add(
+                platform=platform,
+                name=name,
+                connected=True,
+                channel_id=channel_id,
+                account_email=account_email,
+                credential_key=credential_key,
+            )
+
     def update(self, account_id: str, **fields) -> Optional[Account]:
         with self._lock:
             acc = self.get(account_id)
@@ -182,6 +224,28 @@ class AccountRegistry:
             if changed:
                 self.save()
             return changed
+
+    def remove_connected_channel(self, platform: str, channel_id: str) -> List[Account]:
+        """Remove and return profiles for one verified external channel."""
+        platform = str(platform or "").strip().lower()
+        channel_id = str(channel_id or "").strip()
+        if platform not in PLATFORMS or not channel_id:
+            return []
+
+        with self._lock:
+            removed = [
+                account
+                for account in self._accounts
+                if account.platform == platform and account.channel_id == channel_id
+            ]
+            if not removed:
+                return []
+            removed_ids = {account.id for account in removed}
+            self._accounts = [
+                account for account in self._accounts if account.id not in removed_ids
+            ]
+            self.save()
+            return removed
 
     # ---------- per-account queue (대기열) ----------
     def add_queue_item(self, account_id: str, title: str, time: str = "", status: str = "대기") -> bool:
