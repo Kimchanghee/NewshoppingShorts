@@ -203,6 +203,7 @@ async def submit_registration_request(
         db.add(session)
 
         # 감사 로그용으로 registration_requests에도 기록 (APPROVED 상태)
+        consented_at = datetime.now(timezone.utc)
         registration_request = RegistrationRequest(
             name=data.name,
             username=username_clean,
@@ -210,6 +211,12 @@ async def submit_registration_request(
             contact=data.contact,
             email=data.email,
             ym_news_opt_in=bool(data.ym_news_opt_in),
+            terms_accepted=True,
+            privacy_accepted=True,
+            terms_version=data.terms_version,
+            privacy_version=data.privacy_version,
+            terms_accepted_at=consented_at,
+            privacy_accepted_at=consented_at,
             status=RequestStatus.APPROVED,
             reviewed_at=datetime.now(timezone.utc),
         )

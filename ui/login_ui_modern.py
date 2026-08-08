@@ -11,7 +11,7 @@ import sys
 from pathlib import Path
 
 from PyQt6 import QtCore, QtGui, QtWidgets
-from PyQt6.QtCore import Qt, pyqtSignal, QThread
+from PyQt6.QtCore import Qt, QUrl, pyqtSignal, QThread
 from PyQt6.QtWidgets import (
     QMainWindow,
     QWidget,
@@ -26,7 +26,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QScrollArea,
 )
-from PyQt6.QtGui import QFont, QIcon, QPixmap
+from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QPixmap
 
 from ui.design_system_v2 import get_design_system, ColorPalette
 from ui.components.custom_dialog import show_info, show_warning, show_error, show_success
@@ -89,6 +89,9 @@ def apply_visible_line_edit_style(
 
 FONT_FAMILY = "맑은 고딕"
 logger = logging.getLogger(__name__)
+LEGAL_DOCUMENT_VERSION = "2026-08-08"
+PRIVACY_POLICY_URL = "https://newshopping-shorts-auth.vercel.app/privacy"
+TERMS_OF_SERVICE_URL = "https://newshopping-shorts-auth.vercel.app/terms"
 
 
 def _read_app_version() -> str:
@@ -709,7 +712,62 @@ class RegistrationRequestDialog(QWidget):
         self._apply_input_style(self.contactEdit)
         form_layout.addWidget(self.contactEdit)
 
-        form_layout.addSpacing(8)
+        form_layout.addSpacing(6)
+
+        consent_title = _field_label("필수 동의")
+        form_layout.addWidget(consent_title)
+
+        def _consent_row(
+            checkbox: QCheckBox, label_html: str
+        ) -> tuple[QHBoxLayout, QLabel]:
+            row = QHBoxLayout()
+            row.setSpacing(7)
+            checkbox.setCursor(Qt.CursorShape.PointingHandCursor)
+            checkbox.setAccessibleName(label_html.replace("<a href='#'>", "").replace("</a>", ""))
+            row.addWidget(checkbox, alignment=Qt.AlignmentFlag.AlignTop)
+            label = QLabel(label_html, form_container)
+            label.setTextFormat(Qt.TextFormat.RichText)
+            label.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
+            label.setOpenExternalLinks(False)
+            label.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
+            label.setStyleSheet(
+                f"color:{login_color('text_secondary')}; background:transparent;"
+                f"link-color:{login_color('primary')};"
+            )
+            label.setWordWrap(True)
+            row.addWidget(label, 1)
+            return row, label
+
+        self.termsConsentCheckBox = QCheckBox(form_container)
+        terms_row, self.termsLinkLabel = _consent_row(
+            self.termsConsentCheckBox,
+            "[필수] <a href='#'>서비스 이용약관</a>에 동의합니다.",
+        )
+        self.termsLinkLabel.linkActivated.connect(
+            lambda _href: QDesktopServices.openUrl(QUrl(TERMS_OF_SERVICE_URL))
+        )
+        form_layout.addLayout(terms_row)
+
+        self.privacyConsentCheckBox = QCheckBox(form_container)
+        privacy_row, self.privacyLinkLabel = _consent_row(
+            self.privacyConsentCheckBox,
+            "[필수] <a href='#'>개인정보 수집·이용 및 처리방침</a>에 동의합니다.",
+        )
+        self.privacyLinkLabel.linkActivated.connect(
+            lambda _href: QDesktopServices.openUrl(QUrl(PRIVACY_POLICY_URL))
+        )
+        form_layout.addLayout(privacy_row)
+
+        consent_help = QLabel(
+            "각 문서는 웹사이트에서 전문을 확인할 수 있으며, 필수 동의는 각각 선택합니다.",
+            form_container,
+        )
+        consent_help.setWordWrap(True)
+        consent_help.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
+        consent_help.setStyleSheet(
+            f"color:{login_color('text_muted')}; background:transparent; padding-bottom:4px;"
+        )
+        form_layout.addWidget(consent_help)
 
         self.submitButton = QPushButton(form_container)
         self.submitButton.setMinimumHeight(ds.button_sizes["lg"].height)
@@ -751,6 +809,8 @@ class RegistrationRequestDialog(QWidget):
         self.passwordEdit.textChanged.connect(self._validate_form)
         self.passwordConfirmEdit.textChanged.connect(self._validate_form)
         self.contactEdit.textChanged.connect(self._validate_form)
+        self.termsConsentCheckBox.toggled.connect(self._validate_form)
+        self.privacyConsentCheckBox.toggled.connect(self._validate_form)
 
     def _validate_form(self):
         """Update realtime hints. Final validation runs on submit."""
@@ -845,6 +905,21 @@ class RegistrationRequestDialog(QWidget):
             issues.append(("연락처", "연락처를 입력해주세요.", self.contactEdit, "missing"))
         elif len(contact) < 10:
             issues.append(("연락처", "올바른 연락처를 입력해주세요.", self.contactEdit, "invalid"))
+
+        if not self.termsConsentCheckBox.isChecked():
+            issues.append((
+                "서비스 이용약관 동의",
+                "서비스 이용약관을 확인하고 동의해주세요.",
+                self.termsConsentCheckBox,
+                "missing",
+            ))
+        if not self.privacyConsentCheckBox.isChecked():
+            issues.append((
+                "개인정보 수집·이용 동의",
+                "개인정보 수집·이용 내용을 확인하고 동의해주세요.",
+                self.privacyConsentCheckBox,
+                "missing",
+            ))
 
         return issues
 
@@ -952,6 +1027,10 @@ class RegistrationRequestDialog(QWidget):
                 password=password,
                 contact=contact,
                 email=email,
+                terms_accepted=self.termsConsentCheckBox.isChecked(),
+                privacy_accepted=self.privacyConsentCheckBox.isChecked(),
+                terms_version=LEGAL_DOCUMENT_VERSION,
+                privacy_version=LEGAL_DOCUMENT_VERSION,
             )
             if result.get("success"):
                 show_success(self, "완료", "회원가입이 완료되었습니다! 바로 로그인해주세요.")
@@ -994,6 +1073,8 @@ class RegistrationRequestDialog(QWidget):
         self.passwordEdit.clear()
         self.passwordConfirmEdit.clear()
         self.contactEdit.clear()
+        self.termsConsentCheckBox.setChecked(False)
+        self.privacyConsentCheckBox.setChecked(False)
         self._username_available = False
         self.usernameStatusLabel.setText("")
         self.submitButton.setEnabled(True)

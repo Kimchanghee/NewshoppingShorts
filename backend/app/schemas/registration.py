@@ -5,7 +5,7 @@ Registration Request Schemas
 Pydantic 모델을 사용한 요청/응답 검증
 """
 from pydantic import BaseModel, ConfigDict, Field, field_validator
-from typing import Optional, List
+from typing import Literal, Optional, List
 from datetime import datetime
 from enum import Enum
 import re
@@ -29,6 +29,16 @@ class RegistrationRequestCreate(BaseModel):
         False,
         description="Consent to receive YM program news/info emails.",
     )
+    terms_accepted: Literal[True] = Field(
+        ...,
+        description="Required consent to the service terms.",
+    )
+    privacy_accepted: Literal[True] = Field(
+        ...,
+        description="Required consent to personal-information collection and use.",
+    )
+    terms_version: str = Field(..., min_length=10, max_length=32)
+    privacy_version: str = Field(..., min_length=10, max_length=32)
     program_type: Optional[str] = Field("ssmaker", description="프로그램 유형 (ssmaker/stmaker)")
 
     @field_validator('password')
@@ -88,6 +98,12 @@ class RegistrationRequestResponse(BaseModel):
     username: str
     email: Optional[str] = None
     ym_news_opt_in: bool = False
+    terms_accepted: bool = False
+    privacy_accepted: bool = False
+    terms_version: Optional[str] = None
+    privacy_version: Optional[str] = None
+    terms_accepted_at: Optional[datetime] = None
+    privacy_accepted_at: Optional[datetime] = None
     contact: str
     status: RequestStatusEnum
     created_at: datetime

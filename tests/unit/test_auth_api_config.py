@@ -182,6 +182,10 @@ def test_registration_request_sends_ssmaker_program_type(monkeypatch):
         "Password123",
         "010-1234-5678",
         "tester@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
+        terms_version="2026-08-08",
+        privacy_version="2026-08-08",
     )
 
     assert result["success"] is True
@@ -226,6 +230,10 @@ def test_registration_retries_stale_404_endpoint(monkeypatch):
         "Password123",
         "010-1234-5678",
         "tester@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
+        terms_version="2026-08-08",
+        privacy_version="2026-08-08",
     )
 
     assert calls == [
@@ -259,6 +267,10 @@ def test_registration_reports_deployment_disabled_402(monkeypatch):
         "Password123",
         "010-1234-5678",
         "tester@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
+        terms_version="2026-08-08",
+        privacy_version="2026-08-08",
     )
 
     assert result["success"] is False

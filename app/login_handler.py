@@ -30,6 +30,9 @@ class LoginHandler:
 
     def __init__(self, app: "VideoAnalyzerGUI"):
         self.app = app
+        self._terminal_lock = threading.Lock()
+        self._terminal_handled = False
+        self._watch_thread: threading.Thread | None = None
 
     def _extract_login_user_and_token(self) -> tuple[object, str]:
         """Extract user_id and JWT token from login_data safely."""
@@ -49,6 +52,9 @@ class LoginHandler:
         """로그인 상태 감시 시작 및 신규 사용자 자동 체험판 신청"""
         if not self.app.login_data:
             logger.warning("[LoginHandler] No login data available, skipping watch start")
+            return
+        if self._watch_thread is not None and self._watch_thread.is_alive():
+            logger.debug("[LoginHandler] Login watch is already running")
             return
 
         # 신규 사용자 자동 체험판 신청 로직
@@ -73,9 +79,15 @@ class LoginHandler:
 
         self._start_account_settings_sync()
 
+        with self._terminal_lock:
+            self._terminal_handled = False
         self.app._login_watch_stop = False
-        t = threading.Thread(target=self._login_watch_loop, daemon=True)
-        t.start()
+        self._watch_thread = threading.Thread(
+            target=self._login_watch_loop,
+            name="ssmaker-login-watch",
+            daemon=True,
+        )
+        self._watch_thread.start()
 
     def _start_account_settings_sync(self) -> None:
         """Load/save Settings tab values against the authenticated account."""
@@ -181,6 +193,7 @@ class LoginHandler:
 
                 if st == "AUTH_REQUIRED":
                     logger.warning("[watch_loop] Auth token missing/expired (AUTH_REQUIRED)")
+                    self.app._login_watch_stop = True
                     cb_signal = getattr(self.app, 'ui_callback_signal', None)
                     if cb_signal is not None:
                         cb_signal.emit(self._on_auth_required)
@@ -190,6 +203,7 @@ class LoginHandler:
 
                 if st == "EU003":
                     logger.warning("[watch_loop] Duplicate login detected (EU003)")
+                    self.app._login_watch_stop = True
                     # 스레드 안전 UI 콜백 (ui_callback_signal 사용)
                     cb_signal = getattr(self.app, 'ui_callback_signal', None)
                     if cb_signal is not None:
@@ -199,6 +213,7 @@ class LoginHandler:
                     break
                 elif st == "EU004":
                     logger.error("[watch_loop] Force close command received (EU004)")
+                    self.app._login_watch_stop = True
                     cb_signal = getattr(self.app, 'ui_callback_signal', None)
                     if cb_signal is not None:
                         cb_signal.emit(lambda: self.error_program_force_close("EU004"))
@@ -238,8 +253,21 @@ class LoginHandler:
         else:
             QTimer.singleShot(0, lambda: topbar.update_connection_status(connected))
 
+    def _claim_terminal_state(self, reason: str) -> bool:
+        """Atomically allow exactly one terminal-session dialog and exit."""
+        with self._terminal_lock:
+            if self._terminal_handled:
+                logger.debug("[LoginHandler] Suppressed repeated terminal state: %s", reason)
+                return False
+            self._terminal_handled = True
+            self.app._login_watch_stop = True
+            logger.warning("[LoginHandler] Entering terminal session state: %s", reason)
+            return True
+
     def _on_auth_required(self):
         """토큰 만료/유실 등으로 세션 확인이 불가능할 때 사용자에게 안내 후 종료."""
+        if not self._claim_terminal_state("AUTH_REQUIRED"):
+            return
         try:
             show_warning(
                 self.app,
@@ -301,6 +329,8 @@ class LoginHandler:
     def exit_program_other_place(self, status: str):
         """다른 장소에서 로그인(EU003) → 알림 후 종료"""
         if status == "EU003":
+            if not self._claim_terminal_state(status):
+                return
             try:
                 show_warning(
                     self.app,
@@ -314,6 +344,8 @@ class LoginHandler:
     def error_program_force_close(self, status: str):
         """서버에서 강제 종료(EU004) → 알림 후 종료"""
         if status == "EU004":
+            if not self._claim_terminal_state(status):
+                return
             try:
                 show_error(self.app, "오류", "오류로 인해 프로그램을 종료합니다.")
             except Exception as e:

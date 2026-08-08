@@ -9,6 +9,10 @@ def _base_registration_payload() -> dict:
         "contact": "010-1234-5678",
         "email": "tester@example.com",
         "program_type": "ssmaker",
+        "terms_accepted": True,
+        "privacy_accepted": True,
+        "terms_version": "2026-08-08",
+        "privacy_version": "2026-08-08",
     }
 
 
@@ -22,3 +26,14 @@ def test_registration_payload_accepts_ym_news_opt_in_true():
     payload["ym_news_opt_in"] = True
     model = RegistrationRequestCreate(**payload)
     assert model.ym_news_opt_in is True
+
+
+def test_registration_payload_rejects_missing_required_legal_consent():
+    import pytest
+    from pydantic import ValidationError
+
+    payload = _base_registration_payload()
+    payload["privacy_accepted"] = False
+
+    with pytest.raises(ValidationError):
+        RegistrationRequestCreate(**payload)

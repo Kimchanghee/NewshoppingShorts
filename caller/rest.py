@@ -982,6 +982,10 @@ def loginCheck(**data) -> Dict[str, Any]:
             timeout=60,
         )
         _reset_dns_failure_state()
+        if response.status_code in (401, 403):
+            logger.info("Login check requires authentication again (HTTP %s)", response.status_code)
+            _set_auth_token(None)
+            return {"status": "AUTH_REQUIRED", "message": "Session expired"}
         response.raise_for_status()
         loginObject = json.loads(response.text)
         return loginObject
@@ -1041,7 +1045,16 @@ def getVersion() -> str:
 
 
 def submitRegistrationRequest(
-    name: str, username: str, password: str, contact: str, email: str
+    name: str,
+    username: str,
+    password: str,
+    contact: str,
+    email: str,
+    *,
+    terms_accepted: bool = False,
+    privacy_accepted: bool = False,
+    terms_version: str = "",
+    privacy_version: str = "",
 ) -> Dict[str, Any]:
     """
     Submit a registration request to the server.
@@ -1086,6 +1099,17 @@ def submitRegistrationRequest(
             "message": "올바른 이메일 주소를 입력해주세요.",
         }
 
+    if not terms_accepted or not privacy_accepted:
+        return {
+            "success": False,
+            "message": "서비스 이용약관과 개인정보 수집·이용에 각각 동의해주세요.",
+        }
+    if not terms_version.strip() or not privacy_version.strip():
+        return {
+            "success": False,
+            "message": "동의한 약관 버전을 확인할 수 없습니다. 프로그램을 업데이트한 뒤 다시 시도해주세요.",
+        }
+
     body = {
         "name": name.strip(),
         "username": username.strip().lower(),
@@ -1093,6 +1117,10 @@ def submitRegistrationRequest(
         "contact": contact_clean,
         "email": email.strip(),
         "program_type": "ssmaker",
+        "terms_accepted": True,
+        "privacy_accepted": True,
+        "terms_version": terms_version.strip(),
+        "privacy_version": privacy_version.strip(),
     }
 
     try:

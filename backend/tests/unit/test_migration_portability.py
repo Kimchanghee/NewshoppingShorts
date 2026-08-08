@@ -37,7 +37,18 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
 
     assert {"users", "admin_sessions", "work_usages", "system_settings"} <= tables
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260805_0003"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260808_0004"
+        registration_columns = {
+            column["name"] for column in inspect(connection).get_columns("registration_requests")
+        }
+        assert {
+            "terms_accepted",
+            "privacy_accepted",
+            "terms_version",
+            "privacy_version",
+            "terms_accepted_at",
+            "privacy_accepted_at",
+        } <= registration_columns
 
 
 def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):

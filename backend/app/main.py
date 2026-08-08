@@ -30,7 +30,7 @@ from app.models.system_setting import SystemSetting
 from app.utils.billing_crypto import validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
 from app.scheduler.computer_use_worker import run_computer_use_worker_loop
-from app.public_pages import render_privacy_policy
+from app.public_pages import render_privacy_policy, render_terms_of_service
 
 # 로깅 설정 - 모든 로그를 표준 출력에 기록
 logging.basicConfig(
@@ -423,6 +423,15 @@ async def privacy_policy():
     """Public privacy policy for SSMaker users and Store certification."""
     return HTMLResponse(
         content=render_privacy_policy(),
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@app.get("/terms", response_class=HTMLResponse, include_in_schema=False)
+async def terms_of_service():
+    """Public service terms linked from the desktop registration form."""
+    return HTMLResponse(
+        content=render_terms_of_service(),
         headers={"Cache-Control": "public, max-age=3600"},
     )
 

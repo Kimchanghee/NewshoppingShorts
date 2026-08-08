@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
 Application flow controller for PyQt6.
-Game-like auto-update: login ??check ??download ??replace ??restart (no user interaction).
-After restart: show update-complete dialog with release notes + 5s countdown.
+Automatic update flow: check before/after login, download, replace, and restart.
+Long-running instances also check periodically and wait for active work to finish.
 """
 from __future__ import annotations
 
@@ -55,9 +55,16 @@ _PENDING_UPDATE_PATH = os.path.join(
     os.path.expanduser("~"), ".ssmaker", "pending_update.json"
 )
 
+RUNTIME_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
+RUNTIME_UPDATE_DEFER_POLL_MS = 30 * 1000
+RUNTIME_UPDATE_INITIAL_DELAY_MS = 5 * 60 * 1000
+STORE_UPDATE_INITIAL_DELAY_MS = 20 * 1000
+MICROSOFT_STORE_PRODUCT_ID = "9P43TQHLP8WH"
+
 # Keep API endpoint overridable in local/dev network environments.
-_PUBLIC_API_SERVER_URL = "https://project-user-dashboard-api.vercel.app"
+_PUBLIC_API_SERVER_URL = "https://newshopping-shorts-auth.vercel.app"
 _DEPRECATED_404_API_SERVER_URLS = {
+    "https://project-user-dashboard-api.vercel.app",
     "https://13-124-7-65.nip.io",
     "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
     "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
@@ -87,6 +94,7 @@ _ALLOWED_UPDATE_DOWNLOAD_DOMAINS = frozenset({
     "objects.githubusercontent.com",
     "storage.googleapis.com",
     "project-user-dashboard-api.vercel.app",
+    "newshopping-shorts-auth.vercel.app",
     "ssmaker-auth-api-1049571775048.us-central1.run.app",
 })
 
@@ -464,6 +472,7 @@ class AppController:
         self._latest_version: str = ""
         self._release_notes: str = ""
         self._main_launched: bool = False
+        self._loading_started: bool = False
         self._quit_policy_overridden: bool = False
         self._quit_policy_original: bool = True
         if hasattr(self.app, "quitOnLastWindowClosed"):
@@ -472,6 +481,13 @@ class AppController:
             except Exception:
                 self._quit_policy_original = True
         self._pending_update_info: Optional[Dict[str, Any]] = None  # ??낅쑓??꾨뱜 ??곷열 ???關??
+        self._runtime_update_check_worker: Optional[UpdateCheckWorker] = None
+        self._runtime_update_check_running: bool = False
+        self._runtime_update_seen_version: str = ""
+        self._deferred_runtime_update: Optional[Dict[str, Any]] = None
+        self.runtime_update_dialog: Optional[Any] = None
+        self.runtime_update_timer: Optional[QtCore.QTimer] = None
+        self.runtime_update_defer_timer: Optional[QtCore.QTimer] = None
 
     # ???? Entry point ????
 
@@ -695,6 +711,10 @@ class AppController:
 
     def _proceed_to_loading(self) -> None:
         """Continue to ProcessWindow and main app (no update needed)."""
+        if self._loading_started or self._main_launched:
+            logger.debug("Ignoring duplicate loading transition")
+            return
+        self._loading_started = True
         from ui.windows.process_window import ProcessWindow
 
         self.loading_window = ProcessWindow()
@@ -795,6 +815,7 @@ class AppController:
 
             # ?낅뜲?댄듃 ?댁뿭 ?앹뾽 ?쒖떆 (??踰꾩쟾???뚮쭔)
             self._show_update_notes_if_needed()
+            self._start_runtime_update_monitor()
 
         except Exception as e:
             logger.error(f"Failed to launch main app: {e}", exc_info=True)
@@ -806,6 +827,194 @@ class AppController:
                 "?쒖옉 ?ㅻ쪟",
                 self._build_launch_error_message(e),
             )
+
+    # ---- Runtime update monitoring ----
+
+    def _start_runtime_update_monitor(self) -> None:
+        """Keep long-running packaged builds current without interrupting work."""
+        if not getattr(sys, "frozen", False):
+            logger.debug("Development run: runtime update monitor is disabled")
+            return
+        if self.runtime_update_timer is not None:
+            return
+
+        self.runtime_update_timer = QtCore.QTimer(self.app)
+        self.runtime_update_timer.setInterval(RUNTIME_UPDATE_CHECK_INTERVAL_MS)
+        self.runtime_update_timer.timeout.connect(self._check_runtime_update)
+        self.runtime_update_timer.start()
+
+        self.runtime_update_defer_timer = QtCore.QTimer(self.app)
+        self.runtime_update_defer_timer.setInterval(RUNTIME_UPDATE_DEFER_POLL_MS)
+        self.runtime_update_defer_timer.timeout.connect(
+            self._apply_deferred_runtime_update_if_idle
+        )
+
+        initial_delay = (
+            STORE_UPDATE_INITIAL_DELAY_MS
+            if is_msix_package()
+            else RUNTIME_UPDATE_INITIAL_DELAY_MS
+        )
+        QtCore.QTimer.singleShot(initial_delay, self._check_runtime_update)
+        logger.info(
+            "Runtime update monitor started (initial=%sms interval=%sms)",
+            initial_delay,
+            RUNTIME_UPDATE_CHECK_INTERVAL_MS,
+        )
+
+    def _check_runtime_update(self) -> None:
+        """Run one background update check, with a strict concurrency gate."""
+        if self._runtime_update_check_running or self._deferred_runtime_update:
+            return
+        if getattr(self, "download_worker", None) is not None:
+            try:
+                if self.download_worker.isRunning():
+                    return
+            except Exception:
+                pass
+
+        self._runtime_update_check_running = True
+        worker = UpdateCheckWorker(self.get_current_version())
+        self._runtime_update_check_worker = worker
+        worker.update_available.connect(self._on_runtime_update_available)
+        worker.no_update.connect(self._on_runtime_update_check_finished)
+        worker.check_failed.connect(self._on_runtime_update_check_failed)
+        worker.finished.connect(self._on_runtime_update_worker_finished)
+        worker.start()
+
+    def _on_runtime_update_worker_finished(self) -> None:
+        self._runtime_update_check_running = False
+
+    def _on_runtime_update_check_finished(self) -> None:
+        self._runtime_update_check_running = False
+        logger.debug("Runtime update check: current version is up to date")
+
+    def _on_runtime_update_check_failed(self, error: str) -> None:
+        self._runtime_update_check_running = False
+        logger.warning("Runtime update check failed: %s", error)
+
+    def _is_main_app_busy(self) -> bool:
+        """Return whether installing now could interrupt an active user job."""
+        main = getattr(self, "main_gui", None)
+        if main is None:
+            return False
+        if bool(getattr(main, "batch_processing", False)):
+            return True
+        if bool(getattr(main, "dynamic_processing", False)):
+            return True
+        for name in ("batch_thread", "processing_thread", "worker_thread"):
+            thread = getattr(main, name, None)
+            try:
+                if thread is not None and thread.is_alive():
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _on_runtime_update_available(self, update_data: Dict[str, Any]) -> None:
+        """Install at idle, defer active work, or hand Store builds to Windows."""
+        self._runtime_update_check_running = False
+        version = str(update_data.get("latest_version", "")).strip()
+        if version and version == self._runtime_update_seen_version:
+            return
+        self._runtime_update_seen_version = version
+
+        if is_msix_package():
+            self._store_runtime_update_data = dict(update_data)
+            self._show_store_update_ready()
+            return
+
+        if self._is_main_app_busy():
+            self._deferred_runtime_update = dict(update_data)
+            if self.runtime_update_defer_timer is not None:
+                self.runtime_update_defer_timer.start()
+            self._show_runtime_update_ready()
+            return
+
+        self._install_runtime_update(dict(update_data))
+
+    def _install_runtime_update(self, update_data: Dict[str, Any]) -> None:
+        download_url = str(update_data.get("download_url", "")).strip()
+        file_hash = str(update_data.get("file_hash", "")).strip()
+        if not download_url or not file_hash:
+            logger.error("Runtime update metadata is incomplete")
+            return
+        self._latest_version = str(update_data.get("latest_version", "")).strip()
+        self._release_notes = str(update_data.get("release_notes", "")).strip()
+        self._update_is_mandatory = bool(update_data.get("is_mandatory", False))
+        dialog = getattr(self, "runtime_update_dialog", None)
+        if dialog is not None:
+            dialog.close()
+            self.runtime_update_dialog = None
+        self.perform_update(download_url, file_hash)
+
+    def _apply_deferred_runtime_update_if_idle(self) -> None:
+        update_data = self._deferred_runtime_update
+        if not update_data or self._is_main_app_busy():
+            return
+        self._deferred_runtime_update = None
+        if self.runtime_update_defer_timer is not None:
+            self.runtime_update_defer_timer.stop()
+        self._install_runtime_update(update_data)
+
+    def _show_runtime_update_ready(self) -> None:
+        if self.runtime_update_dialog is not None:
+            return
+        from ui.windows.update_dialog import UpdateReadyDialog
+
+        version = str((self._deferred_runtime_update or {}).get("latest_version", ""))
+        dialog = UpdateReadyDialog(version=version, parent=getattr(self, "main_gui", None))
+        dialog.install_requested.connect(self._apply_deferred_runtime_update_if_idle)
+        dialog.deferred.connect(self._on_runtime_update_deferred)
+        dialog.destroyed.connect(lambda: setattr(self, "runtime_update_dialog", None))
+        self.runtime_update_dialog = dialog
+        dialog.show()
+
+    def _on_runtime_update_deferred(self) -> None:
+        """Release the hidden dialog while the idle monitor keeps the update queued."""
+        logger.info("Runtime update deferred until idle")
+        self.runtime_update_dialog = None
+
+    def _show_store_update_ready(self) -> None:
+        if self.runtime_update_dialog is not None:
+            return
+        from ui.windows.update_dialog import UpdateReadyDialog
+
+        data = getattr(self, "_store_runtime_update_data", {}) or {}
+        dialog = UpdateReadyDialog(
+            version=str(data.get("latest_version", "")),
+            store_mode=True,
+            parent=getattr(self, "main_gui", None),
+        )
+        dialog.install_requested.connect(self._open_microsoft_store_update)
+        dialog.deferred.connect(self._on_store_update_deferred)
+        dialog.destroyed.connect(lambda: setattr(self, "runtime_update_dialog", None))
+        self.runtime_update_dialog = dialog
+        dialog.show()
+
+    def _on_store_update_deferred(self) -> None:
+        """Allow a deferred Store update to be offered again on a later check."""
+        logger.info("Microsoft Store update deferred")
+        self.runtime_update_dialog = None
+        self._runtime_update_seen_version = ""
+
+    def _open_microsoft_store_update(self) -> None:
+        """Open the product update page and close only after the user opts in."""
+        from PyQt6.QtCore import QUrl
+        from PyQt6.QtGui import QDesktopServices
+
+        url = QUrl(
+            f"ms-windows-store://pdp/?ProductId={MICROSOFT_STORE_PRODUCT_ID}"
+        )
+        if not QDesktopServices.openUrl(url):
+            QMessageBox.critical(
+                getattr(self, "main_gui", None),
+                "Microsoft Store를 열 수 없어요",
+                "Microsoft Store의 라이브러리에서 SSMaker 업데이트를 확인해 주세요.",
+            )
+            return
+        main = getattr(self, "main_gui", None)
+        if main is not None:
+            QtCore.QTimer.singleShot(1200, main.close)
 
     @staticmethod
     def _build_launch_error_message(exc: Exception) -> str:
@@ -958,6 +1167,9 @@ class AppController:
         If login hasn't happened yet, show login screen.
         If login already succeeded, proceed to loading/main app.
         """
+        if self._main_launched:
+            logger.info("Runtime update failed; keeping the current app session open")
+            return
         if self.login_data is not None:
             self._proceed_to_loading()
         else:
@@ -1016,7 +1228,7 @@ class AppController:
 
         def on_download_finished(success: bool, result: str):
             if success:
-                self.update_progress_dialog.set_status("?ㅼ튂 以鍮?以?..")
+                self.update_progress_dialog.set_status("설치를 준비하는 중")
                 self.update_progress_dialog.set_progress(100)
                 QtCore.QTimer.singleShot(500, lambda: self._run_installer(result))
             else:
@@ -1050,7 +1262,7 @@ class AppController:
         import subprocess
 
         if hasattr(self, "update_progress_dialog") and self.update_progress_dialog:
-            self.update_progress_dialog.set_status("?ㅼ튂 ?꾨줈洹몃옩 ?ㅽ뻾 以?..")
+            self.update_progress_dialog.set_status("설치 프로그램을 시작하는 중")
 
         try:
             # Save update info BEFORE restarting so post-restart can show complete dialog

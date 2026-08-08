@@ -437,14 +437,14 @@ class AuthService:
                 logger.warning(
                     f"Session check with mismatched user_id: token={token_user_id}, request={user_id}"
                 )
-                return {"status": "EU003"}
+                return {"status": "AUTH_REQUIRED"}
 
             # IP mismatch check
             if settings.ENFORCE_SESSION_IP_BINDING and token_ip != ip_address:
                 logger.warning(
                     f"Session IP mismatch: token_ip_hash={_hash_ip(token_ip)}, request_ip_hash={_hash_ip(ip_address)}"
                 )
-                return {"status": "EU003"}  # Session from different IP
+                return {"status": "AUTH_REQUIRED"}
 
             # Database session check
             session = (
@@ -459,7 +459,15 @@ class AuthService:
 
             if not session:
                 logger.info(f"Session not found or inactive: user_id={user_id}, jti={jti}")
-                return {"status": "EU003"}  # Session invalid/expired
+                known_session = (
+                    self.db.query(SessionModel)
+                    .filter(SessionModel.token_jti == jti)
+                    .first()
+                )
+                if known_session is not None and not known_session.is_active:
+                    # A newer login explicitly revoked this otherwise-known session.
+                    return {"status": "EU003"}
+                return {"status": "AUTH_REQUIRED"}
 
             # Update last activity in session
             session.last_activity_at = datetime.now(timezone.utc)
@@ -491,7 +499,7 @@ class AuthService:
 
         except ValueError as e:
             if "expired" in str(e).lower():
-                return {"status": "EU003"}
+                return {"status": "AUTH_REQUIRED"}
             # Don't expose internal error details
             logger.warning(f"Session check failed: {e}")
             return {"status": "error", "message": "Session verification failed"}

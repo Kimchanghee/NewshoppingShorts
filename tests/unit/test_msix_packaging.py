@@ -72,6 +72,12 @@ def test_store_workflow_has_no_private_certificate_dependency():
     assert "build_msix.ps1" in workflow
 
 
+def test_msix_manifest_declares_internet_client_capability():
+    manifest = MANIFEST.read_text(encoding="utf-8")
+
+    assert '<Capability Name="internetClient" />' in manifest
+
+
 def test_direct_installer_build_remains_default():
     script = (ROOT / "scripts" / "build_exe.ps1").read_text(encoding="utf-8-sig")
     assert '$PackageTarget = "installer"' in script
