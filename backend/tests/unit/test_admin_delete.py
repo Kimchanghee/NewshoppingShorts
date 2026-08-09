@@ -56,6 +56,7 @@ except ModuleNotFoundError:
 
 from app.database import Base
 from app.models.computer_use_job import ComputerUseJob
+from app.models.login_attempt import LoginAttempt
 from app.models.registration_request import RegistrationRequest, RequestStatus
 from app.models.user import User
 from app.models.user_log import UserLog
@@ -89,6 +90,11 @@ def test_delete_user_removes_non_cascading_and_registration_records():
                 status=RequestStatus.APPROVED,
             ),
             UserLog(user_id=user.id, action="login", content="test"),
+            LoginAttempt(
+                username=user.username,
+                ip_address="127.0.0.1",
+                success=True,
+            ),
             ComputerUseJob(
                 job_id="delete-job",
                 user_id=user.id,
@@ -117,6 +123,12 @@ def test_delete_user_removes_non_cascading_and_registration_records():
     assert (
         db.query(RegistrationRequest)
         .filter(RegistrationRequest.username == "delete_me")
+        .count()
+        == 0
+    )
+    assert (
+        db.query(LoginAttempt)
+        .filter(LoginAttempt.username == "delete_me")
         .count()
         == 0
     )

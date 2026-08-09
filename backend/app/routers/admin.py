@@ -678,17 +678,23 @@ async def delete_user(
             .filter(RegistrationRequest.username == username)
             .delete(synchronize_session=False)
         )
+        deleted_login_attempts = (
+            db.query(LoginAttempt)
+            .filter(LoginAttempt.username == username)
+            .delete(synchronize_session=False)
+        )
         db.delete(user)
         db.commit()
 
         logger.info(
             "User deleted: user_id=%s, username=%s, user_logs=%s, "
-            "computer_jobs=%s, registration_requests=%s",
+            "computer_jobs=%s, registration_requests=%s, login_attempts=%s",
             user_id,
             username,
             deleted_user_logs,
             deleted_computer_jobs,
             deleted_registration_requests,
+            deleted_login_attempts,
         )
 
         return AdminActionResponse(
