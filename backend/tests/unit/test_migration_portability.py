@@ -32,6 +32,8 @@ def _run_alembic(database_url: str, *args: str) -> None:
 
 
 def test_empty_database_upgrades_to_current_head(tmp_path):
+    from app.database import EXPECTED_ALEMBIC_REVISION
+
     url = f"sqlite:///{(tmp_path / 'empty.db').as_posix()}"
     _run_alembic(url, "upgrade", "head")
     engine = create_engine(url)
@@ -39,7 +41,11 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
 
     assert {"users", "admin_sessions", "work_usages", "system_settings"} <= tables
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260810_0005"
+        assert (
+            connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
+            == EXPECTED_ALEMBIC_REVISION
+            == "20260810_0005"
+        )
         registration_columns = {
             column["name"] for column in inspect(connection).get_columns("registration_requests")
         }

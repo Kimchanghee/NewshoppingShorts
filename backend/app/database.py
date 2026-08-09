@@ -7,7 +7,7 @@ from app.configuration import get_settings
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
-EXPECTED_ALEMBIC_REVISION = "20260808_0004"
+EXPECTED_ALEMBIC_REVISION = "20260810_0005"
 
 # Connection pool configuration
 # Using URL.create() instead of f-string to prevent password from appearing in stack traces
