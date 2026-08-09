@@ -24,6 +24,9 @@ from app.database import get_db
 from app.dependencies import verify_admin_api_key
 from app.models.user import User, UserType, ProgramType
 from app.models.login_attempt import LoginAttempt
+from app.models.registration_request import RegistrationRequest
+from app.models.user_log import UserLog
+from app.models.computer_use_job import ComputerUseJob
 from app.utils.subscription_utils import calculate_subscription_expiry
 from app.services.auth_service import AuthService
 from app.config.constants import FREE_TRIAL_WORK_COUNT
@@ -655,10 +658,38 @@ async def delete_user(
             )
 
         username = user.username
+
+        # These records either contain registration PII or reference users
+        # without an ON DELETE CASCADE constraint. Remove them in the same
+        # transaction so an administrator deletion is complete and cannot be
+        # blocked by an existing log/job row.
+        deleted_user_logs = (
+            db.query(UserLog)
+            .filter(UserLog.user_id == user_id)
+            .delete(synchronize_session=False)
+        )
+        deleted_computer_jobs = (
+            db.query(ComputerUseJob)
+            .filter(ComputerUseJob.user_id == user_id)
+            .delete(synchronize_session=False)
+        )
+        deleted_registration_requests = (
+            db.query(RegistrationRequest)
+            .filter(RegistrationRequest.username == username)
+            .delete(synchronize_session=False)
+        )
         db.delete(user)
         db.commit()
 
-        logger.info(f"User deleted: user_id={user_id}, username={username}")
+        logger.info(
+            "User deleted: user_id=%s, username=%s, user_logs=%s, "
+            "computer_jobs=%s, registration_requests=%s",
+            user_id,
+            username,
+            deleted_user_logs,
+            deleted_computer_jobs,
+            deleted_registration_requests,
+        )
 
         return AdminActionResponse(
             success=True,
