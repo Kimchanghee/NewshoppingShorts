@@ -7,9 +7,11 @@ import sys
 from pathlib import Path
 
 from sqlalchemy import create_engine, inspect, text
+from sqlalchemy.orm import Session
 
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
+os.environ.setdefault("JWT_SECRET_KEY", "a" * 64)
 
 
 def _run_alembic(database_url: str, *args: str) -> None:
@@ -37,7 +39,7 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
 
     assert {"users", "admin_sessions", "work_usages", "system_settings"} <= tables
     with engine.connect() as connection:
-        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260808_0004"
+        assert connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one() == "20260810_0005"
         registration_columns = {
             column["name"] for column in inspect(connection).get_columns("registration_requests")
         }
@@ -93,3 +95,79 @@ def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):
         assert connection.execute(
             text("SELECT session_token FROM admin_sessions_legacy_20260805")
         ).scalar_one() == "legacy-session-token"
+
+
+def test_smoke_account_cleanup_requires_exact_id_and_username(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'cleanup.db').as_posix()}"
+    _run_alembic(url, "upgrade", "20260808_0004")
+
+    from app.models.computer_use_job import ComputerUseJob
+    from app.models.login_attempt import LoginAttempt
+    from app.models.registration_request import RegistrationRequest, RequestStatus
+    from app.models.user import User
+    from app.models.user_log import UserLog
+
+    engine = create_engine(url)
+    with Session(engine) as session:
+        disposable = User(
+            id=28,
+            username="ui_full_1786295998_4c6d80",
+            password_hash="hash",
+            is_active=True,
+        )
+        preserved = User(
+            id=29,
+            username="ui_full_1786295998_other",
+            password_hash="hash",
+            is_active=True,
+        )
+        session.add_all([disposable, preserved])
+        session.flush()
+        session.add_all(
+            [
+                RegistrationRequest(
+                    name="Disposable QA",
+                    username=disposable.username,
+                    password_hash="hash",
+                    contact="01092754320",
+                    status=RequestStatus.APPROVED,
+                ),
+                UserLog(user_id=disposable.id, action="login", content="test"),
+                LoginAttempt(
+                    username=disposable.username,
+                    ip_address="127.0.0.1",
+                    success=True,
+                ),
+                ComputerUseJob(
+                    job_id="cleanup-job",
+                    user_id=disposable.id,
+                    scope="all",
+                    prompt="test",
+                ),
+            ]
+        )
+        session.commit()
+
+    _run_alembic(url, "upgrade", "head")
+
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM users WHERE id=28")
+        ).scalar_one() == 0
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM registration_requests WHERE username=:username"),
+            {"username": "ui_full_1786295998_4c6d80"},
+        ).scalar_one() == 0
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM login_attempts WHERE username=:username"),
+            {"username": "ui_full_1786295998_4c6d80"},
+        ).scalar_one() == 0
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM user_logs WHERE user_id=28")
+        ).scalar_one() == 0
+        assert connection.execute(
+            text("SELECT COUNT(*) FROM computer_use_jobs WHERE user_id=28")
+        ).scalar_one() == 0
+        assert connection.execute(
+            text("SELECT username FROM users WHERE id=29")
+        ).scalar_one() == "ui_full_1786295998_other"
