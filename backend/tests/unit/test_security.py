@@ -201,6 +201,12 @@ class TestErrorExposure:
         body = response.json()
         assert body.get("status") == "ok"
 
+    @pytest.mark.parametrize("path", ["/favicon.ico", "/favicon.png"])
+    def test_favicon_probes_do_not_create_404_logs(self, client, path):
+        response = client.get(path)
+        assert response.status_code == 204
+        assert response.content == b""
+
     def test_404_no_internal_paths(self, client):
         response = client.get("/nonexistent/path/does/not/exist")
         body_str = response.text

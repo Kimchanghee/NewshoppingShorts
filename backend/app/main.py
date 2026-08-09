@@ -418,6 +418,13 @@ async def root():
     return {"status": "ok", "service": "SSMaker Auth API"}
 
 
+@app.get("/favicon.ico", include_in_schema=False, status_code=204)
+@app.get("/favicon.png", include_in_schema=False, status_code=204)
+async def favicon():
+    """Ignore automatic browser favicon probes without generating 404 logs."""
+    return Response(status_code=204)
+
+
 @app.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
 async def privacy_policy():
     """Public privacy policy for SSMaker users and Store certification."""
