@@ -262,6 +262,7 @@ jobs:
         import hmac
         import json
         import os
+        import time
         import urllib.error
         import urllib.parse
         import urllib.request
@@ -317,3 +318,15 @@ jobs:
         with opener.open(request, timeout=30) as response:
             print(f"Server version updated: {response.status}")
             print(ascii(response.read().decode("utf-8", errors="replace")))
+
+        verify_request = urllib.request.Request(
+            f"{api_base_url}/app/version?verify={time.time_ns()}",
+            headers={"Cache-Control": "no-cache", "User-Agent": "SSMaker-Release-Verification"},
+        )
+        with urllib.request.urlopen(verify_request, timeout=30) as response:
+            verified = json.loads(response.read().decode("utf-8"))
+        if verified.get("version") != version or verified.get("file_hash") != payload["file_hash"]:
+            raise SystemExit(
+                f"Version API verification failed: expected {version}, got {verified.get('version')}"
+            )
+        print(f"Server version verified: {verified['version']}")

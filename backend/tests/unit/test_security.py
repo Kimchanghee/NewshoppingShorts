@@ -337,6 +337,56 @@ class TestAuthentication:
         assert payload["latest_version"] == "1.4.43"
         assert payload["file_hash"] == "a" * 64
 
+    def test_version_read_refreshes_metadata_written_by_another_instance(self, client, monkeypatch):
+        """Warm serverless instances must not keep serving stale release metadata."""
+        from app import main
+
+        stale_info = {
+            "version": "1.5.52",
+            "min_required_version": "1.0.0",
+            "download_url": "https://github.com/example/old.exe",
+            "release_notes": "old",
+            "is_mandatory": False,
+            "file_hash": "1" * 64,
+        }
+        fresh_info = {
+            **stale_info,
+            "version": "1.5.53",
+            "download_url": "https://github.com/example/new.exe",
+            "release_notes": "new",
+            "file_hash": "2" * 64,
+        }
+        monkeypatch.setattr(main, "APP_VERSION_INFO", stale_info)
+        monkeypatch.setattr(main, "_load_app_version_info_from_db", lambda _default: fresh_info)
+        monkeypatch.setattr(main, "_fetch_github_release_version_info", lambda: None)
+
+        response = client.get("/app/version")
+
+        assert response.status_code == 200
+        assert response.json()["version"] == "1.5.53"
+        assert response.json()["file_hash"] == "2" * 64
+
+    def test_version_update_fails_when_metadata_cannot_be_persisted(self, client, monkeypatch):
+        """CI must not receive a false success when the shared write fails."""
+        from app import main
+
+        original_info = dict(main.APP_VERSION_INFO)
+        monkeypatch.setattr(main, "APP_VERSION_INFO", original_info)
+        monkeypatch.setattr(main, "_persist_app_version_info_to_db", lambda _info: False)
+
+        response = client.post(
+            "/app/version/update",
+            json={
+                "version": "9.9.9",
+                "download_url": "https://github.com/example/release.exe",
+                "file_hash": "a" * 64,
+            },
+            headers={"Authorization": "Bearer " + "d" * 64},
+        )
+
+        assert response.status_code == 503
+        assert main.APP_VERSION_INFO == original_info
+
 
 # ===== 6. SSRF Prevention =====
 

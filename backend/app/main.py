@@ -519,7 +519,7 @@ def _load_app_version_info_from_db(default_info: dict) -> dict:
         return default_info
 
 
-def _persist_app_version_info_to_db(version_info: dict) -> None:
+def _persist_app_version_info_to_db(version_info: dict) -> bool:
     """Persist app version info so restarts do not lose update metadata."""
     try:
         payload = json.dumps(version_info, ensure_ascii=False)
@@ -531,8 +531,10 @@ def _persist_app_version_info_to_db(version_info: dict) -> None:
             else:
                 row.setting_value = payload
             db.commit()
+        return True
     except Exception as e:
         logger.warning("Failed persisting APP_VERSION_INFO to DB: %s", e)
+        return False
 
 
 APP_VERSION_INFO = _load_app_version_info_from_db(APP_VERSION_INFO)
@@ -634,6 +636,17 @@ def _fetch_github_release_version_info() -> Optional[dict]:
 
 
 def _get_effective_app_version_info() -> dict:
+    global APP_VERSION_INFO
+
+    # Vercel may keep several warm function instances alive at once. A release
+    # update can be handled by one instance while another still has stale
+    # module-level metadata, so refresh the persisted value on every read.
+    persisted_info = _load_app_version_info_from_db(APP_VERSION_INFO)
+    if _parse_version_tuple(str(APP_VERSION_INFO.get("version", "0.0.0"))) <= _parse_version_tuple(
+        str(persisted_info.get("version", "0.0.0"))
+    ):
+        APP_VERSION_INFO = persisted_info
+
     effective_info = dict(APP_VERSION_INFO)
     github_info = _fetch_github_release_version_info()
     if not github_info:
@@ -753,8 +766,9 @@ async def update_app_version(
     new_info["is_mandatory"] = request.is_mandatory
     if request.file_hash:
         new_info["file_hash"] = request.file_hash
+    if not _persist_app_version_info_to_db(new_info):
+        raise HTTPException(status_code=503, detail="Version metadata persistence failed")
     APP_VERSION_INFO = new_info
-    _persist_app_version_info_to_db(APP_VERSION_INFO)
 
     logger.info(f"App version updated to {request.version} by CI/CD")
 
