@@ -21,12 +21,12 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
+from sqlalchemy import text
 from app.errors import AppError
 from app.routers import auth, registration, admin, subscription, payment, logs, computer_use
 from app.routers.auth import limiter, rate_limit_exceeded_handler
 from app.configuration import get_settings
 from app.database import SessionLocal, init_db, verify_database_revision
-from app.models.system_setting import SystemSetting
 from app.utils.billing_crypto import validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
 from app.scheduler.computer_use_worker import run_computer_use_worker_loop
@@ -488,12 +488,13 @@ def _load_app_version_info_from_db(default_info: dict) -> dict:
     """Load persisted app version info from DB, fallback to defaults."""
     try:
         with SessionLocal() as db:
-            row = db.get(SystemSetting, _APP_VERSION_INFO_SETTING_KEY)
-
-        if not row:
-            return default_info
-
-        raw_value = row.setting_value
+            raw_value = db.execute(
+                text(
+                    "SELECT setting_value FROM system_settings "
+                    "WHERE setting_key = :setting_key"
+                ),
+                {"setting_key": _APP_VERSION_INFO_SETTING_KEY},
+            ).scalar_one_or_none()
         if not raw_value:
             return default_info
 
@@ -524,12 +525,27 @@ def _persist_app_version_info_to_db(version_info: dict) -> bool:
     try:
         payload = json.dumps(version_info, ensure_ascii=False)
         with SessionLocal() as db:
-            row = db.get(SystemSetting, _APP_VERSION_INFO_SETTING_KEY)
-            if row is None:
-                row = SystemSetting(setting_key=_APP_VERSION_INFO_SETTING_KEY, setting_value=payload)
-                db.add(row)
+            dialect = db.get_bind().dialect.name
+            params = {
+                "setting_key": _APP_VERSION_INFO_SETTING_KEY,
+                "setting_value": payload,
+            }
+            if dialect in {"postgresql", "sqlite"}:
+                statement = text(
+                    "INSERT INTO system_settings (setting_key, setting_value) "
+                    "VALUES (:setting_key, :setting_value) "
+                    "ON CONFLICT (setting_key) DO UPDATE "
+                    "SET setting_value = EXCLUDED.setting_value"
+                )
+            elif dialect in {"mysql", "mariadb"}:
+                statement = text(
+                    "INSERT INTO system_settings (setting_key, setting_value) "
+                    "VALUES (:setting_key, :setting_value) "
+                    "ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"
+                )
             else:
-                row.setting_value = payload
+                raise RuntimeError(f"Unsupported settings database dialect: {dialect}")
+            db.execute(statement, params)
             db.commit()
         return True
     except Exception as e:

@@ -20,6 +20,8 @@ from pathlib import Path
 from unittest.mock import patch, MagicMock
 
 import pytest
+from sqlalchemy import create_engine, text
+from sqlalchemy.orm import sessionmaker
 
 # Add backend root to path
 backend_root = Path(__file__).parent.parent.parent
@@ -386,6 +388,33 @@ class TestAuthentication:
 
         assert response.status_code == 503
         assert main.APP_VERSION_INFO == original_info
+
+    def test_version_metadata_round_trips_on_legacy_two_column_table(self, monkeypatch):
+        """Release metadata must not depend on optional legacy schema columns."""
+        from app import main
+
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE system_settings ("
+                    "setting_key VARCHAR(128) PRIMARY KEY, "
+                    "setting_value TEXT NOT NULL)"
+                )
+            )
+        local_session = sessionmaker(bind=engine)
+        monkeypatch.setattr(main, "SessionLocal", local_session)
+        expected = {
+            "version": "1.5.54",
+            "min_required_version": "1.0.0",
+            "download_url": "https://github.com/example/release.exe",
+            "release_notes": "release",
+            "is_mandatory": False,
+            "file_hash": "a" * 64,
+        }
+
+        assert main._persist_app_version_info_to_db(expected) is True
+        assert main._load_app_version_info_from_db({"version": "0.0.0"}) == expected
 
 
 # ===== 6. SSRF Prevention =====
