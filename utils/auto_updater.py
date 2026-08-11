@@ -27,7 +27,7 @@ from utils.windows_package import is_msix_package
 logger = get_logger(__name__)
 
 # 현재 앱 버전(배포 시 version.json이 우선)
-CURRENT_VERSION = "1.5.52"
+CURRENT_VERSION = "1.5.53"
 
 # 버전 확인 API 기본 주소
 _DEFAULT_UPDATE_BASE_URL = (
@@ -48,6 +48,7 @@ GITHUB_RELEASE_API_URL = os.getenv(
 _ALLOWED_DOWNLOAD_DOMAINS: frozenset[str] = frozenset({
     "github.com",
     "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
     "storage.googleapis.com",
     "project-user-dashboard-api.vercel.app",
     "newshopping-shorts-auth.vercel.app",

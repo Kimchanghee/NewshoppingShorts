@@ -92,6 +92,7 @@ GITHUB_RELEASE_API_URL = os.getenv(
 _ALLOWED_UPDATE_DOWNLOAD_DOMAINS = frozenset({
     "github.com",
     "objects.githubusercontent.com",
+    "release-assets.githubusercontent.com",
     "storage.googleapis.com",
     "project-user-dashboard-api.vercel.app",
     "newshopping-shorts-auth.vercel.app",

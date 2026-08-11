@@ -1,4 +1,17 @@
-from startup.app_controller import UpdateCheckWorker
+from startup.app_controller import UpdateCheckWorker, _is_allowed_update_download_url
+
+
+def test_github_release_asset_redirect_is_trusted():
+    redirect_url = (
+        "https://release-assets.githubusercontent.com/"
+        "github-production-release-asset/1143965521/installer.exe"
+    )
+
+    assert _is_allowed_update_download_url(redirect_url)
+
+    from utils import auto_updater
+
+    assert "release-assets.githubusercontent.com" in auto_updater._ALLOWED_DOWNLOAD_DOMAINS
 
 
 def test_update_check_falls_back_to_github_when_server_version_is_stale(monkeypatch):
