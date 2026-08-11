@@ -11,6 +11,11 @@ def allow_plain_coupang_urls_for_legacy_queue_tests(monkeypatch):
     monkeypatch.setenv(queue_runner.AFFILIATE_LINK_REQUIRED_ENV, "0")
     # Never contend with a real automation run's single-instance lock.
     monkeypatch.setenv(queue_runner.QUEUE_SKIP_LOCK_ENV, "1")
+    # These legacy queue-flow tests stub ``run_sourcing`` and intentionally
+    # exercise the marketplace branch. Production now defaults to
+    # ``platform_video``; pinning the branch here prevents accidental live
+    # browser/network work and keeps the unit boundary explicit.
+    monkeypatch.setattr(queue_runner, "get_sourcing_method", lambda: "coupang")
 
 
 def test_load_queue_accepts_utf8_bom(monkeypatch, tmp_path):
@@ -19,6 +24,47 @@ def test_load_queue_accepts_utf8_bom(monkeypatch, tmp_path):
     monkeypatch.setattr(queue_runner, "QUEUE_PATH", queue_path)
 
     assert queue_runner.load_queue() == {"items": []}
+
+
+def test_queue_platform_sourcing_forwards_configured_sources_and_threshold(
+    monkeypatch, tmp_path
+):
+    from core.sourcing import platform_pipeline
+    import managers.settings_manager as sm
+
+    captured = {}
+
+    class _Settings:
+        def get_platform_video_sources(self):
+            return ["kuaishou", "douyin"]
+
+    async def fake_run_platform_sourcing(url, **kwargs):
+        captured["url"] = url
+        captured.update(kwargs)
+        return {"ok": False, "error": "test stop", "product_info": {}}
+
+    monkeypatch.setattr(sm, "get_settings_manager", lambda: _Settings())
+    monkeypatch.setattr(
+        platform_pipeline, "run_platform_sourcing", fake_run_platform_sourcing
+    )
+    monkeypatch.setattr(queue_runner, "get_gemini_client", lambda: None)
+
+    report = queue_runner.asyncio.run(
+        queue_runner.run_platform_sourcing_for_queue(
+            {
+                "coupang_url": "https://www.coupang.com/vp/products/1",
+                "planned_number": "[001]",
+                "product_name": "mini fan",
+            },
+            tmp_path,
+            0.94,
+        )
+    )
+
+    assert captured["platforms"] == ["kuaishou", "douyin"]
+    assert captured["min_similarity_score"] == 0.94
+    assert captured["product_name_hint"] == "mini fan"
+    assert report["ok"] is False
 
 
 def test_build_upload_item_uses_problem_hook_metadata_title():
@@ -32,7 +78,10 @@ def test_build_upload_item_uses_problem_hook_metadata_title():
         "final_video": "final.mp4",
         "render_integrity": {"ok": True},
     }
-    report = {"_report_path": "report.json"}
+    report = {
+        "_report_path": "report.json",
+        "selected_source_url": "https://www.aliexpress.com/item/1005001234567890.html",
+    }
 
     upload_item = queue_runner.build_upload_item(
         rendered,
@@ -53,6 +102,9 @@ def test_build_upload_item_uses_problem_hook_metadata_title():
     assert "[047]" in upload_item["description"]
     assert "Linktree" in upload_item["description"]
     assert upload_item["summer_upload_metadata"]["tags"] == queue_runner.SUMMER_UPLOAD_METADATA["cooling_bedding"]["tags"]
+    assert upload_item["marketplace_source_url"] == (
+        "https://www.aliexpress.com/item/1005001234567890.html"
+    )
 
 
 def test_youtube_preflight_block_does_not_consume_pending(monkeypatch, capsys):
@@ -1190,6 +1242,26 @@ def test_select_safe_item_accepts_verified_marketplace_demo():
     assert item["source"] == "aliexpress"
 
 
+def test_select_safe_item_accepts_verified_cached_marketplace_demo():
+    report = {
+        "match_status": "matched",
+        "best_similarity": 0.92,
+        "sourced_products": [
+            {
+                "source": "1688",
+                "similarity": 0.92,
+                "video_file": "cached.mp4",
+                "fallback_reason": "cached_marketplace_video",
+                "auto_publish_safe": True,
+                "requires_review": False,
+            }
+        ],
+    }
+
+    assert queue_runner.select_safe_marketplace_item(report, 0.9) is not None
+    assert queue_runner.select_safe_marketplace_item(report, 0.95) is None
+
+
 def test_select_safe_item_rejects_unknown_similarity():
     report = {
         "match_status": "matched",
@@ -1233,6 +1305,34 @@ def test_validate_render_upload_quality_blocks_short_non_vertical_video(tmp_path
     assert "duration_too_short" in result["reasons"]
     assert "not_vertical_1080x1920" in result["reasons"]
     assert "final_video_too_small" in result["reasons"]
+
+
+def test_platform_reedit_quality_profile_does_not_require_tts(tmp_path):
+    final_video = tmp_path / "platform.mp4"
+    final_video.write_bytes(b"x" * queue_runner.MIN_FINAL_VIDEO_BYTES)
+    base = {
+        "final_video": str(final_video),
+        "render_ok": True,
+        "tts_segment_count": 0,
+        "video_probe": {
+            "duration": 20.0,
+            "has_audio": True,
+            "is_vertical_1080x1920": True,
+        },
+        "render_integrity": {"ok": True},
+    }
+
+    platform = queue_runner.validate_render_upload_quality(
+        {**base, "quality_profile": "platform_reedit"}
+    )
+    narrated = queue_runner.validate_render_upload_quality(
+        {**base, "quality_profile": "narrated_marketplace"}
+    )
+
+    assert platform["ok"] is True
+    assert "missing_tts_segments" not in platform["reasons"]
+    assert narrated["ok"] is False
+    assert "missing_tts_segments" in narrated["reasons"]
 
 
 def test_publish_linktree_accepts_existing_public_card(monkeypatch):

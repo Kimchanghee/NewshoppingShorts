@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """
-3플랫폼(도우인/콰이쇼우/샤오홍슈) 키워드 영상 검색기.
+3플랫폼(샤오홍슈/도우인/콰이쇼우) 키워드 영상 검색기.
 
 기존 AliExpress/1688 소싱과 동일 패턴(zendriver + _extract_video_urls + _download_video)을
-재사용해서, 상품명 키워드로 세 채널을 '순서대로' 검색하고 먼저 영상이 나오는 곳에서
-다운로드한다(first-hit-wins).
+재사용해서 상품명 키워드로 세 채널을 검색하고, 안전 기준을 통과한 후보 중
+상품 관련성 점수가 가장 높은 영상을 선택한다.
 
 다운로드 전략(성공률 순):
   1) 검색 결과에서 영상 '페이지 링크'(douyin.com/video/{id} 등)를 긁어 yt-dlp에 위임
@@ -20,7 +20,6 @@
 from __future__ import annotations
 
 import asyncio
-from difflib import SequenceMatcher
 import os
 import re
 import subprocess
@@ -34,24 +33,45 @@ from utils.logging_config import get_logger
 from core.sourcing.product_searcher import (
     _download_video,
     _extract_video_urls,
+    _generic_reference_lacks_richer_evidence,
+    _multi_reference_score,
     _page_has_access_challenge,
     _passes_category_guard,
+    _passes_reference_constraints,
 )
 
 logger = get_logger(__name__)
 
-# 순서 = 우선순위(먼저 나오는 곳 사용).
-# bilibili: 검색이 비로그인 개방 + yt-dlp 완전 지원 → 로그인 없이도 성공하는 최종 폴백.
-DEFAULT_PLATFORM_ORDER = ["douyin", "kuaishou", "xiaohongshu", "bilibili"]
+# 순서는 동점일 때의 우선순위다. 상품 후기·판매 영상 비중이 높은
+# 실제 다운로드 성공률이 높은 도우인을 먼저 보고, 샤오홍슈·콰이쇼우로 폴백한다.
+# Douyin first: its public detail pages expose a playable Resource Timing URL
+# most consistently. Xiaohongshu/Kuaishou remain automatic fallbacks.
+DEFAULT_PLATFORM_ORDER = ["douyin", "xiaohongshu", "kuaishou"]
+SUPPORTED_COMMERCE_PLATFORMS = frozenset(DEFAULT_PLATFORM_ORDER)
 
 # 검증 기준(쇼츠 소스로 쓸 수 있는 영상).
 MIN_SOURCE_SECONDS = 4.0
-MAX_SOURCE_SECONDS = 90.0
+# Product demonstrations are often longer than a finished Short.  The existing
+# re-editor selects/trims the usable segment, so accept source material up to
+# five minutes while still rejecting accidental long-form downloads.
+MAX_SOURCE_SECONDS = 300.0
 MIN_SOURCE_SHORT_SIDE = 480
 
 
 def _normalized_relevance_text(value: str) -> str:
     return " ".join(re.findall(r"[0-9a-zA-Z가-힣\u3400-\u9fff]+", str(value or "").lower()))
+
+
+def _queries_for_chinese_platform(queries: List[str]) -> List[str]:
+    """Use translated Chinese queries; never paste Korean into Chinese sites."""
+    clean = list(dict.fromkeys(
+        " ".join(re.sub(r"[가-힣]+", " ", str(query or "")).split())
+        for query in queries
+        if str(query or "").strip()
+    ))
+    non_korean = [query for query in clean if query]
+    chinese = [query for query in non_korean if re.search(r"[\u3400-\u9fff]", query)]
+    return chinese or non_korean
 
 
 def candidate_relevance_score(evidence: str, references: List[str]) -> Optional[float]:
@@ -65,7 +85,8 @@ def candidate_relevance_score(evidence: str, references: List[str]) -> Optional[
     if not candidate:
         return None
     candidate_tokens = set(candidate.split())
-    best = 0.0
+    eligible_references: List[str] = []
+    best_coverage = 0.0
     for raw_reference in references or []:
         reference = _normalized_relevance_text(raw_reference)
         if not reference:
@@ -76,10 +97,24 @@ def candidate_relevance_score(evidence: str, references: List[str]) -> Optional[
         # identity. Letting it reach 100% coverage made unrelated videos pass.
         if len(reference_tokens) < 2 and len(compact_reference) < 4:
             continue
+        eligible_references.append(raw_reference)
         coverage = len(candidate_tokens & reference_tokens) / max(1, len(reference_tokens))
-        sequence = SequenceMatcher(None, candidate, reference).ratio()
-        best = max(best, coverage, (0.7 * coverage) + (0.3 * sequence))
-    return min(1.0, max(0.0, best)) if best > 0 else 0.0
+        if coverage >= 0.9 and _generic_reference_lacks_richer_evidence(
+            evidence, raw_reference, references
+        ):
+            coverage = min(coverage, 0.89)
+        best_coverage = max(best_coverage, coverage)
+    if not eligible_references:
+        return 0.0
+    if not _passes_reference_constraints(evidence, eligible_references):
+        return 0.0
+
+    # Use the same multilingual semantic/Jaccard scorer as product sourcing.
+    # Reference-token coverage remains as candidate-owned literal evidence so
+    # an exact product phrase followed by caption words ("... 사용 후기") keeps
+    # its prior positive behavior without restoring fuzzy sequence matching.
+    shared_score = _multi_reference_score(evidence, eligible_references)
+    return min(1.0, max(0.0, shared_score, best_coverage))
 
 
 def _relevance_result(
@@ -90,8 +125,28 @@ def _relevance_result(
 ) -> tuple[bool, Optional[float]]:
     if not _passes_category_guard(evidence, category_terms or []):
         return False, 0.0
+    if not _passes_reference_constraints(evidence, references):
+        return False, 0.0
     score = candidate_relevance_score(evidence, references)
-    threshold = max(0.9, min(1.0, min_score))
+    # Chinese captions are commonly written without spaces, so token/Jaccard
+    # scoring can under-rate an obvious family match ("自动打蛋器" vs
+    # "电动打蛋器").  A literal CJK/Korean category anchor is candidate-owned
+    # evidence and is sufficient for the user's product-video policy. Explicit
+    # contradictions/accessory checks above still have veto power.
+    evidence_lower = str(evidence or "").lower()
+    strong_category_match = any(
+        len(compact) >= 2
+        and bool(re.search(r"[가-힣\u3400-\u9fff]", compact))
+        and compact.lower() in evidence_lower
+        for term in (category_terms or [])
+        if (compact := re.sub(r"\s+", "", str(term or "")))
+    )
+    if score is not None and strong_category_match:
+        score = max(score, 0.75)
+    # The caller selects the policy. Marketplace identity matching normally
+    # passes 0.9; product-video discovery intentionally passes 0.75 because it
+    # needs the same product family, not the identical seller/model.
+    threshold = max(0.70, min(1.0, min_score))
     return score is not None and score >= threshold, score
 
 # 플랫폼별 검색 URL 템플릿 + 다운로드 referer.
@@ -109,7 +164,7 @@ _REFERER = {
 }
 
 # yt-dlp 추출기가 지원하는 플랫폼(영상 페이지 링크 → yt-dlp 다운로드).
-_YTDLP_PLATFORMS = {"douyin", "kuaishou", "bilibili"}
+_YTDLP_PLATFORMS = {"douyin", "kuaishou", "xiaohongshu", "bilibili"}
 
 # 검색 결과에서 영상 '페이지 링크'를 찾는 패턴(href/절대경로 모두).
 _PAGE_LINK_PATTERNS = {
@@ -146,6 +201,23 @@ _PLATFORM_MP4_JS = r"""
     ];
     for (const re of pats) { let m; while ((m = re.exec(html))) out.add(m[1].replace(/\\u002F/g,'/').replace(/\\\//g,'/')); }
     document.querySelectorAll('video[src]').forEach(v => { if (v.src && !v.src.startsWith('blob:')) out.add(v.src); });
+    // Modern Douyin/Kuaishou players commonly use MediaSource blobs.  The
+    // actual MP4 request is still visible in Resource Timing, but its signed
+    // CDN path often has no `.mp4` suffix (Douyin uses
+    // `.../video/tos/...?...&mime_type=video_mp4`).  Looking only at DOM
+    // attributes therefore misses a video which is already playing.
+    try {
+        performance.getEntriesByType('resource').forEach(entry => {
+            const u = String(entry && entry.name || '').replace(/&amp;/g, '&');
+            if (!u.startsWith('http')) return;
+            if (
+                /[?&]mime_type=video_(?:mp4|x-flv)(?:&|$)/i.test(u) ||
+                /\/video\/tos\//i.test(u) ||
+                /(?:douyinvod|zjcdn|kwaicdn|txmov2|xhscdn)\./i.test(u) &&
+                    /(?:video|play|\.mp4|\.m3u8)/i.test(u)
+            ) out.add(u);
+        });
+    } catch (e) {}
     return [...out];
 })()
 """
@@ -201,6 +273,7 @@ _WARMUP_URL = {
 _EXTERNAL_SITE_FILTER = {
     "douyin": "douyin.com/video",
     "kuaishou": "kuaishou.com/short-video",
+    "xiaohongshu": "xiaohongshu.com/explore",
     "bilibili": "bilibili.com/video",
 }
 
@@ -212,7 +285,11 @@ async def _external_search_links(
     site = _EXTERNAL_SITE_FILTER.get(platform)
     if not site:
         return []
-    q = urllib.parse.quote(f"{query} site:{site}")
+    # Xiaohongshu /explore mixes image notes and videos under one URL shape.
+    # Adding the native "video" intent word cuts photo-only notes before the
+    # extractor stage; Douyin/Kuaishou URL paths are already video-specific.
+    intent_query = f"{query} 视频" if platform == "xiaohongshu" else query
+    q = urllib.parse.quote(f"{intent_query} site:{site}")
     url = f"https://html.duckduckgo.com/html/?q={q}"
     try:
         tab = await asyncio.wait_for(browser.get(url, new_tab=True), timeout=PAGE_OPEN_TIMEOUT)
@@ -248,6 +325,14 @@ def _normalize_source_id(url: str) -> str:
         return str(url or "").strip().split("?")[0].split("#")[0].rstrip("/").lower()[:300]
 
 
+def _canonical_source_ids(values: Optional[Set[str]]) -> Set[str]:
+    return {
+        canonical
+        for value in (values or set())
+        if (canonical := _normalize_source_id(str(value or "")))
+    }
+
+
 def probe_media_file(path: str) -> Dict[str, float]:
     """ffprobe로 길이(초)/가로/세로 조회. 실패 시 빈 dict."""
     if not path or not os.path.exists(path):
@@ -261,7 +346,7 @@ def probe_media_file(path: str) -> Dict[str, float]:
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if r.returncode != 0:
-            return {}
+            raise RuntimeError("ffprobe failed")
         out: Dict[str, float] = {}
         for line in (r.stdout or "").splitlines():
             k, _, v = line.partition("=")
@@ -269,6 +354,29 @@ def probe_media_file(path: str) -> Dict[str, float]:
                 out[k.strip()] = float(v.strip())
             except ValueError:
                 continue
+        if out:
+            return out
+    except Exception:
+        pass
+
+    # Packaged/runtime machines do not always expose ffprobe on PATH. OpenCV
+    # is already an application dependency, and gives us a deterministic
+    # duration/resolution fallback instead of silently trusting file size.
+    try:
+        import cv2
+
+        capture = cv2.VideoCapture(path)
+        if not capture.isOpened():
+            capture.release()
+            return {}
+        width = float(capture.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height = float(capture.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+        fps = float(capture.get(cv2.CAP_PROP_FPS) or 0)
+        frames = float(capture.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        capture.release()
+        out = {"width": width, "height": height}
+        if fps > 0 and frames > 0:
+            out["duration"] = frames / fps
         return out
     except Exception:
         return {}
@@ -336,7 +444,23 @@ async def start_browser() -> Any:
     for attempt in (1, 2):
         try:
             return await asyncio.wait_for(
-                zd.start(user_data_dir=profile, headless=False),
+                zd.start(
+                    user_data_dir=profile,
+                    headless=False,
+                    sandbox=False,
+                    browser_args=[
+                        "--window-size=1400,900",
+                        "--disable-blink-features=AutomationControlled",
+                        "--no-first-run",
+                        "--no-default-browser-check",
+                        "--lang=zh-CN",
+                        "--accept-lang=zh-CN,zh;q=0.9,en;q=0.7",
+                    ],
+                    # Chrome cold starts can exceed zendriver's 250ms default,
+                    # especially after a forced cleanup of a stale profile.
+                    browser_connection_timeout=1.5,
+                    browser_connection_max_tries=40,
+                ),
                 timeout=BROWSER_START_TIMEOUT,
             )
         except (asyncio.TimeoutError, Exception) as e:  # zendriver raises plain Exception
@@ -374,16 +498,25 @@ async def _extract_platform_videos(tab: Any) -> List[str]:
     return [u for u in urls if u.startswith("http")]
 
 
-async def _browser_cookies_for(browser: Any, platform: str) -> Dict[str, str]:
-    """자동화 브라우저의 플랫폼 도메인 쿠키(dict) — 서명 CDN 다운로드 성공률용."""
+async def _browser_cookies_for(
+    browser: Any,
+    platform: str,
+    target_url: str = "",
+) -> Dict[str, str]:
+    """Return only cookies whose browser domain matches the target host."""
     keyword = {"douyin": "douyin", "kuaishou": "kuaishou", "xiaohongshu": "xiaohongshu"}.get(platform, platform)
+    target_host = (urllib.parse.urlsplit(target_url).hostname or "").rstrip(".").lower()
     out: Dict[str, str] = {}
     try:
         cookies = await asyncio.wait_for(browser.cookies.get_all(), timeout=EVAL_TIMEOUT)
         for c in cookies or []:
             try:
                 domain = str(getattr(c, "domain", "") or "")
-                if keyword in domain:
+                cookie_host = domain.lstrip(".").rstrip(".").lower()
+                domain_matches_target = bool(target_host) and (
+                    target_host == cookie_host or target_host.endswith(f".{cookie_host}")
+                )
+                if domain_matches_target or (not target_host and keyword in cookie_host):
                     out[str(getattr(c, "name", ""))] = str(getattr(c, "value", ""))
             except Exception:
                 continue
@@ -444,8 +577,14 @@ async def _extract_video_page_links(
     return links
 
 
-def _ytdlp_download(page_url: str, output_dir: str,
-                    cookies: Optional[Dict[str, str]] = None) -> Optional[Dict[str, Any]]:
+def _ytdlp_download(
+    page_url: str,
+    output_dir: str,
+    cookies: Optional[Dict[str, str]] = None,
+    relevance_references: Optional[List[str]] = None,
+    min_relevance_score: float = 0.9,
+    category_terms: Optional[List[str]] = None,
+) -> Optional[Dict[str, Any]]:
     """yt-dlp로 영상 페이지 다운로드(동기). 성공 시 {local_path, duration, ...}.
 
     다운로드 전에 메타만 먼저 뽑아 길이를 확인한다 — 빌리빌리처럼 긴 영상이 많은
@@ -465,6 +604,38 @@ def _ytdlp_download(page_url: str, output_dir: str,
         ):
             logger.info("[PlatformSearch] 길이 부적합 %.0fs — 스킵: %s",
                         meta.duration, page_url[:60])
+            return {
+                "technical_rejected": True,
+                "reason": f"duration_{meta.duration:.1f}s",
+                "title": str(meta.title or ""),
+            }
+
+        # yt-dlp can read the public title/caption without downloading the
+        # media. Reject unrelated results here so a broad recall query never
+        # wastes bandwidth on a clip that will be deleted immediately.
+        evidence = str(meta.title or "").strip() if meta.ok else ""
+        relevance_score: Optional[float] = None
+        if relevance_references and evidence:
+            relevant, relevance_score = _relevance_result(
+                evidence,
+                list(relevance_references),
+                min_relevance_score,
+                list(category_terms or []),
+            )
+            if not relevant:
+                logger.info(
+                    "[PlatformSearch] metadata relevance reject score=%s: %s",
+                    relevance_score,
+                    evidence[:100],
+                )
+                return {
+                    "relevance_rejected": True,
+                    "title": evidence,
+                    "relevance_score": relevance_score,
+                }
+        elif relevance_references:
+            # Let the browser-page fallback inspect document.title instead of
+            # downloading a source whose identity evidence is still unknown.
             return None
 
         cv = collector.collect_one(page_url, download=True, cookies=cookies)
@@ -475,6 +646,7 @@ def _ytdlp_download(page_url: str, output_dir: str,
                 "title": cv.title,
                 "width": cv.width,
                 "height": cv.height,
+                "relevance_score": relevance_score,
             }
         if cv.error:
             logger.info("[PlatformSearch] yt-dlp 수집 실패(%s): %s", page_url[:60], cv.error[:160])
@@ -486,8 +658,29 @@ def _ytdlp_download(page_url: str, output_dir: str,
 # 페이지 열기/스크립트 평가가 무한 대기하지 않도록 하는 타임아웃(초).
 PAGE_OPEN_TIMEOUT = 40.0
 EVAL_TIMEOUT = 15.0
-# 플랫폼 1곳당 시간 예산(초) — 초과 시 다음 플랫폼으로.
-PER_PLATFORM_BUDGET = 240.0
+# 플랫폼 1곳당 시간/후보 예산. 사진 노트·깨진 링크가 반복되어도
+# 풀자동화 한 건이 무한정 늘어지지 않고 다음 플랫폼으로 넘어간다.
+PER_PLATFORM_BUDGET = 120.0
+MAX_PAGE_ATTEMPTS_PER_PLATFORM = 6
+MAX_PAGE_ATTEMPTS_PER_QUERY = 2
+
+
+def _take_fresh_page_links(
+    page_links: List[str], attempted: Set[str], skip: Set[str]
+) -> List[str]:
+    """Reserve a small candidate slice without starving later query aliases."""
+    fresh_links: List[str] = []
+    for link in page_links:
+        if len(fresh_links) >= MAX_PAGE_ATTEMPTS_PER_QUERY:
+            break
+        if len(attempted.difference(skip)) >= MAX_PAGE_ATTEMPTS_PER_PLATFORM:
+            break
+        source_id = _normalize_source_id(link)
+        if source_id in attempted:
+            continue
+        attempted.add(source_id)
+        fresh_links.append(link)
+    return fresh_links
 
 
 def _mux_streams(video_path: str, audio_path: Optional[str], out_path: str) -> bool:
@@ -539,8 +732,8 @@ async def _browser_page_video_download(
                 logger.info("[PlatformSearch] %s 소스 제목: %s", platform, page_title[:80])
         except Exception:
             pass
-        cookies = await _browser_cookies_for(browser, platform)
         for vurl in urls[:3]:
+            cookies = await _browser_cookies_for(browser, platform, vurl)
             path = os.path.join(output_dir, f"platform_{platform}_{uuid.uuid4().hex[:8]}.mp4")
             try:
                 size = await asyncio.wait_for(
@@ -599,7 +792,6 @@ async def _bilibili_browser_download(
             logger.info("[PlatformSearch] bilibili 길이 부적합 %.0fs — 스킵", timelength_ms / 1000.0)
             return None
 
-        cookies = await _browser_cookies_for(browser, "bilibili")
         referer = link
         tag = uuid.uuid4().hex[:8]
 
@@ -610,8 +802,9 @@ async def _bilibili_browser_download(
             audios = dash.get("audio") or []
             aurl = (audios[0].get("baseUrl") or audios[0].get("base_url") or "") if audios else ""
             vpath = os.path.join(output_dir, f"bili_{tag}_v.m4s")
+            video_cookies = await _browser_cookies_for(browser, "bilibili", vurl)
             vsize = await asyncio.wait_for(
-                asyncio.to_thread(_download_video, vurl, vpath, referer, cookies=cookies),
+                asyncio.to_thread(_download_video, vurl, vpath, referer, cookies=video_cookies),
                 timeout=180,
             ) if vurl else None
             if not vsize:
@@ -619,8 +812,9 @@ async def _bilibili_browser_download(
             apath = ""
             if aurl:
                 apath = os.path.join(output_dir, f"bili_{tag}_a.m4s")
+                audio_cookies = await _browser_cookies_for(browser, "bilibili", aurl)
                 asize = await asyncio.wait_for(
-                    asyncio.to_thread(_download_video, aurl, apath, referer, cookies=cookies),
+                    asyncio.to_thread(_download_video, aurl, apath, referer, cookies=audio_cookies),
                     timeout=180,
                 )
                 if not asize:
@@ -643,8 +837,9 @@ async def _bilibili_browser_download(
             if not u:
                 return None
             path = os.path.join(output_dir, f"platform_bilibili_{tag}.flv")
+            media_cookies = await _browser_cookies_for(browser, "bilibili", u)
             size = await asyncio.wait_for(
-                asyncio.to_thread(_download_video, u, path, referer, cookies=cookies),
+                asyncio.to_thread(_download_video, u, path, referer, cookies=media_cookies),
                 timeout=180,
             )
             if size:
@@ -673,7 +868,11 @@ async def search_one_platform(
     if not tmpl:
         return None
     os.makedirs(output_dir, exist_ok=True)
-    skip = skip_source_ids or set()
+    skip = _canonical_source_ids(skip_source_ids)
+    # A result often appears under every query variant. Track attempted page
+    # IDs for this platform run so photo notes, broken videos and rejected
+    # clips are never probed repeatedly.
+    tried_source_ids = set(skip)
     deadline = _time.monotonic() + max(30.0, float(budget_seconds))
 
     # 홈 워밍업: 기본 쿠키(ttwid/did 등)를 먼저 심어 비로그인 검색 렌더 성공률을 올린다.
@@ -689,7 +888,7 @@ async def search_one_platform(
         except Exception:
             pass
 
-    for q in [x for x in queries if str(x or "").strip()]:
+    for q in _queries_for_chinese_platform(queries):
         if _time.monotonic() > deadline:
             logger.info("[PlatformSearch] %s: 시간 예산 초과 — 다음 플랫폼으로", platform)
             return None
@@ -711,7 +910,7 @@ async def search_one_platform(
             hit = await _search_query_on_tab(
                 browser, tab, platform, q, url, output_dir, page_wait, skip, deadline,
                 relevance_references or [], min_relevance_score,
-                category_terms or [],
+                category_terms or [], tried_source_ids,
             )
         except Exception as e:
             # 쿼리 하나가 죽어도 다음 쿼리/플랫폼은 계속 — 전체 소싱을 무너뜨리지 않는다.
@@ -723,6 +922,13 @@ async def search_one_platform(
                 pass
         if hit:
             return hit
+        if len(tried_source_ids.difference(skip)) >= MAX_PAGE_ATTEMPTS_PER_PLATFORM:
+            logger.info(
+                "[PlatformSearch] %s: 후보 %d개 점검 완료 — 다음 플랫폼으로",
+                platform,
+                MAX_PAGE_ATTEMPTS_PER_PLATFORM,
+            )
+            return None
     return None
 
 
@@ -731,6 +937,7 @@ async def _search_query_on_tab(
     output_dir: str, page_wait: float, skip: Set[str], deadline: float,
     relevance_references: List[str], min_relevance_score: float,
     category_terms: List[str],
+    tried_source_ids: Optional[Set[str]] = None,
 ) -> Optional[Dict[str, Any]]:
     """열린 탭에서 챌린지 확인→링크 추출→다운로드까지. 성공 시 hit dict."""
     import time as _time
@@ -758,28 +965,55 @@ async def _search_query_on_tab(
         if platform in _YTDLP_PLATFORMS:
             page_links = await _extract_video_page_links(tab, platform, output_dir, q)
             logger.info("[PlatformSearch] %s: 영상 페이지 링크 %d개", platform, len(page_links))
-            if not page_links:
-                # 플랫폼 자체 검색이 게이트일 때: 외부 검색엔진으로 영상 페이지를 찾는다.
-                page_links = await _external_search_links(browser, platform, q, output_dir)
-            fresh_links = [l for l in page_links if _normalize_source_id(l) not in skip]
+            # Native result pages frequently expose only one stale/deleted
+            # result to a logged-out session.  Merge external indexed results
+            # until we have enough unique candidates instead of treating one
+            # unusable URL as a complete search.
+            if len(page_links) < 4:
+                external_links = await _external_search_links(
+                    browser, platform, q, output_dir
+                )
+                seen_links = {_normalize_source_id(link) for link in page_links}
+                for link in external_links:
+                    source_id = _normalize_source_id(link)
+                    if source_id and source_id not in seen_links:
+                        seen_links.add(source_id)
+                        page_links.append(link)
+            attempted = tried_source_ids if tried_source_ids is not None else set(skip)
+            fresh_links = _take_fresh_page_links(page_links, attempted, skip)
             if len(page_links) != len(fresh_links):
-                logger.info("[PlatformSearch] %s: 이미 사용한 영상 %d개 스킵",
+                logger.info("[PlatformSearch] %s: 이미 사용/시도한 영상 %d개 스킵",
                             platform, len(page_links) - len(fresh_links))
             ytdlp_cookies = (
                 await _browser_cookies_for(browser, platform) if fresh_links else {}
             )
-            for link in fresh_links[:4]:
+            # Spread the finite platform budget across exact and family-alias
+            # queries. Four stale links from the first over-specific query used
+            # to starve simpler native phrases such as 手持挂烫机.
+            for link in fresh_links:
                 if _time.monotonic() > deadline:
                     logger.info("[PlatformSearch] %s: 시간 예산 초과(yt-dlp 단계)", platform)
                     return None
                 try:
                     got = await asyncio.wait_for(
-                        asyncio.to_thread(_ytdlp_download, link, output_dir, ytdlp_cookies),
+                        asyncio.to_thread(
+                            _ytdlp_download,
+                            link,
+                            output_dir,
+                            ytdlp_cookies,
+                            relevance_references,
+                            min_relevance_score,
+                            category_terms,
+                        ),
                         timeout=240,
                     )
                 except asyncio.TimeoutError:
                     logger.warning("[PlatformSearch] %s yt-dlp 240s 초과: %s", platform, link[:60])
                     got = None
+                if got and (
+                    got.get("relevance_rejected") or got.get("technical_rejected")
+                ):
+                    continue
                 if not got and platform == "bilibili":
                     # 412 리스크컨트롤 폴백: 브라우저 컨텍스트에서 직접 스트림 다운로드.
                     got = await _bilibili_browser_download(browser, link, output_dir)
@@ -834,12 +1068,12 @@ async def _search_query_on_tab(
             return None
 
         referer = _REFERER.get(platform, url)
-        session_cookies = await _browser_cookies_for(browser, platform)
         for vurl in video_urls[:5]:
             if _time.monotonic() > deadline:
                 logger.info("[PlatformSearch] %s: 시간 예산 초과(직접 다운로드 단계)", platform)
                 return None
             filepath = os.path.join(output_dir, f"platform_{platform}_{uuid.uuid4().hex[:8]}.mp4")
+            session_cookies = await _browser_cookies_for(browser, platform, vurl)
             try:
                 size = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -878,9 +1112,24 @@ async def search_platform_shorts(
     relevance_references: Optional[List[str]] = None,
     min_relevance_score: float = 0.9,
     category_terms: Optional[List[str]] = None,
+    prefer_best: bool = True,
 ) -> Optional[Dict[str, Any]]:
-    """Try platforms in order and return the first relevance-safe candidate."""
-    for platform in (platforms or DEFAULT_PLATFORM_ORDER):
+    """Return the strongest relevance-safe candidate across enabled platforms.
+
+    Every platform still searches in deterministic priority order.  When
+    ``prefer_best`` is true (the full-automation default), one safe candidate
+    per platform is compared instead of allowing an early 0.90 hit to hide a
+    later exact match.  Downloaded non-selected candidates are removed.
+    """
+    requested = platforms or DEFAULT_PLATFORM_ORDER
+    active_platforms = list(dict.fromkeys(
+        str(platform or "").strip().lower()
+        for platform in requested
+        if str(platform or "").strip().lower() in SUPPORTED_COMMERCE_PLATFORMS
+    )) or list(DEFAULT_PLATFORM_ORDER)
+
+    safe_hits: List[Dict[str, Any]] = []
+    for platform in active_platforms:
         hit = await search_one_platform(
             browser,
             platform,
@@ -892,8 +1141,31 @@ async def search_platform_shorts(
             category_terms=category_terms,
         )
         if hit:
-            return hit
-    return None
+            if not prefer_best:
+                return hit
+            safe_hits.append(hit)
+            # No later candidate can exceed an exact score.
+            if float(hit.get("relevance_score") or 0.0) >= 1.0:
+                break
+    if not safe_hits:
+        return None
+
+    selected = max(
+        enumerate(safe_hits),
+        key=lambda pair: (float(pair[1].get("relevance_score") or 0.0), -pair[0]),
+    )[1]
+    selected_path = os.path.abspath(str(selected.get("video_file") or ""))
+    for candidate in safe_hits:
+        candidate_path = str(candidate.get("video_file") or "")
+        if not candidate_path:
+            continue
+        if os.path.abspath(candidate_path) == selected_path:
+            continue
+        try:
+            os.remove(candidate_path)
+        except OSError:
+            pass
+    return selected
 
 
 async def collect_by_keyword(

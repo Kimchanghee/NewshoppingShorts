@@ -2023,6 +2023,7 @@ class YouTubeManager:
         render_integrity: Optional[Dict[str, Any]] = None,
         render_integrity_required: bool = False,
         upload_number: Optional[int] = None,
+        marketplace_source_url: str = "",
     ) -> bool:
         """
         Add video to upload queue.
@@ -2034,10 +2035,13 @@ class YouTubeManager:
             tags: Video tags (auto-generated if empty and enabled)
             product_info: Product information for SEO generation
             source_url: Source URL
+            marketplace_source_url: Original marketplace/platform media page,
+                recorded for deduplication only after a confirmed upload
             linktree_url: Public Linktree profile URL for the auto-comment
             upload_number: Shared Linktree/channel number, shown as [001]
         """
         clean_source_url = self._normalize_public_url(source_url)
+        clean_marketplace_source_url = self._normalize_public_url(marketplace_source_url)
         clean_coupang_link = self._normalize_public_url(coupang_deep_link)
         clean_product_info = self._sanitize_public_text(product_info, limit=220)
         clean_title = self._sanitize_public_text(title, limit=100)
@@ -2096,6 +2100,7 @@ class YouTubeManager:
             "tags": normalized_tags,
             "product_info": clean_product_info or "",
             "source_url": clean_source_url or "",
+            "marketplace_source_url": clean_marketplace_source_url or "",
             "coupang_deep_link": clean_coupang_link or "",
             "linktree_url": linktree_url or "",
             "upload_number": clean_upload_number,
@@ -2275,6 +2280,7 @@ class YouTubeManager:
                     registry.finalize_reservation(
                         reservation_id,
                         video_id=str(item.get("video_id") or ""),
+                        source_url=str(item.get("marketplace_source_url") or ""),
                     )
                 else:
                     registry.record(
@@ -2283,6 +2289,12 @@ class YouTubeManager:
                         platform="youtube",
                         video_id=str(item.get("video_id") or ""),
                     )
+                    marketplace_source_url = str(item.get("marketplace_source_url") or "")
+                    if marketplace_source_url:
+                        registry.record_source(
+                            marketplace_source_url,
+                            meta={"platform": "youtube", "video_id": str(item.get("video_id") or "")},
+                        )
                 item.pop("registry_error", None)
                 item.pop("upload_completed_registry_repair_required", None)
                 item.pop("upload_registry_reservation_id", None)
@@ -2423,7 +2435,11 @@ class YouTubeManager:
                 self._try_post_auto_comment(video_id, item)
                 # 업로드 이력 기록(다음번 중복 차단용).
                 try:
-                    registry.finalize_reservation(reservation_id, video_id=video_id)
+                    registry.finalize_reservation(
+                        reservation_id,
+                        video_id=video_id,
+                        source_url=str(item.get("marketplace_source_url") or ""),
+                    )
                     item.pop("upload_registry_reservation_id", None)
                 except Exception as rec_exc:
                     # The video is already live. Keep this queue item in a

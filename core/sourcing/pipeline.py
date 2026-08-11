@@ -31,6 +31,9 @@ MARKETPLACE_SEARCH_STAGE_TIMEOUT = int(
 MARKETPLACE_VIDEO_SCAN_TIMEOUT = int(
     os.getenv("SSMAKER_MARKETPLACE_VIDEO_SCAN_TIMEOUT", "240")
 )
+PLATFORM_FALLBACK_TIMEOUT = int(
+    os.getenv("SSMAKER_PLATFORM_FALLBACK_TIMEOUT", "420")
+)
 
 
 def _safe_print(message: Any) -> None:
@@ -75,6 +78,7 @@ class SourcingPipeline:
         enforce_min_similarity: bool = True,
         fallback_product_name: str = "",
         fallback_category: str = "",
+        allow_product_image_fallback: bool = True,
     ):
         """
         Args:
@@ -85,6 +89,9 @@ class SourcingPipeline:
             min_similarity_score: Final marketplace match gate (0.0-1.0).
             enforce_min_similarity: Block automation when no marketplace
                 product reaches min_similarity_score.
+            allow_product_image_fallback: Create a static Coupang-image video
+                after all real-video searches fail. Disable for search-only
+                diagnostics and smoke tests.
         """
         self.coupang_url = coupang_url
         self.output_dir = output_dir
@@ -96,6 +103,7 @@ class SourcingPipeline:
         self.enforce_min_similarity = bool(enforce_min_similarity)
         self.fallback_product_name = str(fallback_product_name or "").strip()
         self.fallback_category = str(fallback_category or "").strip()
+        self.allow_product_image_fallback = bool(allow_product_image_fallback)
 
         # Results populated during run
         self.product_info: Optional[Dict] = None
@@ -439,6 +447,146 @@ class SourcingPipeline:
             except Exception as ee:
                 logger.error("[Pipeline] Headless retry also failed: %s", ee)
                 return None
+
+    async def _try_platform_video_fallback(
+        self,
+        browser: Any,
+        *,
+        queries: List[str],
+        relevance_references: List[str],
+        category_terms: List[str],
+        used_source_ids: set[str],
+    ) -> bool:
+        """Promote a strict short-platform match into the normal source flow.
+
+        This is deliberately search/download-only.  Rendering and uploading
+        remain owned by the existing full-automation stages, so falling back
+        from AliExpress/1688 cannot accidentally publish a raw platform clip.
+        """
+        if os.getenv("SSMAKER_DISABLE_PLATFORM_FALLBACK", "").strip() == "1":
+            logger.info("[Pipeline] Platform fallback disabled by environment")
+            return False
+
+        clean_queries = list(dict.fromkeys(
+            str(query or "").strip() for query in queries if str(query or "").strip()
+        ))
+        clean_references = list(dict.fromkeys(
+            str(reference or "").strip()
+            for reference in relevance_references
+            if str(reference or "").strip()
+        ))
+        if not clean_queries or not clean_references:
+            return False
+
+        try:
+            from core.sourcing.platform_shorts_searcher import search_platform_shorts
+            from managers.settings_manager import get_settings_manager
+
+            platforms = get_settings_manager().get_platform_video_sources()
+            self._progress(
+                "video_download",
+                "마켓 영상 없음 — 샤오홍슈·도우인·콰이쇼우 검색 중...",
+                0.82,
+            )
+            hit = await asyncio.wait_for(
+                search_platform_shorts(
+                    browser,
+                    clean_queries,
+                    self.output_dir,
+                    platforms=platforms,
+                    skip_source_ids=set(used_source_ids or set()),
+                    relevance_references=clean_references,
+                    min_relevance_score=max(0.9, self.min_similarity_score),
+                    category_terms=list(category_terms or []),
+                    prefer_best=True,
+                ),
+                timeout=PLATFORM_FALLBACK_TIMEOUT,
+            )
+        except asyncio.TimeoutError:
+            logger.warning(
+                "[Pipeline] Platform fallback timeout (%ss)",
+                PLATFORM_FALLBACK_TIMEOUT,
+            )
+            self.search_diagnostics["platform_fallback"] = {
+                "ok": False,
+                "reason": "timeout",
+                "timeout_seconds": PLATFORM_FALLBACK_TIMEOUT,
+            }
+            return False
+        except Exception as exc:
+            logger.warning("[Pipeline] Platform fallback failed: %s", exc)
+            self.search_diagnostics["platform_fallback"] = {
+                "ok": False,
+                "reason": str(exc),
+            }
+            return False
+
+        if not hit:
+            self.search_diagnostics["platform_fallback"] = {
+                "ok": False,
+                "reason": "no_relevance_safe_video",
+                "platforms": list(platforms),
+            }
+            return False
+
+        video_file = str(hit.get("video_file") or "")
+        video_url = str(hit.get("video_url") or hit.get("source_url") or "")
+        score = float(hit.get("relevance_score") or 0.0)
+        threshold = max(0.9, self.min_similarity_score)
+        if not video_file or not os.path.isfile(video_file) or score < threshold:
+            logger.warning(
+                "[Pipeline] Rejecting incomplete/unsafe platform hit (file=%s score=%.3f)",
+                bool(video_file and os.path.isfile(video_file)),
+                score,
+            )
+            if video_file:
+                try:
+                    os.remove(video_file)
+                except OSError:
+                    pass
+            return False
+
+        try:
+            from managers.uploaded_registry import normalize_source_id
+            selected_source_id = normalize_source_id(video_url)
+        except Exception:
+            selected_source_id = video_url
+
+        platform = str(hit.get("platform") or "platform_video")
+        title = str(hit.get("title") or hit.get("evidence") or clean_references[0])
+        item = {
+            "source": platform,
+            "source_platform": platform,
+            "source_url": video_url,
+            "selected_source_id": selected_source_id,
+            "product": {
+                "title": title,
+                "url": video_url,
+                "score": score,
+            },
+            "video_file": video_file,
+            "video_url": video_url,
+            "size_mb": float(hit.get("size_mb") or 0.0),
+            "query": str(hit.get("query") or ""),
+            "via": str(hit.get("via") or ""),
+            "sourcing_route": "marketplace_to_platform_fallback",
+            "auto_publish_safe": True,
+            "requires_review": False,
+        }
+        self.sourced_products.append(item)
+        self.search_diagnostics["platform_fallback"] = {
+            "ok": True,
+            "platform": platform,
+            "score": score,
+            "source_id": selected_source_id,
+            "platforms": list(platforms),
+        }
+        self._progress(
+            "video_download",
+            f"{platform}에서 관련도 {score * 100:.1f}% 영상 확보",
+            0.9,
+        )
+        return True
 
     async def run_sourcing(self) -> bool:
         """
@@ -972,22 +1120,36 @@ class SourcingPipeline:
             if not candidates_1688 and not candidates_ali:
                 if access_challenges:
                     sources = sorted({str(e.get("source") or "") for e in access_challenges if e.get("source")})
-                    self.error = (
+                    marketplace_blocker = (
                         "marketplace_access_challenge: AliExpress/1688 search requires a valid logged-in session "
-                        "or manual verification before queue items can be consumed. Sources: "
+                        "or manual verification. Sources: "
                         + ", ".join(sources)
                     )
-                    logger.warning("[Pipeline] %s", self.error)
-                    self._progress("overseas_search", self.error, 1.0)
-                    return False
-                msg = "후보 0개 — 검색을 종료하고 폴백 단계로 진행합니다."
-                logger.warning("[Pipeline] %s", msg)
-                self._progress("overseas_search", msg, 1.0)
+                    self.search_diagnostics["marketplace_access_challenge_error"] = marketplace_blocker
+                    logger.warning("[Pipeline] %s; continuing to platform fallback", marketplace_blocker)
+                    self._progress(
+                        "overseas_search",
+                        "마켓플레이스 접근 제한 — 숏폼 플랫폼 폴백으로 계속합니다.",
+                        1.0,
+                    )
+                else:
+                    msg = "후보 0개 — 검색을 종료하고 폴백 단계로 진행합니다."
+                    logger.warning("[Pipeline] %s", msg)
+                    self._progress("overseas_search", msg, 1.0)
             else:
                 self._progress("overseas_search", "검색 완료", 1.0)
 
             # ── Step 5: Find products with video + download ──
             self._progress("video_download", "영상 있는 상품 탐색 중...", 0.0)
+
+            try:
+                from managers.uploaded_registry import get_uploaded_registry
+
+                used_marketplace_source_ids = get_uploaded_registry().used_source_ids()
+            except Exception as exc:
+                self.error = f"중복 소스 기록을 확인할 수 없어 자동 소싱을 중단했습니다: {exc}"
+                self._progress("video_download", self.error, 0.0)
+                return False
 
             # Build category guard from English keyword — rejects wrong-category
             # candidates before we even try them, lifting matching accuracy.
@@ -1047,6 +1209,7 @@ class SourcingPipeline:
                             min_score=marketplace_video_min_score,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
+                            skip_source_ids=used_marketplace_source_ids,
                         ),
                         timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
                     )
@@ -1082,6 +1245,7 @@ class SourcingPipeline:
                                 min_score=marketplace_video_min_score,
                                 category_terms=category_terms,
                                 overlap_references=overlap_refs,
+                                skip_source_ids=used_marketplace_source_ids,
                             ),
                             timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
                         )
@@ -1105,6 +1269,7 @@ class SourcingPipeline:
                             count=need_from_1688, min_score=marketplace_video_min_score,
                             category_terms=category_terms,
                             overlap_references=overlap_refs,
+                            skip_source_ids=used_marketplace_source_ids,
                         ),
                         timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
                     )
@@ -1147,6 +1312,7 @@ class SourcingPipeline:
                                     min_score=marketplace_video_min_score,
                                     category_terms=category_terms,
                                     overlap_references=overlap_refs,
+                                    skip_source_ids=used_marketplace_source_ids,
                                 ),
                                 timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
                             )
@@ -1167,7 +1333,9 @@ class SourcingPipeline:
             # previously sourced safe marketplace video for the same Coupang
             # product/link before falling back to a static product-image video.
             if not self.sourced_products:
-                cached = self._find_cached_marketplace_video()
+                cached = self._find_cached_marketplace_video(
+                    used_source_ids=used_marketplace_source_ids
+                )
                 if cached:
                     self._progress(
                         "video_download",
@@ -1175,6 +1343,19 @@ class SourcingPipeline:
                         0.88,
                     )
                     self.sourced_products.append(cached)
+
+            # A marketplace miss is not the end of the search.  Reuse the same
+            # strict product references and category guard on the four supported
+            # short-video platforms, then hand the winning source back to the
+            # normal narration/render pipeline.
+            if not self.sourced_products:
+                await self._try_platform_video_fallback(
+                    browser,
+                    queries=[cn_kw] if cn_kw else [en_kw],
+                    relevance_references=overlap_refs,
+                    category_terms=category_terms,
+                    used_source_ids=used_marketplace_source_ids,
+                )
 
             # If nothing matched at the strict threshold, retry progressively looser.
             # Korean Coupang title vs Korean AliExpress title often scores < 0.05
@@ -1207,6 +1388,7 @@ class SourcingPipeline:
                                     count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
                                     category_terms=category_terms,
                                     overlap_references=overlap_refs,
+                                    skip_source_ids=used_marketplace_source_ids,
                                 ),
                                 timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
                             )
@@ -1231,6 +1413,7 @@ class SourcingPipeline:
                                     count=2, min_score=relaxed, max_try=MARKETPLACE_VIDEO_EXPANDED_MAX_TRY_WITH_IMAGE,
                                     category_terms=category_terms,
                                     overlap_references=overlap_refs,
+                                    skip_source_ids=used_marketplace_source_ids,
                                 ),
                                 timeout=MARKETPLACE_VIDEO_SCAN_TIMEOUT,
                             )
@@ -1245,7 +1428,11 @@ class SourcingPipeline:
 
             # Final exact-product fallback: only after strict + relaxed
             # marketplace scans are exhausted.
-            if not self.sourced_products and coupang_image.startswith("http"):
+            if (
+                self.allow_product_image_fallback
+                and not self.sourced_products
+                and coupang_image.startswith("http")
+            ):
                 self._progress(
                     "video_download",
                     "상품 영상 없음 — 쿠팡 상품 이미지로 대체 영상 생성 중...",
@@ -1261,6 +1448,7 @@ class SourcingPipeline:
             # auto-upload when valid marketplace videos were found.
             if (
                 REPLACE_LOW_CONFIDENCE_WITH_IMAGE
+                and self.allow_product_image_fallback
                 and self.sourced_products
                 and coupang_image.startswith("http")
             ):
@@ -1369,7 +1557,10 @@ class SourcingPipeline:
         """Create a short vertical MP4 from the real Coupang product image."""
         return await self._run_blocking_image_video_create(image_url)
 
-    def _find_cached_marketplace_video(self) -> Optional[Dict[str, Any]]:
+    def _find_cached_marketplace_video(
+        self,
+        used_source_ids: Optional[set[str]] = None,
+    ) -> Optional[Dict[str, Any]]:
         """Find a previous safe marketplace video for the same Coupang target."""
         try:
             from core.sourcing.product_searcher import _looks_b2b_candidate_title
@@ -1383,6 +1574,13 @@ class SourcingPipeline:
 
         current_name = ((self.product_info or {}).get("name") or "").strip()
         current_url = (self.coupang_url or "").strip()
+        from managers.uploaded_registry import normalize_source_id
+
+        canonical_used_source_ids = {
+            normalized
+            for value in (used_source_ids or set())
+            if (normalized := normalize_source_id(str(value or "")))
+        }
 
         roots: list[Path] = []
         output = Path(self.output_dir).expanduser()
@@ -1417,6 +1615,7 @@ class SourcingPipeline:
                     current_name=current_name,
                     current_url=current_url,
                     b2b_title_check=_looks_b2b_candidate_title,
+                    used_source_ids=canonical_used_source_ids,
                 )
                 if cached:
                     return cached
@@ -1430,13 +1629,30 @@ class SourcingPipeline:
         current_name: str,
         current_url: str,
         b2b_title_check: Optional[Callable[[str], bool]],
+        used_source_ids: Optional[set[str]] = None,
     ) -> Optional[Dict[str, Any]]:
+        from managers.uploaded_registry import normalize_source_id
+
         for item in report.get("sourced_products") or report.get("sourcing_results") or []:
             product_meta = item.get("product") or {}
             source = str(item.get("source") or product_meta.get("source") or "").lower()
             video_file = str(item.get("video_file") or "")
             title = str(item.get("title") or product_meta.get("title") or "")
-            item_url = item.get("url") or product_meta.get("url") or ""
+            item_url = (
+                item.get("source_page_url")
+                or item.get("url")
+                or product_meta.get("url")
+                or ""
+            )
+            item_source_id = normalize_source_id(
+                str(item.get("source_id") or item_url or item.get("video_url") or "")
+            )
+            if item_source_id and item_source_id in (used_source_ids or set()):
+                logger.info(
+                    "[Pipeline] Skip cached marketplace video (used source=%s)",
+                    item_source_id,
+                )
+                continue
             raw_similarity = item.get(
                 "similarity",
                 item.get("score", product_meta.get("score", report.get("best_similarity"))),
@@ -1649,11 +1865,17 @@ class SourcingPipeline:
 
     def get_report(self) -> Dict[str, Any]:
         """Return full sourcing report as dict."""
+        from managers.uploaded_registry import normalize_source_id
+
         items = [
             {
                 "source": p["source"],
                 "title": p["product"].get("title"),
                 "url": p["product"].get("url"),
+                "source_page_url": p["product"].get("url") or p.get("video_url") or "",
+                "source_id": normalize_source_id(
+                    p["product"].get("url") or p.get("video_url") or ""
+                ),
                 "similarity": p["product"].get("score"),
                 "video_file": p["video_file"],
                 "video_size_mb": p["size_mb"],
@@ -1673,6 +1895,7 @@ class SourcingPipeline:
             "sourced_products": items,
             # Backward compatibility for consumers still using the old key.
             "sourcing_results": list(items),
+            "quality_profile": "narrated_marketplace",
             "match_threshold": self.min_similarity_score,
             "min_similarity_score": self.min_similarity_score,
             "best_similarity": self.best_similarity_score,

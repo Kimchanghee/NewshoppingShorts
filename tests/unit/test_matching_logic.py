@@ -14,6 +14,8 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
@@ -205,6 +207,143 @@ def test_semantic_score_lifts_electric_cleaning_brush_match_to_publish_threshold
     assert _multi_reference_score(candidate, refs) >= 0.9
 
 
+def test_family_anchor_alone_stays_below_auto_publish_threshold():
+    refs = ["cleaning brush"]
+    candidate = "Household Cleaning Brush"
+
+    assert _semantic_similarity_score(candidate, refs) < 0.9
+    assert _multi_reference_score(candidate, refs) < 0.9
+
+
+def test_generic_translated_reference_cannot_override_richer_subtype_intent():
+    refs = [
+        "automatic electric cleaning brush spin scrubber",
+        "cleaning brush",
+    ]
+
+    assert _multi_reference_score("cleaning brush", refs) < 0.9
+    assert _multi_reference_score("electric cleaning brush spin scrubber", refs) >= 0.9
+
+
+def test_cleaning_brush_rejects_explicit_personal_care_subtype():
+    refs = [
+        "automatic electric cleaning brush spin scrubber",
+        "cordless rechargeable power scrubber cleaning tool",
+    ]
+    candidate = "Rechargeable Electric Toothbrush Sonic Cleaning Brush for Teeth"
+
+    assert _semantic_similarity_score(candidate, refs) < 0.9
+    assert not _passes_reference_constraints(candidate, refs)
+
+
+def test_cleaning_brush_rejects_accessory_only_listing_but_allows_complete_bundle():
+    refs = ["electric spin scrubber cordless cleaning brush"]
+    accessory = "Replacement Brush Heads for Electric Spin Scrubber Accessories"
+    complete_bundle = "Electric Spin Scrubber with 8 Replacement Brush Heads"
+
+    assert _semantic_similarity_score(accessory, refs) < 0.9
+    assert not _passes_reference_constraints(accessory, refs)
+    assert _passes_reference_constraints(complete_bundle, refs)
+
+
+def test_explicit_manual_candidate_contradicts_electric_reference():
+    refs = ["electric spin scrubber cordless cleaning brush"]
+    manual = "Manual Hand Powered Cleaning Brush Non-Electric Scrubber"
+
+    assert _semantic_similarity_score(manual, refs) < 0.9
+    assert not _passes_reference_constraints(manual, refs)
+
+
+@pytest.mark.parametrize(
+    ("reference", "candidate"),
+    [
+        ("12V car cooling fan", "24V car cooling fan"),
+        ("rechargeable fan 5000mAh", "rechargeable fan 2000mAh"),
+        ("portable humidifier 1.5L", "portable humidifier 500ml"),
+        ("storage box 30 x 20 x 10 cm", "storage box 40 x 30 x 20 cm"),
+        ("air purifier model AP-120", "air purifier model AP-240"),
+        ("adult cooling neck fan", "kids cooling neck fan"),
+    ],
+)
+def test_explicit_attribute_conflicts_are_rejected(reference, candidate):
+    assert not _passes_reference_constraints(candidate, [reference])
+
+
+def test_equivalent_explicit_units_and_missing_candidate_values_are_allowed():
+    assert _passes_reference_constraints(
+        "portable humidifier 1500ml", ["portable humidifier 1.5L"]
+    )
+    assert _passes_reference_constraints(
+        "portable humidifier quiet mist", ["portable humidifier 1.5L"]
+    )
+
+
+def test_explicit_package_quantity_conflict_is_rejected():
+    reference = "올데이키친 싱크대 거름망 500개입, 1개"
+
+    assert not _passes_reference_constraints(
+        "50/100pcs biodegradable kitchen sink strainer filter bags",
+        [reference],
+    )
+    assert _passes_reference_constraints(
+        "500 pcs biodegradable kitchen sink strainer filter bags",
+        [reference],
+    )
+    # A listing that omits the pack count is uncertain, not contradictory.
+    assert _passes_reference_constraints(
+        "biodegradable kitchen sink strainer filter bags",
+        [reference],
+    )
+
+
+def test_explicit_n_in_one_configuration_conflict_is_rejected():
+    references = [
+        "전동 욕실 청소 브러시 9in1",
+        "电动浴室清洁刷 9合1",
+        "electric bathroom cleaning brush 9-in-1",
+    ]
+
+    assert not _passes_reference_constraints(
+        "Electric Bathroom Cleaning Brush 10 in 1 Spin Scrubber", references
+    )
+    assert _passes_reference_constraints(
+        "Electric Bathroom Cleaning Brush 9-in-1 Spin Scrubber", references
+    )
+
+
+def test_vacuum_reference_uses_vacuum_guard_not_generic_wireless_guard():
+    terms = _category_terms_for_keyword(
+        "wireless",
+        reference_name="2세대 ROMIN 무선 미니 청소기 에어건 진공 핸드청소기",
+        keyword_cn="无线吸尘器",
+    )
+
+    assert any(term in terms for term in ("vacuum", "청소기", "吸尘"))
+    assert "bluetooth" not in terms
+    assert _passes_category_guard(
+        "Cordless Handheld Vacuum Cleaner Strong Suction", terms
+    )
+    assert not _passes_category_guard("Wireless Bluetooth Speaker", terms)
+
+
+def test_bathroom_spin_scrubber_is_not_misclassified_as_vacuum():
+    terms = _category_terms_for_keyword(
+        "Rebine Cordless Electric Spin Scrubber Bathroom Cleaning Brush",
+        reference_name=(
+            "리바인 무선 만능 전동 다용도 화장실 욕실 청소기 "
+            "9in1 분리형 방수 - 물걸레청소기"
+        ),
+        keyword_cn="无线电动多功能浴室卫生间清洁刷 9合1",
+    )
+
+    assert "brush" in terms or "清洁" in terms
+    assert "vacuum" not in terms
+    assert _passes_category_guard(
+        "Electric Spin Scrubber Bathroom Cleaning Brush 9 in 1", terms
+    )
+    assert not _passes_category_guard("Cordless Handheld Vacuum Cleaner", terms)
+
+
 def test_semantic_score_blocks_metal_stopper_for_biodegradable_strainer_bag():
     refs = [
         "콘실 국산 생분해 옥수수 싱크대 배수구 거름망",
@@ -250,7 +389,6 @@ def test_biodegradable_strainer_query_does_not_trigger_sponge_search():
     )
     assert "可降解水槽过滤网袋" in variants
     assert "水槽海绵架" not in variants
-
     terms = _category_terms_for_keyword(
         "biodegradable sink mesh bag compostable drain strainer",
         reference_name="콘실 국산 생분해 옥수수 싱크대 배수구 거름망",
@@ -258,6 +396,69 @@ def test_biodegradable_strainer_query_does_not_trigger_sponge_search():
     )
     assert "sponge" not in terms
     assert "bag" in terms or "mesh" in terms
+
+
+def test_chinese_exact_translation_is_first_search_variant():
+    exact = "ROMIN 第二代 无线迷你吸尘器 吹尘吸尘二合一"
+    variants = _preferred_chinese_query_variants(
+        exact,
+        "ROMIN second generation cordless mini vacuum cleaner air duster",
+    )
+
+    assert variants[0] == exact
+
+
+def test_english_exact_translation_is_first_search_variant():
+    exact = "Alissa portable handheld fan MAX USB 100-speed"
+    variants = _preferred_english_query_variants(
+        exact,
+        "알리사 100단 아이스 터보 MAX 휴대용 선풍기",
+    )
+
+    assert variants[0] == exact
+
+
+def test_rule_based_translation_preserves_model_generation_and_pack_count():
+    vacuum = convert_keywords_rule_based(
+        "2세대 ROMIN 무선 미니 청소기 에어건 진공 핸드청소기"
+    )
+    strainer = convert_keywords_rule_based("올데이키친 싱크대 거름망 500개입, 1개")
+
+    assert "ROMIN" in vacuum["chinese"]
+    assert "2代" in vacuum["chinese"]
+    assert "500个装" in strainer["chinese"]
+
+
+@pytest.mark.parametrize(
+    ("product_name", "required_terms"),
+    [
+        (
+            "리바인 무선 만능 전동 다용도 화장실 욕실 청소기 9in1 분리형 방수",
+            ("电动浴室清洁刷", "9合1"),
+        ),
+        (
+            "알리사 100단 아이스 터보 MAX 휴대용 선풍기",
+            ("便携式手持风扇", "100档", "MAX"),
+        ),
+        (
+            "Ditwo 미니 무선 전동 휘핑기 우유 거품기 스프링 헤드 + 거품 헤드 + 거치대",
+            ("电动奶泡器", "电动打蛋器", "Ditwo"),
+        ),
+        (
+            "올데이키친 싱크대 거름망, 500개입, 1개",
+            ("水槽过滤网", "500个装"),
+        ),
+        (
+            "2세대 ROMIN 무선 미니 청소기 에어건 진공 핸드청소기",
+            ("无线迷你吸尘器", "吹吸一体吸尘器", "ROMIN", "2代"),
+        ),
+    ],
+)
+def test_five_live_products_get_identity_preserving_chinese_queries(
+    product_name, required_terms
+):
+    chinese = convert_keywords_rule_based(product_name)["chinese"]
+    assert all(term in chinese for term in required_terms)
 
 
 def test_preferred_query_variants_keep_product_anchors():

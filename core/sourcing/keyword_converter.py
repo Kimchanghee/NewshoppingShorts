@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -16,6 +17,35 @@ logger = get_logger(__name__)
 # search results than the sum of their parts. Every entry here is a literal substring
 # scan against the Korean product title — if it hits, we use ONLY the compound terms.
 _COMPOUND_MAP = {
+    # Live platform-video families. Keep the native Chinese shopping phrase as
+    # one token so exact translated intent is the first Douyin/XHS/Kuaishou
+    # query even when Gemini is unavailable or quota-limited.
+    "휴대용 믹서기": {"cn": "便携式无线榨汁杯 搅拌机", "en": "portable wireless blender cup"},
+    "텀블러 믹서기": {"cn": "便携式无线榨汁杯 搅拌机", "en": "portable wireless blender cup"},
+    "자동 디스펜서": {"cn": "自动泡沫洗手机 自动皂液器", "en": "automatic foam soap dispenser"},
+    "거품비누 손세정기": {"cn": "自动泡沫洗手机 自动皂液器", "en": "automatic foam soap dispenser"},
+    "휴대용 핸디형 스팀다리미": {"cn": "手持挂烫机 便携式蒸汽熨斗", "en": "portable handheld garment steamer"},
+    "핸디형 스팀다리미": {"cn": "手持挂烫机 便携式蒸汽熨斗", "en": "handheld garment steamer"},
+    "미니 가습기": {"cn": "迷你加湿器", "en": "mini humidifier"},
+    "전동 와인 오프너": {"cn": "电动红酒开瓶器", "en": "electric wine opener"},
+    "마늘 야채": {"cn": "无线电动蒜泥器 食物绞肉机", "en": "wireless garlic food chopper"},
+    "모션 센서등": {"cn": "人体感应灯 充电式LED灯", "en": "motion sensor rechargeable light"},
+    "동작감지 스마트 조명": {"cn": "人体感应灯 充电式LED灯", "en": "motion sensor rechargeable light"},
+    "반려동물 스팀 브러쉬": {"cn": "宠物蒸汽梳 猫狗除毛刷", "en": "pet steam brush"},
+    "스팀 강아지 고양이": {"cn": "宠物蒸汽梳 猫狗除毛刷", "en": "pet steam brush"},
+    "반려동물 빗": {"cn": "宠物蒸汽梳 猫狗除毛刷", "en": "pet steam brush"},
+    "접이식 노트북 거치대": {"cn": "折叠笔记本电脑支架", "en": "foldable laptop stand"},
+    "목걸이 선풍기": {"cn": "挂脖风扇", "en": "neck fan"},
+    "목 선풍기": {"cn": "挂脖风扇", "en": "neck fan"},
+    # 실제 원본 탐색에 자주 쓰이는 전자 소형가전. 한국 판매자가 붙인 브랜드는
+    # 아래 identity-token 단계에서 보존하고, 여기서는 중국 판매자 핵심명으로 번역한다.
+    "욕실 청소기": {"cn": "电动浴室清洁刷", "en": "electric bathroom cleaning brush"},
+    "화장실 청소기": {"cn": "电动浴室清洁刷", "en": "electric bathroom cleaning brush"},
+    "휴대용 선풍기": {"cn": "便携式手持风扇", "en": "portable handheld fan"},
+    "우유 거품기": {"cn": "电动奶泡器", "en": "electric milk frother"},
+    "전동 휘핑기": {"cn": "电动打蛋器", "en": "electric whisk"},
+    "무선 미니 청소기": {"cn": "无线迷你吸尘器", "en": "cordless mini vacuum cleaner"},
+    "에어건 진공": {"cn": "吹吸一体吸尘器", "en": "vacuum cleaner air duster 2 in 1"},
     # 주방 — 수세미 / 식기 류
     "물빠짐 수세미": {"cn": "海绵架 沥水架", "en": "sponge holder kitchen sink"},
     "수세미거치대": {"cn": "海绵架 沥水架", "en": "sponge holder kitchen sink"},
@@ -272,6 +302,57 @@ def _extract_latin_tokens(name: str) -> str:
     return " ".join(tokens[:6]).strip()
 
 
+def _identity_tokens(product_name: str, language: str) -> List[str]:
+    """Keep brand/model/spec/option tokens that identify the exact SKU.
+
+    Chinese marketplace originals are often found by a translated family noun
+    plus an unchanged private-label/model token.  Counts and generations are
+    also product options, not disposable marketing words.
+    """
+    text = str(product_name or "")
+    out: List[str] = []
+
+    def add(value: str) -> None:
+        value = " ".join(str(value or "").split())
+        if value and value.lower() not in {item.lower() for item in out}:
+            out.append(value)
+
+    for token in re.findall(r"(?<![A-Za-z0-9])([A-Za-z][A-Za-z0-9-]{1,})(?![A-Za-z0-9])", text):
+        add(token)
+
+    patterns = (
+        (r"(?<!\d)(\d+)\s*세대", lambda n: f"{n}代" if language == "cn" else f"{n}nd-generation"),
+        (r"(?<!\d)(\d+)\s*단(?!\w)", lambda n: f"{n}档" if language == "cn" else f"{n}-speed"),
+        (r"(?<!\d)(\d+)\s*(?:개입|매입)(?!\w)", lambda n: f"{n}个装" if language == "cn" else f"{n}pcs"),
+        (r"(?<!\d)(\d+)\s*in\s*1(?!\d)", lambda n: f"{n}合1" if language == "cn" else f"{n}-in-1"),
+    )
+    for pattern, render in patterns:
+        for match in re.finditer(pattern, text, re.IGNORECASE):
+            add(render(match.group(1)))
+
+    for value, unit in re.findall(
+        r"(?<![\w.])(\d+(?:\.\d+)?)\s*(mah|ah|v|w|ml|l|cm|mm)(?!\w)",
+        text,
+        re.IGNORECASE,
+    ):
+        add(f"{value}{unit.upper()}")
+    return out
+
+
+def _append_identity_tokens(base: str, product_name: str, language: str) -> str:
+    result = " ".join(str(base or "").split())
+    for token in _identity_tokens(product_name, language):
+        if token.lower() not in result.lower():
+            result = f"{result} {token}".strip()
+    return result
+
+
+def _sanitize_search_phrase(value: str) -> str:
+    """Remove Korean annotations Gemini sometimes echoes beside translations."""
+    without_hangul = re.sub(r"[가-힣]+", " ", str(value or ""))
+    return " ".join(without_hangul.split()).strip(" ,;/")
+
+
 def convert_keywords_rule_based(product_name: str) -> Dict[str, str]:
     """Rule-based keyword conversion from Korean product name.
 
@@ -329,8 +410,14 @@ def convert_keywords_rule_based(product_name: str) -> Dict[str, str]:
                 break
         return " ".join(out).strip()
 
-    cn = _uniq_join(cn_parts)
-    en = _uniq_join(en_parts, max_tokens=6) or _extract_latin_tokens(product_name)
+    cn = _sanitize_search_phrase(
+        _append_identity_tokens(_uniq_join(cn_parts, max_tokens=8), product_name, "cn")
+    )
+    en = _sanitize_search_phrase(_append_identity_tokens(
+        _uniq_join(en_parts, max_tokens=10) or _extract_latin_tokens(product_name),
+        product_name,
+        "en",
+    ))
 
     if not cn or not en:
         logger.warning(
@@ -441,12 +528,15 @@ async def convert_keywords_gemini(product_name: str, gemini_client: Optional[obj
 
     try:
         prompt = (
-            f"다음 한국어 상품명을 중국어와 영어 검색 키워드로 변환해줘. "
+            f"다음 한국어 상품명을 중국 판매 사이트에서 원본 상품을 찾을 수 있도록 "
+            f"간체 중국어와 영어의 고정밀 검색 문구로 번역해줘. "
             f"상품명: \"{product_name}\"\n\n"
             f"반드시 아래 형식으로만 답해:\n"
             f"chinese: [중국어 키워드]\n"
             f"english: [영어 키워드]\n\n"
-            f"브랜드명은 제외하고 상품 카테고리/특성 위주로."
+            f"중국어는 상품 종류·세부 형태·기능을 직역하고, 브랜드/모델명, 세대, "
+            f"숫자, 크기, 전압, 구성 수량(예: 500개입)은 절대 빼거나 바꾸지 마. "
+            f"최고/인기 같은 판매 문구만 제외해."
         )
 
         text = await generate_content_text(gemini_client, prompt)
@@ -464,6 +554,8 @@ async def convert_keywords_gemini(product_name: str, gemini_client: Optional[obj
                 en = line.split(":", 1)[1].strip()
 
         if cn and en:
+            cn = _sanitize_search_phrase(_append_identity_tokens(cn, product_name, "cn"))
+            en = _sanitize_search_phrase(_append_identity_tokens(en, product_name, "en"))
             logger.info("[KeywordConverter] Gemini: cn=%s en=%s", cn[:40], en[:40])
             return {"chinese": cn, "english": en}
 

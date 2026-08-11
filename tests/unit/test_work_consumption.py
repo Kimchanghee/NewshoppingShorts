@@ -297,6 +297,83 @@ def test_direct_platform_finalize_outage_does_not_publish_or_release(monkeypatch
     assert "release" not in events
 
 
+def test_direct_platform_upload_forwards_selected_source(monkeypatch, tmp_path):
+    from ui.panels.sourcing_panel import SourcingPanel
+
+    video = tmp_path / "edited.mp4"
+    video.write_bytes(b"video")
+    queued = {}
+
+    class _Reservation:
+        finalized = False
+
+        def mark_pending_finalize(self):
+            return None
+
+        def finalize(self):
+            self.finalized = True
+            return {"success": True, "reservation_status": "completed"}
+
+        def complete_delivery(self):
+            return None
+
+        def can_release(self):
+            return False
+
+    monkeypatch.setattr(
+        "ui.panels.sourcing_panel.DurableWorkReservation.begin",
+        lambda *_args, **_kwargs: (
+            _Reservation(),
+            {"success": True, "reservation_status": "reserved"},
+        ),
+    )
+
+    source_url = "https://www.douyin.com/video/7351234567890123456"
+
+    async def _pipeline(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "product_info": {"name": "상품"},
+            "hit": {"platform": "douyin", "video_url": source_url},
+            "selected_source_url": source_url,
+            "final_video": str(video),
+            "deep_link": "",
+            "purchase_url": "https://www.coupang.com/vp/products/1",
+            "render_integrity": {"ok": True},
+        }
+
+    monkeypatch.setattr("core.sourcing.platform_pipeline.run_platform_sourcing", _pipeline)
+
+    class _Panel:
+        def _on_pipeline_progress(self, *_args):
+            return None
+
+        def _safe_set_results(self, _text):
+            return None
+
+        def _reset_start_button(self):
+            return None
+
+    class _YouTube:
+        def add_to_upload_queue(self, **kwargs):
+            queued.update(kwargs)
+            return True
+
+    SourcingPanel._run_platform_pipeline(
+        _Panel(),
+        "https://www.coupang.com/vp/products/1",
+        0.9,
+        False,
+        True,
+        None,
+        _YouTube(),
+        "42",
+        "platform:https://www.coupang.com/vp/products/1",
+    )
+
+    assert queued["marketplace_source_url"] == source_url
+
+
 def test_batch_and_direct_publication_are_gated_after_finalize():
     from core.video.batch import processor
     from ui.panels.sourcing_panel import SourcingPanel

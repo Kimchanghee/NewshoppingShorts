@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from core.sourcing.coupang_scraper import _cached_product_from_reports
@@ -114,6 +115,68 @@ def test_similarity_gate_ignores_coupang_image_fallback_as_match():
     assert pipeline.match_status == "not_found"
 
 
+def test_marketplace_failure_can_promote_safe_platform_hit(
+    tmp_path, monkeypatch
+):
+    from core.sourcing import platform_shorts_searcher
+    import managers.settings_manager as settings_mod
+
+    video = tmp_path / "platform.mp4"
+    video.write_bytes(b"video")
+    captured = {}
+
+    async def fake_search(*args, **kwargs):
+        captured.update(kwargs)
+        return {
+            "platform": "douyin",
+            "query": "portable fan",
+            "title": "portable handheld fan product demo",
+            "video_url": "https://www.douyin.com/video/7351234567890123456",
+            "video_file": str(video),
+            "size_mb": 1.25,
+            "relevance_score": 0.97,
+            "via": "yt-dlp",
+        }
+
+    class FakeSettings:
+        def get_platform_video_sources(self):
+            return ["xiaohongshu", "douyin", "kuaishou"]
+
+    monkeypatch.setattr(platform_shorts_searcher, "search_platform_shorts", fake_search)
+    monkeypatch.setattr(settings_mod, "get_settings_manager", lambda: FakeSettings())
+
+    pipeline = SourcingPipeline(
+        coupang_url="https://www.coupang.com/vp/products/12345",
+        output_dir=str(tmp_path),
+        min_similarity_score=0.9,
+    )
+    pipeline.product_info = {
+        "name": "portable handheld fan",
+        "url": pipeline.coupang_url,
+    }
+
+    found = asyncio.run(
+        pipeline._try_platform_video_fallback(
+            object(),
+            queries=["便携式风扇", "portable fan"],
+            relevance_references=["portable handheld fan", "portable fan"],
+            category_terms=["fan"],
+            used_source_ids=set(),
+        )
+    )
+
+    assert found is True
+    assert captured["platforms"] == [
+        "xiaohongshu", "douyin", "kuaishou"
+    ]
+    item = pipeline.sourced_products[0]
+    assert item["source"] == "douyin"
+    assert item["product"]["score"] == 0.97
+    assert item["product"]["url"] == item["video_url"]
+    assert item["auto_publish_safe"] is True
+    assert item["requires_review"] is False
+
+
 def test_scraped_product_info_uses_queue_fallback_for_null_name_and_generic_image():
     pipeline = SourcingPipeline(
         coupang_url="https://www.coupang.com/vp/products/12345",
@@ -221,6 +284,9 @@ def test_cached_marketplace_video_reuses_nested_safe_report(tmp_path, monkeypatc
     assert cached["auto_publish_safe"] is True
     assert cached["product"]["score"] == 1.0
     assert cached["video_file"] == str(video_path)
+    assert pipeline._find_cached_marketplace_video(
+        used_source_ids={"aliexpress:1005010461954174"}
+    ) is None
 
     pipeline.sourced_products = [cached]
     assert pipeline.evaluate_similarity_threshold() is True

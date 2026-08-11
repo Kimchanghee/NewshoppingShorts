@@ -181,6 +181,26 @@ def test_upload_queue_allows_verified_youtube_account(monkeypatch):
     assert len(manager._upload_queue) == 1
 
 
+def test_upload_queue_preserves_marketplace_source_for_post_upload_dedupe(monkeypatch):
+    settings = _AccountVerificationSettings(ok=True)
+    settings.account_email = "ympartners.uk@gmail.com"
+    manager = _make_upload_manager(monkeypatch, settings)
+
+    manager.add_to_upload_queue(
+        video_path="video.mp4",
+        title="title",
+        marketplace_source_url=(
+            "https://www.douyin.com/video/7351234567890123456?from=search"
+        ),
+        render_integrity={"ok": True},
+        render_integrity_required=True,
+    )
+
+    assert manager._upload_queue[0]["marketplace_source_url"] == (
+        "https://www.douyin.com/video/7351234567890123456?from=search"
+    )
+
+
 def test_upload_queue_applies_shared_upload_number(monkeypatch):
     settings = _AccountVerificationSettings(ok=True)
     settings.account_email = "ympartners.uk@gmail.com"

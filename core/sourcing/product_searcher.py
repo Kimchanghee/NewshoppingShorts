@@ -9,10 +9,12 @@ import os
 import re
 import sys
 import uuid
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
+from urllib.parse import urljoin, urlsplit
 
 import requests
 
+from managers.uploaded_registry import normalize_source_id
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -188,7 +190,8 @@ def _similarity_score(name1: str, name2: str) -> float:
 _SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
     # Electric food chopper / garlic mincer family
     "electric": (
-        "electric", "cordless", "rechargeable", "usb", "전동", "충전", "电动", "充电",
+        "electric", "cordless", "rechargeable", "usb", "전동", "충전",
+        "电动", "充电", "无线", "無線",
     ),
     "chopper": (
         "chopper", "chop", "mincer", "mince", "crusher", "grinder", "garlic press",
@@ -208,7 +211,7 @@ _SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
     # Portable appliance families used by strict auto-sourcing.
     "brush": (
         "brush", "scrubber", "spin scrubber", "cleaning brush", "cleaning tool",
-        "청소솔", "브러쉬", "브러시",
+        "청소솔", "브러쉬", "브러시", "清洁刷", "清潔刷", "电动刷", "電動刷", "刷头", "刷頭",
     ),
     "sealer": (
         "sealer", "sealing", "seal", "heat sealer", "sealing machine",
@@ -221,7 +224,7 @@ _SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
     "milk": ("milk", "coffee", "cappuccino", "latte", "우유", "커피"),
     "handheld": (
         "handheld", "hand held", "portable", "mini", "clip", "hand press",
-        "휴대용", "미니", "핸드", "손잡이",
+        "휴대용", "미니", "핸드", "손잡이", "手持", "便携", "便攜",
     ),
     "vacuum": ("vacuum", "suction", "진공", "청소기"),
     "vehicle": ("car", "vehicle", "automotive", "dashboard", "차량", "자동차", "차"),
@@ -662,6 +665,7 @@ def _family_score(
     *,
     required: set[str],
     optional: set[str],
+    family_only_score: float = 0.89,
 ) -> float:
     if not required.issubset(reference_features):
         return 0.0
@@ -670,7 +674,10 @@ def _family_score(
 
     relevant_optional = optional & reference_features
     if not relevant_optional:
-        return 0.9
+        # A shared family noun is useful ranking evidence, but is not enough to
+        # cross the 90% auto-publish boundary by itself.  Stronger attribute or
+        # literal-title evidence can still lift a genuine match above it.
+        return min(0.9, family_only_score)
     covered_optional = len(relevant_optional & candidate_features)
     # Candidate-side optional evidence can compensate a little for marketplace
     # title wording differences (e.g. "towel rack" instead of explicit
@@ -678,6 +685,297 @@ def _family_score(
     extra_optional = len((optional & candidate_features) - relevant_optional)
     optional_coverage = min(1.0, (covered_optional + 0.5 * extra_optional) / len(relevant_optional))
     return min(1.0, 0.68 + 0.32 * optional_coverage)
+
+
+def _has_explicit_reference_contradiction(
+    candidate_title: str,
+    references: Optional[List[str]],
+) -> bool:
+    """Detect only explicit, high-confidence product-attribute conflicts.
+
+    This intentionally avoids guessing attributes from missing words.  A
+    candidate is rejected only when both the reference intent and a conflicting
+    candidate attribute/subtype are stated plainly.
+    """
+    if not references:
+        return False
+    ref = " ".join(r for r in references if r).lower()
+    title_l = (candidate_title or "").lower()
+    if not ref or not title_l:
+        return False
+
+    electric_markers = (
+        "electric", "automatic", "cordless", "rechargeable", "usb",
+        "전동", "자동", "충전", "电动", "充电",
+    )
+    manual_markers = (
+        "manual", "hand-powered", "hand powered", "non-electric", "non electric",
+        "수동", "手动",
+    )
+    ref_electric = any(marker in ref for marker in electric_markers)
+    ref_manual = any(marker in ref for marker in manual_markers)
+    title_electric = any(marker in title_l for marker in electric_markers)
+    title_manual = any(marker in title_l for marker in manual_markers)
+    explicitly_non_electric = any(
+        marker in title_l for marker in ("non-electric", "non electric", "수동", "手动")
+    )
+    if ref_electric and title_manual and (explicitly_non_electric or not title_electric):
+        return True
+    if ref_manual and title_electric and not title_manual:
+        return True
+
+    cordless_markers = ("cordless", "wireless", "rechargeable", "충전식", "무선", "无线", "充电")
+    corded_markers = ("corded", "wired", "plug-in", "plug in", "mains powered", "유선", "插电", "有线")
+    if any(marker in ref for marker in cordless_markers):
+        if any(marker in title_l for marker in corded_markers) and not any(
+            marker in title_l for marker in cordless_markers
+        ):
+            return True
+
+    reusable_markers = ("reusable", "washable", "다회용", "재사용", "可重复使用")
+    disposable_markers = ("disposable", "single use", "single-use", "일회용", "一次性")
+    if any(marker in ref for marker in reusable_markers):
+        if any(marker in title_l for marker in disposable_markers) and not any(
+            marker in title_l for marker in reusable_markers
+        ):
+            return True
+    if any(marker in ref for marker in disposable_markers):
+        if any(marker in title_l for marker in reusable_markers) and not any(
+            marker in title_l for marker in disposable_markers
+        ):
+            return True
+
+    cleaning_brush_ref_markers = (
+        "cleaning brush", "spin scrubber", "power scrubber", "electric scrubber",
+        "청소 브러시", "청소솔", "전동 브러시", "清洁刷", "电动刷", "电动清洁",
+    )
+    if any(marker in ref for marker in cleaning_brush_ref_markers):
+        competing_brush_subtypes = (
+            "toothbrush", "tooth brush", "칫솔", "牙刷",
+            "hairbrush", "hair brush", "comb brush", "헤어 브러시", "빗", "梳子",
+            "makeup brush", "cosmetic brush", "foundation brush", "메이크업 브러시", "化妆刷",
+            "paint brush", "painting brush", "페인트 브러시", "油漆刷",
+        )
+        cleaning_device_markers = (
+            "spin scrubber", "power scrubber", "electric scrubber", "cleaning machine",
+            "전동 청소", "电动清洁刷", "旋转清洁刷",
+        )
+        if any(marker in title_l for marker in competing_brush_subtypes) and not any(
+            marker in title_l for marker in cleaning_device_markers
+        ):
+            return True
+
+        accessory_only_markers = (
+            "replacement brush head", "replacement brush heads", "brush head replacement",
+            "replacement pad", "replacement pads", "scrubber pad", "scrubber pads",
+            "refill head", "refill heads", "spare head", "spare heads",
+            "attachment only", "heads only", "accessories for", "attachments for",
+            "교체용 브러시", "교체용 헤드", "리필 브러시", "替换刷头", "刷头配件",
+        )
+        complete_bundle_markers = (
+            " with ", " includes ", " including ", " comes with ", "set with", "+",
+            "본체", "整机", "主机",
+        )
+        if any(marker in title_l for marker in accessory_only_markers) and not any(
+            marker in title_l for marker in complete_bundle_markers
+        ):
+            return True
+
+    neck_fan_ref_markers = (
+        "neck fan", "neckband fan", "hanging neck", "wearable neck fan",
+        "목 선풍기", "목걸이 선풍기", "넥밴드 선풍기",
+        "挂脖风扇", "颈挂风扇", "挂脖",
+    )
+    competing_waist_fan_markers = (
+        "waist fan", "belt fan", "waist-mounted fan", "belt-mounted fan",
+        "허리 선풍기", "벨트 선풍기", "挂腰风扇", "腰挂风扇", "挂腰",
+    )
+    if any(marker in ref for marker in neck_fan_ref_markers) and any(
+        marker in title_l for marker in competing_waist_fan_markers
+    ):
+        # Seller titles often append unrelated high-traffic subtypes (for
+        # example "挂脖风扇") to a waist-fan listing.  An explicit waist/belt
+        # mounting claim is a hard conflict with a neck-worn product, even
+        # when the desired keyword was stuffed elsewhere in the same title.
+        return True
+
+    generic_accessory_only_markers = (
+        "replacement battery", "replacement charger", "battery charger for",
+        "replacement cable", "replacement cord", "replacement filter",
+        "spare part", "spare parts", "accessory only", "accessories only",
+        "case for", "cover for", "mount for", "adapter for",
+        "교체용 배터리", "교체용 충전기", "교체용 케이블", "부품 전용",
+        "替换电池", "替换充电器", "配件专用",
+    )
+    candidate_accessories = [
+        marker for marker in generic_accessory_only_markers if marker in title_l
+    ]
+    if candidate_accessories and not any(marker in ref for marker in candidate_accessories):
+        bundle_markers = (
+            " with ", " includes ", " including ", " comes with ",
+            "bundle", "본체 포함", "整机", "套装含",
+        )
+        if not any(marker in title_l for marker in bundle_markers):
+            return True
+
+    # Compare only values that are explicit on both sides.  Different units
+    # within the same measurement family are normalized before comparison;
+    # absent values never count as contradictions.
+    measurement_patterns = {
+        "voltage": (r"(?<![\w.])(\d+(?:\.\d+)?)\s*(v|volt(?:s)?)(?!\w)", 1.0),
+        "battery": (r"(?<![\w.])(\d+(?:\.\d+)?)\s*(mah|ah)(?!\w)", None),
+        "volume": (r"(?<![\w.])(\d+(?:\.\d+)?)\s*(ml|l|liters?|litres?)(?!\w)", None),
+    }
+
+    def _values(text: str, pattern: str, fixed_scale: Optional[float]) -> set[float]:
+        values: set[float] = set()
+        for raw_value, raw_unit in re.findall(pattern, text, re.IGNORECASE):
+            value = float(raw_value)
+            unit = raw_unit.lower()
+            scale = fixed_scale
+            if scale is None:
+                scale = {
+                    "ah": 1000.0,
+                    "mah": 1.0,
+                    "l": 1000.0,
+                    "liter": 1000.0,
+                    "liters": 1000.0,
+                    "litre": 1000.0,
+                    "litres": 1000.0,
+                    "ml": 1.0,
+                }.get(unit, 1.0)
+            values.add(round(value * scale, 4))
+        return values
+
+    for pattern, fixed_scale in measurement_patterns.values():
+        reference_values = _values(ref, pattern, fixed_scale)
+        candidate_values = _values(title_l, pattern, fixed_scale)
+        if reference_values and candidate_values and reference_values.isdisjoint(candidate_values):
+            return True
+
+    # Package counts are part of the exact product option.  The tokenizer
+    # intentionally drops packaging noise for broad relevance scoring, so
+    # compare explicit counts here before a 50/100-piece listing can be treated
+    # as the same option as a 500-piece Coupang product.  A bare Korean "1개"
+    # commonly means the checkout quantity rather than pack size, so it is
+    # ignored; explicit markers such as 개입/pcs/count remain authoritative.
+    package_pattern = re.compile(
+        r"(?<![\w.])((?:\d+\s*[/,]\s*)*\d+)\s*"
+        r"(pieces?|counts?|pcs?|ct|개입|매입|장|매|개)(?![a-zA-Z가-힣])",
+        re.IGNORECASE,
+    )
+
+    def _package_quantities(text: str) -> set[int]:
+        quantities: set[int] = set()
+        for match in package_pattern.finditer(text):
+            unit = match.group(2).lower()
+            for raw_value in re.findall(r"\d+", match.group(1)):
+                value = int(raw_value)
+                if unit == "개" and value < 2:
+                    continue
+                quantities.add(value)
+        return quantities
+
+    reference_quantities = _package_quantities(ref)
+    candidate_quantities = _package_quantities(title_l)
+    if (
+        reference_quantities
+        and candidate_quantities
+        and reference_quantities.isdisjoint(candidate_quantities)
+    ):
+        return True
+
+    configuration_pattern = re.compile(
+        r"(?<!\d)(\d+)\s*-?\s*(?:in|合)\s*-?\s*1(?!\d)",
+        re.IGNORECASE,
+    )
+    reference_configurations = {
+        int(value) for value in configuration_pattern.findall(ref)
+    }
+    candidate_configurations = {
+        int(value) for value in configuration_pattern.findall(title_l)
+    }
+    if (
+        reference_configurations
+        and candidate_configurations
+        and reference_configurations.isdisjoint(candidate_configurations)
+    ):
+        return True
+
+    dimension_pattern = re.compile(
+        r"(?<![\w.])(\d+(?:\.\d+)?)\s*(mm|cm|inches|inch|in)?\s*"
+        r"[x×*]\s*(\d+(?:\.\d+)?)\s*(mm|cm|inches|inch|in)?"
+        r"(?:\s*[x×*]\s*(\d+(?:\.\d+)?)\s*(mm|cm|inches|inch|in)?)?",
+        re.IGNORECASE,
+    )
+
+    def _dimensions(text: str) -> set[tuple[float, ...]]:
+        unit_scale = {"mm": 1.0, "cm": 10.0, "in": 25.4, "inch": 25.4, "inches": 25.4}
+        dimensions: set[tuple[float, ...]] = set()
+        for match in dimension_pattern.finditer(text):
+            units = [match.group(2), match.group(4), match.group(6)]
+            stated_units = [unit.lower() for unit in units if unit]
+            if not stated_units:
+                continue
+            inherited_unit = stated_units[-1]
+            parts = [
+                float(match.group(1)) * unit_scale[(match.group(2) or inherited_unit).lower()],
+                float(match.group(3)) * unit_scale[(match.group(4) or inherited_unit).lower()],
+            ]
+            if match.group(5):
+                parts.append(
+                    float(match.group(5))
+                    * unit_scale[(match.group(6) or inherited_unit).lower()]
+                )
+            dimensions.add(tuple(sorted(round(part, 2) for part in parts)))
+        return dimensions
+
+    reference_dimensions = _dimensions(ref)
+    candidate_dimensions = _dimensions(title_l)
+    if (
+        reference_dimensions
+        and candidate_dimensions
+        and reference_dimensions.isdisjoint(candidate_dimensions)
+    ):
+        return True
+
+    model_pattern = re.compile(
+        r"(?:model|model no\.?|모델|모델명|型号)\s*[:#-]?\s*([a-z0-9][a-z0-9_-]{2,})",
+        re.IGNORECASE,
+    )
+    reference_models = {m.lower() for m in model_pattern.findall(ref)}
+    candidate_models = {m.lower() for m in model_pattern.findall(title_l)}
+    if reference_models and candidate_models and reference_models.isdisjoint(candidate_models):
+        return True
+
+    audience_groups = (
+        ("baby", "babies", "infant", "toddler", "아기", "유아", "婴儿", "幼儿"),
+        ("kid", "kids", "child", "children", "어린이", "아동", "儿童"),
+        ("adult", "adults", "성인", "成人"),
+        ("men", "mens", "male", "남성", "男士"),
+        ("women", "womens", "female", "여성", "女士"),
+    )
+
+    def _audiences(text: str) -> set[int]:
+        return {
+            index
+            for index, markers in enumerate(audience_groups)
+            if any(re.search(rf"(?<![a-z]){re.escape(marker)}(?![a-z])", text) for marker in markers)
+        }
+
+    reference_audiences = _audiences(ref)
+    candidate_audiences = _audiences(title_l)
+    if reference_audiences and candidate_audiences:
+        # Baby/kids overlap is common; all other explicitly different groups
+        # represent a materially different intended audience.
+        youth = {0, 1}
+        compatible = bool(reference_audiences & candidate_audiences) or (
+            bool(reference_audiences & youth) and bool(candidate_audiences & youth)
+        )
+        if not compatible:
+            return True
+
+    return False
 
 
 def _semantic_similarity_score(candidate_title: str, references: List[str]) -> float:
@@ -822,9 +1120,16 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
                 candidate,
                 required={str(profile["feature"])},
                 optional=set(profile.get("optional", ())),
+                # These profiles represent narrow product identities (for
+                # example waterproof_phone_pouch), not a generic family noun.
+                # Preserve their established exact-profile positive behavior.
+                family_only_score=0.9,
             )
         )
     score = max(family_scores)
+
+    if _has_explicit_reference_contradiction(candidate_title, references):
+        score = min(score, 0.55)
 
     disposable_bag_intent = bool(reference & {"biodegradable", "cornstarch", "bag_net", "disposable"})
     metal_stopper_candidate = bool(candidate & {"stainless", "stopper"}) and not bool(
@@ -865,6 +1170,24 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
     return max(score, min(0.85, fallback))
 
 
+def _generic_reference_lacks_richer_evidence(
+    candidate_title: str,
+    reference: str,
+    references: List[str],
+) -> bool:
+    """Whether an exact generic reference omits attributes stated by a richer one."""
+    candidate_features = _extract_semantic_features(candidate_title)
+    features = _extract_semantic_features(reference)
+    if not features:
+        return False
+    richer_extras: set[str] = set()
+    for other in references:
+        other_features = _extract_semantic_features(other)
+        if features < other_features:
+            richer_extras.update(other_features - features)
+    return bool(richer_extras) and not bool(candidate_features & richer_extras)
+
+
 def _multi_reference_score(
     candidate_title: str,
     references: List[str],
@@ -876,7 +1199,18 @@ def _multi_reference_score(
     and we take the max — this lifts cross-vendor accuracy because no single
     reference language overlaps every candidate language.
     """
-    text_score = max((_similarity_score(candidate_title, r) for r in references if r), default=0.0)
+    text_scores: List[float] = []
+    for reference in (reference for reference in references if reference):
+        score = _similarity_score(candidate_title, reference)
+        # Translated keyword lists often include both a rich product phrase and
+        # a generic family-only phrase.  An exact hit on the generic phrase
+        # must not erase the richer subtype intent expressed elsewhere.
+        if score >= 0.9 and _generic_reference_lacks_richer_evidence(
+            candidate_title, reference, references
+        ):
+            score = min(score, 0.89)
+        text_scores.append(score)
+    text_score = max(text_scores, default=0.0)
     semantic_score = _semantic_similarity_score(candidate_title, references)
     return max(text_score, semantic_score)
 
@@ -890,6 +1224,11 @@ def _preferred_english_query_variants(keyword_en: str, reference_name: str = "")
         query = " ".join(str(query or "").split())
         if query and query.lower() not in {v.lower() for v in variants}:
             variants.append(query)
+
+    # AliExpress gets the full identity-preserving English translation first.
+    # Generic seller-vocabulary variants are recall fallbacks only.
+    if keyword_en:
+        add(keyword_en)
 
     if any(x in haystack for x in ("neck cooler", "ice neck", "cooling neck", "cooling scarf", "neck ring", "neck band", "pcm ice")):
         add("ice neck cooler")
@@ -985,8 +1324,6 @@ def _preferred_english_query_variants(keyword_en: str, reference_name: str = "")
     head = _simplify_to_head_noun(keyword_en, max_tokens=3)
     if head:
         add(head)
-    if keyword_en:
-        add(keyword_en)
     return variants
 
 
@@ -1051,6 +1388,28 @@ def _preferred_chinese_query_variants(keyword_cn: str, keyword_en: str = "") -> 
         if query and query not in variants:
             variants.append(query)
 
+    # The exact, identity-preserving Chinese translation is always the first
+    # 1688 request.  Broader seller-vocabulary variants below are recall
+    # fallbacks only; they must not replace the high-precision first pass.
+    if keyword_cn:
+        add(keyword_cn)
+
+    # Native seller aliases for handheld garment steamers. The exact translated
+    # phrase stays first; these shorter terms widen recall after an exact-query
+    # page exposes only stale or undownloadable results.
+    if any(
+        marker in haystack
+        for marker in ("挂烫机", "蒸汽熨斗", "garment steamer", "steam iron")
+    ):
+        add("手持挂烫机")
+        add("蒸汽熨斗")
+        add("便携挂烫机")
+
+    if any(marker in haystack for marker in ("挂脖风扇", "颈挂风扇", "neck fan")):
+        add("挂脖风扇")
+        add("颈挂风扇")
+        add("无叶挂脖风扇")
+
     for query in summer_seed_queries:
         add(query)
 
@@ -1094,8 +1453,6 @@ def _preferred_chinese_query_variants(keyword_cn: str, keyword_en: str = "") -> 
     head = _simplify_to_head_noun(keyword_cn, max_tokens=4)
     if head:
         add(head)
-    if keyword_cn:
-        add(keyword_cn)
     return variants
 
 
@@ -1265,55 +1622,123 @@ _DOWNLOAD_MAX_BYTES = int(os.getenv("SSMAKER_DOWNLOAD_MAX_BYTES", str(200 * 1024
 _DOWNLOAD_MAX_SECONDS = float(os.getenv("SSMAKER_DOWNLOAD_MAX_SECONDS", "180"))
 
 
+def _is_safe_remote_media_url(url: str) -> bool:
+    """Allow only public HTTP(S) media endpoints, rejecting local-network SSRF."""
+    try:
+        from utils.url_security import resolve_public_http_url
+
+        _parsed, addresses = resolve_public_http_url(str(url or "").strip())
+        return bool(addresses)
+    except (OSError, TypeError, ValueError, UnicodeError):
+        return False
+
+
+class _PinnedMediaResponse:
+    """Requests-like streaming facade over a DNS-pinned http.client response."""
+
+    def __init__(self, response, connection):
+        self._response = response
+        self._connection = connection
+        self.status_code = response.status
+        self.headers = response.headers
+
+    def iter_content(self, chunk_size: int = 65536):
+        while True:
+            chunk = self._response.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
+
+    def close(self):
+        try:
+            self._response.close()
+        finally:
+            self._connection.close()
+
+
+def _open_pinned_media_hop(url: str, headers: Dict[str, str]):
+    """Resolve once and connect to that exact approved public IP."""
+    from utils.Tool import _PinnedHTTPConnection, _PinnedHTTPSConnection
+    from utils.url_security import resolve_public_http_url
+
+    parsed, approved_ips = resolve_public_http_url(url)
+    connection_type = (
+        _PinnedHTTPSConnection if parsed.scheme.lower() == "https" else _PinnedHTTPConnection
+    )
+    hostname = parsed.hostname or ""
+    port = parsed.port or (443 if parsed.scheme.lower() == "https" else 80)
+    connection = connection_type(
+        hostname,
+        approved_ips[0],
+        port=port,
+        timeout=60,
+    )
+    path = parsed.path or "/"
+    if parsed.params:
+        path = f"{path};{parsed.params}"
+    if parsed.query:
+        path = f"{path}?{parsed.query}"
+    hop_headers = dict(headers)
+    hop_headers["Host"] = hostname
+    try:
+        connection.request("GET", path, headers=hop_headers)
+        return _PinnedMediaResponse(connection.getresponse(), connection)
+    except Exception:
+        connection.close()
+        raise
+
+
+def _get_media_response(
+    url: str,
+    *,
+    headers: Dict[str, str],
+    cookies: Optional[dict],
+    max_redirects: int = 5,
+):
+    """GET a media URL while validating every redirect and scoping cookies."""
+    current = str(url or "").strip()
+    initial_host = (urlsplit(current).hostname or "").lower()
+    previous_scheme = ""
+    for hop in range(max_redirects + 1):
+        if not _is_safe_remote_media_url(current):
+            raise ValueError(f"unsafe media URL: {current[:120]}")
+        parsed = urlsplit(current)
+        current_host = (parsed.hostname or "").lower()
+        current_scheme = parsed.scheme.lower()
+        if previous_scheme == "https" and current_scheme != "https":
+            raise ValueError("HTTPS media redirect downgrade rejected")
+        hop_headers = dict(headers)
+        if current_host == initial_host and current_scheme == "https" and cookies:
+            cookie_parts = []
+            for name, value in cookies.items():
+                name_text = str(name or "")
+                value_text = str(value or "")
+                if not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", name_text):
+                    continue
+                if any(char in value_text for char in ("\r", "\n", ";")):
+                    continue
+                cookie_parts.append(f"{name_text}={value_text}")
+            if cookie_parts:
+                hop_headers["Cookie"] = "; ".join(cookie_parts)
+        response = _open_pinned_media_hop(current, hop_headers)
+        if response.status_code not in {301, 302, 303, 307, 308}:
+            return response
+        location = response.headers.get("Location")
+        response.close()
+        if not location or hop >= max_redirects:
+            raise ValueError("invalid or excessive media redirect")
+        previous_scheme = current_scheme
+        current = urljoin(current, location)
+    raise ValueError("excessive media redirect")
+
+
 def _download_hls_via_ffmpeg(url: str, filepath: str, referer: str,
                              max_seconds: float = _DOWNLOAD_MAX_SECONDS) -> Optional[float]:
-    """Best-effort HLS (.m3u8) download via ffmpeg.
-
-    Marketplace videos are occasionally served only as HLS playlists, which the
-    plain byte-stream path can't assemble (it would just save the text manifest
-    and fail validation). When ffmpeg is available we remux the stream into the
-    mp4 at `filepath`. Any failure returns None — no worse than the old behavior
-    where every .m3u8 URL was discarded outright.
-    """
-    import subprocess
-    try:
-        from utils.ffmpeg import resolve_ffmpeg_exe
-        ffmpeg = resolve_ffmpeg_exe()
-    except Exception:
-        ffmpeg = None
-    if not ffmpeg:
-        logger.info("[ProductSearcher] HLS url but ffmpeg unavailable, skip: %s", url[:80])
-        return None
-    try:
-        cmd = [
-            ffmpeg, "-y",
-            "-headers", f"Referer: {referer}\r\n",
-            "-i", url,
-            "-c", "copy", "-bsf:a", "aac_adtstoasc",
-            filepath,
-        ]
-        proc = subprocess.run(cmd, capture_output=True, timeout=max_seconds)
-        if proc.returncode != 0 or not os.path.exists(filepath):
-            logger.info("[ProductSearcher] ffmpeg HLS download failed (rc=%s): %s",
-                        getattr(proc, "returncode", "?"), url[:80])
-            if os.path.exists(filepath):
-                os.remove(filepath)
-            return None
-        size = os.path.getsize(filepath)
-        if size < 10_000 or not _is_valid_video_file(filepath):
-            logger.warning("[ProductSearcher] HLS result invalid/too small, discarding: %s", filepath)
-            os.remove(filepath)
-            return None
-        return round(size / (1024 * 1024), 1)
-    except subprocess.TimeoutExpired:
-        logger.warning("[ProductSearcher] ffmpeg HLS timeout (%ss): %s", max_seconds, url[:80])
-    except Exception as e:
-        logger.info("[ProductSearcher] ffmpeg HLS error: %s", e)
-    try:
-        if os.path.exists(filepath):
-            os.remove(filepath)
-    except OSError:
-        pass
+    """Fail closed until redirects and every HLS segment can be validated."""
+    logger.warning(
+        "[ProductSearcher] HLS download disabled for network safety: %s",
+        str(url)[:80],
+    )
     return None
 
 
@@ -1332,7 +1757,8 @@ def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2,
     """
     import time
 
-    # HLS playlists need ffmpeg; the byte-stream path below can't assemble them.
+    # HLS playlists can redirect each segment independently. Keep them disabled
+    # until every nested URL can use the same public-network validation.
     if ".m3u8" in url.lower():
         return _download_hls_via_ffmpeg(url, filepath, referer, max_seconds)
 
@@ -1342,8 +1768,7 @@ def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2,
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
                 "Referer": referer,
             }
-            r = requests.get(url, headers=headers, timeout=(10, 60), stream=True,
-                             cookies=cookies or None)
+            r = _get_media_response(url, headers=headers, cookies=cookies)
             if r.status_code != 200:
                 logger.warning("[ProductSearcher] Download HTTP %d (attempt %d/%d): %s",
                                r.status_code, attempt, max_retries, url[:80])
@@ -1595,8 +2020,8 @@ async def search_aliexpress(
       2. Full keyword + VIDEO filter — precision pass with same video filter.
       3. Head-noun (no filter) — for products where filter returned too few.
       4. Full keyword (no filter) — fallback for niche queries.
-      5. Korean reference name — AliExpress KR serves Korean-translated
-         results; only used if total < 10.
+      Korean text is never sent as a marketplace query.  The Korean Coupang
+      name remains a scoring reference only.
 
     All raw candidates are merged, deduplicated by item ID, scored against the
     full reference set, and returned sorted by score.
@@ -1647,14 +2072,6 @@ async def search_aliexpress(
         if len(raw_all) >= 18:
             break
         await _run_attempt(query, f"intent-{idx}", False)
-
-    # Korean reference name — AliExpress KR serves Korean-translated results;
-    # only used if intent queries returned too few candidates.
-    if len(raw_all) < 10 and reference_name:
-        kr_head = re.sub(r"[\[\]\(\)\{\}\|/,;]", " ", reference_name)
-        kr_head = " ".join(kr_head.split()[:3])
-        if kr_head:
-            await _run_attempt(kr_head, "kr-head", False)
 
     raw = raw_all
     _safe_print(f"[ProductSearcher] AliExpress merged total: {len(raw)} candidates (video-filter prioritized)")
@@ -2520,6 +2937,47 @@ _CATEGORY_GUARDS: Dict[str, List[str]] = {
 
 
 _CATEGORY_GUARDS.update({
+    # Specific guards for live short-form product-video sourcing. These use
+    # category nouns rather than generic attributes (wireless, rechargeable,
+    # mini), so an unrelated gadget cannot pass on modifiers alone.
+    "portable wireless blender cup": [
+        "blender", "mixer", "榨汁杯", "榨汁", "搅拌机", "搅拌", "블렌더", "믹서기",
+    ],
+    "automatic foam soap dispenser": [
+        "soap dispenser", "soap", "dispenser", "泡沫洗手", "洗手机", "皂液器",
+        "디스펜서", "손세정기",
+    ],
+    "portable handheld garment steamer": [
+        "garment steamer", "steam iron", "挂烫机", "蒸汽熨斗", "熨斗",
+        "스팀다리미", "다리미",
+    ],
+    "mini humidifier": [
+        "humidifier", "加湿器", "加湿", "가습기",
+    ],
+    "electric wine opener": [
+        "wine opener", "wine bottle opener", "红酒开瓶器", "开瓶器",
+        "와인 오프너",
+    ],
+    "wireless garlic food chopper": [
+        "food chopper", "garlic chopper", "mincer", "蒜泥器", "绞肉机", "切碎器",
+        "다지기", "초퍼",
+    ],
+    "motion sensor rechargeable light": [
+        "motion sensor light", "sensor light", "人体感应灯", "感应灯", "센서등",
+        "동작감지",
+    ],
+    "pet steam brush": [
+        "pet steam brush", "pet brush", "cat brush", "dog brush", "宠物蒸汽梳",
+        "宠物梳", "猫梳", "狗梳", "반려동물", "애견 브러쉬",
+    ],
+    "foldable laptop stand": [
+        "laptop stand", "notebook stand", "笔记本电脑支架", "笔记本支架",
+        "노트북 거치대",
+    ],
+    "neck fan": [
+        "neck fan", "neckband fan", "wearable fan", "hanging neck", "挂脖风扇",
+        "颈挂风扇", "挂脖", "목 선풍기", "목걸이 선풍기", "넥밴드 선풍기",
+    ],
     "ice neck cooler": [
         "neck", "cooler", "cooling", "scarf", "pcm",
         "\ub125\ucfe8\ub7ec", "\uc544\uc774\uc2a4\ub125", "\ucfe8\uc2a4\uce74\ud504",
@@ -2702,6 +3160,61 @@ def _category_terms_for_keyword(
     kw = (keyword_en or "").lower()
     combined = f"{reference_name} {keyword_en} {keyword_cn}".lower()
 
+    cleaning_brush_markers = (
+        "cleaning brush",
+        "spin scrubber",
+        "power scrubber",
+        "electric scrubber",
+        "bathroom cleaning",
+        "욕실 청소",
+        "화장실 청소",
+        "청소 브러시",
+        "전동 브러시",
+        "清洁刷",
+        "清潔刷",
+        "电动刷",
+        "電動刷",
+    )
+    if any(marker in combined for marker in cleaning_brush_markers):
+        return list(_CATEGORY_GUARDS["cleaning brush"])
+
+    vacuum_markers = (
+        "vacuum cleaner",
+        "handheld vacuum",
+        "car vacuum",
+        "vacuum",
+        "핸드청소기",
+        "진공청소기",
+        "진공",
+        "吸尘",
+        "吸塵",
+    )
+    if any(marker in combined for marker in vacuum_markers):
+        return [
+            "vacuum cleaner",
+            "vacuum",
+            "suction",
+            "dust collector",
+            "청소기",
+            "흡입",
+            "吸尘",
+            "吸塵",
+            "吸力",
+        ]
+
+    neck_fan_markers = (
+        "neck fan",
+        "neckband fan",
+        "wearable fan",
+        "목 선풍기",
+        "목걸이 선풍기",
+        "넥밴드 선풍기",
+        "挂脖风扇",
+        "颈挂风扇",
+    )
+    if any(marker in combined for marker in neck_fan_markers):
+        return list(_CATEGORY_GUARDS["neck fan"])
+
     neck_cooler_markers = (
         "neck cooler",
         "ice neck",
@@ -2765,6 +3278,9 @@ def _passes_reference_constraints(title: str, references: Optional[List[str]]) -
     """Reject candidates that match the broad category but contradict key attributes."""
     if not references:
         return True
+
+    if _has_explicit_reference_contradiction(title, references):
+        return False
 
     ref = " ".join(r for r in references if r).lower()
     title_l = (title or "").lower()
@@ -2862,12 +3378,18 @@ def _passes_reference_constraints(title: str, references: Optional[List[str]]) -
         "around neck", "hanging neck", "목걸이", "넥밴드", "넥 선풍기",
         "\u6302\u8116", "\u9888\u6302", "\u65e0\u53f6",
     )
-    if any(marker in ref for marker in hand_fan_ref_markers):
+    reference_has_hand_fan = any(marker in ref for marker in hand_fan_ref_markers)
+    reference_has_neck_fan = any(marker in ref for marker in neck_fan_ref_markers)
+    # Korean titles often contain both the precise subtype (목 선풍기) and the
+    # broad commerce phrase (휴대용 선풍기). The deterministic translation can
+    # therefore contain both neck-fan and handheld-fan wording. In that mixed
+    # case the narrower neck subtype is authoritative.
+    if reference_has_hand_fan and not reference_has_neck_fan:
         if any(marker in title_l for marker in neck_fan_title_markers) and not any(
             marker in title_l for marker in hand_fan_title_markers
         ):
             return False
-    if any(marker in ref for marker in neck_fan_ref_markers):
+    if reference_has_neck_fan:
         if any(marker in title_l for marker in hand_fan_title_markers) and not any(
             marker in title_l for marker in neck_fan_title_markers
         ):
@@ -2997,6 +3519,7 @@ async def find_products_with_video(
     min_score: float = MIN_SIMILARITY_SCORE,
     category_terms: Optional[List[str]] = None,
     overlap_references: Optional[List[str]] = None,
+    skip_source_ids: Optional[Set[str]] = None,
 ) -> List[Dict[str, Any]]:
     """
     Iterate candidates, visit detail pages, find the first *count* with downloadable video.
@@ -3015,12 +3538,24 @@ async def find_products_with_video(
     found: List[Dict[str, Any]] = []
     tried = 0
     rejected_low_score = 0
+    canonical_skip_source_ids = {
+        normalized
+        for source_id in (skip_source_ids or set())
+        if (normalized := normalize_source_id(str(source_id or "")))
+    }
 
     for cand in candidates[:max_try]:
         if len(found) >= count:
             break
         detail_url = cand.get("url", "")
         if not detail_url.startswith("http"):
+            continue
+        detail_source_id = normalize_source_id(detail_url)
+        if detail_source_id and detail_source_id in canonical_skip_source_ids:
+            logger.info(
+                "[ProductSearcher] [%s] skip used source %s",
+                source_label, detail_source_id,
+            )
             continue
 
         cand_score = float(cand.get("score") or 0.0)

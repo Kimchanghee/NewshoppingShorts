@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-3플랫폼 로그인 도우미 — 자동화 브라우저 프로필로 도우인/콰이쇼우/샤오홍슈를 열어준다.
+숏폼 플랫폼 로그인 도우미 — 자동화 브라우저 프로필로 도우인/콰이쇼우/샤오홍슈를 열어준다.
 
 여기서 한 번 로그인해 두면(QR 스캔 등) 영구 프로필(~/.ssmaker/zendriver_profile)에
 세션이 저장되어, 이후 3플랫폼 자동 소싱의 검색·다운로드 성공률이 크게 올라간다.
@@ -22,9 +22,9 @@ except Exception:
     pass
 
 LOGIN_URLS = [
+    "https://www.xiaohongshu.com/",  # 로그인 → QR
     "https://www.douyin.com/",       # 우상단 로그인 → QR
     "https://www.kuaishou.com/",     # 로그인 → QR
-    "https://www.xiaohongshu.com/",  # 로그인 → QR
 ]
 
 

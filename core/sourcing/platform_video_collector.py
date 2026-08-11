@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-3플랫폼(도우인/샤오홍슈/콰이쇼우) 영상 수집기 — yt-dlp 기반.
+4플랫폼(도우인/샤오홍슈/콰이쇼우/빌리빌리) 영상 수집기 — yt-dlp 기반.
 
 풀자동화의 'platform_video' 소싱 방식에서 사용. 상품 리뷰/데모 숏폼을
 URL(또는 유저/해시태그 페이지)로 받아 다운로드 + 메타 수집한다.
@@ -9,8 +9,8 @@ URL(또는 유저/해시태그 페이지)로 받아 다운로드 + 메타 수집
 (워터마크 제거·컷·자막·음성/BGM 교체)을 거쳐 변형 저작물로 만들어야 함.
 이 모듈은 '수집'만 담당하며, 재편집/업로드는 별도 단계에서 수행한다.
 
-상태: 스캐폴드. 도우인/콰이쇼우는 yt-dlp 추출기 지원. 샤오홍슈(RED)는
-yt-dlp 지원이 불안정하여 전용 스크래퍼가 필요(미구현).
+샤오홍슈는 최신 yt-dlp의 XiaoHongShu 추출기를 사용하며, 사이트 정책이나
+로그인 상태에 따라 실패하면 브라우저 세션 쿠키를 함께 전달한다.
 """
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ _PLATFORM_DOMAINS = {
     "bilibili": ("bilibili.com", "b23.tv"),
 }
 
-SUPPORTED_BY_YTDLP = {"douyin", "kuaishou", "bilibili"}  # 샤오홍슈는 별도 스크래퍼 필요
+SUPPORTED_BY_YTDLP = {"douyin", "kuaishou", "xiaohongshu", "bilibili"}
 
 
 @dataclass
@@ -61,7 +61,7 @@ def detect_platform(url: str) -> Optional[str]:
 
 
 class PlatformVideoCollector:
-    """yt-dlp로 도우인/콰이쇼우 숏폼을 다운로드하는 수집기."""
+    """yt-dlp로 지원 숏폼 플랫폼 영상을 다운로드하는 수집기."""
 
     def __init__(self, output_dir: Optional[str] = None):
         self.output_dir = output_dir or os.path.join(
@@ -83,6 +83,7 @@ class PlatformVideoCollector:
     _REFERERS = {
         "douyin": "https://www.douyin.com/",
         "kuaishou": "https://www.kuaishou.com/",
+        "xiaohongshu": "https://www.xiaohongshu.com/",
         "bilibili": "https://www.bilibili.com/",
     }
 
@@ -96,10 +97,6 @@ class PlatformVideoCollector:
         platform = detect_platform(url) or "unknown"
         cv = CollectedVideo(platform=platform, source_url=url)
 
-        if platform == "xiaohongshu":
-            cv.error = "샤오홍슈는 yt-dlp 미지원 — 전용 스크래퍼 필요(미구현)."
-            logger.warning("[Collector] %s", cv.error)
-            return cv
         if platform not in SUPPORTED_BY_YTDLP:
             cv.error = f"지원하지 않는 URL/플랫폼: {platform}"
             return cv
@@ -161,6 +158,7 @@ class PlatformVideoCollector:
     _COOKIE_DOMAINS = {
         "douyin": ".douyin.com",
         "kuaishou": ".kuaishou.com",
+        "xiaohongshu": ".xiaohongshu.com",
         "bilibili": ".bilibili.com",
     }
 

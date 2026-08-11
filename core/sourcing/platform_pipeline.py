@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-3플랫폼(도우인/콰이쇼우/샤오홍슈) 소싱 오케스트레이터 — UI와 풀자동화 큐가 공유.
+3플랫폼(샤오홍슈/도우인/콰이쇼우) 소싱 오케스트레이터 — UI와 풀자동화 큐가 공유.
 
-쿠팡 링크 → 상품명 → 파트너스 딥링크 → 키워드(Gemini→룰) → 3채널 순차 검색·다운로드
+쿠팡 링크 → 상품명 → 파트너스 딥링크 → 중국어 키워드(Gemini→룰) → 3채널 검색·다운로드
 → 소스 중복 차단 → 재편집(9:16·워터마크 크롭·속도 변형·훅) 까지 담당한다.
 링크트리 발행/업로드는 호출자(UI 패널·큐 스크립트)가 기존 경로로 수행한다.
 
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
@@ -23,6 +24,20 @@ logger = get_logger(__name__)
 
 ProgressCb = Optional[Callable[[str, str, float], None]]
 BeforeCommitCb = Optional[Callable[[str], None]]
+
+
+def _platform_relevance_threshold(configured_score: float) -> float:
+    """Threshold for a related product-family clip, not an identical listing.
+
+    Marketplace product matching can remain at 90%, but a short-form source
+    only needs to demonstrate the same product category. Category guards and
+    explicit attribute contradictions are still evaluated separately.
+    """
+    try:
+        configured = float(configured_score)
+    except (TypeError, ValueError):
+        configured = 0.75
+    return max(0.70, min(0.75, configured))
 
 # 재편집 기본값: 살짝 빠르게(Content ID 완화) — 원본 오디오 유지.
 DEFAULT_REEDIT_OPTIONS = {"speed": 1.03, "mirror": False, "mute": False, "bgm_path": None}
@@ -65,14 +80,27 @@ def cleanup_old_outputs(output_dir: str, retention_days: int = OUTPUT_RETENTION_
 
 
 def build_queries(product_name: str, keywords: Dict[str, str]) -> List[str]:
-    """검색 쿼리 목록(중국어 우선 → 한국어 상품명 → 영어)."""
+    """중국 플랫폼용 쿼리(중국어 정확 번역을 항상 첫 검색어로)."""
     cn = str((keywords or {}).get("chinese", "") or "").strip()
     en = str((keywords or {}).get("english", "") or "").strip()
-    out: List[str] = []
-    for q in (cn, str(product_name or "").strip(), en):
-        if q and q not in out:
-            out.append(q)
-    return out
+    if cn:
+        from core.sourcing.product_searcher import _preferred_chinese_query_variants
+
+        queries = list(_preferred_chinese_query_variants(cn, en))
+        # Product-video discovery does not require an identical seller/model.
+        # Exact translated intent remains first, then add the Chinese product
+        # family chunks so a brand or generation suffix cannot collapse recall
+        # to one stale result (e.g. "... Ditwo" -> "电动打奶器").
+        for chunk in re.findall(r"[\u3400-\u9fff]{2,12}", cn):
+            if chunk not in queries:
+                queries.append(chunk)
+        return queries[:7]
+    if en:
+        return [en]
+    fallback = str(product_name or "").strip()
+    if fallback and not any("가" <= char <= "힣" for char in fallback):
+        return [fallback]
+    return []
 
 
 async def _convert_keywords(product_name: str, gemini_client: Any) -> Dict[str, str]:
@@ -135,6 +163,7 @@ async def run_platform_sourcing(
     reedit_options: Optional[Dict[str, Any]] = None,
     min_similarity_score: float = 0.9,
     before_commit: BeforeCommitCb = None,
+    download_only: bool = False,
 ) -> Dict[str, Any]:
     """쿠팡 링크 → 3플랫폼 소싱 + 재편집. 결과 report dict 반환(업로드는 호출자 몫)."""
     from core.sourcing.coupang_scraper import scrape_product
@@ -150,6 +179,7 @@ async def run_platform_sourcing(
 
     report: Dict[str, Any] = {
         "ok": False, "error": "", "sourcing_method": "platform_video",
+        "quality_profile": "platform_reedit",
         "coupang_url": coupang_url,
         "product_info": {}, "deep_link": "", "keywords": {},
         "queries": [], "hit": None, "final_video": "",
@@ -217,7 +247,7 @@ async def run_platform_sourcing(
               f"검색어: {' / '.join(q[:14] for q in queries[:3])}", 1.0)
 
         # ── 4) 3채널 검색·다운로드(소스 중복 스킵) ──
-        _emit(progress, "overseas_search", f"'{product_name[:20]}' 로 3채널 검색 중...", 0.1)
+        _emit(progress, "overseas_search", f"'{product_name[:20]}' 중국어로 3채널 검색 중...", 0.1)
         skip_ids = set()
         try:
             from managers.uploaded_registry import get_uploaded_registry
@@ -233,16 +263,38 @@ async def run_platform_sourcing(
             platforms=platforms,
             skip_source_ids=skip_ids,
             relevance_references=relevance_references,
-            min_relevance_score=max(0.9, min(1.0, float(min_similarity_score))),
+            min_relevance_score=_platform_relevance_threshold(min_similarity_score),
             category_terms=category_terms,
+            # A related product-family clip is sufficient. Later platforms are
+            # fallbacks, not a contest for an identical-listing score.
+            prefer_best=False,
         )
         if not hit:
-            report["error"] = "세 채널 모두에서 쓸 수 있는 영상을 찾지 못했어요. (로그인 필요/안티봇/중복 가능)"
+            report["error"] = "샤오홍슈·도우인·콰이쇼우에서 관련 영상을 찾지 못했어요. (로그인 필요/안티봇/중복 가능)"
             _emit(progress, "overseas_search", report["error"], 0.0)
             return report
         report["hit"] = hit
+        report["selected_source_url"] = str(hit.get("video_url") or "")
+        from managers.uploaded_registry import normalize_source_id
+        report["selected_source_id"] = normalize_source_id(
+            report["selected_source_url"]
+        )
         _emit(progress, "overseas_search", f"{hit['platform']}에서 영상 확보", 1.0)
         _emit(progress, "video_download", f"{hit['platform']} 영상 {hit.get('size_mb', 0)}MB", 1.0)
+
+        # 실검색 점검은 원본 파일·소스 URL·관련도만 확인한다.
+        # 일반 UI/풀자동화는 기본값 False로 재편집을 계속한다.
+        if download_only:
+            report["ok"] = True
+            report["download_only"] = True
+            report["downloaded_video"] = str(hit.get("video_file") or "")
+            report["render_integrity"] = {
+                "ok": True,
+                "source": "platform_video_download",
+                "platform": hit.get("platform", ""),
+                "via": hit.get("via", ""),
+            }
+            return report
 
         # ── 5) 재편집(변형 저작물화) ──
         _emit(progress, "video_create", "재편집 중(워터마크 크롭·9:16·속도 변형)...", 0.1)
@@ -262,11 +314,9 @@ async def run_platform_sourcing(
             report["error"] = "재편집에 실패했어요."
             _emit(progress, "video_create", report["error"], 0.0)
             return report
-        quota_committed = False
         if before_commit is not None:
             try:
                 before_commit(edited)
-                quota_committed = True
             except Exception as exc:
                 report["error"] = f"완성 영상의 사용량을 확정하지 못했어요: {exc}"
                 _emit(progress, "video_create", report["error"], 1.0)
@@ -276,29 +326,8 @@ async def run_platform_sourcing(
                                       "platform": hit["platform"], "via": hit.get("via", "")}
         _emit(progress, "video_create", "재편집 완료", 1.0)
 
-        # ── 6) 소스 사용 기록(재사용 차단) + 원본 정리 ──
-        try:
-            from managers.uploaded_registry import get_uploaded_registry
-            get_uploaded_registry().record_source(
-                str(hit.get("video_url") or ""),
-                meta={"platform": hit["platform"], "coupang_url": coupang_url,
-                      "product_name": product_name[:80]},
-            )
-        except Exception as e:
-            logger.error("[PlatformPipeline] 소스 기록 실패로 자동 게시 중단: %s", e)
-            report["error"] = f"소스 중복 방지 기록을 저장하지 못했어요: {e}"
-            report["ok"] = False
-            if quota_committed:
-                # Quota is already finalized and the durable reservation now
-                # blocks a second render. Preserve the usable artifact so an
-                # operator can repair the registry and finish delivery.
-                report["manual_recovery_required"] = True
-            else:
-                try:
-                    os.remove(edited)
-                except OSError:
-                    pass
-            return report
+        # ── 6) 원본 정리 ──
+        # 소스 사용 기록은 실제 원격 업로드 성공과 같은 트랜잭션에서 확정한다.
         try:
             os.remove(hit["video_file"])
         except OSError:

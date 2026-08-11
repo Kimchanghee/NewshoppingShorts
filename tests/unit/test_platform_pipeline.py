@@ -2,11 +2,15 @@
 """3플랫폼 소싱 파이프라인(신규 개선분) 유닛 테스트."""
 import asyncio
 import os
+import sys
+import types
+from types import SimpleNamespace
 
 import pytest
 
 from core.sourcing import platform_pipeline as pp
 from core.sourcing import platform_shorts_searcher as searcher
+from core.sourcing import platform_video_collector as collector_mod
 from core.video import reeditor
 from managers import uploaded_registry as reg_mod
 
@@ -15,12 +19,73 @@ from managers import uploaded_registry as reg_mod
 
 def test_build_queries_orders_chinese_first():
     q = pp.build_queries("미니 선풍기", {"chinese": "迷你风扇", "english": "mini fan"})
-    assert q == ["迷你风扇", "미니 선풍기", "mini fan"]
+    assert q[0] == "迷你风扇"
+    assert len(q) == len(set(q))
 
 
 def test_build_queries_skips_empty_and_duplicates():
     q = pp.build_queries("mini fan", {"chinese": "", "english": "mini fan"})
     assert q == ["mini fan"]
+
+
+def test_build_queries_adds_chinese_product_family_after_exact_brand_query():
+    q = pp.build_queries(
+        "Ditwo 미니 무선 우유 거품기",
+        {
+            "chinese": "电动打奶器 电动打蛋器 起泡器 Ditwo",
+            "english": "electric milk frother whisk egg Ditwo",
+        },
+    )
+
+    assert q[0] == "电动打奶器 电动打蛋器 起泡器 Ditwo"
+    assert "电动打奶器" in q
+    assert "电动打蛋器" in q
+    assert "起泡器" in q
+
+
+def test_browser_media_probe_supports_suffixless_douyin_resource_urls():
+    assert "mime_type=video_" in searcher._PLATFORM_MP4_JS
+    assert "/video/tos/" in searcher._PLATFORM_MP4_JS
+
+
+def test_platform_video_threshold_targets_related_category_not_identical_listing():
+    assert pp._platform_relevance_threshold(0.9) == 0.75
+    assert pp._platform_relevance_threshold(0.5) == 0.70
+    assert pp._platform_relevance_threshold(1.0) == 0.75
+
+
+def test_chinese_platform_queries_drop_korean_and_prefer_chinese():
+    assert searcher._queries_for_chinese_platform(
+        ["无线手持吸尘器 2代 ROMIN", "무선 미니 청소기", "wireless vacuum"]
+    ) == ["无线手持吸尘器 2代 ROMIN"]
+
+
+def test_chinese_platform_query_strips_mixed_korean_brand_annotation():
+    assert searcher._queries_for_chinese_platform(
+        ["Rebine 리바인 无线 电动 多功能 浴室清洁刷"]
+    ) == ["Rebine 无线 电动 多功能 浴室清洁刷"]
+
+
+def test_gemini_keyword_conversion_removes_hangul_from_search_phrases(monkeypatch):
+    from core.sourcing import keyword_converter
+
+    async def fake_generate(_client, _prompt):
+        return (
+            "chinese: Rebine 리바인 无线 电动 浴室清洁刷 9合1\n"
+            "english: Rebine 리바인 cordless electric bathroom cleaning brush 9-in-1"
+        )
+
+    monkeypatch.setattr(keyword_converter, "generate_content_text", fake_generate)
+    result = asyncio.run(
+        keyword_converter.convert_keywords_gemini(
+            "리바인 무선 전동 욕실 청소기 9in1", object()
+        )
+    )
+
+    assert not any("가" <= char <= "힣" for char in result["chinese"])
+    assert not any("가" <= char <= "힣" for char in result["english"])
+    assert "Rebine" in result["chinese"]
+    assert "9合1" in result["chinese"]
 
 
 # ── 키워드 변환: Gemini 실패 시 rule-based 폴백 ──
@@ -91,10 +156,13 @@ def test_registry_source_roundtrip(tmp_path):
     assert reg2.is_source_used(url)
 
 
-def test_normalize_source_id_strips_query_and_case():
-    a = reg_mod.normalize_source_id("https://www.KUAISHOU.com/short-video/AbC123?x=1#t")
-    b = reg_mod.normalize_source_id("https://www.kuaishou.com/short-video/abc123")
+def test_normalize_source_id_strips_query_and_host_case():
+    a = reg_mod.normalize_source_id("https://www.KUAISHOU.com/short-video/AbC12345?x=1#t")
+    b = reg_mod.normalize_source_id("https://www.kuaishou.com/short-video/AbC12345")
     assert a == b
+    assert a != reg_mod.normalize_source_id(
+        "https://www.kuaishou.com/short-video/abc12345"
+    )
 
 
 # ── searcher: 페이지 링크 패턴 + 후보 검증 ──
@@ -120,27 +188,259 @@ def test_page_link_pattern_kuaishou_and_xhs():
     assert searcher._PAGE_LINK_PATTERNS["xiaohongshu"].search(_SAMPLE_HTML)
 
 
-def test_page_link_pattern_bilibili():
+def test_legacy_bilibili_extractor_is_not_in_automation_order():
     ids = {m.group(2) for m in searcher._PAGE_LINK_PATTERNS["bilibili"].finditer(_SAMPLE_HTML)}
     assert ids == {"BV1xx411c7mD", "BV1yy411c7mE"}
     assert "bilibili" in searcher._YTDLP_PLATFORMS
-    assert searcher.DEFAULT_PLATFORM_ORDER[-1] == "bilibili"
+    assert "xiaohongshu" in searcher._YTDLP_PLATFORMS
+    assert searcher.DEFAULT_PLATFORM_ORDER == ["douyin", "xiaohongshu", "kuaishou"]
+    assert "bilibili" not in searcher.SUPPORTED_COMMERCE_PLATFORMS
 
 
-def test_settings_platform_sources_migration_appends_bilibili(monkeypatch, tmp_path):
+def test_settings_platform_sources_preserve_custom_explicit_order():
+    from managers.settings_manager import SettingsManager
+    sm = SettingsManager.__new__(SettingsManager)
+    sm._settings = {"platform_video_sources": ["kuaishou", "douyin"]}
+    import threading
+    sm._lock = threading.RLock()
+    assert sm.get_platform_video_sources() == ["kuaishou", "douyin"]
+
+
+def test_settings_platform_sources_migrates_legacy_two_platform_default():
     from managers.settings_manager import SettingsManager
     sm = SettingsManager.__new__(SettingsManager)
     sm._settings = {"platform_video_sources": ["douyin", "kuaishou"]}
     import threading
     sm._lock = threading.RLock()
-    assert sm.get_platform_video_sources() == ["douyin", "kuaishou", "bilibili"]
+    assert sm.get_platform_video_sources() == [
+        "douyin", "xiaohongshu", "kuaishou"
+    ]
+
+
+def test_settings_platform_sources_default_includes_all_supported_platforms():
+    from managers.settings_manager import SettingsManager
+    sm = SettingsManager.__new__(SettingsManager)
+    sm._settings = {}
+    import threading
+    sm._lock = threading.RLock()
+    assert sm.get_platform_video_sources() == [
+        "douyin", "xiaohongshu", "kuaishou"
+    ]
+
+
+def test_settings_platform_sources_drop_bilibili_and_keep_xiaohongshu():
+    from managers.settings_manager import SettingsManager
+    sm = SettingsManager.__new__(SettingsManager)
+    sm._settings = {"platform_video_sources": ["xiaohongshu", "bilibili"]}
+    import threading
+    sm._lock = threading.RLock()
+    assert sm.get_platform_video_sources() == ["xiaohongshu"]
+
+
+def test_settings_migrates_legacy_coupang_mode_to_three_platforms():
+    from managers.settings_manager import SettingsManager
+    sm = SettingsManager.__new__(SettingsManager)
+    sm._settings = {"automation_sourcing_method": "coupang"}
+    assert sm.get_automation_sourcing_method() == "platform_video"
+
+
+def test_search_platform_shorts_selects_best_safe_hit_and_cleans_discarded(
+    monkeypatch, tmp_path
+):
+    low = tmp_path / "low.mp4"
+    high = tmp_path / "high.mp4"
+    low.write_bytes(b"low")
+    high.write_bytes(b"high")
+
+    async def fake_search(_browser, platform, *_args, **_kwargs):
+        if platform == "douyin":
+            return {
+                "platform": platform,
+                "video_file": str(low),
+                "video_url": "https://www.douyin.com/video/7351234567890123456",
+                "relevance_score": 0.91,
+            }
+        if platform == "xiaohongshu":
+            return {
+                "platform": platform,
+                "video_file": str(high),
+                "video_url": "https://www.xiaohongshu.com/explore/66a1b2c3d4e5f6a7b8c9d0e1",
+                "relevance_score": 0.98,
+            }
+        return None
+
+    monkeypatch.setattr(searcher, "search_one_platform", fake_search)
+    hit = asyncio.run(
+        searcher.search_platform_shorts(
+            object(), ["portable fan"], str(tmp_path),
+            platforms=["douyin", "xiaohongshu"],
+            relevance_references=["portable fan"],
+        )
+    )
+
+    assert hit["platform"] == "xiaohongshu"
+    assert high.exists()
+    assert not low.exists()
+
+
+def test_search_platform_shorts_filters_non_commerce_platforms(monkeypatch, tmp_path):
+    called = []
+
+    async def fake_search(_browser, platform, *_args, **_kwargs):
+        called.append(platform)
+        return None
+
+    monkeypatch.setattr(searcher, "search_one_platform", fake_search)
+    hit = asyncio.run(
+        searcher.search_platform_shorts(
+            object(), ["迷你风扇"], str(tmp_path),
+            platforms=["bilibili", "xiaohongshu", "douyin", "kuaishou"],
+            relevance_references=["迷你风扇"],
+        )
+    )
+
+    assert hit is None
+    assert called == ["xiaohongshu", "douyin", "kuaishou"]
+
+
+def test_search_one_platform_shares_attempted_ids_across_query_variants(
+    monkeypatch, tmp_path
+):
+    seen_sets = []
+
+    class Tab:
+        async def close(self):
+            return None
+
+    class Browser:
+        async def get(self, *_args, **_kwargs):
+            return Tab()
+
+    async def fake_query(*args, **_kwargs):
+        attempted = args[-1]
+        seen_sets.append(attempted)
+        if len(seen_sets) == 1:
+            attempted.add("douyin:7351234567890123456")
+        return None
+
+    monkeypatch.setitem(searcher._WARMUP_URL, "douyin", "")
+    monkeypatch.setattr(searcher, "_search_query_on_tab", fake_query)
+
+    hit = asyncio.run(searcher.search_one_platform(
+        Browser(),
+        "douyin",
+        ["迷你风扇", "手持风扇"],
+        str(tmp_path),
+    ))
+
+    assert hit is None
+    assert len(seen_sets) == 2
+    assert seen_sets[0] is seen_sets[1]
+    assert "douyin:7351234567890123456" in seen_sets[1]
+
+
+def test_xiaohongshu_collector_uses_ytdlp(monkeypatch, tmp_path):
+    class FakeYoutubeDL:
+        def __init__(self, opts):
+            self.opts = opts
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def extract_info(self, _url, download=True):
+            if download:
+                (tmp_path / "xhs-video.mp4").write_bytes(b"video")
+            return {
+                "id": "xhs-video",
+                "ext": "mp4",
+                "title": "portable fan product demo",
+                "duration": 12,
+                "width": 1080,
+                "height": 1920,
+            }
+
+    monkeypatch.setitem(sys.modules, "yt_dlp", types.SimpleNamespace(YoutubeDL=FakeYoutubeDL))
+    collector = collector_mod.PlatformVideoCollector(str(tmp_path))
+    result = collector.collect_one(
+        "https://www.xiaohongshu.com/explore/66a1b2c3d4e5f6a7b8c9d0e1"
+    )
+
+    assert "xiaohongshu" in collector_mod.SUPPORTED_BY_YTDLP
+    assert result.ok is True
+    assert result.title == "portable fan product demo"
+    assert result.local_path.endswith("xhs-video.mp4")
+
+
+def test_ytdlp_rejects_unrelated_metadata_before_download(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeCollector:
+        def __init__(self, output_dir):
+            assert output_dir == str(tmp_path)
+
+        def collect_one(self, _url, download=True, cookies=None):
+            calls.append(download)
+            return SimpleNamespace(
+                ok=True,
+                error="",
+                duration=12,
+                title="cat dancing compilation",
+                local_path="",
+                width=1080,
+                height=1920,
+            )
+
+    monkeypatch.setattr(collector_mod, "PlatformVideoCollector", FakeCollector)
+    result = searcher._ytdlp_download(
+        "https://www.xiaohongshu.com/explore/66a1b2c3d4e5f6a7b8c9d0e1",
+        str(tmp_path),
+        relevance_references=["迷你手持风扇"],
+        category_terms=["风扇"],
+    )
+
+    assert result["relevance_rejected"] is True
+    assert calls == [False]
+
+
+def test_ytdlp_long_metadata_is_terminal_for_same_page(monkeypatch, tmp_path):
+    calls = []
+
+    class FakeCollector:
+        def __init__(self, output_dir):
+            assert output_dir == str(tmp_path)
+
+        def collect_one(self, _url, download=True, cookies=None):
+            calls.append(download)
+            return SimpleNamespace(
+                ok=True,
+                error="",
+                duration=449,
+                title="挂脖风扇评测",
+                local_path="",
+                width=1080,
+                height=1920,
+            )
+
+    monkeypatch.setattr(collector_mod, "PlatformVideoCollector", FakeCollector)
+    result = searcher._ytdlp_download(
+        "https://www.douyin.com/video/7538697061118545171",
+        str(tmp_path),
+        relevance_references=["挂脖风扇"],
+        category_terms=["挂脖风扇"],
+    )
+
+    assert result["technical_rejected"] is True
+    assert calls == [False]
 
 
 def test_validate_source_video_rejects_bad_duration(monkeypatch, tmp_path):
     f = tmp_path / "v.mp4"
     f.write_bytes(b"0" * 300_000)
     monkeypatch.setattr(searcher, "probe_media_file",
-                        lambda p: {"duration": 200.0, "width": 1080, "height": 1920})
+                        lambda p: {"duration": 400.0, "width": 1080, "height": 1920})
     ok, why = searcher.validate_source_video(str(f))
     assert not ok and "duration" in why
 
@@ -179,6 +479,18 @@ def test_candidate_relevance_requires_candidate_owned_evidence():
     ) == 0.0
 
 
+def test_candidate_relevance_rejects_accessory_only_video():
+    score = searcher.candidate_relevance_score(
+        "mini fan replacement battery charger", ["mini fan"]
+    )
+    assert score is not None and score < 0.9
+    relevant, threshold_score = searcher._relevance_result(
+        "mini fan replacement battery charger", ["mini fan"], 0.9, ["mini fan"]
+    )
+    assert relevant is False
+    assert threshold_score < 0.9
+
+
 def test_platform_auto_publish_threshold_never_drops_below_ninety_percent():
     relevant, score = searcher._relevance_result(
         "미니 선풍기 사용 후기",
@@ -199,6 +511,56 @@ def test_platform_auto_publish_threshold_never_drops_below_ninety_percent():
 def test_candidate_relevance_accepts_exact_multilingual_product_title():
     assert searcher.candidate_relevance_score("미니 선풍기 사용 후기", ["미니 선풍기"]) >= 0.9
     assert searcher.candidate_relevance_score("迷你风扇 产品演示", ["迷你风扇"]) >= 0.9
+
+
+def test_related_product_video_can_use_platform_family_threshold():
+    title = "迷你口袋风扇 USB 高速100档手持小风扇 便携式"
+    references = [
+        "알리사 100단 아이스 터보 MAX 휴대용 선풍기",
+        "便携式手持风扇 MAX USB 100档",
+        "portable handheld fan MAX USB 100-speed",
+    ]
+    relevant, score = searcher._relevance_result(
+        title,
+        references,
+        0.75,
+        ["风扇", "fan", "선풍기"],
+    )
+
+    assert score is not None and score >= 0.75
+    assert relevant is True
+
+
+def test_chinese_product_family_anchor_handles_unspaced_caption():
+    title = "这个多功能打蛋器，不管打蛋液还是搅面糊都好用 #自动打蛋器"
+    references = [
+        "Ditwo 미니 무선 전동 휘핑기 우유 거품기",
+        "电动奶泡器 电动打蛋器 打蛋器 Ditwo",
+        "electric milk frother whisk egg Ditwo",
+    ]
+    relevant, score = searcher._relevance_result(
+        title,
+        references,
+        0.75,
+        ["whisk", "beater", "거품기", "打蛋"],
+    )
+
+    assert score == 0.75
+    assert relevant is True
+
+
+def test_candidate_relevance_accepts_real_chinese_electric_brush_caption():
+    references = [
+        "리바인 무선 만능 전동 다용도 화장실 욕실 청소기 9in1 분리형 방수",
+        "Rebine 无线 电动 多功能 卫生间 浴室 清洁刷 9合1 可拆卸 防水",
+        "Rebine cordless electric multi-functional bathroom cleaning brush 9-in-1",
+    ]
+    caption = (
+        "这款多功能手持无线电动清洁刷，厨房浴室砖，水池都可以清洁，"
+        "一机多用省时省力又省心，可换刷头，超长续航，太方便了"
+    )
+
+    assert searcher.candidate_relevance_score(caption, references) >= 0.9
 
 
 # ── cleanup: 보존 기간 지난 산출물 정리 ──
@@ -232,7 +594,7 @@ def test_queue_platform_helpers(tmp_path, monkeypatch):
     assert (tmp_path / "rendered" / "render_result.json").exists()
 
 
-def test_queue_get_sourcing_method_defaults_to_coupang(monkeypatch):
+def test_queue_get_sourcing_method_defaults_to_platform_video(monkeypatch):
     from scripts import run_summer_coupang_queue_once as queue_runner
 
     class _Boom:
@@ -241,10 +603,10 @@ def test_queue_get_sourcing_method_defaults_to_coupang(monkeypatch):
 
     import managers.settings_manager as sm
     monkeypatch.setattr(sm, "get_settings_manager", lambda: _Boom())
-    assert queue_runner.get_sourcing_method() == "coupang"
+    assert queue_runner.get_sourcing_method() == "platform_video"
 
 
-def test_registry_failure_after_quota_commit_preserves_video_and_checkpoint(
+def test_platform_source_is_deferred_until_successful_upload(
     monkeypatch, tmp_path
 ):
     from core.sourcing import coupang_scraper
@@ -275,11 +637,14 @@ def test_registry_failure_after_quota_commit_preserves_video_and_checkpoint(
             handle.write(b"finished-video")
         return True
 
-    class FailingRegistry:
+    class DeferredRegistry:
+        record_source_called = False
+
         def used_source_ids(self):
             return set()
 
         def record_source(self, *_args, **_kwargs):
+            self.record_source_called = True
             raise OSError("registry unavailable")
 
     def finalize(_path):
@@ -296,7 +661,8 @@ def test_registry_failure_after_quota_commit_preserves_video_and_checkpoint(
     })
     monkeypatch.setattr(searcher, "search_platform_shorts", fake_search)
     monkeypatch.setattr(reeditor, "reedit", fake_reedit)
-    monkeypatch.setattr(reg_mod, "get_uploaded_registry", lambda: FailingRegistry())
+    registry = DeferredRegistry()
+    monkeypatch.setattr(reg_mod, "get_uploaded_registry", lambda: registry)
 
     report = asyncio.run(
         pp.run_platform_sourcing(
@@ -307,8 +673,73 @@ def test_registry_failure_after_quota_commit_preserves_video_and_checkpoint(
         )
     )
 
-    assert report["ok"] is False
-    assert report["manual_recovery_required"] is True
+    assert report["ok"] is True
+    assert "manual_recovery_required" not in report
+    assert report["quality_profile"] == "platform_reedit"
+    assert report["selected_source_url"] == (
+        "https://www.douyin.com/video/7351234567890123456"
+    )
+    assert report["selected_source_id"] == "douyin:7351234567890123456"
+    assert registry.record_source_called is False
     assert report["final_video"]
     assert os.path.exists(report["final_video"])
     assert store.state("platform:recovery", "42") == "completed_pending_delivery"
+
+
+def test_download_only_stops_before_reedit_and_keeps_source(monkeypatch, tmp_path):
+    from core.sourcing import coupang_scraper
+
+    source = tmp_path / "source.mp4"
+    source.write_bytes(b"source")
+
+    async def fake_scrape(_browser, _url):
+        return {"name": "미니 선풍기"}
+
+    async def fake_keywords(_product_name, _client):
+        return {"chinese": "迷你手持风扇", "english": "mini handheld fan"}
+
+    search_options = {}
+
+    async def fake_search(*_args, **kwargs):
+        search_options.update(kwargs)
+        return {
+            "platform": "xiaohongshu",
+            "video_file": str(source),
+            "video_url": "https://www.xiaohongshu.com/explore/66a1b2c3d4e5f6a7b8c9d0e1",
+            "size_mb": 1,
+            "via": "test",
+            "title": "迷你手持风扇 使用演示",
+            "relevance_score": 0.98,
+        }
+
+    class Registry:
+        def used_source_ids(self):
+            return set()
+
+    monkeypatch.setattr(coupang_scraper, "scrape_product", fake_scrape)
+    monkeypatch.setattr(pp, "_convert_keywords", fake_keywords)
+    monkeypatch.setattr(pp, "_resolve_purchase_link", lambda url: {
+        "purchase_url": url, "deep_link": "", "source": "original",
+    })
+    monkeypatch.setattr(searcher, "search_platform_shorts", fake_search)
+    monkeypatch.setattr(
+        reeditor,
+        "reedit",
+        lambda *_args, **_kwargs: pytest.fail("download-only must not reedit"),
+    )
+    monkeypatch.setattr(reg_mod, "get_uploaded_registry", lambda: Registry())
+
+    report = asyncio.run(pp.run_platform_sourcing(
+        "https://www.coupang.com/vp/products/1",
+        output_dir=str(tmp_path),
+        browser=object(),
+        download_only=True,
+    ))
+
+    assert report["ok"] is True
+    assert search_options["prefer_best"] is False
+    assert search_options["min_relevance_score"] == 0.75
+    assert report["download_only"] is True
+    assert report["downloaded_video"] == str(source)
+    assert source.exists()
+    assert report["final_video"] == ""

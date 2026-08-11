@@ -11,6 +11,7 @@ from managers.uploaded_registry import (
     RegistryIntegrityError,
     UploadedRegistry,
     normalize_product_key,
+    normalize_source_id,
 )
 
 
@@ -19,6 +20,47 @@ def test_normalize_product_key_stable():
     b = normalize_product_key("모기 퇴치기 LED", "https://link.coupang.com/a/xyz?lptag=2")
     assert a == b  # query string stripped
     assert a  # non-empty
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "expected"),
+    [
+        (
+            "https://www.aliexpress.com/item/3256809302776463.html?spm=abc",
+            "https://m.aliexpress.com/item/3256809302776463.html",
+            "aliexpress:3256809302776463",
+        ),
+        (
+            "https://detail.1688.com/offer/1031496968874.html?trace=1",
+            "https://m.1688.com/offer/1031496968874.html",
+            "1688:1031496968874",
+        ),
+        (
+            "https://www.bilibili.com/video/BV1AbCdEfGh2?share=1",
+            "https://m.bilibili.com/video/BV1AbCdEfGh2",
+            "bilibili:BV1AbCdEfGh2",
+        ),
+    ],
+)
+def test_normalize_source_id_collapses_platform_url_aliases(first, second, expected):
+    assert normalize_source_id(first) == expected
+    assert normalize_source_id(second) == expected
+
+
+def test_normalize_source_id_preserves_case_sensitive_native_ids():
+    assert normalize_source_id(
+        "https://www.kuaishou.com/short-video/AbC12345"
+    ) != normalize_source_id("https://www.kuaishou.com/short-video/abc12345")
+    assert normalize_source_id(
+        "https://www.bilibili.com/video/BV1AbCdEfGh2"
+    ) != normalize_source_id("https://www.bilibili.com/video/BV1abcdefgh2")
+    canonical = "kuaishou:AbC12345"
+    assert normalize_source_id(canonical) == canonical
+
+
+def test_normalize_source_id_does_not_trust_matching_path_on_unrelated_host():
+    raw = "https://evil.example/video/BV1AbCdEfGh2?token=secret"
+    assert normalize_source_id(raw) == "https://evil.example/video/bv1abcdefgh2"
 
 
 def test_product_key_duplicate_blocked(tmp_path):
@@ -149,6 +191,27 @@ def test_failed_preupload_reservation_can_be_released(tmp_path):
 
     retry_id, reason = UploadedRegistry(path=path).reserve(product_key=key)
     assert retry_id and not reason
+
+
+def test_finalize_reservation_records_canonical_marketplace_source(tmp_path):
+    path = str(tmp_path / "reg.json")
+    registry = UploadedRegistry(path=path)
+    reservation_id, reason = registry.reserve(product_key="source-aware-product")
+    assert reservation_id and not reason
+
+    registry.finalize_reservation(
+        reservation_id,
+        video_id="youtube-source-aware",
+        source_url="https://m.aliexpress.com/item/3256809302776463.html?tracking=1",
+    )
+
+    reloaded = UploadedRegistry(path=path)
+    assert "aliexpress:3256809302776463" in reloaded.used_source_ids()
+    stored = json.loads((tmp_path / "reg.json").read_text(encoding="utf-8"))
+    source = stored["sources"]["aliexpress:3256809302776463"]
+    assert source["source_url"] == (
+        "https://m.aliexpress.com/item/3256809302776463.html"
+    )
 
 
 def test_stale_reservation_stays_blocking_until_explicit_reconciliation(tmp_path, monkeypatch):

@@ -1230,7 +1230,8 @@ def is_verified_marketplace_demo_item(item: Dict[str, Any], min_similarity: floa
     similarity = _item_similarity(item)
     if similarity is None or similarity < min_similarity:
         return False
-    if str(item.get("fallback_reason") or "").strip():
+    fallback_reason = str(item.get("fallback_reason") or "").strip()
+    if fallback_reason not in {"", "cached_marketplace_video"}:
         return False
     if item.get("requires_review"):
         return False
@@ -1283,7 +1284,10 @@ def validate_render_upload_quality(rendered: Dict[str, Any]) -> Dict[str, Any]:
         reasons.append("missing_audio")
     if not probe.get("is_vertical_1080x1920"):
         reasons.append("not_vertical_1080x1920")
-    if int(rendered.get("tts_segment_count") or 0) <= 0:
+    quality_profile = str(
+        rendered.get("quality_profile") or "narrated_marketplace"
+    ).strip()
+    if quality_profile != "platform_reedit" and int(rendered.get("tts_segment_count") or 0) <= 0:
         reasons.append("missing_tts_segments")
 
     integrity = rendered.get("render_integrity") if isinstance(rendered.get("render_integrity"), dict) else {}
@@ -1298,6 +1302,7 @@ def validate_render_upload_quality(rendered: Dict[str, Any]) -> Dict[str, Any]:
         "min_duration_seconds": MIN_FINAL_VIDEO_SECONDS,
         "max_duration_seconds": MAX_FINAL_VIDEO_SECONDS,
         "min_file_size_bytes": MIN_FINAL_VIDEO_BYTES,
+        "quality_profile": quality_profile,
     }
 
 
@@ -1345,28 +1350,41 @@ async def run_sourcing(item: Dict[str, Any], run_dir: Path, min_similarity: floa
 
 
 def get_sourcing_method() -> str:
-    """풀자동화 소싱 방식: 'coupang'(기존) | 'platform_video'(3플랫폼 영상)."""
+    """풀자동화 소싱 방식: 중국 숏폼 3플랫폼 영상 직접 소싱."""
     try:
         from managers.settings_manager import get_settings_manager
 
         return get_settings_manager().get_automation_sourcing_method()
     except Exception:
-        return "coupang"
+        return "platform_video"
 
 
-async def run_platform_sourcing_for_queue(item: Dict[str, Any], run_dir: Path) -> Dict[str, Any]:
+async def run_platform_sourcing_for_queue(
+    item: Dict[str, Any],
+    run_dir: Path,
+    min_similarity: float,
+) -> Dict[str, Any]:
     """3플랫폼 방식 소싱(+재편집) 실행. report에는 deep_link/final_video가 포함된다."""
     out_dir = run_dir / "platform_sourcing"
     out_dir.mkdir(parents=True, exist_ok=True)
     from core.sourcing.platform_pipeline import run_platform_sourcing
 
     try:
+        from managers.settings_manager import get_settings_manager
+
+        platforms = get_settings_manager().get_platform_video_sources()
+    except Exception:
+        platforms = None
+
+    try:
         report = await run_platform_sourcing(
             str(item["coupang_url"]),
             output_dir=str(out_dir),
             progress=progress(item.get("planned_number") or "PLT"),
+            platforms=platforms,
             gemini_client=get_gemini_client(),
             product_name_hint=str(item.get("product_name") or ""),
+            min_similarity_score=min_similarity,
         )
     except Exception as exc:
         report = {
@@ -1394,6 +1412,7 @@ def platform_rendered_result(report: Dict[str, Any], run_dir: Path, product_name
         "render_integrity": report.get("render_integrity")
         or {"ok": bool(report.get("final_video")), "source": "platform_video"},
         "sourcing_method": "platform_video",
+        "quality_profile": str(report.get("quality_profile") or "platform_reedit"),
     }
     result["upload_quality"] = validate_render_upload_quality(result)
     result_path = run_dir / "rendered" / "render_result.json"
@@ -1403,7 +1422,7 @@ def platform_rendered_result(report: Dict[str, Any], run_dir: Path, product_name
 
 
 def is_platform_system_blocker(reason: str) -> bool:
-    """3플랫폼 소싱 실패가 시스템 원인(브라우저/환경)인지 판별."""
+    """숏폼 플랫폼 소싱 실패가 시스템 원인(브라우저/환경)인지 판별."""
     markers = ("브라우저", "chrome", "zendriver", "traceback", "browser")
     low = str(reason or "").lower()
     return any(m in low for m in markers)
@@ -1554,6 +1573,11 @@ def build_upload_item(
         "product_description": summary_line or product_name,
         "product_name": product_name,
         "source_url": str(item.get("coupang_url") or ""),
+        "marketplace_source_url": str(
+            report.get("selected_source_url")
+            or ((report.get("hit") or {}).get("video_url"))
+            or ""
+        ),
         "coupang_deep_link": purchase_url,
         "linktree_url": linktree_url,
         "upload_number": upload_number,
@@ -2245,13 +2269,20 @@ async def process_pending_items(
         run_dir = build_run_dir(item)
         platform_mode = get_sourcing_method() == "platform_video"
         if platform_mode:
-            report = await run_platform_sourcing_for_queue(item, run_dir)
+            report = await run_platform_sourcing_for_queue(item, run_dir, min_similarity)
             safe_item = None
             similarity = None
         else:
             report = await run_sourcing(item, run_dir, min_similarity)
             safe_item = select_safe_marketplace_item(report, min_similarity)
             similarity = report.get("best_similarity")
+            if safe_item:
+                report["selected_source_url"] = str(
+                    safe_item.get("source_page_url")
+                    or safe_item.get("url")
+                    or (safe_item.get("product") or {}).get("url")
+                    or ""
+                )
         product_name = str((report.get("product_info") or {}).get("name") or item.get("product_name") or "").strip()
 
         duplicate_reason = duplicate_upload_reason(item, queue_payload, product_name=product_name)

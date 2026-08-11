@@ -21,6 +21,7 @@ import threading
 import time
 import uuid
 from typing import Dict, List, Optional
+from urllib.parse import parse_qs, urlsplit, urlunsplit
 
 from filelock import FileLock, Timeout as FileLockTimeout
 
@@ -52,9 +53,65 @@ def normalize_product_key(*parts: str) -> str:
 
 
 def normalize_source_id(url: str) -> str:
-    """소스 영상 URL → 안정 식별자(쿼리 제거·소문자). 같은 영상 재사용 차단용."""
-    u = str(url or "").strip().split("?")[0].split("#")[0].rstrip("/").lower()
-    return u[:300]
+    """소스 URL을 플랫폼 고유 ID로 정규화한다.
+
+    데스크톱/모바일/추적 파라미터가 달라도 동일 상품·영상 페이지는 같은
+    ID가 되어야 한다. 알 수 없는 URL만 기존의 정규화 URL로 폴백한다.
+    """
+    raw = str(url or "").strip()
+    if not raw:
+        return ""
+    canonical = re.fullmatch(
+        r"(aliexpress|1688|douyin|kuaishou|xiaohongshu|bilibili):(.+)",
+        raw,
+        re.IGNORECASE,
+    )
+    if canonical:
+        platform = canonical.group(1).lower()
+        native_id = canonical.group(2)
+        if platform == "bilibili" and native_id.lower().startswith("bv"):
+            native_id = "BV" + native_id[2:]
+        return f"{platform}:{native_id}"
+    stripped = raw.split("?")[0].split("#")[0].rstrip("/")
+    parsed = urlsplit(raw)
+    host = (parsed.hostname or "").rstrip(".").lower()
+
+    def _official_host(domain: str) -> bool:
+        return host == domain or host.endswith(f".{domain}")
+
+    patterns = (
+        ("aliexpress", "aliexpress.com", r"/item/(\d{9,})(?:\.html)?/?$"),
+        ("1688", "1688.com", r"/offer/(\d{10,})(?:\.html)?/?$"),
+        ("douyin", "douyin.com", r"/video/(\d{10,25})/?$"),
+        ("kuaishou", "kuaishou.com", r"/short-video/([0-9a-z_-]{8,})/?$"),
+        ("xiaohongshu", "xiaohongshu.com", r"/explore/([0-9a-f]{20,})/?$"),
+        ("bilibili", "bilibili.com", r"/video/(bv[0-9a-z]{10})/?$"),
+    )
+    for platform, domain, pattern in patterns:
+        if not _official_host(domain):
+            continue
+        match = re.search(pattern, parsed.path, re.IGNORECASE)
+        if match:
+            native_id = match.group(1)
+            if platform == "bilibili":
+                native_id = "BV" + native_id[2:]
+            return f"{platform}:{native_id}"
+        if platform == "1688":
+            offer_ids = parse_qs(parsed.query).get("offerId") or parse_qs(parsed.query).get("offerid")
+            if offer_ids and re.fullmatch(r"\d{10,}", offer_ids[0]):
+                return f"1688:{offer_ids[0]}"
+    return stripped.lower()[:300]
+
+
+def sanitize_source_url_for_storage(url: str) -> str:
+    """Remove credentials, query parameters, and fragments from a source URL."""
+    raw = str(url or "").strip()
+    parsed = urlsplit(raw)
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+        return ""
+    host = parsed.hostname.rstrip(".").lower()
+    port = f":{parsed.port}" if parsed.port else ""
+    return urlunsplit((parsed.scheme.lower(), f"{host}{port}", parsed.path, "", ""))[:2048]
 
 
 def frame_ahash(video_path: str) -> Optional[int]:
@@ -348,8 +405,13 @@ class UploadedRegistry:
                     "업로드 전 중복 방지 예약을 저장하지 못했습니다."
                 ) from exc
 
-    def finalize_reservation(self, reservation_id: str, video_id: str = "") -> None:
-        """Convert a durable pre-upload reservation into upload history."""
+    def finalize_reservation(
+        self,
+        reservation_id: str,
+        video_id: str = "",
+        source_url: str = "",
+    ) -> None:
+        """Convert a durable pre-upload reservation into upload/source history."""
         with self._lock:
             try:
                 with self._file_lock:
@@ -375,6 +437,14 @@ class UploadedRegistry:
                                 "at": time.time(),
                             }
                         )
+                    source_id = normalize_source_id(source_url)
+                    if source_id:
+                        disk["sources"][source_id] = {
+                            "at": time.time(),
+                            "platform": reservation.get("platform") or "youtube",
+                            "video_id": str(video_id or ""),
+                            "source_url": sanitize_source_url_for_storage(source_url),
+                        }
                     disk["reservations"].pop(str(reservation_id), None)
                     self._atomic_write(self._path, disk)
                     self._atomic_write(self._backup_path, disk)

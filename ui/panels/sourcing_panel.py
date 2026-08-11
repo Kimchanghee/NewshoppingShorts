@@ -426,7 +426,7 @@ class SourcingPanel(QWidget):
         self._refresh_readiness()
 
     def _build_sourcing_method_card(self) -> QWidget:
-        """풀자동화 소싱 방식 선택 카드 (기존 쿠팡 / 3플랫폼 영상 다운로드)."""
+        """풀자동화 3플랫폼 영상 소싱 카드."""
         from PyQt6.QtWidgets import QRadioButton, QButtonGroup
 
         ds = self.ds
@@ -434,7 +434,7 @@ class SourcingPanel(QWidget):
             from managers.settings_manager import get_settings_manager
             current = get_settings_manager().get_automation_sourcing_method()
         except Exception:
-            current = "coupang"
+            current = "platform_video"
 
         card = QFrame()
         card.setObjectName("SourcingMethodCard")
@@ -468,14 +468,17 @@ class SourcingPanel(QWidget):
 
         self._method_group = QButtonGroup(card)
 
-        self.radio_method_coupang = QRadioButton("기존 방식 — 쿠팡 상품 기반 소싱")
+        self.radio_method_coupang = QRadioButton("기존 마켓 영상 방식")
         self.radio_method_coupang.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
         self.radio_method_coupang.setStyleSheet(radio_style)
         self.radio_method_coupang.setChecked(current == "coupang")
         self._method_group.addButton(self.radio_method_coupang)
         lay.addWidget(self.radio_method_coupang)
+        self.radio_method_coupang.setVisible(False)
 
-        self.radio_method_platform = QRadioButton("3플랫폼 방식 — 도우인·콰이쇼우·샤오홍슈 영상 다운로드")
+        self.radio_method_platform = QRadioButton(
+            "중국 숏폼 방식 — 샤오홍슈·도우인·콰이쇼우 영상 다운로드"
+        )
         self.radio_method_platform.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
         self.radio_method_platform.setStyleSheet(radio_style)
         self.radio_method_platform.setChecked(current == "platform_video")
@@ -498,9 +501,10 @@ class SourcingPanel(QWidget):
             return
         if method == "platform_video":
             self._method_hint.setText(
-                "⚠️ 재업로드는 저작권 스트라이크 리스크가 있어 재편집(워터마크 크롭·속도 변형·훅 자막)을 자동 적용합니다. "
-                "도우인→콰이쇼우→샤오홍슈→빌리빌리 순으로 검색합니다. 빌리빌리는 로그인 없이도 되고, "
-                "앞의 세 채널은 자동화 브라우저에 한 번 로그인해 두면(scripts/open_platform_login.py) 성공률이 크게 올라갑니다."
+                "쿠팡 상품명과 핵심 사양을 중국어로 정확히 변환한 뒤 "
+                "도우인→샤오홍슈→콰이쇼우에서 실제 영상 제목·설명을 대조해 최적 후보를 고릅니다. "
+                "자동화 브라우저에 한 번 로그인해 두면(scripts/open_platform_login.py) 성공률이 올라갑니다. "
+                "재사용 전에는 각 플랫폼의 저작권·이용 조건을 확인하세요."
             )
         else:
             self._method_hint.setText("쿠팡 상품 정보로 영상을 생성합니다. (현재 기본 방식)")
@@ -949,7 +953,7 @@ class SourcingPanel(QWidget):
             from managers.settings_manager import get_settings_manager
             return get_settings_manager().get_automation_sourcing_method()
         except Exception:
-            return "coupang"
+            return "platform_video"
 
     def _on_start_clicked(self):
         # 3플랫폼 방식이면 별도 흐름(영상 다운로드→재편집→업로드)으로 분기.
@@ -993,10 +997,10 @@ class SourcingPanel(QWidget):
         thread.start()
 
     def _on_start_platform_video(self):
-        """3플랫폼 방식: 쿠팡 링크 → 상품명 → 도우인/콰이쇼우/샤오홍슈 순차 검색·다운로드·재편집·업로드."""
+        """숏폼 플랫폼 방식: 상품명으로 지원 플랫폼을 순차 검색·다운로드·재편집·업로드."""
         url = self.url_input.text().strip()
         if not is_official_coupang_url(url):
-            self.results_label.setText("공식 HTTPS 쿠팡 상품 링크를 붙여넣어 주세요. (상품명으로 3채널을 검색합니다)")
+            self.results_label.setText("공식 HTTPS 쿠팡 상품 링크를 붙여넣어 주세요. (상품명으로 숏폼 플랫폼을 검색합니다)")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if self._running:
@@ -1012,7 +1016,9 @@ class SourcingPanel(QWidget):
         self.btn_start.setText("영상 찾아 만드는 중...")
         self._apply_button_style(disabled=True)
         self._reset_step_indicators()
-        self.results_label.setText("상품명으로 도우인·콰이쇼우·샤오홍슈를 순서대로 검색할게요...")
+        self.results_label.setText(
+            "상품명을 중국어로 번역해 샤오홍슈·도우인·콰이쇼우의 최적 영상을 고를게요..."
+        )
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
         min_similarity_score = self._match_threshold_score()
@@ -1197,6 +1203,9 @@ class SourcingPanel(QWidget):
                     video_path=edited, title="", description="",
                     product_info=product_name,
                     source_url=coupang_url,
+                    marketplace_source_url=str(
+                        report.get("selected_source_url") or hit.get("video_url") or ""
+                    ),
                     coupang_deep_link=deep_link,
                     linktree_url=linktree_url,
                     render_integrity=report.get("render_integrity") or {"ok": False, "source": "platform_video"},
