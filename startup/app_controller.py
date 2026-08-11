@@ -99,6 +99,14 @@ _ALLOWED_UPDATE_DOWNLOAD_DOMAINS = frozenset({
     "ssmaker-auth-api-1049571775048.us-central1.run.app",
 })
 
+# The release certificate is intentionally pinned because the current signing
+# certificate is private/self-issued rather than chained to a public Windows
+# root. Authenticode still verifies the file signature; only the chain-trust
+# result is relaxed for this exact signer.
+_PINNED_UPDATE_SIGNER_THUMBPRINTS = frozenset({
+    "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
+})
+
 
 def _is_allowed_update_download_url(download_url: str) -> bool:
     parsed = urlparse(str(download_url or "").strip())
@@ -142,9 +150,10 @@ def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tupl
     escaped_path = file_path.replace("'", "''")
     ps_script = (
         f"$sig = Get-AuthenticodeSignature -FilePath '{escaped_path}'; "
-        "if ($null -eq $sig) { Write-Output 'unknown|'; exit 0 }; "
+        "if ($null -eq $sig) { Write-Output '{}'; exit 0 }; "
         "$thumb=''; if ($sig.SignerCertificate) { $thumb=$sig.SignerCertificate.Thumbprint }; "
-        "Write-Output (($sig.Status.ToString().ToLower()) + '|' + $thumb)"
+        "[PSCustomObject]@{Status=[string]$sig.Status; StatusMessage=[string]$sig.StatusMessage; "
+        "Thumbprint=[string]$thumb} | ConvertTo-Json -Compress"
     )
     try:
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
@@ -159,29 +168,41 @@ def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tupl
     except Exception as e:
         return False, f"Signature check invocation failed: {e}"
 
-    output = (result.stdout or "").strip().splitlines()
-    last_line = output[-1].strip() if output else ""
-    status, thumb = (last_line.split("|", 1) + [""])[:2] if "|" in last_line else (last_line, "")
-    status = (status or "").strip().lower()
-    thumb = (thumb or "").replace(" ", "").strip().lower()
+    try:
+        info = json.loads((result.stdout or "").strip() or "{}")
+    except json.JSONDecodeError:
+        return False, "Invalid signature verification output"
 
-    if status != "valid":
-        stderr = (result.stderr or "").strip()
-        return False, f"Invalid signature status: {status or 'unknown'} {stderr}".strip()
-
+    status = str(info.get("Status") or "").strip().lower()
+    status_message = str(info.get("StatusMessage") or "").strip()
+    thumb = str(info.get("Thumbprint") or "").replace(" ", "").strip().upper()
     allow_raw = (os.getenv(thumbprints_env, "") or "").strip()
-    if allow_raw:
-        allowed = {
-            item.replace(" ", "").strip().lower()
-            for item in allow_raw.split(",")
-            if item.strip()
-        }
-        if not thumb:
-            return False, "Missing signer thumbprint"
-        if thumb not in allowed:
-            return False, "Signer thumbprint not allowed"
+    allowed = set(_PINNED_UPDATE_SIGNER_THUMBPRINTS)
+    allowed.update(
+        item.replace(" ", "").strip().upper()
+        for item in allow_raw.split(",")
+        if item.strip()
+    )
 
-    return True, "Signature verified"
+    if not thumb:
+        return False, "Missing signer thumbprint"
+    if thumb not in allowed:
+        return False, "Signer thumbprint not allowed"
+    if status == "valid":
+        return True, "Signature verified"
+
+    # A copied certificate on a modified executable produces HashMismatch, not
+    # UnknownError. Accept UnknownError only for the pinned signer and the
+    # specific private-root trust failure emitted by Windows.
+    # StatusMessage is localized by Windows, so the stable signal is
+    # UnknownError plus the exact pinned certificate. Invalid/tampered PE files
+    # are reported as HashMismatch and remain blocked above.
+    if status == "unknownerror":
+        return True, "Signature verified with pinned private-root signer"
+
+    stderr = (result.stderr or "").strip()
+    detail = status_message or stderr
+    return False, f"Invalid signature status: {status or 'unknown'} {detail}".strip()
 
 
 class UpdateCheckWorker(QtCore.QThread):

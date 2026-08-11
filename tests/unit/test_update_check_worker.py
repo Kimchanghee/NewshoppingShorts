@@ -1,4 +1,11 @@
-from startup.app_controller import UpdateCheckWorker, _is_allowed_update_download_url
+import json
+from types import SimpleNamespace
+
+from startup.app_controller import (
+    UpdateCheckWorker,
+    _is_allowed_update_download_url,
+    _verify_authenticode_signature,
+)
 
 
 def test_github_release_asset_redirect_is_trusted():
@@ -12,6 +19,51 @@ def test_github_release_asset_redirect_is_trusted():
     from utils import auto_updater
 
     assert "release-assets.githubusercontent.com" in auto_updater._ALLOWED_DOWNLOAD_DOMAINS
+
+
+def test_pinned_release_signer_accepts_private_root_chain(monkeypatch, tmp_path):
+    installer = tmp_path / "SSMaker_Setup.exe"
+    installer.write_bytes(b"signed-installer-placeholder")
+    response = {
+        "Status": "UnknownError",
+        "StatusMessage": (
+            "A certificate chain processed, but terminated in a root certificate "
+            "which is not trusted by the trust provider"
+        ),
+        "Thumbprint": "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
+    }
+    monkeypatch.setattr(
+        "startup.app_controller.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout=json.dumps(response), stderr="", returncode=0
+        ),
+    )
+
+    ok, reason = _verify_authenticode_signature(str(installer), "UPDATE_SIGNER_THUMBPRINTS")
+
+    assert ok is True
+    assert "pinned" in reason.lower()
+
+
+def test_pinned_release_signer_rejects_hash_mismatch(monkeypatch, tmp_path):
+    installer = tmp_path / "SSMaker_Setup.exe"
+    installer.write_bytes(b"tampered-installer-placeholder")
+    response = {
+        "Status": "HashMismatch",
+        "StatusMessage": "The contents of the file do not match its signature.",
+        "Thumbprint": "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
+    }
+    monkeypatch.setattr(
+        "startup.app_controller.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout=json.dumps(response), stderr="", returncode=0
+        ),
+    )
+
+    ok, reason = _verify_authenticode_signature(str(installer), "UPDATE_SIGNER_THUMBPRINTS")
+
+    assert ok is False
+    assert "hashmismatch" in reason.lower()
 
 
 def test_update_check_falls_back_to_github_when_server_version_is_stale(monkeypatch):

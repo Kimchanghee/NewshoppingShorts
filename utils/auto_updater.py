@@ -55,6 +55,10 @@ _ALLOWED_DOWNLOAD_DOMAINS: frozenset[str] = frozenset({
     "ssmaker-auth-api-1049571775048.us-central1.run.app",
 })
 
+_PINNED_UPDATE_SIGNER_THUMBPRINTS: frozenset[str] = frozenset({
+    "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
+})
+
 
 def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tuple[bool, str]:
     """Verify Windows Authenticode signature status and optional thumbprint allowlist."""
@@ -63,17 +67,19 @@ def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tupl
     if not file_path or not os.path.exists(file_path):
         return False, "file not found"
 
-    allowlist = {
+    allowlist = set(_PINNED_UPDATE_SIGNER_THUMBPRINTS)
+    allowlist.update({
         t.strip().upper().replace(" ", "")
         for t in str(thumbprints_env or "").split(",")
         if t.strip()
-    }
+    })
 
     ps_script = (
         "$ErrorActionPreference='Stop'; "
         f"$sig=Get-AuthenticodeSignature -FilePath '{file_path}'; "
         "$thumb=''; if ($sig.SignerCertificate) { $thumb=$sig.SignerCertificate.Thumbprint }; "
-        "[PSCustomObject]@{Status=[string]$sig.Status; Thumbprint=[string]$thumb} | ConvertTo-Json -Compress"
+        "[PSCustomObject]@{Status=[string]$sig.Status; StatusMessage=[string]$sig.StatusMessage; "
+        "Thumbprint=[string]$thumb} | ConvertTo-Json -Compress"
     )
     proc = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
@@ -93,12 +99,19 @@ def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tupl
         return False, "invalid signature verification output"
 
     status = str(info.get("Status") or "").strip()
+    status_message = str(info.get("StatusMessage") or "").strip()
     thumbprint = str(info.get("Thumbprint") or "").strip().upper().replace(" ", "")
-    if status != "Valid":
-        return False, f"invalid signature status: {status or 'unknown'}"
-    if allowlist and thumbprint not in allowlist:
+    if not thumbprint:
+        return False, "missing signer thumbprint"
+    if thumbprint not in allowlist:
         return False, "signer certificate is not allowlisted"
-    return True, "ok"
+    if status == "Valid":
+        return True, "ok"
+    # Windows localizes StatusMessage. UnknownError is accepted only after the
+    # exact signer pin matched; tampered files report HashMismatch instead.
+    if status == "UnknownError":
+        return True, "signature verified with pinned private-root signer"
+    return False, f"invalid signature status: {status or 'unknown'} {status_message}".strip()
 
 
 def get_current_version() -> str:
