@@ -30,35 +30,39 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     with engine.connect() as connection:
         dialect = connection.dialect.name
-        lock_acquired = False
-        try:
-            if dialect == "postgresql":
-                connection.execute(text("SELECT pg_advisory_lock(2086080501)"))
-                connection.commit()
-                lock_acquired = True
-            elif dialect in {"mysql", "mariadb"}:
-                value = connection.execute(
-                    text("SELECT GET_LOCK('ssmaker_alembic_migration', 60)")
-                ).scalar()
-                connection.commit()
-                if value != 1:
-                    raise RuntimeError("Timed out waiting for the database migration lock")
-                lock_acquired = True
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+        )
 
-            context.configure(
-                connection=connection,
-                target_metadata=target_metadata,
-                compare_type=True,
-            )
+        if dialect == "postgresql":
+            # Supabase uses transaction pooling. Session advisory locks can be
+            # returned to the pool while still held and block later deploys.
+            # A transaction lock is tied to this migration transaction and is
+            # released automatically on commit, rollback, or disconnect.
             with context.begin_transaction():
+                connection.execute(text("SELECT pg_advisory_xact_lock(2086081106)"))
                 context.run_migrations()
-        finally:
-            if lock_acquired and dialect == "postgresql":
-                connection.execute(text("SELECT pg_advisory_unlock(2086080501)"))
-                connection.commit()
-            elif lock_acquired and dialect in {"mysql", "mariadb"}:
+            return
+
+        if dialect in {"mysql", "mariadb"}:
+            value = connection.execute(
+                text("SELECT GET_LOCK('ssmaker_alembic_migration', 60)")
+            ).scalar()
+            connection.commit()
+            if value != 1:
+                raise RuntimeError("Timed out waiting for the database migration lock")
+            try:
+                with context.begin_transaction():
+                    context.run_migrations()
+            finally:
                 connection.execute(text("SELECT RELEASE_LOCK('ssmaker_alembic_migration')"))
                 connection.commit()
+            return
+
+        with context.begin_transaction():
+            context.run_migrations()
 
 
 if context.is_offline_mode():

@@ -12,6 +12,16 @@ from sqlalchemy.orm import Session
 
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 os.environ.setdefault("JWT_SECRET_KEY", "a" * 64)
+os.environ.setdefault("DB_USER", "test")
+os.environ.setdefault("DB_PASSWORD", "test")
+
+
+def test_postgres_migration_lock_is_transaction_scoped():
+    migration_env = (BACKEND_ROOT / "migrations" / "env.py").read_text(encoding="utf-8")
+
+    assert "pg_advisory_xact_lock" in migration_env
+    assert "pg_advisory_lock(" not in migration_env
+    assert "pg_advisory_unlock(" not in migration_env
 
 
 def _run_alembic(database_url: str, *args: str) -> None:
