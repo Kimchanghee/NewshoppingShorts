@@ -44,7 +44,7 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
             == EXPECTED_ALEMBIC_REVISION
-            == "20260810_0005"
+            == "20260811_0006"
         )
         registration_columns = {
             column["name"] for column in inspect(connection).get_columns("registration_requests")
@@ -88,6 +88,11 @@ def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):
         "revoked_at",
     } <= admin_columns
     with engine.connect() as connection:
+        system_setting_columns = {
+            column["name"]
+            for column in inspect(connection).get_columns("system_settings")
+        }
+        assert "updated_at" in system_setting_columns
         assert connection.execute(text("SELECT COUNT(*) FROM admin_sessions")).scalar_one() == 0
         assert connection.execute(
             text("SELECT session_token FROM admin_sessions_legacy_20260805")
