@@ -11,9 +11,10 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from caller import rest
+from utils.app_identity import load_app_identity
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -52,15 +53,48 @@ class TopBarPanel(QFrame):
         layout.setContentsMargins(24, 12, 24, 12)
         layout.setSpacing(16)
 
-        # Title
-        self.app_title = QLabel("쇼핑 숏폼 메이커 - 스튜디오")
+        # Product identity. Version metadata comes from the installed
+        # version.json so it automatically changes with every update.
+        identity = load_app_identity()
+        self.brand_group = QWidget()
+        self.brand_group.setObjectName("AppIdentity")
+        brand_layout = QHBoxLayout(self.brand_group)
+        brand_layout.setContentsMargins(0, 0, 0, 0)
+        brand_layout.setSpacing(10)
+
+        self.app_title = QLabel(identity.name)
         self.app_title.setFont(QFont(
             d.typography.font_family_heading,
             d.typography.size_sm,
             QFont.Weight.Bold,
         ))
         self.app_title.setStyleSheet(f"color: {c.text_primary}; letter-spacing: -0.5px;")
-        layout.addWidget(self.app_title)
+        self.app_title.setAccessibleName(identity.name)
+        brand_layout.addWidget(self.app_title)
+
+        self.app_meta = QLabel(identity.display_metadata)
+        self.app_meta.setObjectName("AppVersionMeta")
+        self.app_meta.setFont(QFont(
+            d.typography.font_family_body,
+            d.typography.size_2xs,
+            QFont.Weight.Medium,
+        ))
+        self.app_meta.setStyleSheet(f"""
+            #AppVersionMeta {{
+                background-color: {c.surface_variant};
+                color: {c.text_muted};
+                border: 1px solid {c.border_light};
+                border-radius: {d.radius.base}px;
+                padding: 3px 7px;
+            }}
+        """)
+        self.app_meta.setAccessibleName("앱 버전과 업데이트 날짜")
+        self.app_meta.setAccessibleDescription(identity.accessible_description)
+        brand_layout.addWidget(self.app_meta)
+
+        self.brand_group.setAccessibleName(identity.name)
+        self.brand_group.setAccessibleDescription(identity.accessible_description)
+        layout.addWidget(self.brand_group)
 
         layout.addStretch()
 
@@ -176,7 +210,7 @@ class TopBarPanel(QFrame):
 
     def set_compact_mode(self, compact: bool) -> None:
         """Keep primary account actions visible on narrow windows."""
-        self.app_title.setVisible(not compact)
+        self.brand_group.setVisible(not compact)
         self.gui.last_login_label.setVisible(not compact)
         self.gui.connection_label.setVisible(not compact)
         self.layout().setContentsMargins(12 if compact else 24, 12, 12 if compact else 24, 12)

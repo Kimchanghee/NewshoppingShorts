@@ -42,6 +42,7 @@ from ui.components.status_bar import StatusBar
 from ui.components.step_nav import StepNav
 from ui.responsive import ResponsiveLayoutController, calculate_window_rect
 
+from utils.app_identity import APP_DISPLAY_NAME
 from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
@@ -78,7 +79,7 @@ class UIInitializer:
         d = self.design
         gui = self.gui
 
-        gui.setWindowTitle("쇼핑 숏폼 메이커 - 스튜디오")
+        gui.setWindowTitle(APP_DISPLAY_NAME)
         icon_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "resource", "mainTrayIcon.png")
         if os.path.exists(icon_path):
             gui.setWindowIcon(QIcon(icon_path))
