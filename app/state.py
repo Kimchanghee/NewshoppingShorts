@@ -63,6 +63,8 @@ class AppState:
 
         # Sourcing (Mode 3) pipeline result cache
         self.sourcing_result: Optional[Dict[str, Any]] = None
+        # Full automation result scope: final MP4 only, or MP4 + YouTube queue.
+        self.automation_delivery_mode = "file_only"
 
         # Video source variables
         self.video_source = "none"

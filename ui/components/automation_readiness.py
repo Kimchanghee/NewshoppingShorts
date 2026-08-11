@@ -3,13 +3,13 @@
 Full-Automation Readiness Card (PyQt6)
 풀 자동화 준비 상태 카드
 
-Mode 3(풀 자동화 소싱) 화면 상단에 표시되어, 쿠팡 링크 1개로 영상 제작 →
-Linktree 발행 → YouTube 업로드까지 자동으로 진행하기 위해 필요한 항목이
-준비되었는지 한눈에 보여준다.
+Mode 3(풀 자동화 소싱) 화면 상단에 표시되어, 사용자가 선택한 자동화 범위에
+필요한 항목만 한눈에 보여준다. 기본 범위는 외부 연결이 필요 없는 영상 파일
+제작이며, YouTube 업로드는 사용자가 명시적으로 선택한다.
 
 - AI 분석 엔진 (Vertex/Gemini)        : 항상 필요
-- YouTube 채널 연결                   : 'YouTube 자동 업로드'를 켰을 때 필요
-- Linktree 자동 발행 (Webhook)        : '링크트리 자동 발행'을 켰을 때 필요
+- YouTube 채널 연결                   : YouTube 업로드 범위를 선택했을 때 필요
+- Linktree 자동 발행 (Webhook)        : 항상 선택 사항이며 실패해도 업로드 계속
 - 쿠팡 파트너스 딥링크 키              : 선택(없으면 원본 쿠팡 링크로 발행)
 
 각 항목은 ✓/⚠/✗ 상태와 함께 "설정하기" 버튼을 제공하여, 사용자가 곧바로
@@ -101,11 +101,11 @@ class AutomationReadinessCard(QFrame):
 
         layout.addLayout(header)
 
-        helper = QLabel("쿠팡 링크 1개로 영상 제작·발행·업로드까지 자동으로 진행하려면 아래 항목이 준비되어야 합니다.")
-        helper.setWordWrap(True)
-        helper.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        helper.setStyleSheet(f"color: {get_color('text_muted')}; padding-bottom: 3px;")
-        layout.addWidget(helper)
+        self._helper_label = QLabel("")
+        self._helper_label.setWordWrap(True)
+        self._helper_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self._helper_label.setStyleSheet(f"color: {get_color('text_muted')}; padding-bottom: 3px;")
+        layout.addWidget(self._helper_label)
 
         # 항목 행 컨테이너 (refresh 때마다 재생성)
         self._rows_container = QWidget()
@@ -119,12 +119,22 @@ class AutomationReadinessCard(QFrame):
         layout.addWidget(self._rows_container)
 
     # ------------------------------------------------------------- refresh
-    def refresh(self, youtube_required: bool = True, linktree_required: bool = True) -> None:
+    def refresh(
+        self,
+        youtube_required: bool = True,
+        linktree_required: bool = True,
+        show_youtube: bool = True,
+        show_linktree: bool = True,
+        mode_label: str = "upload",
+    ) -> None:
         """현재 연동 상태를 다시 계산하여 행을 갱신한다.
 
         Args:
             youtube_required: 'YouTube 자동 업로드' 옵션이 켜져 있는지 여부.
-            linktree_required: '링크트리 자동 발행' 옵션이 켜져 있는지 여부.
+            linktree_required: 하위 호환용. Linktree는 신규 UI에서 선택 항목이다.
+            show_youtube: 현재 실행에 YouTube 상태를 표시할지 여부.
+            show_linktree: 현재 실행에 Linktree 상태를 표시할지 여부.
+            mode_label: ``file_only`` 또는 ``upload``. 안내/요약 문구에 사용한다.
         """
         if self._rows_layout is None:
             return
@@ -150,42 +160,36 @@ class AutomationReadinessCard(QFrame):
         ))
 
         # 2) YouTube 채널 연결 (업로드 옵션 켰을 때만 필요)
-        yt_status, yt_detail = self._youtube_status()
-        if not youtube_required:
-            rows.append((
-                "youtube",
-                "YouTube 채널 연결",
-                STATUS_READY if yt_status == STATUS_READY else STATUS_SKIPPED,
-                "‘YouTube 자동 업로드’ 옵션이 꺼져 있어 이번 실행에서는 필요하지 않습니다."
-                if yt_status != STATUS_READY else yt_detail,
-                "upload" if yt_status != STATUS_READY else None,
-            ))
-        else:
-            rows.append((
-                "youtube",
-                "YouTube 채널 연결",
-                yt_status,
-                yt_detail,
-                "upload" if yt_status != STATUS_READY else None,
-            ))
+        if show_youtube:
+            yt_status, yt_detail = self._youtube_status()
+            if not youtube_required:
+                rows.append((
+                    "youtube",
+                    "YouTube 채널 연결",
+                    STATUS_READY if yt_status == STATUS_READY else STATUS_SKIPPED,
+                    "이번 실행에서는 YouTube 업로드를 사용하지 않습니다."
+                    if yt_status != STATUS_READY else yt_detail,
+                    "upload" if yt_status != STATUS_READY else None,
+                ))
+            else:
+                rows.append((
+                    "youtube",
+                    "YouTube 채널 연결",
+                    yt_status,
+                    yt_detail,
+                    "upload" if yt_status != STATUS_READY else None,
+                ))
 
         # 3) Linktree 자동 발행 (발행 옵션 켰을 때만 필요)
-        lt_status, lt_detail = self._linktree_status()
-        if not linktree_required:
+        if show_linktree:
+            lt_status, lt_detail = self._linktree_status()
             rows.append((
                 "linktree",
-                "Linktree 자동 발행",
-                STATUS_READY if lt_status == STATUS_READY else STATUS_SKIPPED,
-                "‘링크트리 자동 발행’ 옵션이 꺼져 있어 이번 실행에서는 필요하지 않습니다."
-                if lt_status != STATUS_READY else lt_detail,
-                "linktree_setup" if lt_status != STATUS_READY else None,
-            ))
-        else:
-            rows.append((
-                "linktree",
-                "Linktree 자동 발행",
-                lt_status,
-                lt_detail,
+                "Linktree 상품 링크 등록 (선택)",
+                STATUS_READY if lt_status == STATUS_READY else STATUS_OPTIONAL,
+                lt_detail if lt_status == STATUS_READY else (
+                    "미연결 또는 등록 실패 시 이 단계만 건너뛰고 업로드를 계속합니다."
+                ),
                 "linktree_setup" if lt_status != STATUS_READY else None,
             ))
 
@@ -200,6 +204,8 @@ class AutomationReadinessCard(QFrame):
         ))
 
         required_missing = 0
+        for column in range(4):
+            self._rows_layout.setColumnStretch(column, 1 if column < len(rows) else 0)
         for index, (key, title, status, detail, target) in enumerate(rows):
             if status == STATUS_MISSING:
                 required_missing += 1
@@ -209,13 +215,21 @@ class AutomationReadinessCard(QFrame):
                 index,
             )
 
-        self._update_summary(required_missing)
+        if self._helper_label is not None:
+            self._helper_label.setText(
+                "영상 제작에 필요한 공통 항목만 확인합니다. YouTube와 Linktree 연결은 필요하지 않아요."
+                if mode_label == "file_only"
+                else "YouTube 업로드에 필요한 항목을 확인합니다. Linktree는 선택 기능이며 시작을 막지 않아요."
+            )
+        self._update_summary(required_missing, mode_label)
 
-    def _update_summary(self, required_missing: int) -> None:
+    def _update_summary(self, required_missing: int, mode_label: str = "upload") -> None:
         if self._summary_label is None:
             return
         if required_missing == 0:
-            self._summary_label.setText("✓ 준비 완료")
+            self._summary_label.setText(
+                "✓ 영상 제작 준비 완료" if mode_label == "file_only" else "✓ 업로드 준비 완료"
+            )
             self._summary_label.setStyleSheet(f"color: {get_color('success')};")
         else:
             self._summary_label.setText(f"설정 필요 {required_missing}건")

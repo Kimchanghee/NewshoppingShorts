@@ -13,7 +13,7 @@ from typing import List, Optional
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QFrame, QWidget, QCheckBox, QScrollArea, QSizePolicy,
-    QTextEdit, QSpinBox,
+    QTextEdit, QSpinBox, QRadioButton, QButtonGroup,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
@@ -26,6 +26,120 @@ from utils.auth_helpers import extract_user_id
 from managers.work_quota import DurableWorkReservation
 
 logger = get_logger(__name__)
+
+
+DELIVERY_FILE_ONLY = "file_only"
+DELIVERY_YOUTUBE = "youtube"
+
+
+class _DeliveryModeCard(QFrame):
+    """Large, keyboard-selectable radio card for the automation result scope."""
+
+    selected = pyqtSignal(str)
+
+    def __init__(
+        self,
+        mode_id: str,
+        title: str,
+        description: str,
+        result_text: str,
+        badge: str = "",
+        parent=None,
+    ):
+        super().__init__(parent)
+        self.mode_id = mode_id
+        self.ds = get_design_system()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumHeight(146)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(8)
+
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        self.radio = QRadioButton(title)
+        self.radio.setFont(QFont(
+            self.ds.typography.font_family_primary,
+            self.ds.typography.size_sm,
+            QFont.Weight.Bold,
+        ))
+        self.radio.setAccessibleName(f"{title}{', 권장' if badge else ''}")
+        self.radio.setAccessibleDescription(f"{description} 결과: {result_text}")
+        self.radio.toggled.connect(self._on_toggled)
+        header.addWidget(self.radio, 1)
+
+        if badge:
+            badge_label = QLabel(badge)
+            badge_label.setFont(QFont(
+                self.ds.typography.font_family_primary,
+                self.ds.typography.size_xs,
+                QFont.Weight.Bold,
+            ))
+            badge_label.setStyleSheet(
+                f"color: {get_color('success')}; background: transparent; border: none;"
+            )
+            header.addWidget(badge_label)
+        layout.addLayout(header)
+
+        description_label = QLabel(description)
+        description_label.setWordWrap(True)
+        description_label.setFont(QFont(
+            self.ds.typography.font_family_primary,
+            self.ds.typography.size_xs,
+        ))
+        description_label.setStyleSheet(f"color: {get_color('text_secondary')};")
+        description_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout.addWidget(description_label, 1)
+
+        result_label = QLabel(result_text)
+        result_label.setWordWrap(True)
+        result_label.setFont(QFont(
+            self.ds.typography.font_family_primary,
+            self.ds.typography.size_xs,
+            QFont.Weight.Bold,
+        ))
+        result_label.setStyleSheet(f"color: {get_color('text_muted')};")
+        result_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        layout.addWidget(result_label)
+
+        self.set_selected(False)
+
+    def _on_toggled(self, checked: bool) -> None:
+        self.set_selected(checked)
+        if checked:
+            self.selected.emit(self.mode_id)
+
+    def set_selected(self, selected: bool) -> None:
+        border = get_color('primary') if selected else get_color('border_light')
+        background = get_color('surface_variant') if selected else get_color('surface')
+        width = 2 if selected else 1
+        self.setStyleSheet(f"""
+            QFrame {{
+                background-color: {background};
+                border: {width}px solid {border};
+                border-radius: {self.ds.radius.md}px;
+            }}
+            QFrame QLabel, QFrame QRadioButton {{
+                background: transparent;
+                border: none;
+                color: {get_color('text_primary')};
+            }}
+            QFrame:focus {{ border: 2px solid {get_color('primary')}; }}
+        """)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.radio.setChecked(True)
+        super().mouseReleaseEvent(event)
+
+    def keyPressEvent(self, event) -> None:
+        if event.key() in (Qt.Key.Key_Space, Qt.Key.Key_Return, Qt.Key.Key_Enter):
+            self.radio.setChecked(True)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
 
 class _StepIndicator(QFrame):
@@ -98,6 +212,16 @@ class SourcingPanel(QWidget):
         self._pipeline = None
         self._running = False
         self._step_indicators = {}
+        saved_delivery_mode = getattr(
+            getattr(gui, "state", None),
+            "automation_delivery_mode",
+            DELIVERY_FILE_ONLY,
+        )
+        self._delivery_mode = (
+            saved_delivery_mode
+            if saved_delivery_mode in (DELIVERY_FILE_ONLY, DELIVERY_YOUTUBE)
+            else DELIVERY_FILE_ONLY
+        )
         self.pipeline_progress.connect(self._update_step)
         self.pipeline_finished.connect(self._on_pipeline_done)
         self.platform_result_ready.connect(self._set_platform_result)
@@ -139,9 +263,11 @@ class SourcingPanel(QWidget):
         main_layout.setContentsMargins(ds.spacing.space_6, ds.spacing.space_4, ds.spacing.space_6, ds.spacing.space_4)
         main_layout.setSpacing(ds.spacing.space_4)
 
-        # ── Full-automation readiness checklist (top) ──
-        # 사용자가 '소싱 시작'을 누르기 전에 AI·YouTube·Linktree·쿠팡 연동이
-        # 준비됐는지 한눈에 보여주고, 바로 설정 화면으로 이동하게 한다.
+        # 무엇을 자동화할지 먼저 결정한다. 연결이 필요 없는 파일 제작을
+        # 안전한 기본값으로 두고, YouTube 업로드는 명시적으로 선택하게 한다.
+        main_layout.addWidget(self._build_delivery_mode_selector())
+
+        # 선택한 범위에 필요한 준비 항목만 보여준다.
         self.readiness_card = AutomationReadinessCard(
             self.gui, on_navigate=self._navigate_to_setup
         )
@@ -190,30 +316,12 @@ class SourcingPanel(QWidget):
         url_row.addWidget(self.url_input, 1)
         input_layout.addLayout(url_row)
 
-        # Options
-        opts_layout = QHBoxLayout()
-        opts_layout.setSpacing(ds.spacing.space_4)
-
         # 다크 테마에서 기본 팔레트(검정 텍스트)로 렌더링되면 라벨이 보이지 않으므로
         # 공통 체크박스 스타일(외곽선 박스 + 빨간 체크 표시)을 사용한다.
         checkbox_style = checkbox_qss()
 
-        self.chk_linktree = QCheckBox("Linktree에 자동 등록")
-        self.chk_linktree.setChecked(True)
-        self.chk_linktree.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self.chk_linktree.setStyleSheet(checkbox_style)
-        opts_layout.addWidget(self.chk_linktree)
-
-        self.chk_upload = QCheckBox("YouTube 자동 업로드")
-        self.chk_upload.setChecked(True)
-        self.chk_upload.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self.chk_upload.setStyleSheet(checkbox_style)
-        opts_layout.addWidget(self.chk_upload)
-
-        opts_layout.addStretch()
-        input_layout.addLayout(opts_layout)
-
         timer_frame = QFrame()
+        self.upload_timer_frame = timer_frame
         timer_frame.setObjectName("UploadTimerFrame")
         timer_frame.setMinimumHeight(44)
         timer_frame.setStyleSheet(f"""
@@ -419,16 +527,249 @@ class SourcingPanel(QWidget):
         main_layout.addWidget(self.results_frame)
         main_layout.addStretch()
 
-        # Refresh readiness when automation options toggle, and paint once now.
-        self.chk_upload.toggled.connect(lambda _checked=False: self._refresh_readiness())
-        self.chk_upload.toggled.connect(lambda _checked=False: self._sync_upload_timer_enabled())
+        # Refresh readiness when optional integration changes, and paint once now.
         self.chk_linktree.toggled.connect(lambda _checked=False: self._refresh_readiness())
+        self.chk_linktree.toggled.connect(lambda _checked=False: self._update_delivery_status())
+        self._sync_delivery_ui()
+
+    def _build_delivery_mode_selector(self) -> QWidget:
+        """Build the two explicit automation result paths."""
+        ds = self.ds
+        section = QFrame()
+        section.setObjectName("DeliveryModeSelector")
+        section.setStyleSheet(f"""
+            QFrame#DeliveryModeSelector {{
+                background-color: {get_color('surface')};
+                border: 1px solid {get_color('border_light')};
+                border-radius: {ds.radius.md}px;
+            }}
+            QFrame#DeliveryModeSelector QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        layout = QVBoxLayout(section)
+        layout.setContentsMargins(16, 14, 16, 14)
+        layout.setSpacing(10)
+
+        title = QLabel("1. 어디까지 자동으로 진행할까요?")
+        title.setFont(QFont(
+            ds.typography.font_family_primary,
+            ds.typography.size_base,
+            QFont.Weight.Bold,
+        ))
+        layout.addWidget(title)
+
+        helper = QLabel("결과 범위를 먼저 선택해 주세요. 영상 파일 제작은 외부 서비스 연결 없이 시작할 수 있어요.")
+        helper.setWordWrap(True)
+        helper.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        helper.setStyleSheet(f"color: {get_color('text_muted')};")
+        layout.addWidget(helper)
+
+        cards = QHBoxLayout()
+        cards.setSpacing(10)
+        self.delivery_file_card = _DeliveryModeCard(
+            DELIVERY_FILE_ONLY,
+            "영상 파일까지 자동 제작",
+            "상품 영상 찾기부터 편집·음성·자막까지 자동으로 진행하고 완성 파일을 저장합니다.",
+            "결과: 완성 MP4 · YouTube·Linktree 연결 필요 없음",
+            badge="권장",
+        )
+        self.delivery_youtube_card = _DeliveryModeCard(
+            DELIVERY_YOUTUBE,
+            "제작 후 YouTube까지 업로드",
+            "완성 영상을 만든 뒤 연결된 채널의 업로드 대기열에 자동으로 추가합니다.",
+            "결과: 완성 MP4 + YouTube 예약 업로드",
+        )
+        cards.addWidget(self.delivery_file_card, 1)
+        cards.addWidget(self.delivery_youtube_card, 1)
+        layout.addLayout(cards)
+
+        self._delivery_group = QButtonGroup(section)
+        self._delivery_group.setExclusive(True)
+        self._delivery_group.addButton(self.delivery_file_card.radio)
+        self._delivery_group.addButton(self.delivery_youtube_card.radio)
+        self.delivery_file_card.selected.connect(self._on_delivery_mode_changed)
+        self.delivery_youtube_card.selected.connect(self._on_delivery_mode_changed)
+
+        # Compatibility state used by the existing pipeline. It is intentionally
+        # hidden because upload is now selected through the two result cards.
+        self.chk_upload = QCheckBox(section)
+        self.chk_upload.setVisible(False)
+
+        self.delivery_options_frame = QFrame()
+        self.delivery_options_frame.setObjectName("DeliveryOptionsFrame")
+        self.delivery_options_frame.setStyleSheet(f"""
+            QFrame#DeliveryOptionsFrame {{
+                background-color: {get_color('background')};
+                border: 1px solid {get_color('border_light')};
+                border-radius: {ds.radius.sm}px;
+            }}
+            QFrame#DeliveryOptionsFrame QLabel,
+            QFrame#DeliveryOptionsFrame QCheckBox {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        options_layout = QVBoxLayout(self.delivery_options_frame)
+        options_layout.setContentsMargins(12, 10, 12, 10)
+        options_layout.setSpacing(8)
+
+        status_row = QHBoxLayout()
+        self.delivery_status_label = QLabel("")
+        self.delivery_status_label.setWordWrap(True)
+        self.delivery_status_label.setFont(QFont(
+            ds.typography.font_family_primary,
+            ds.typography.size_xs,
+            QFont.Weight.Bold,
+        ))
+        status_row.addWidget(self.delivery_status_label, 1)
+        self.btn_youtube_setup = QPushButton("YouTube 연결")
+        self.btn_youtube_setup.setMinimumHeight(34)
+        self.btn_youtube_setup.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_youtube_setup.setStyleSheet(f"""
+            QPushButton {{
+                color: {get_color('text_on_primary')};
+                background-color: {get_color('primary')};
+                border: none;
+                border-radius: {ds.radius.sm}px;
+                padding: 5px 12px;
+                font-weight: 700;
+            }}
+            QPushButton:hover {{ background-color: {get_color('primary_hover')}; }}
+        """)
+        self.btn_youtube_setup.clicked.connect(lambda: self._navigate_to_setup("upload"))
+        status_row.addWidget(self.btn_youtube_setup)
+        options_layout.addLayout(status_row)
+
+        self.chk_linktree = QCheckBox("Linktree에도 상품 링크 등록 (선택)")
+        self.chk_linktree.setChecked(False)
+        self.chk_linktree.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        self.chk_linktree.setStyleSheet(checkbox_qss())
+        options_layout.addWidget(self.chk_linktree)
+
+        linktree_hint = QLabel("연결되지 않았거나 등록에 실패해도 영상 제작과 YouTube 업로드는 계속됩니다.")
+        linktree_hint.setWordWrap(True)
+        linktree_hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        linktree_hint.setStyleSheet(f"color: {get_color('text_muted')}; padding-left: 24px;")
+        options_layout.addWidget(linktree_hint)
+        layout.addWidget(self.delivery_options_frame)
+
+        self.delivery_outcome_label = QLabel("")
+        self.delivery_outcome_label.setWordWrap(True)
+        self.delivery_outcome_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        layout.addWidget(self.delivery_outcome_label)
+
+        if self._delivery_mode == DELIVERY_YOUTUBE:
+            self.delivery_youtube_card.radio.setChecked(True)
+        else:
+            self.delivery_file_card.radio.setChecked(True)
+        return section
+
+    def _on_delivery_mode_changed(self, mode_id: str) -> None:
+        if mode_id not in (DELIVERY_FILE_ONLY, DELIVERY_YOUTUBE):
+            return
+        self._delivery_mode = mode_id
+        if hasattr(self.gui, "state"):
+            try:
+                self.gui.state.automation_delivery_mode = mode_id
+            except Exception:
+                pass
+        self._sync_delivery_ui()
+
+    def _is_upload_mode(self) -> bool:
+        return self._delivery_mode == DELIVERY_YOUTUBE
+
+    def _is_linktree_requested(self) -> bool:
+        return bool(
+            self._is_upload_mode()
+            and getattr(self, "chk_linktree", None)
+            and self.chk_linktree.isChecked()
+        )
+
+    def _youtube_readiness(self) -> tuple[bool, str]:
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            settings = get_settings_manager()
+            if not bool(settings.get_youtube_connected()):
+                return False, "YouTube 채널이 연결되지 않았어요. 이 모드를 쓰려면 먼저 채널을 연결해 주세요."
+            verification = settings.get_youtube_account_verification() or {}
+            if verification.get("required") and not verification.get("ok"):
+                return False, str(
+                    verification.get("message")
+                    or "YouTube 계정 이메일 확인이 필요해요."
+                )
+            info = settings.get_youtube_channel_info() or {}
+            channel_name = info.get("channel_name") or info.get("title") or "연결된 채널"
+            return True, f"✓ YouTube 연결됨 · {channel_name}"
+        except Exception as exc:
+            logger.debug("[SourcingPanel] YouTube readiness lookup failed: %s", exc)
+            return False, "YouTube 연결 상태를 확인하지 못했어요. 업로드 설정을 확인해 주세요."
+
+    def _sync_delivery_ui(self) -> None:
+        upload_mode = self._is_upload_mode()
+        if hasattr(self, "chk_upload"):
+            self.chk_upload.blockSignals(True)
+            self.chk_upload.setChecked(upload_mode)
+            self.chk_upload.blockSignals(False)
+        if hasattr(self, "delivery_file_card"):
+            self.delivery_file_card.set_selected(not upload_mode)
+        if hasattr(self, "delivery_youtube_card"):
+            self.delivery_youtube_card.set_selected(upload_mode)
+        if hasattr(self, "delivery_options_frame"):
+            self.delivery_options_frame.setVisible(upload_mode)
+        if hasattr(self, "upload_timer_frame"):
+            self.upload_timer_frame.setVisible(upload_mode)
+        self._sync_upload_timer_enabled()
+        self._update_delivery_status()
         self._refresh_readiness()
+
+    def _update_delivery_status(self) -> None:
+        if not hasattr(self, "delivery_outcome_label"):
+            # Minimal/test UIs created by integrations may not include the new
+            # selector; keep the legacy control reset behavior in that case.
+            if hasattr(self, "btn_start") and not self._running:
+                self.btn_start.setEnabled(True)
+                self.btn_start.setText("자동화 시작")
+            return
+
+        if not self._is_upload_mode():
+            self.delivery_outcome_label.setText(
+                "✓ 현재 저장된 음성·자막 설정으로 영상 파일까지 자동 제작합니다. 외부 서비스에는 올리지 않습니다."
+            )
+            self.delivery_outcome_label.setStyleSheet(f"color: {get_color('success')};")
+            if hasattr(self, "btn_start") and not self._running:
+                self.btn_start.setEnabled(True)
+                self.btn_start.setText("영상 파일 만들기 시작")
+                self.btn_start.setToolTip("")
+                self._apply_button_style(disabled=False)
+            return
+
+        ready, message = self._youtube_readiness()
+        if hasattr(self, "delivery_status_label"):
+            self.delivery_status_label.setText(message)
+            self.delivery_status_label.setStyleSheet(
+                f"color: {get_color('success') if ready else get_color('warning')};"
+            )
+        if hasattr(self, "btn_youtube_setup"):
+            self.btn_youtube_setup.setVisible(not ready)
+        if self._is_linktree_requested():
+            message += " · Linktree 등록은 선택이며 실패해도 업로드는 계속됩니다."
+        self.delivery_outcome_label.setText(message)
+        self.delivery_outcome_label.setStyleSheet(
+            f"color: {get_color('success') if ready else get_color('warning')};"
+        )
+        if hasattr(self, "btn_start") and not self._running:
+            self.btn_start.setEnabled(ready)
+            self.btn_start.setText(
+                "영상 만들고 YouTube에 올리기" if ready else "YouTube 연결 후 시작 가능"
+            )
+            self.btn_start.setToolTip("" if ready else message)
+            self._apply_button_style(disabled=not ready)
 
     def _build_sourcing_method_card(self) -> QWidget:
         """풀자동화 3플랫폼 영상 소싱 카드."""
-        from PyQt6.QtWidgets import QRadioButton, QButtonGroup
-
         ds = self.ds
         try:
             from managers.settings_manager import get_settings_manager
@@ -580,17 +921,23 @@ class SourcingPanel(QWidget):
         card = getattr(self, "readiness_card", None)
         if card is None:
             return
-        youtube_required = bool(getattr(self, "chk_upload", None) and self.chk_upload.isChecked())
-        linktree_required = bool(getattr(self, "chk_linktree", None) and self.chk_linktree.isChecked())
+        youtube_required = self._is_upload_mode()
+        show_linktree = self._is_linktree_requested()
         try:
-            card.refresh(youtube_required=youtube_required, linktree_required=linktree_required)
+            card.refresh(
+                youtube_required=youtube_required,
+                linktree_required=False,
+                show_youtube=youtube_required,
+                show_linktree=show_linktree,
+                mode_label="upload" if youtube_required else "file_only",
+            )
         except Exception as exc:
             logger.debug("[SourcingPanel] readiness refresh skipped: %s", exc)
 
     def showEvent(self, event):
         """Refresh readiness whenever the panel becomes visible."""
         super().showEvent(event)
-        self._refresh_readiness()
+        self._sync_delivery_ui()
 
     def _load_match_policy(self) -> dict:
         try:
@@ -849,103 +1196,30 @@ class SourcingPanel(QWidget):
             """)
 
     def _validate_linktree_publish_ready(self) -> bool:
-        """Block full automation when Linktree publish is requested but disconnected."""
-        if not getattr(self, "chk_linktree", None) or not self.chk_linktree.isChecked():
+        """Compatibility preflight: Linktree is optional and never blocks."""
+        if not self._is_linktree_requested():
             return True
-
         try:
             from managers.linktree_manager import get_linktree_manager
 
             ok, message = get_linktree_manager().require_connected_for_publish()
+            if not ok:
+                logger.info("[SourcingPanel] Optional Linktree step will be skipped: %s", message)
         except Exception as exc:
-            logger.warning("[SourcingPanel] Linktree preflight failed: %s", exc)
-            ok = False
-            message = (
-                "Linktree 자동 등록 상태를 확인하지 못했어요. "
-                "설정 > Coupang/Linktree 자동화에서 연결을 확인한 뒤 다시 시작해 주세요."
-            )
-
-        if ok:
-            return True
-
-        self.results_label.setText(message)
-        self.results_label.setStyleSheet(f"color: {get_color('warning')};")
-        # 단순 경고로 끝내지 않고, 지금 바로 연결할지 물어보고 설정 화면으로 안내한다.
-        try:
-            from ui.components.custom_dialog import show_question
-
-            go_now = show_question(
-                self,
-                "Linktree 연결이 필요해요",
-                message + "\n\n지금 Linktree를 연결할까요?",
-            )
-        except Exception:
-            go_now = False
-        if go_now:
-            self._open_linktree_setup_dialog()
-        return False
+            logger.warning("[SourcingPanel] Optional Linktree preflight skipped: %s", exc)
+        return True
 
     def _validate_youtube_upload_ready(self) -> bool:
-        """Block full automation when YouTube auto-upload is requested but the
-        channel is not connected (or the account-email guard fails).
-
-        Mirrors :meth:`_validate_linktree_publish_ready` so the user is told up
-        front instead of the upload step being silently skipped at the end.
-        """
-        if not getattr(self, "chk_upload", None) or not self.chk_upload.isChecked():
+        """Safety preflight for the explicitly selected YouTube delivery mode."""
+        if not self._is_upload_mode():
             return True
-
-        message = ""
-        try:
-            from managers.settings_manager import get_settings_manager
-
-            settings = get_settings_manager()
-            if not bool(settings.get_youtube_connected()):
-                message = (
-                    "YouTube 자동 업로드가 켜져 있는데 아직 채널이 연결되지 않았어요.\n"
-                    "‘업로드 설정’ 탭에서 채널을 연결하거나, YouTube 자동 업로드 체크를 끄고 다시 시작해 주세요."
-                )
-            else:
-                verification = settings.get_youtube_account_verification() or {}
-                if verification.get("required") and not verification.get("ok"):
-                    message = str(
-                        verification.get("message")
-                        or "올릴 YouTube 계정 이메일 확인이 필요해요. ‘업로드 설정’ 탭에서 확인해 주세요."
-                    )
-        except Exception as exc:
-            logger.warning("[SourcingPanel] YouTube preflight failed: %s", exc)
-            self.results_label.setText(
-                "YouTube 연결 설정을 확인하지 못해 자동 업로드를 시작하지 않았어요. 설정을 다시 확인해 주세요."
-            )
-            self.results_label.setStyleSheet(f"color: {get_color('error')};")
-            return False
-
-        if not message:
+        ready, message = self._youtube_readiness()
+        if ready:
             return True
 
         self.results_label.setText(message)
         self.results_label.setStyleSheet(f"color: {get_color('warning')};")
-        # 단순 경고로 끝내지 않고, 지금 바로 연결할지 물어보고 업로드 설정 화면으로 안내한다.
-        try:
-            from ui.components.custom_dialog import show_question
-
-            go_now = show_question(
-                self,
-                "YouTube 연결이 필요해요",
-                message + "\n\n지금 YouTube 채널을 연결할까요?",
-            )
-        except Exception:
-            go_now = False
-        if go_now:
-            gui = self.gui
-            if gui is not None and hasattr(gui, "open_youtube_connect"):
-                try:
-                    gui.open_youtube_connect()
-                except Exception as exc:
-                    logger.warning("[SourcingPanel] open YouTube connect failed: %s", exc)
-            elif gui is not None and hasattr(gui, "_on_step_selected"):
-                gui._on_step_selected("upload")
-        self._refresh_readiness()
+        self._sync_delivery_ui()
         return False
 
     def _current_sourcing_method(self) -> str:
@@ -975,13 +1249,13 @@ class SourcingPanel(QWidget):
 
         min_similarity_score = self._match_threshold_score()
         self._save_match_policy()
-        if not self._validate_linktree_publish_ready():
-            return
         if not self._validate_youtube_upload_ready():
             return
         self._running = True
         self.btn_start.setEnabled(False)
-        self.btn_start.setText("자동으로 만드는 중...")
+        self.btn_start.setText(
+            "영상 만들고 업로드 준비 중..." if self._is_upload_mode() else "영상 파일 만드는 중..."
+        )
         self._apply_button_style(disabled=True)
 
         self._reset_step_indicators()
@@ -1005,9 +1279,8 @@ class SourcingPanel(QWidget):
             return
         if self._running:
             return
-        # 수익화 경로도 기존 방식과 동일하게 검증(딥링크·링크트리·유튜브).
-        if not self._validate_linktree_publish_ready():
-            return
+        # YouTube 모드에서만 채널 연결을 필수로 검증한다. Linktree는 선택이며
+        # 연결/발행 실패가 제작이나 업로드를 막지 않는다.
         if not self._validate_youtube_upload_ready():
             return
 
@@ -1022,12 +1295,8 @@ class SourcingPanel(QWidget):
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
         min_similarity_score = self._match_threshold_score()
-        linktree_enabled = bool(
-            getattr(self, "chk_linktree", None) and self.chk_linktree.isChecked()
-        )
-        upload_enabled = bool(
-            getattr(self, "chk_upload", None) and self.chk_upload.isChecked()
-        )
+        linktree_enabled = self._is_linktree_requested()
+        upload_enabled = self._is_upload_mode()
         gemini_client = getattr(self.gui, "genai_client", None)
         youtube_manager = getattr(self.gui, "youtube_manager", None)
         user_id = extract_user_id(getattr(self.gui, "login_data", None))
@@ -1181,17 +1450,17 @@ class SourcingPanel(QWidget):
                         progress("linktree_publish",
                                  "링크트리 발행 완료" if ok else "링크트리 발행 실패", 1.0)
                         if not ok:
-                            self._safe_set_results("링크트리 발행에 실패해 자동 업로드를 중단했어요.")
-                            return
+                            logger.warning(
+                                "[Sourcing] Linktree publish failed; continuing without Linktree"
+                            )
                     else:
-                        progress("linktree_publish", "링크트리 미연결", 1.0)
-                        self._safe_set_results("링크트리가 연결되지 않아 자동 업로드를 중단했어요.")
-                        return
+                        progress("linktree_publish", "링크트리 미연결 · 이 단계만 건너뜀", 1.0)
+                        logger.info(
+                            "[Sourcing] Linktree is not connected; continuing without Linktree"
+                        )
                 except Exception as e:
                     logger.warning("[Sourcing] platform linktree publish 실패: %s", e)
-                    progress("linktree_publish", f"링크트리 오류: {e}", 1.0)
-                    self._safe_set_results(f"링크트리 발행 오류로 자동 업로드를 중단했어요: {e}")
-                    return
+                    progress("linktree_publish", "링크트리 오류 · 이 단계만 건너뜀", 1.0)
 
             if upload_enabled:
                 if youtube_manager is None or not hasattr(
@@ -1257,9 +1526,7 @@ class SourcingPanel(QWidget):
 
     def _reset_platform_controls(self):
         self._running = False
-        self.btn_start.setEnabled(True)
-        self.btn_start.setText("자동화 시작")
-        self._apply_button_style(disabled=False)
+        self._update_delivery_status()
 
     def _run_pipeline(self, coupang_url: str, min_similarity_score: float):
         """Run sourcing pipeline in background thread with its own event loop."""
@@ -1342,9 +1609,7 @@ class SourcingPanel(QWidget):
     def _on_pipeline_done(self, success: bool, pipeline):
         """Pipeline finished - update UI and emit results."""
         self._running = False
-        self.btn_start.setEnabled(True)
-        self.btn_start.setText("자동 만들기 시작")
-        self._apply_button_style(disabled=False)
+        self._update_delivery_status()
 
         report = pipeline.get_report()
 
@@ -1377,8 +1642,9 @@ class SourcingPanel(QWidget):
             self.results_label.setStyleSheet(f"color: {get_color('text_primary')};")
 
             # Store in app state
-            report["linktree_auto_publish_requested"] = self.chk_linktree.isChecked()
-            report["youtube_auto_upload_requested"] = self.chk_upload.isChecked()
+            report["automation_delivery_mode"] = self._delivery_mode
+            report["linktree_auto_publish_requested"] = self._is_linktree_requested()
+            report["youtube_auto_upload_requested"] = self._is_upload_mode()
             if hasattr(self.gui, 'state'):
                 self.gui.state.sourcing_result = report
 
@@ -1404,7 +1670,7 @@ class SourcingPanel(QWidget):
             )
             return
 
-        if self.chk_upload.isChecked():
+        if self._is_upload_mode():
             safe_items = [
                 item for item in source_items
                 if bool(item.get("auto_publish_safe", item.get("source") != "coupang_image"))
@@ -1459,7 +1725,7 @@ class SourcingPanel(QWidget):
             # the original Coupang URL so the action is not silently skipped
             # when Coupang Partners keys are not configured yet).
             publish_url = pipeline.deep_link or pipeline.coupang_url
-            if self.chk_linktree.isChecked() and publish_url and not self.chk_upload.isChecked():
+            if self._is_linktree_requested() and publish_url and not self._is_upload_mode():
                 try:
                     from managers.linktree_manager import get_linktree_manager
                     lm = get_linktree_manager()
@@ -1475,35 +1741,42 @@ class SourcingPanel(QWidget):
                         logger.info("[SourcingPanel] Linktree 미연결 - 자동 발행 건너뜀")
                 except Exception as e:
                     logger.warning("[SourcingPanel] Linktree publish error: %s", e)
-            elif self.chk_linktree.isChecked() and publish_url:
+            elif self._is_linktree_requested() and publish_url:
                 logger.info("[SourcingPanel] Linktree publish deferred until render integrity passes")
 
-            # Full automation: chain to batch processing if YouTube auto-upload is checked
-            if self.chk_upload.isChecked():
-                logger.info("[SourcingPanel] 풀 자동화 모드 - 영상 제작 자동 시작")
-                self._enable_youtube_auto_upload_for_pipeline()
-                if hasattr(self.gui, '_on_step_selected'):
-                    QTimer.singleShot(500, lambda: self.gui._on_step_selected('queue'))
-                if hasattr(self.gui, 'start_batch_processing'):
-                    QTimer.singleShot(1000, self.gui.start_batch_processing)
-            else:
-                # Manual mode: stop at voice selection so user can configure
-                if hasattr(self.gui, '_on_step_selected'):
-                    QTimer.singleShot(500, lambda: self.gui._on_step_selected('voice'))
+            # Both delivery modes are fully automatic through final rendering.
+            # The selected scope only controls whether the completed file is
+            # also handed to the YouTube upload queue.
+            upload_enabled = self._is_upload_mode()
+            logger.info(
+                "[SourcingPanel] Full automation render start (delivery=%s)",
+                self._delivery_mode,
+            )
+            self._set_youtube_auto_upload_for_pipeline(upload_enabled)
+            if hasattr(self.gui, '_on_step_selected'):
+                QTimer.singleShot(500, lambda: self.gui._on_step_selected('queue'))
+            if hasattr(self.gui, 'start_batch_processing'):
+                QTimer.singleShot(1000, self.gui.start_batch_processing)
         else:
             logger.warning("[SourcingPanel] No videos were successfully enqueued")
             self.results_label.setText(
                 self.results_label.text() + "\n\n※ 만들 목록에 담지 못했어요. 영상 파일을 확인해 주세요."
             )
 
-    def _enable_youtube_auto_upload_for_pipeline(self):
-        """Synchronize the sourcing checkbox with the actual YouTube manager."""
+    def _set_youtube_auto_upload_for_pipeline(self, enabled: bool):
+        """Enable upload for this run without disabling the user's global setting."""
         try:
             from managers.settings_manager import get_settings_manager
 
             settings = get_settings_manager()
-            settings.set_youtube_auto_upload(True)
             yt_manager = getattr(self.gui, "youtube_manager", None)
+            if not enabled:
+                logger.info(
+                    "[SourcingPanel] External delivery disabled for this file-only run"
+                )
+                return
+
+            settings.set_youtube_auto_upload(True)
             if yt_manager and hasattr(yt_manager, "set_upload_interval"):
                 try:
                     yt_manager.set_upload_interval(settings.get_youtube_upload_interval())
@@ -1511,9 +1784,13 @@ class SourcingPanel(QWidget):
                     pass
             if yt_manager and hasattr(yt_manager, "set_upload_enabled"):
                 yt_manager.set_upload_enabled(True)
-                logger.info("[SourcingPanel] YouTube auto-upload enabled for full pipeline")
+                logger.info("[SourcingPanel] YouTube auto-upload enabled for this run")
         except Exception as exc:
-            logger.warning("[SourcingPanel] Failed to enable YouTube auto-upload: %s", exc)
+            logger.warning("[SourcingPanel] Failed to sync YouTube auto-upload: %s", exc)
+
+    def _enable_youtube_auto_upload_for_pipeline(self):
+        """Backward-compatible wrapper for older tests/integrations."""
+        self._set_youtube_auto_upload_for_pipeline(True)
 
     def get_sourcing_result(self) -> Optional[dict]:
         """Return last pipeline report or None."""

@@ -145,11 +145,15 @@ def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
         "youtube_auto_upload_requested": bool(
             result.get("youtube_auto_upload_requested", False)
         ),
+        "automation_delivery_mode": str(
+            result.get("automation_delivery_mode")
+            or ("youtube" if result.get("youtube_auto_upload_requested") else "file_only")
+        ),
     }
 
 
 def _get_linktree_publish_connection_issue(linktree_manager) -> str:
-    """Return a blocking reason when requested Linktree publish cannot run."""
+    """Return the warning shown when the optional Linktree step cannot run."""
     if linktree_manager is None:
         return "Linktree 자동 발행이 요청되었지만 Linktree 매니저를 초기화하지 못했습니다."
     try:
@@ -1912,7 +1916,7 @@ def _process_single_video(app, url, current_number, total_urls):
                                             if not linktree_ok:
                                                 linktree_publish_blocked = True
                                                 linktree_publish_block_reason = (
-                                                    "Linktree 자동 발행 요청이 실패해 YouTube 업로드를 중지했습니다."
+                                                    "Linktree 자동 등록 요청이 실패해 이 단계만 건너뜁니다."
                                                 )
                                     except Exception as linktree_publish_err:
                                         logger.warning(
@@ -1921,7 +1925,7 @@ def _process_single_video(app, url, current_number, total_urls):
                                         )
                                         linktree_publish_blocked = True
                                         linktree_publish_block_reason = (
-                                            "Linktree 자동 발행 중 오류가 발생해 YouTube 업로드를 중지했습니다."
+                                            "Linktree 자동 등록 중 오류가 발생해 이 단계만 건너뜁니다."
                                         )
                                 video_desc += f"\n\n🛒 쿠팡 상품 보기: {coupang_link}"
 
@@ -1952,9 +1956,10 @@ def _process_single_video(app, url, current_number, total_urls):
                                         logger.warning("[Automation] Inpock link update skipped: %s", inpock_err)
 
                             if linktree_publish_blocked:
-                                raise WorkDeliveryPendingError(
+                                logger.warning(
+                                    "[Automation] Optional Linktree step skipped; delivery continues: %s",
                                     linktree_publish_block_reason
-                                    or "Linktree 자동 발행이 완료되지 않았습니다."
+                                    or "Linktree 자동 등록이 완료되지 않았습니다.",
                                 )
 
                             # 3. Add to YouTube Upload Queue
@@ -1963,23 +1968,24 @@ def _process_single_video(app, url, current_number, total_urls):
                                 or sourcing_context.get("auto_publish_safe") is False
                                 or sourcing_context.get("requires_review") is True
                             )
-                            if yt_manager and yt_manager.get_upload_settings().enabled and review_only_source:
+                            external_delivery_requested = bool(
+                                not sourcing_context
+                                or sourcing_context.get("automation_delivery_mode") == "youtube"
+                            )
+                            if (
+                                external_delivery_requested
+                                and yt_manager
+                                and yt_manager.get_upload_settings().enabled
+                                and review_only_source
+                            ):
                                 logger.warning(
                                     "[Automation] YouTube auto-upload skipped: sourced video requires review"
                                 )
-                            elif yt_manager and yt_manager.get_upload_settings().enabled and linktree_publish_blocked:
-                                message = linktree_publish_block_reason or (
-                                    "Linktree 자동 발행 실패로 YouTube 자동 업로드를 중지했습니다."
-                                )
-                                logger.warning("[Automation] YouTube auto-upload skipped: %s", message)
-                                _safe_set_url_status(app, url, "failed")
-                                if not hasattr(app, "url_status_message"):
-                                    app.url_status_message = {}
-                                app.url_status_message[url] = message
-                                update_fn = getattr(app, "update_url_listbox", None)
-                                if update_fn is not None:
-                                    _dispatch_ui_callback(app, update_fn)
-                            elif yt_manager and yt_manager.get_upload_settings().enabled:
+                            elif (
+                                external_delivery_requested
+                                and yt_manager
+                                and yt_manager.get_upload_settings().enabled
+                            ):
                                 _queue_delivery_or_raise(
                                     "YouTube",
                                     yt_manager.add_to_upload_queue,
@@ -2010,19 +2016,14 @@ def _process_single_video(app, url, current_number, total_urls):
                                     ig_manager = get_instagram_manager()
 
                                 ig_enabled = bool(
-                                    ig_manager
+                                    external_delivery_requested
+                                    and ig_manager
                                     and ig_manager.get_upload_settings().enabled
                                     and ig_manager.is_connected()
                                 )
                                 if ig_enabled and review_only_source:
                                     logger.warning(
                                         "[Automation] Instagram auto-upload skipped: sourced video requires review"
-                                    )
-                                elif ig_enabled and linktree_publish_blocked:
-                                    logger.warning(
-                                        "[Automation] Instagram auto-upload skipped: %s",
-                                        linktree_publish_block_reason
-                                        or "Linktree 자동 발행 실패",
                                     )
                                 elif ig_enabled:
                                     _queue_delivery_or_raise(
@@ -2064,18 +2065,14 @@ def _process_single_video(app, url, current_number, total_urls):
                                     tt_manager = get_tiktok_manager()
 
                                 tt_enabled = bool(
-                                    tt_manager
+                                    external_delivery_requested
+                                    and tt_manager
                                     and tt_manager.get_upload_settings().enabled
                                     and tt_manager.is_connected()
                                 )
                                 if tt_enabled and review_only_source:
                                     logger.warning(
                                         "[Automation] TikTok auto-upload skipped: sourced video requires review"
-                                    )
-                                elif tt_enabled and linktree_publish_blocked:
-                                    logger.warning(
-                                        "[Automation] TikTok auto-upload skipped: %s",
-                                        linktree_publish_block_reason or "Linktree 자동 발행 실패",
                                     )
                                 elif tt_enabled:
                                     _queue_delivery_or_raise(

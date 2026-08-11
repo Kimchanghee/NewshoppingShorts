@@ -212,7 +212,7 @@ class UIInitializer:
 
         pages = [
             ("mode", "만들기 방식 선택", "어떤 방식으로 영상을 만들지 골라 주세요.", mode_selection_panel),
-            ("sourcing", "전체 자동 만들기", "쿠팡 상품 링크만 넣으면 영상 찾기부터 올리기까지 자동으로 진행해요.", sourcing_panel),
+            ("sourcing", "전체 자동 만들기", "쿠팡 상품 링크로 영상 파일까지 자동 제작하고, 원하면 YouTube 업로드까지 진행해요.", sourcing_panel),
             ("source", "영상 넣기", "숏폼으로 만들 영상 링크나 내 컴퓨터 파일을 넣어 주세요.", url_input_panel),
             ("voice", "목소리 선택", "영상에 입힐 AI 목소리를 골라 주세요.", voice_panel),
             ("cta", "마무리 멘트 선택", "영상 끝에 넣을 행동 유도 문구를 골라 주세요.", cta_panel),

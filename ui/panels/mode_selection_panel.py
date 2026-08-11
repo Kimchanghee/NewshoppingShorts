@@ -333,14 +333,14 @@ class ModeSelectionPanel(QWidget):
         sourcing_card = ModeCard(
             mode_id="sourcing",
             title="전체 자동 만들기",
-            subtitle="쿠팡 링크 하나면 끝까지 자동",
-            description="쿠팡 상품 링크만 넣으면 영상 찾기부터 올리기까지 알아서 진행해요.",
+            subtitle="쿠팡 링크 하나로 영상 파일까지 자동",
+            description="상품에 맞는 영상을 찾아 완성 파일을 만들고, 원하면 YouTube 업로드까지 이어서 진행합니다.",
             icon="🤖",
             features=[
                 "쿠팡 상품 링크 1개만 붙여넣기",
                 "어울리는 해외 영상을 자동으로 찾아 줘요",
-                "수수료 추적 링크를 만들어 Linktree에 자동 등록",
-                "영상 제작부터 YouTube 올리기까지 자동"
+                "YouTube·Linktree 연결 없이 영상 파일 제작",
+                "YouTube 업로드와 Linktree 등록은 선택"
             ],
             is_selected=False
         )
