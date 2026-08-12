@@ -11,10 +11,14 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
 from uuid import uuid4
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
 from managers.settings_manager import get_settings_manager
-from managers.summer_coupang_queue_status import build_summer_coupang_queue_snapshot
+from managers.summer_coupang_queue_status import (
+    build_summer_coupang_queue_snapshot,
+    delete_summer_coupang_queue_items,
+)
 from ui.components.custom_dialog import show_info, show_question, show_warning
 from utils.logging_config import get_logger
 from utils.secrets_manager import get_secrets_manager
@@ -280,6 +284,64 @@ class QueueManager:
         self.update_queue_count()
         return True
 
+    def _delete_local_keys(self, keys: Iterable[str]) -> int:
+        deleted = 0
+        for key in set(keys):
+            existed = key in self.gui.url_queue or key in self.gui.url_status
+            while key in self.gui.url_queue:
+                self.gui.url_queue.remove(key)
+            for attr in (
+                "url_status",
+                "url_status_message",
+                "url_remarks",
+                "url_timestamps",
+                "url_auto_upload_status",
+            ):
+                store = getattr(self.gui, attr, None)
+                if isinstance(store, dict):
+                    store.pop(key, None)
+            self._remove_mix_job(key)
+            if existed:
+                deleted += 1
+        return deleted
+
+    def _save_queue_session(self) -> None:
+        manager = getattr(self.gui, "session_manager", None)
+        save = getattr(manager, "save_session", None)
+        if callable(save):
+            try:
+                save(force=True)
+            except Exception as exc:
+                logger.warning("[Queue] Failed to persist deletion: %s", exc)
+
+    def _show_delete_feedback(self, message: str) -> None:
+        panel = getattr(self.gui, "queue_panel", None)
+        show_feedback = getattr(panel, "show_delete_feedback", None)
+        if callable(show_feedback):
+            show_feedback(message)
+        else:
+            show_info(self.gui, "삭제 완료", message)
+
+    def _delete_scheduled(self, scope: str, selected_ids=None) -> Dict[str, object]:
+        result = delete_summer_coupang_queue_items(
+            scope,
+            selected_ids=selected_ids,
+        )
+        if result.get("busy"):
+            show_warning(
+                self.gui,
+                "삭제할 수 없음",
+                "풀자동 작업이 실행 중입니다. 작업이 끝난 뒤 다시 삭제해 주세요.",
+            )
+        return result
+
+    def _finish_delete(self, deleted: int, message: str) -> None:
+        self._last_summer_coupang_snapshot = None
+        self._save_queue_session()
+        self.update_url_listbox()
+        self.add_log(message)
+        self._show_delete_feedback(message)
+
     def remove_selected_url(self):
         tree: QTreeWidget = getattr(self.gui, "url_listbox", None)
         if tree is None:
@@ -287,130 +349,169 @@ class QueueManager:
 
         selected = tree.selectedItems()
         if not selected:
+            show_info(self.gui, "선택 필요", "삭제할 항목을 먼저 선택해 주세요.")
             return
 
-        item = selected[0]
-        display_value = item.text(1)
-        key = self._find_queue_key_by_display(display_value)
-        status = self._normalize_status(self.gui.url_status.get(key))
-        if status == "processing":
-            show_warning(self.gui, "경고", "현재 작업이 진행 중입니다.")
+        local_keys = []
+        scheduled_ids = []
+        processing_count = 0
+        for item in selected:
+            metadata = item.data(0, Qt.ItemDataRole.UserRole)
+            metadata = metadata if isinstance(metadata, dict) else {}
+            source = metadata.get("source")
+            status = self._normalize_status(metadata.get("status"))
+            if status == "processing":
+                processing_count += 1
+                continue
+            if source == "scheduled" and metadata.get("id"):
+                scheduled_ids.append(str(metadata["id"]))
+            elif source == "local" and metadata.get("key"):
+                local_keys.append(str(metadata["key"]))
+            else:
+                display_value = item.text(1)
+                key = self._find_queue_key_by_display(display_value)
+                if key in self.gui.url_queue or key in self.gui.url_status:
+                    local_keys.append(key)
+
+        delete_count = len(set(local_keys)) + len(set(scheduled_ids))
+        if not delete_count:
+            if processing_count:
+                show_warning(self.gui, "삭제할 수 없음", "진행 중인 작업은 삭제할 수 없습니다.")
+            else:
+                show_info(self.gui, "선택 필요", "삭제 가능한 항목을 선택해 주세요.")
+            return
+        processing_note = f" 진행 중 {processing_count}건은 유지됩니다." if processing_count else ""
+        if not show_question(
+            self.gui,
+            "선택 항목 삭제",
+            f"선택한 항목 {delete_count}건을 삭제할까요?{processing_note}",
+        ):
             return
 
-        if key in self.gui.url_queue:
-            self.gui.url_queue.remove(key)
-        self.gui.url_status.pop(key, None)
-        self.gui.url_status_message.pop(key, None)
-        self.gui.url_remarks.pop(key, None)
-        self._remove_mix_job(key)
+        scheduled_result = (
+            self._delete_scheduled("selected", scheduled_ids)
+            if scheduled_ids
+            else {"deleted": 0, "busy": False}
+        )
+        if scheduled_result.get("busy"):
+            return
+        deleted = self._delete_local_keys(local_keys) + int(scheduled_result.get("deleted", 0))
+        if not deleted:
+            show_info(self.gui, "안내", "선택한 항목은 이미 삭제되었거나 찾을 수 없습니다.")
+            self.update_url_listbox()
+            return
 
-        self.update_url_listbox()
-        self.update_queue_count()
-        self.add_log(f"삭제됨: {display_value[:80]}")
+        message = f"선택한 항목 {deleted}건을 삭제했습니다."
+        self._finish_delete(deleted, message)
 
-        # Log URL removal
         try:
             from caller.rest import log_user_action
-            log_user_action("URL 삭제", f"작업 큐에서 URL 삭제: {display_value[:50]}...")
+
+            log_user_action("URL 삭제", f"작업 큐에서 선택 항목 {deleted}건 삭제")
         except Exception:
             pass
 
     def clear_url_queue(self):
-        if not self.gui.url_queue and not self.gui.url_status:
+        snapshot = build_summer_coupang_queue_snapshot()
+        local_keys = set(self.gui.url_queue).union(self.gui.url_status.keys())
+        local_deletable = [
+            key
+            for key in local_keys
+            if self._normalize_status(self.gui.url_status.get(key)) != "processing"
+        ]
+        scheduled_counts = snapshot.get("counts", {})
+        scheduled_deletable = int(snapshot.get("total", 0)) - int(
+            scheduled_counts.get("processing", 0)
+        )
+        total = len(set(local_deletable)) + max(0, scheduled_deletable)
+        if not total:
+            show_info(self.gui, "안내", "삭제할 대기열 항목이 없습니다.")
             return
+
+        processing_count = sum(
+            1
+            for status in self.gui.url_status.values()
+            if self._normalize_status(status) == "processing"
+        ) + int(scheduled_counts.get("processing", 0))
+        processing_note = f" 진행 중 {processing_count}건은 유지됩니다." if processing_count else ""
         if not show_question(
             self.gui,
-            "확인",
-            "대기열의 모든 링크를 비우시겠습니까? (완료/실패 이력도 삭제됩니다)",
+            "전체 삭제",
+            f"삭제 가능한 대기열 {total}건을 모두 삭제할까요?{processing_note}",
         ):
             return
 
-        processing = [
-            url
-            for url, status in self.gui.url_status.items()
-            if self._normalize_status(status) == "processing"
-        ]
-        self.gui.url_queue[:] = processing
-        self.gui.url_status.clear()
-        self.gui.url_status.update({url: "processing" for url in processing})
-        if hasattr(self.gui, "url_timestamps"):
-            kept_timestamps = {
-                url: ts for url, ts in self.gui.url_timestamps.items() if url in processing
-            }
-            self.gui.url_timestamps.clear()
-            self.gui.url_timestamps.update(kept_timestamps)
-        if hasattr(self.gui, "url_status_message"):
-            kept_messages = {
-                url: msg
-                for url, msg in self.gui.url_status_message.items()
-                if url in processing
-            }
-            self.gui.url_status_message.clear()
-            self.gui.url_status_message.update(kept_messages)
-        if hasattr(self.gui, "url_remarks"):
-            kept_remarks = {
-                url: remark
-                for url, remark in self.gui.url_remarks.items()
-                if url in processing
-            }
-            self.gui.url_remarks.clear()
-            self.gui.url_remarks.update(kept_remarks)
+        scheduled_result = (
+            self._delete_scheduled("all")
+            if scheduled_deletable
+            else {"deleted": 0, "busy": False}
+        )
+        if scheduled_result.get("busy"):
+            return
+        deleted = self._delete_local_keys(local_deletable) + int(
+            scheduled_result.get("deleted", 0)
+        )
         if hasattr(self.gui, "generated_videos"):
             self.gui.generated_videos = []
-
-        self._prune_mix_jobs(set(processing))
-        self.update_url_listbox()
-        self.update_queue_count()
-        self.add_log("대기열을 비웠습니다. (진행 중 항목은 유지)")
+        message = f"대기열 {deleted}건을 삭제했습니다."
+        if processing_count:
+            message += f" 진행 중 {processing_count}건은 유지했습니다."
+        self._finish_delete(deleted, message)
 
     def clear_waiting_only(self):
+        local_keys = set(self.gui.url_queue).union(self.gui.url_status.keys())
         waiting_urls = [
-            url
-            for url, status in self.gui.url_status.items()
-            if self._normalize_status(status) == "waiting"
+            key
+            for key in local_keys
+            if self._normalize_status(self.gui.url_status.get(key)) == "waiting"
         ]
-        if not waiting_urls:
-            show_info(self.gui, "안내", "대기 중인 링크가 없습니다.")
+        snapshot = build_summer_coupang_queue_snapshot()
+        scheduled_count = int(snapshot.get("counts", {}).get("waiting", 0))
+        total = len(set(waiting_urls)) + scheduled_count
+        if not total:
+            show_info(self.gui, "안내", "대기 중인 작업이 없습니다.")
             return
-        if not show_question(self.gui, "확인", "대기 상태 링크만 삭제할까요?"):
+        if not show_question(self.gui, "대기 작업 삭제", f"대기 중인 작업 {total}건을 삭제할까요?"):
             return
 
-        for key in waiting_urls:
-            if key in self.gui.url_queue:
-                self.gui.url_queue.remove(key)
-            self.gui.url_status.pop(key, None)
-            self.gui.url_status_message.pop(key, None)
-            self.gui.url_remarks.pop(key, None)
-            self._remove_mix_job(key)
-
-        self.update_url_listbox()
-        self.update_queue_count()
-        self.add_log("대기 중 링크를 삭제했습니다.")
+        scheduled_result = (
+            self._delete_scheduled("waiting")
+            if scheduled_count
+            else {"deleted": 0, "busy": False}
+        )
+        if scheduled_result.get("busy"):
+            return
+        deleted = self._delete_local_keys(waiting_urls) + int(
+            scheduled_result.get("deleted", 0)
+        )
+        self._finish_delete(deleted, f"대기 중인 작업 {deleted}건을 삭제했습니다.")
 
     def clear_completed_only(self):
-        """완료된 작업만 삭제"""
         completed_urls = [
             url
             for url, status in self.gui.url_status.items()
             if self._normalize_status(status) == "completed"
         ]
-        if not completed_urls:
+        snapshot = build_summer_coupang_queue_snapshot()
+        scheduled_count = int(snapshot.get("counts", {}).get("completed", 0))
+        total = len(set(completed_urls)) + scheduled_count
+        if not total:
             show_info(self.gui, "안내", "완료된 작업이 없습니다.")
             return
-        if not show_question(self.gui, "확인", f"완료된 작업 {len(completed_urls)}건을 삭제할까요?"):
+        if not show_question(self.gui, "완료 이력 삭제", f"완료된 작업 {total}건을 삭제할까요?"):
             return
 
-        for key in completed_urls:
-            if key in self.gui.url_queue:
-                self.gui.url_queue.remove(key)
-            self.gui.url_status.pop(key, None)
-            self.gui.url_status_message.pop(key, None)
-            self.gui.url_remarks.pop(key, None)
-            self._remove_mix_job(key)
-
-        self.update_url_listbox()
-        self.update_queue_count()
-        self.add_log(f"완료된 작업 {len(completed_urls)}건을 삭제했습니다.")
+        scheduled_result = (
+            self._delete_scheduled("completed")
+            if scheduled_count
+            else {"deleted": 0, "busy": False}
+        )
+        if scheduled_result.get("busy"):
+            return
+        deleted = self._delete_local_keys(completed_urls) + int(
+            scheduled_result.get("deleted", 0)
+        )
+        self._finish_delete(deleted, f"완료된 작업 {deleted}건을 삭제했습니다.")
 
     # ----------------------- UI sync helpers -----------------------
     def update_url_listbox(self):
@@ -464,6 +565,11 @@ class QueueManager:
             item = QTreeWidgetItem(
                 [order_text, display_url, status_text, auto_upload_text, remarks_text]
             )
+            item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {"source": "local", "key": key, "status": status},
+            )
             tree.addTopLevelItem(item)
 
         processed_items = []
@@ -502,6 +608,11 @@ class QueueManager:
             item = QTreeWidgetItem(
                 [order_text, display_url, status_text, auto_upload_text, remarks_text]
             )
+            item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {"source": "local", "key": key, "status": status},
+            )
             tree.addTopLevelItem(item)
 
         summer_snapshot = build_summer_coupang_queue_snapshot()
@@ -516,11 +627,24 @@ class QueueManager:
                     str(row.get("remarks", "")),
                 ]
             )
+            item.setData(
+                0,
+                Qt.ItemDataRole.UserRole,
+                {
+                    "source": "scheduled",
+                    "id": str(row.get("queue_item_id", "")),
+                    "status": str(row.get("bucket", "waiting")),
+                },
+            )
             tree.addTopLevelItem(item)
 
         keep = set(self.gui.url_queue).union(self.gui.url_status.keys())
         self._prune_mix_jobs(keep)
         self.update_queue_count()
+        panel = getattr(self.gui, "queue_panel", None)
+        sync_controls = getattr(panel, "sync_delete_controls", None)
+        if callable(sync_controls):
+            sync_controls(summer_snapshot)
 
     def update_queue_count(self):
         if not self.gui:

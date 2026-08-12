@@ -26,6 +26,26 @@ class DummyLabel:
         self.text = text
 
 
+class DummyTreeItem:
+    def __init__(self, metadata, display="https://example.com/item"):
+        self.metadata = metadata
+        self.display = display
+
+    def data(self, *_args):
+        return self.metadata
+
+    def text(self, column):
+        return self.display if column == 1 else ""
+
+
+class DummyTree:
+    def __init__(self, items):
+        self.items = items
+
+    def selectedItems(self):
+        return self.items
+
+
 def _build_manager(monkeypatch):
     events = {"warning": [], "info": []}
     monkeypatch.setattr(
@@ -198,3 +218,78 @@ def test_summer_coupang_youtube_status_shows_connected_with_upload_token(monkeyp
     )
 
     assert gui.summer_status_youtube.text == "YouTube\n연결됨 Summer Channel"
+
+
+def test_clear_waiting_deletes_local_and_scheduled_rows(monkeypatch):
+    manager, gui, events = _build_manager(monkeypatch)
+    gui.url_queue = ["https://example.com/local"]
+    gui.url_status = {"https://example.com/local": "waiting"}
+    monkeypatch.setattr(
+        queue_module,
+        "build_summer_coupang_queue_snapshot",
+        lambda: {"total": 2, "counts": {"waiting": 2, "processing": 0}},
+    )
+    calls = []
+    monkeypatch.setattr(
+        queue_module,
+        "delete_summer_coupang_queue_items",
+        lambda scope, **kwargs: calls.append((scope, kwargs))
+        or {"deleted": 2, "busy": False},
+    )
+
+    manager.clear_waiting_only()
+
+    assert gui.url_queue == []
+    assert gui.url_status == {}
+    assert calls == [("waiting", {"selected_ids": None})]
+    info_messages = [args[2] for args, _ in events["info"] if len(args) >= 3]
+    assert "대기 중인 작업 3건을 삭제했습니다." in info_messages
+
+
+def test_remove_selected_deletes_scheduled_row_by_stable_id(monkeypatch):
+    manager, gui, events = _build_manager(monkeypatch)
+    gui.url_listbox = DummyTree(
+        [DummyTreeItem({"source": "scheduled", "id": "scheduled-001", "status": "waiting"})]
+    )
+    calls = []
+    monkeypatch.setattr(manager, "update_url_listbox", lambda: None)
+    monkeypatch.setattr(
+        queue_module,
+        "delete_summer_coupang_queue_items",
+        lambda scope, **kwargs: calls.append((scope, kwargs))
+        or {"deleted": 1, "busy": False},
+    )
+
+    manager.remove_selected_url()
+
+    assert calls == [
+        ("selected", {"selected_ids": ["scheduled-001"]})
+    ]
+    info_messages = [args[2] for args, _ in events["info"] if len(args) >= 3]
+    assert "선택한 항목 1건을 삭제했습니다." in info_messages
+
+
+def test_clear_all_preserves_processing_rows_in_both_sources(monkeypatch):
+    manager, gui, events = _build_manager(monkeypatch)
+    gui.url_queue = ["https://example.com/waiting", "https://example.com/processing"]
+    gui.url_status = {
+        "https://example.com/waiting": "waiting",
+        "https://example.com/processing": "processing",
+    }
+    monkeypatch.setattr(
+        queue_module,
+        "build_summer_coupang_queue_snapshot",
+        lambda: {"total": 2, "counts": {"waiting": 1, "processing": 1}},
+    )
+    monkeypatch.setattr(
+        queue_module,
+        "delete_summer_coupang_queue_items",
+        lambda scope, **kwargs: {"deleted": 1, "busy": False, "kept_processing": 1},
+    )
+
+    manager.clear_url_queue()
+
+    assert gui.url_queue == ["https://example.com/processing"]
+    assert gui.url_status == {"https://example.com/processing": "processing"}
+    info_messages = [args[2] for args, _ in events["info"] if len(args) >= 3]
+    assert any("진행 중 2건은 유지했습니다." in message for message in info_messages)
