@@ -1,6 +1,94 @@
 import json
 
-from managers.summer_coupang_queue_status import build_summer_coupang_queue_snapshot
+import pytest
+
+from managers.summer_coupang_queue_status import (
+    build_summer_coupang_queue_snapshot,
+    delete_summer_coupang_queue_items,
+    summer_coupang_item_identity,
+)
+
+
+def _write_delete_fixture(queue_path):
+    items = [
+        {
+            "planned_number": "[001]",
+            "status": "pending",
+            "scheduled_at": "2026-08-11T12:00:00+09:00",
+            "coupang_url": "https://example.com/waiting",
+        },
+        {
+            "planned_number": "[002]",
+            "status": "completed",
+            "scheduled_at": "2026-08-11T16:00:00+09:00",
+            "coupang_url": "https://example.com/completed",
+        },
+        {
+            "planned_number": "[003]",
+            "status": "failed",
+            "scheduled_at": "2026-08-11T20:00:00+09:00",
+            "coupang_url": "https://example.com/failed",
+        },
+        {
+            "planned_number": "[004]",
+            "status": "processing",
+            "scheduled_at": "2026-08-12T00:00:00+09:00",
+            "coupang_url": "https://example.com/processing",
+        },
+    ]
+    queue_path.write_text(
+        json.dumps({"automation_policy": {"interval_minutes": 240}, "items": items}),
+        encoding="utf-8",
+    )
+    return items
+
+
+@pytest.mark.parametrize(
+    ("scope", "selected_index", "expected_deleted", "expected_numbers"),
+    [
+        ("waiting", None, 1, {"[002]", "[003]", "[004]"}),
+        ("completed", None, 1, {"[001]", "[003]", "[004]"}),
+        ("selected", 2, 1, {"[001]", "[002]", "[004]"}),
+        ("all", None, 3, {"[004]"}),
+    ],
+)
+def test_delete_summer_queue_items_by_visible_scope(
+    tmp_path, scope, selected_index, expected_deleted, expected_numbers
+):
+    queue_path = tmp_path / "summer_queue.json"
+    items = _write_delete_fixture(queue_path)
+    selected_ids = (
+        [summer_coupang_item_identity(items[selected_index])]
+        if selected_index is not None
+        else None
+    )
+
+    result = delete_summer_coupang_queue_items(
+        scope,
+        selected_ids=selected_ids,
+        path=queue_path,
+    )
+
+    payload = json.loads(queue_path.read_text(encoding="utf-8"))
+    remaining_numbers = {item["planned_number"] for item in payload["items"]}
+    assert result["deleted"] == expected_deleted
+    assert remaining_numbers == expected_numbers
+    assert queue_path.with_suffix(".json.bak").exists()
+
+
+def test_delete_summer_queue_never_removes_selected_processing_item(tmp_path):
+    queue_path = tmp_path / "summer_queue.json"
+    items = _write_delete_fixture(queue_path)
+
+    result = delete_summer_coupang_queue_items(
+        "selected",
+        selected_ids=[summer_coupang_item_identity(items[3])],
+        path=queue_path,
+    )
+
+    assert result["deleted"] == 0
+    assert result["kept_processing"] == 1
+    assert build_summer_coupang_queue_snapshot(queue_path)["total"] == 4
 
 
 def test_build_snapshot_maps_scheduled_queue_rows(tmp_path):

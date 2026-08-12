@@ -1,21 +1,21 @@
-"""
-Read-only status helpers for the Summer Coupang scheduled automation queue.
-
-The scheduled runner owns the queue file. UI code should only read and display it.
-"""
+"""Status and safe UI-edit helpers for the scheduled automation queue."""
 
 from __future__ import annotations
 
 import json
+import os
+import shutil
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterable, List, Optional
 
 from user_facing_errors import sanitize_user_message
 
 DEFAULT_QUEUE_PATH = (
     Path.home() / ".ssmaker" / "summer_coupang_autosourcing_queue_20260603.json"
 )
+DEFAULT_QUEUE_LOCK_PATH = Path.home() / ".ssmaker" / "summer_coupang_queue_once.lock"
 
 SUCCESS_STATUSES = {"completed"}
 LINKTREE_RETRY_STATUSES = {"completed_linktree_blocked", "linktree_retry_pending"}
@@ -67,6 +67,144 @@ def load_summer_coupang_queue(
         return json.loads(queue_path.read_text(encoding="utf-8-sig"))
     except Exception:
         return {}
+
+
+def summer_coupang_item_identity(item: Dict[str, Any]) -> str:
+    """Build a stable identity for a queue item across UI refreshes."""
+    return "\x1f".join(
+        str(value or "").strip()
+        for value in (
+            item.get("planned_number"),
+            item.get("scheduled_at"),
+            item.get("scheduled_order"),
+            item.get("coupang_url") or item.get("purchase_url"),
+        )
+    )
+
+
+def _lock_path_for_queue(queue_path: Path) -> Path:
+    try:
+        if queue_path.resolve() == DEFAULT_QUEUE_PATH.resolve():
+            return DEFAULT_QUEUE_LOCK_PATH
+    except OSError:
+        pass
+    return queue_path.with_suffix(f"{queue_path.suffix}.lock")
+
+
+@contextmanager
+def _queue_edit_lock(queue_path: Path):
+    """Share the runner's OS lock so UI deletion cannot race an active run."""
+    lock_path = _lock_path_for_queue(queue_path)
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = open(lock_path, "a+b")
+    acquired = False
+    try:
+        handle.seek(0)
+        if os.name == "nt":
+            import msvcrt
+
+            msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        acquired = True
+        yield
+    finally:
+        if acquired:
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                else:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+        handle.close()
+
+
+def delete_summer_coupang_queue_items(
+    scope: str,
+    *,
+    selected_ids: Optional[Iterable[str]] = None,
+    path: Optional[Path] = None,
+) -> Dict[str, Any]:
+    """Delete visible scheduled-queue items without racing the queue runner.
+
+    ``scope`` is one of ``waiting``, ``completed``, ``selected`` or ``all``.
+    Processing items are always retained.
+    """
+    if scope not in {"waiting", "completed", "selected", "all"}:
+        raise ValueError(f"Unsupported delete scope: {scope}")
+
+    queue_path = path or DEFAULT_QUEUE_PATH
+    selected = {str(value) for value in (selected_ids or []) if str(value)}
+    result = {
+        "deleted": 0,
+        "kept_processing": 0,
+        "busy": False,
+        "backup_path": "",
+    }
+    if not queue_path.exists():
+        return result
+
+    try:
+        with _queue_edit_lock(queue_path):
+            payload = load_summer_coupang_queue(queue_path)
+            items = payload.get("items") if isinstance(payload.get("items"), list) else []
+            kept_items: List[Any] = []
+
+            for item in items:
+                if not isinstance(item, dict):
+                    kept_items.append(item)
+                    continue
+
+                bucket = _status_bucket_for_item(item)
+                if bucket == "processing":
+                    result["kept_processing"] += 1
+                    kept_items.append(item)
+                    continue
+
+                matches = (
+                    (scope == "waiting" and bucket == "waiting")
+                    or (scope == "completed" and bucket == "completed")
+                    or (scope == "all")
+                    or (
+                        scope == "selected"
+                        and summer_coupang_item_identity(item) in selected
+                    )
+                )
+                if matches:
+                    result["deleted"] += 1
+                else:
+                    kept_items.append(item)
+
+            if not result["deleted"]:
+                return result
+
+            backup_path = queue_path.with_suffix(f"{queue_path.suffix}.bak")
+            shutil.copy2(queue_path, backup_path)
+            result["backup_path"] = str(backup_path)
+
+            payload["items"] = kept_items
+            temp_path = queue_path.with_suffix(f"{queue_path.suffix}.tmp")
+            try:
+                temp_path.write_text(
+                    json.dumps(payload, ensure_ascii=False, indent=2),
+                    encoding="utf-8",
+                )
+                os.replace(temp_path, queue_path)
+            finally:
+                if temp_path.exists():
+                    temp_path.unlink()
+    except (OSError, PermissionError):
+        result["busy"] = True
+
+    return result
 
 
 def parse_datetime(raw: Any) -> Optional[datetime]:
@@ -226,6 +364,9 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
         "planned_number": planned,
         "scheduled_at": scheduled_at,
         "youtube_url": youtube_url,
+        "queue_item_id": summer_coupang_item_identity(item),
+        "source": "scheduled",
+        "bucket": _status_bucket_for_item(item),
     }
 
 
