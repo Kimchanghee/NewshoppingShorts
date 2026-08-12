@@ -89,7 +89,8 @@ def apply_visible_line_edit_style(
 
 FONT_FAMILY = "맑은 고딕"
 logger = logging.getLogger(__name__)
-LEGAL_DOCUMENT_VERSION = "2026-08-08"
+TERMS_DOCUMENT_VERSION = "2026-08-13"
+PRIVACY_DOCUMENT_VERSION = "2026-08-08"
 PRIVACY_POLICY_URL = "https://newshopping-shorts-auth.vercel.app/privacy"
 TERMS_OF_SERVICE_URL = "https://newshopping-shorts-auth.vercel.app/terms"
 
@@ -769,6 +770,58 @@ class RegistrationRequestDialog(QWidget):
         )
         form_layout.addWidget(consent_help)
 
+        self.responsibilityNotice = QFrame(form_container)
+        self.responsibilityNotice.setAccessibleName("이용 전 확인")
+        self.responsibilityNotice.setStyleSheet(f"""
+            QFrame {{
+                background-color: {login_color('surface_variant')};
+                border: 1px solid {login_color('border')};
+                border-radius: {ds.radius.md}px;
+            }}
+            QLabel {{
+                background: transparent;
+                border: none;
+            }}
+        """)
+        notice_layout = QVBoxLayout(self.responsibilityNotice)
+        notice_layout.setContentsMargins(12, 10, 12, 10)
+        notice_layout.setSpacing(5)
+
+        self.responsibilityNoticeTitle = QLabel("이용 전 확인", self.responsibilityNotice)
+        self.responsibilityNoticeTitle.setFont(
+            QFont(FONT_FAMILY, ds.typography.size_xs, QFont.Weight.Bold)
+        )
+        self.responsibilityNoticeTitle.setStyleSheet(
+            f"color:{login_color('text_primary')}; background:transparent; border:none;"
+        )
+        notice_layout.addWidget(self.responsibilityNoticeTitle)
+
+        self.responsibilityNoticeBody = QLabel(
+            "SSMaker는 콘텐츠 제작과 운영을 돕는 도구이며 "
+            "조회수·판매·제휴 수익을 보장하지 않습니다. 연결한 계정과 게시물은 "
+            "직접 확인하고 각 플랫폼 정책, 광고 표시 및 저작권 기준에 맞게 운영해 주세요. "
+            "외부 플랫폼의 정책·심사·장애로 생기는 제한에는 해당 플랫폼 기준이 적용됩니다. "
+            "<a href='#'>이용약관에서 자세히 보기</a>",
+            self.responsibilityNotice,
+        )
+        self.responsibilityNoticeBody.setAccessibleName("수익 및 연결 계정 운영 안내")
+        self.responsibilityNoticeBody.setTextFormat(Qt.TextFormat.RichText)
+        self.responsibilityNoticeBody.setTextInteractionFlags(
+            Qt.TextInteractionFlag.TextBrowserInteraction
+        )
+        self.responsibilityNoticeBody.setOpenExternalLinks(False)
+        self.responsibilityNoticeBody.setWordWrap(True)
+        self.responsibilityNoticeBody.setFont(QFont(FONT_FAMILY, ds.typography.size_xs))
+        self.responsibilityNoticeBody.setStyleSheet(
+            f"color:{login_color('text_secondary')}; background:transparent; border:none;"
+            f"link-color:{login_color('primary')};"
+        )
+        self.responsibilityNoticeBody.linkActivated.connect(
+            lambda _href: QDesktopServices.openUrl(QUrl(TERMS_OF_SERVICE_URL))
+        )
+        notice_layout.addWidget(self.responsibilityNoticeBody)
+        form_layout.addWidget(self.responsibilityNotice)
+
         self.submitButton = QPushButton(form_container)
         self.submitButton.setMinimumHeight(ds.button_sizes["lg"].height)
         self.submitButton.setFont(QFont(FONT_FAMILY, ds.button_sizes['lg'].font_size, QFont.Weight.Bold))
@@ -1029,8 +1082,8 @@ class RegistrationRequestDialog(QWidget):
                 email=email,
                 terms_accepted=self.termsConsentCheckBox.isChecked(),
                 privacy_accepted=self.privacyConsentCheckBox.isChecked(),
-                terms_version=LEGAL_DOCUMENT_VERSION,
-                privacy_version=LEGAL_DOCUMENT_VERSION,
+                terms_version=TERMS_DOCUMENT_VERSION,
+                privacy_version=PRIVACY_DOCUMENT_VERSION,
             )
             if result.get("success"):
                 show_success(self, "완료", "회원가입이 완료되었습니다! 바로 로그인해주세요.")
