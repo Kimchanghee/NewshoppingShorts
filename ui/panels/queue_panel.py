@@ -3,7 +3,7 @@ Queue Panel for PyQt6
 """
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
-    QTreeWidget, QTreeWidgetItem, QHeaderView
+    QTreeWidget, QTreeWidgetItem, QHeaderView, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QTimer
 from ui.components.rounded_widgets import create_rounded_button
@@ -13,6 +13,7 @@ class QueuePanel(QFrame, ThemedMixin):
     def __init__(self, parent, gui, theme_manager=None):
         super().__init__(parent)
         self.gui = gui
+        self.gui.queue_panel = self
         self.__init_themed__(theme_manager)
         self.create_widgets()
         self.apply_theme()
@@ -62,10 +63,16 @@ class QueuePanel(QFrame, ThemedMixin):
         self.gui.stop_batch_button.setEnabled(False)
         control_layout.addWidget(self.gui.stop_batch_button)
         
-        self.clear_waiting_btn = create_rounded_button(self, "대기중 삭제", self.gui.clear_waiting_only, style="secondary")
+        self.clear_waiting_btn = create_rounded_button(self, "대기 삭제 (0)", self.gui.clear_waiting_only, style="secondary")
+        self.clear_waiting_btn.setAccessibleName("대기 중인 작업 모두 삭제")
+        self.clear_waiting_btn.setToolTip("일반 작업과 풀자동 예약 중 대기 상태인 항목을 삭제합니다.")
+        self.clear_waiting_btn.setEnabled(False)
         control_layout.addWidget(self.clear_waiting_btn)
 
-        self.clear_completed_btn = create_rounded_button(self, "완료 삭제", self.gui.clear_completed_only, style="secondary")
+        self.clear_completed_btn = create_rounded_button(self, "완료 삭제 (0)", self.gui.clear_completed_only, style="secondary")
+        self.clear_completed_btn.setAccessibleName("완료된 작업 모두 삭제")
+        self.clear_completed_btn.setToolTip("일반 작업과 풀자동 예약의 완료 이력을 삭제합니다.")
+        self.clear_completed_btn.setEnabled(False)
         control_layout.addWidget(self.clear_completed_btn)
 
         control_layout.addStretch()
@@ -89,19 +96,32 @@ class QueuePanel(QFrame, ThemedMixin):
         self.gui.url_listbox = QTreeWidget()
         self.gui.url_listbox.setColumnCount(5)
         self.gui.url_listbox.setHeaderLabels(["구분", "URL", "상태", "자동 업로드", "비고"])
+        self.gui.url_listbox.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
+        self.gui.url_listbox.itemSelectionChanged.connect(self.sync_delete_controls)
         self._configure_queue_table_columns()
         self.main_layout.addWidget(self.gui.url_listbox)
         
         # Action Buttons
         action_layout = QHBoxLayout()
-        self.remove_btn = create_rounded_button(self, "선택 삭제", self.gui.remove_selected_url, style="danger")
+        self.remove_btn = create_rounded_button(self, "선택 삭제 (0)", self.gui.remove_selected_url, style="danger")
+        self.remove_btn.setAccessibleName("선택한 대기열 항목 삭제")
+        self.remove_btn.setToolTip("표에서 삭제할 항목을 하나 이상 선택해 주세요.")
+        self.remove_btn.setEnabled(False)
         action_layout.addWidget(self.remove_btn)
         
-        self.clear_btn = create_rounded_button(self, "전체 삭제", self.gui.clear_url_queue, style="secondary")
+        self.clear_btn = create_rounded_button(self, "전체 삭제 (0)", self.gui.clear_url_queue, style="secondary")
+        self.clear_btn.setAccessibleName("삭제 가능한 대기열 전체 삭제")
+        self.clear_btn.setToolTip("진행 중인 작업을 제외한 일반 작업과 풀자동 예약을 모두 삭제합니다.")
+        self.clear_btn.setEnabled(False)
         action_layout.addWidget(self.clear_btn)
         
         action_layout.addStretch()
         self.main_layout.addLayout(action_layout)
+
+        self.delete_feedback_label = QLabel("삭제 결과가 여기에 표시됩니다.")
+        self.delete_feedback_label.setAccessibleName("대기열 삭제 결과")
+        self.delete_feedback_label.setWordWrap(True)
+        self.main_layout.addWidget(self.delete_feedback_label)
         
         # Status Counts
         count_layout = QHBoxLayout()
@@ -122,6 +142,63 @@ class QueuePanel(QFrame, ThemedMixin):
         self.gui.count_failed.setStyleSheet(self.gui.count_failed.styleSheet() + "background-color: #991B1B;")
         
         self.main_layout.addLayout(count_layout)
+
+    def sync_delete_controls(self, summer_snapshot=None):
+        status = getattr(self.gui, "url_status", {})
+        queue = getattr(self.gui, "url_queue", [])
+        manager = getattr(self.gui, "queue_manager", None)
+        normalize = getattr(manager, "_normalize_status", lambda value: str(value or "waiting"))
+        local_keys = set(queue).union(status.keys())
+        local_waiting = sum(
+            1 for key in local_keys
+            if normalize(status.get(key)) == "waiting"
+        )
+        local_completed = sum(
+            1 for key in local_keys
+            if normalize(status.get(key)) == "completed"
+        )
+        local_deletable = sum(
+            1 for key in local_keys
+            if normalize(status.get(key)) != "processing"
+        )
+
+        if not isinstance(summer_snapshot, dict):
+            summer_snapshot = getattr(
+                getattr(self.gui, "queue_manager", None),
+                "_last_summer_coupang_snapshot",
+                {},
+            ) or {}
+        counts = summer_snapshot.get("counts", {}) if isinstance(summer_snapshot, dict) else {}
+        waiting = local_waiting + int(counts.get("waiting", 0) or 0)
+        completed = local_completed + int(counts.get("completed", 0) or 0)
+        scheduled_deletable = int(summer_snapshot.get("total", 0) or 0) - int(
+            counts.get("processing", 0) or 0
+        )
+        deletable = local_deletable + max(0, scheduled_deletable)
+
+        selected_deletable = 0
+        for item in self.gui.url_listbox.selectedItems():
+            metadata = item.data(0, Qt.ItemDataRole.UserRole)
+            if not isinstance(metadata, dict):
+                continue
+            if normalize(metadata.get("status")) != "processing":
+                selected_deletable += 1
+
+        self.clear_waiting_btn.setText(f"대기 삭제 ({waiting})")
+        self.clear_waiting_btn.setEnabled(waiting > 0)
+        self.clear_completed_btn.setText(f"완료 삭제 ({completed})")
+        self.clear_completed_btn.setEnabled(completed > 0)
+        self.remove_btn.setText(f"선택 삭제 ({selected_deletable})")
+        self.remove_btn.setEnabled(selected_deletable > 0)
+        self.clear_btn.setText(f"전체 삭제 ({deletable})")
+        self.clear_btn.setEnabled(deletable > 0)
+
+    def show_delete_feedback(self, message):
+        self.delete_feedback_label.setText(f"✓ {message}")
+        self.delete_feedback_label.setAccessibleDescription(message)
+        self.delete_feedback_label.setStyleSheet(
+            "color: #10B981; border: none; font-size: 12px; font-weight: 600; padding: 2px 0;"
+        )
 
     def _configure_queue_table_columns(self):
         tree = self.gui.url_listbox
@@ -175,6 +252,9 @@ class QueuePanel(QFrame, ThemedMixin):
         self.setStyleSheet(f"background-color: {bg}; border: 1px solid {border}; border-radius: 8px;")
         self.title_label.setStyleSheet(f"color: {text_primary}; font-weight: bold; border: none;")
         self.subtitle_label.setStyleSheet(f"color: {text_secondary}; border: none;")
+        self.delete_feedback_label.setStyleSheet(
+            f"color: {text_secondary}; border: none; font-size: 12px; padding: 2px 0;"
+        )
         chip_style = (
             f"background-color: {self.get_color('bg_input')};"
             f"color: {text_primary};"

@@ -96,6 +96,11 @@ class RoundedButton(QPushButton, ThemedMixin):
                 QPushButton:hover {{
                     background-color: {border_light};
                 }}
+                QPushButton:disabled {{
+                    background-color: {surface_variant};
+                    color: {get_color('text_muted')};
+                    border-color: {border_light};
+                }}
             """
         elif self._style == "outline":
             style_sheet = f"""
@@ -124,6 +129,11 @@ class RoundedButton(QPushButton, ThemedMixin):
                 QPushButton:hover {{
                     background-color: {error};
                     color: white;
+                }}
+                QPushButton:disabled {{
+                    background-color: {surface_variant};
+                    color: {get_color('text_muted')};
+                    border-color: {border_light};
                 }}
             """
         
