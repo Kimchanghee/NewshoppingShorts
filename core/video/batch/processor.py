@@ -2263,10 +2263,20 @@ def _create_final_video_for_batch(
         original_duration = video.duration
         video_duration = original_duration
         original_fps = video.fps
+        cached_last_frame = None
 
         logger.info("  원본 길이: %.3f초", original_duration)
         logger.info("  원본 크기: %dx%d", video.w, video.h)
         logger.info("  FPS: %s", original_fps)
+
+        # OCR coordinates are expressed in the decoded source frame space.
+        # Blur before crop/resize/mirror so the pixels and mask stay aligned.
+        logger.info("[블러 처리] 원본 좌표에서 중국어 자막 블러 적용 중...")
+        try:
+            video = app.apply_chinese_subtitle_removal(video)
+        except Exception as e:
+            ui_controller.write_error_log(e)
+            logger.warning("중국어 자막 제거 실패: %s", e)
 
         # 9:16 비율 강제 적용 (1080x1920)
         target_width = 1080
@@ -2308,24 +2318,13 @@ def _create_final_video_for_batch(
             logger.debug("  좌우 반전 적용")
             video = video.fx(vfx.mirror_x)
 
-        # 중국어 자막 블러
-        logger.info("[블러 처리] 중국어 자막 블러 적용 중...")
-        cached_last_frame = (
-            None  # 마지막 프레임 캐시 (블러 처리된 VideoClip의 파일 참조 문제 방지)
-        )
+        # Cache after every spatial transform so a freeze-frame tail has the
+        # same geometry and mirror state as the rendered clip.
         try:
-            video = app.apply_chinese_subtitle_removal(video)
-            # ★ 블러 처리 직후 마지막 프레임 캐시 (나중에 연장 시 사용)
-            try:
-                cached_last_frame = video.get_frame(max(video.duration - 0.01, 0))
-                logger.debug("중국어 자막 제거 완료 + 마지막 프레임 캐시됨")
-            except Exception as frame_cache_err:
-                logger.debug(
-                    "중국어 자막 제거 완료 (프레임 캐시 실패): %s", frame_cache_err
-                )
-        except Exception as e:
-            ui_controller.write_error_log(e)
-            logger.warning("중국어 자막 제거 실패: %s", e)
+            cached_last_frame = video.get_frame(max(video.duration - 0.01, 0))
+            logger.debug("최종 공간 변환 후 마지막 프레임 캐시됨")
+        except Exception as frame_cache_err:
+            logger.debug("마지막 프레임 캐시 실패: %s", frame_cache_err)
 
         # TTS 1.2배속 처리 (무음 없이)
         logger.info("[TTS 처리]")

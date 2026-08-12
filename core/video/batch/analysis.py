@@ -29,6 +29,37 @@ from prompts import get_video_analysis_prompt, get_translation_prompt
 logger = get_logger(__name__)
 
 
+def _collect_subtitle_diagnostics(app, positions):
+    """Preserve fail-closed OCR diagnostics across analysis and rendering."""
+    detector = getattr(app, "_cached_subtitle_detector", None)
+    regions = [item for item in (positions or []) if isinstance(item, dict)]
+    invalid_counts = [
+        int(getattr(app, "invalid_coordinate_count", 0) or 0),
+        int(getattr(detector, "invalid_coordinate_count", 0) or 0),
+    ]
+    reasons = list(getattr(app, "ocr_review_reasons", []) or [])
+    if detector is not None:
+        reasons.extend(list(getattr(detector, "review_reasons", []) or []))
+    review_required = bool(
+        getattr(app, "subtitle_review_required", False)
+        or getattr(detector, "review_required", False)
+    )
+    for region in regions:
+        try:
+            invalid_counts.append(int(region.get("invalid_coordinate_count", 0) or 0))
+        except (TypeError, ValueError):
+            review_required = True
+        review_required = review_required or bool(region.get("review_required", False))
+        reasons.extend(list(region.get("review_reasons", []) or []))
+    invalid_count = max(invalid_counts, default=0)
+    review_required = review_required or invalid_count > 0
+    return {
+        "subtitle_review_required": review_required,
+        "invalid_coordinate_count": invalid_count,
+        "ocr_review_reasons": list(dict.fromkeys(str(reason) for reason in reasons if reason)),
+    }
+
+
 def _run_with_timeout(callback, timeout_seconds: int, label: str):
     """Run an SDK call without letting a stuck network request block the batch."""
     result_queue = queue.Queue(maxsize=1)
@@ -115,6 +146,7 @@ def _apply_sourcing_analysis_fallback(app, reason: str) -> bool:
         "subtitle_positions": subtitle_positions,
         "raw_subtitle_positions": subtitle_positions,
         "fallback_reason": reason,
+        **_collect_subtitle_diagnostics(app, subtitle_positions),
     }
     return True
 
@@ -441,7 +473,8 @@ def _analyze_video_for_batch(app):
             app.analysis_result = {
                 'script': [],  # 대본 없음
                 'subtitle_positions': subtitle_positions,
-                'raw_subtitle_positions': subtitle_positions  # 필터링 전 원본 저장
+                'raw_subtitle_positions': subtitle_positions,  # 필터링 전 원본 저장
+                **_collect_subtitle_diagnostics(app, subtitle_positions),
             }
             logger.info(f"[배치 분석] 상품 설명 생성 완료 - {len(product_desc)}자")
             logger.debug(f"[미리보기] {product_desc[:100]}...")
@@ -459,7 +492,8 @@ def _analyze_video_for_batch(app):
             app.analysis_result = {
                 'script': script_data,
                 'subtitle_positions': subtitle_positions,
-                'raw_subtitle_positions': subtitle_positions  # 필터링 전 원본 저장
+                'raw_subtitle_positions': subtitle_positions,  # 필터링 전 원본 저장
+                **_collect_subtitle_diagnostics(app, subtitle_positions),
             }
 
             # ★ 대본 파싱 실패 시 원본 텍스트를 fallback으로 저장 ★
@@ -559,7 +593,11 @@ def _translate_script_for_batch(app):
             cta_lines=cta_lines
         )
 
-        MAX_RETRIES = 3
+        # Short 2/4-second retries do not outlive Gemini's temporary
+        # ``503 high demand`` spikes and leave an otherwise completed OCR render
+        # without a script.  Retry only the bounded translation request here so
+        # the expensive frame analysis does not have to restart from scratch.
+        MAX_RETRIES = 5
         response = None
         
         for attempt in range(1, MAX_RETRIES + 1):
@@ -601,10 +639,32 @@ def _translate_script_for_batch(app):
                     else:
                         logger.warning("[배치 번역] API Key Manager가 없어 키 교체를 수행할 수 없습니다.")
                 
-                if attempt < MAX_RETRIES:
-                    time.sleep(2 * attempt)
-                else:
-                    raise e
+                error_text = str(e).lower()
+                transient = any(
+                    marker in error_text
+                    for marker in (
+                        "408",
+                        "429",
+                        "500",
+                        "502",
+                        "503",
+                        "504",
+                        "resource_exhausted",
+                        "unavailable",
+                        "high demand",
+                        "timeout",
+                        "temporarily",
+                    )
+                )
+                if attempt < MAX_RETRIES and transient:
+                    delay = 15 * attempt
+                    app.add_log(
+                        f"[번역] 일시적 API 오류 - {delay}초 후 재시도 "
+                        f"({attempt + 1}/{MAX_RETRIES})"
+                    )
+                    time.sleep(delay)
+                    continue
+                raise e
 
         # 비용 계산 및 로깅
         if response and hasattr(response, 'usage_metadata') and response.usage_metadata:

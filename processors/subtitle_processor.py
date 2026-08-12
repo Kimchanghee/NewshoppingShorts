@@ -110,7 +110,12 @@ class SubtitleProcessor:
             "applied": False,
             "regions": 0,
             "reason": "",
+            "review_required": False,
+            "invalid_coordinate_count": 0,
         }
+        review_required = False
+        invalid_coordinate_count = 0
+        review_reasons = []
         logger.debug("[BLUR MAIN] Option status:")
         logger.debug(f"  - add_subtitles: {_get_bool(getattr(self.gui, 'add_subtitles', None))}")
         logger.debug(f"  - apply_blur: {blur_val}")
@@ -151,6 +156,18 @@ class SubtitleProcessor:
                     self.gui.analysis_result.get("raw_subtitle_positions")
                     or subtitle_positions
                 )
+                review_required = bool(
+                    self.gui.analysis_result.get("subtitle_review_required", False)
+                )
+                review_reasons.extend(
+                    self.gui.analysis_result.get("ocr_review_reasons", []) or []
+                )
+                try:
+                    invalid_coordinate_count = int(
+                        self.gui.analysis_result.get("invalid_coordinate_count", 0) or 0
+                    )
+                except (TypeError, ValueError):
+                    invalid_coordinate_count = 0
                 logger.info(
                     f"[BLUR MAIN] Reusing existing OCR results: {len(subtitle_positions)} regions"
                 )
@@ -165,11 +182,49 @@ class SubtitleProcessor:
                 detector = self._get_or_create_detector()
                 raw_positions = detector.detect_subtitles_with_opencv() or []
                 subtitle_positions = list(raw_positions)
+                review_required = bool(getattr(detector, "review_required", False))
+                review_reasons.extend(
+                    getattr(detector, "review_reasons", []) or []
+                )
+                try:
+                    invalid_coordinate_count = int(
+                        getattr(detector, "invalid_coordinate_count", 0) or 0
+                    )
+                except (TypeError, ValueError):
+                    invalid_coordinate_count = 0
                 logger.info(
                     f"[BLUR MAIN] OCR detection result: {len(subtitle_positions)} regions"
                 )
 
             detected_positions = raw_positions or subtitle_positions
+            review_required = review_required or bool(
+                getattr(self.gui, "subtitle_review_required", False)
+            )
+            review_reasons.extend(
+                getattr(self.gui, "ocr_review_reasons", []) or []
+            )
+            try:
+                invalid_coordinate_count = max(
+                    invalid_coordinate_count,
+                    int(getattr(self.gui, "invalid_coordinate_count", 0) or 0),
+                )
+            except (TypeError, ValueError):
+                review_required = True
+            for position in detected_positions:
+                if not isinstance(position, dict):
+                    review_required = True
+                    continue
+                review_required = review_required or bool(
+                    position.get("review_required", False)
+                )
+                review_reasons.extend(position.get("review_reasons", []) or [])
+                try:
+                    invalid_coordinate_count = max(
+                        invalid_coordinate_count,
+                        int(position.get("invalid_coordinate_count", 0) or 0),
+                    )
+                except (TypeError, ValueError):
+                    review_required = True
             logger.debug(
                 f"[BLUR MAIN] Region count before filtering: {len(detected_positions)}"
             )
@@ -183,6 +238,17 @@ class SubtitleProcessor:
             # Reuse cached detector (no duplicate instantiation)
             # 캐시된 detector 재사용 (중복 생성 없음)
             detector = self._get_or_create_detector()
+            review_required = review_required or bool(
+                getattr(detector, "review_required", False)
+            )
+            review_reasons.extend(getattr(detector, "review_reasons", []) or [])
+            try:
+                invalid_coordinate_count = max(
+                    invalid_coordinate_count,
+                    int(getattr(detector, "invalid_coordinate_count", 0) or 0),
+                )
+            except (TypeError, ValueError):
+                pass
             chinese_positions = detector._filter_chinese_regions(detected_positions)
 
             logger.info(
@@ -202,7 +268,18 @@ class SubtitleProcessor:
                         "completed": True,
                         "applied": False,
                         "regions": 0,
-                        "reason": "no_chinese_regions_detected",
+                        "reason": (
+                            "review_required_no_reliable_regions"
+                            if review_required or invalid_coordinate_count
+                            else "no_chinese_regions_detected"
+                        ),
+                        "review_required": bool(
+                            review_required or invalid_coordinate_count
+                        ),
+                        "invalid_coordinate_count": invalid_coordinate_count,
+                        "review_reasons": list(
+                            dict.fromkeys(str(value) for value in review_reasons if value)
+                        ),
                     }
                 )
                 self.gui.update_progress_state(
@@ -248,6 +325,16 @@ class SubtitleProcessor:
                     "applied": True,
                     "regions": len(chinese_positions),
                     "reason": "",
+                    "review_required": bool(
+                        review_required or invalid_coordinate_count
+                    ),
+                    "invalid_coordinate_count": invalid_coordinate_count,
+                    "review_reasons": list(
+                        dict.fromkeys(str(value) for value in review_reasons if value)
+                    ),
+                    "coverage_stats": getattr(
+                        self.gui, "_precision_blur_stats", {}
+                    ),
                 }
             )
             self.gui.update_progress_state(
@@ -392,7 +479,7 @@ class SubtitleProcessor:
             )
 
         # 영상 해상도에 비례한 블러 커널 크기 계산 (1080p 기준)
-        base_kernel = 25
+        base_kernel = 35
         min_kernel = max(15, int(base_kernel * (h / base_height)))
 
         # 영상 해상도에 비례한 페더 마스크 블러 크기 계산 (1080p 기준)
@@ -533,6 +620,50 @@ class SubtitleProcessor:
             return []
         return normalized
 
+    @staticmethod
+    def _match_polygons_for_interpolation(left_polygons, right_polygons):
+        """One-to-one nearest matching for simultaneous text boxes."""
+        def metrics(polygon):
+            xs = [point[0] for point in polygon]
+            ys = [point[1] for point in polygon]
+            return (
+                (min(xs) + max(xs)) / 2.0,
+                (min(ys) + max(ys)) / 2.0,
+                max(xs) - min(xs),
+                max(ys) - min(ys),
+            )
+
+        candidates = []
+        for left_index, left in enumerate(left_polygons):
+            if len(left) < 3:
+                continue
+            lx, ly, lw, lh = metrics(left)
+            for right_index, right in enumerate(right_polygons):
+                if len(left) != len(right) or len(right) < 3:
+                    continue
+                rx, ry, rw, rh = metrics(right)
+                distance = ((lx - rx) ** 2 + (ly - ry) ** 2) ** 0.5
+                max_distance = max(20.0, max(lw, lh, rw, rh) * 2.5)
+                if distance <= max_distance:
+                    candidates.append((distance, left_index, right_index))
+
+        matches = []
+        used_left = set()
+        used_right = set()
+        for _distance, left_index, right_index in sorted(candidates):
+            if left_index in used_left or right_index in used_right:
+                continue
+            used_left.add(left_index)
+            used_right.add(right_index)
+            matches.append((left_polygons[left_index], right_polygons[right_index]))
+        return matches
+
+    def _linked_stable_overlay_bounds(
+        self, subtitle_positions, fps: float, frame_w: int, frame_h: int
+    ) -> Dict[int, tuple]:
+        """Deprecated: unrelated overlays must never share temporal bounds."""
+        return {}
+
     def _build_polygon_timeline(
         self,
         subtitle_positions: List[Dict[str, Any]],
@@ -541,38 +672,241 @@ class SubtitleProcessor:
         frame_h: int,
         video_duration: float,
     ) -> Dict[int, List[List[List[int]]]]:
-        """Build frame-indexed polygon map from OCR detections."""
+        """Build a time-first polygon map with tightly bounded gap filling.
+
+        ``frame_index`` from the capture backend is diagnostic only.  Rendering
+        is keyed from the decoder timestamp saved in ``frame_regions`` so a
+        different MoviePy FPS cannot silently shift the mask.  Missing slots
+        are interpolated only when they are bounded by observations from the
+        same region and scene; event-edge extrapolation is limited to one slot.
+        """
         timeline: Dict[int, List[List[List[int]]]] = {}
         if fps <= 0:
             return timeline
 
         max_frame = max(0, int(video_duration * fps) + 1)
-        expansion_frames = 1
+        expansion_frames = max(
+            0,
+            int(
+                round(
+                    fps
+                    * float(
+                        getattr(OCRThresholds, "PRECISION_EVENT_EDGE_SECONDS", 0.4)
+                    )
+                )
+            ),
+        )
+        max_internal_gap_frames = 2
+        persistent_gap_frames = max(
+            max_internal_gap_frames,
+            int(
+                round(
+                    fps
+                    * float(
+                        getattr(
+                            OCRThresholds,
+                            "PRECISION_PERSISTENT_TRACK_GAP_SECONDS",
+                            1.0,
+                        )
+                    )
+                )
+            ),
+        )
 
-        for pos in subtitle_positions:
+        global_exact_groups: Dict[tuple, List[Dict[str, Any]]] = {}
+        global_scene_observations: Dict[str, List[Dict[str, Any]]] = {}
+
+        for pos_index, pos in enumerate(subtitle_positions):
             frame_regions = pos.get("frame_regions")
             if isinstance(frame_regions, list) and frame_regions:
+                observations: List[Dict[str, Any]] = []
                 for fr in frame_regions:
                     polygon = self._normalize_polygon_points(
                         fr.get("polygon"), frame_w=frame_w, frame_h=frame_h
                     )
                     if not polygon:
                         continue
-                    frame_index = fr.get("frame_index")
+
+                    # Timestamp is canonical.  Old caches without a timestamp
+                    # retain a frame-index fallback for backward compatibility.
                     try:
-                        frame_index = int(frame_index)
+                        time_value = float(fr.get("time"))
                     except (TypeError, ValueError):
-                        frame_index = -1
-                    if frame_index < 0:
+                        time_value = -1.0
+                    if time_value >= 0.0:
+                        slot = int(round(time_value * fps))
+                    else:
                         try:
-                            frame_index = int(round(float(fr.get("time", 0.0)) * fps))
+                            slot = int(fr.get("frame_index", -1))
                         except (TypeError, ValueError):
-                            continue
-                    for offset in range(-expansion_frames, expansion_frames + 1):
-                        idx = frame_index + offset
-                        if idx < 0 or idx > max_frame:
-                            continue
-                        timeline.setdefault(idx, []).append(polygon)
+                            slot = -1
+                    if slot < 0 or slot > max_frame:
+                        continue
+                    # Scene IDs may include the detector segment name. Preserve
+                    # the value instead of coercing every string ID to zero.
+                    scene_id = str(fr.get("scene_id", "scene:0") or "scene:0")
+                    observations.append(
+                        {
+                            "slot": slot,
+                            "scene_id": scene_id,
+                            "polygon": polygon,
+                            "text": str(fr.get("text", "") or "").strip(),
+                            "source": str(fr.get("source", "") or ""),
+                        }
+                    )
+
+                observations.sort(key=lambda item: (item["slot"], item["scene_id"]))
+                grouped: Dict[str, Dict[int, List[Dict[str, Any]]]] = {}
+                exact_slots = set()
+                for item in observations:
+                    normalized_text = "".join(item["text"].split()).casefold()
+                    if normalized_text:
+                        global_exact_groups.setdefault(
+                            (item["scene_id"], normalized_text), []
+                        ).append(item)
+                    global_scene_observations.setdefault(item["scene_id"], []).append(
+                        item
+                    )
+                    exact_slots.add(item["slot"])
+                    timeline.setdefault(item["slot"], []).append(item["polygon"])
+                    grouped.setdefault(item["scene_id"], {}).setdefault(
+                        item["slot"], []
+                    ).append(item)
+
+                # Build one-to-one polygon tracks inside each scene before
+                # interpolation. A scene slot can contain many OCR boxes. The
+                # former slot-level algorithm treated that slot as complete if
+                # *any* box existed, so a label observed on frames 6 and 8 was
+                # not filled on frame 7 when an unrelated label happened to be
+                # present there. Tracking each polygon independently preserves
+                # simultaneous labels and fills only the missing object.
+                def polygon_metrics(polygon):
+                    xs = [point[0] for point in polygon]
+                    ys = [point[1] for point in polygon]
+                    width = max(1.0, float(max(xs) - min(xs)))
+                    height = max(1.0, float(max(ys) - min(ys)))
+                    return (
+                        (min(xs) + max(xs)) / 2.0,
+                        (min(ys) + max(ys)) / 2.0,
+                        width,
+                        height,
+                    )
+
+                for _scene_id, scene_slots in grouped.items():
+                    tracks: List[List[Dict[str, Any]]] = []
+                    for slot in sorted(scene_slots):
+                        assigned_tracks = set()
+                        for item in scene_slots[slot]:
+                            ix, iy, iw, ih = polygon_metrics(item["polygon"])
+                            item_text = "".join(item["text"].split()).casefold()
+                            candidates = []
+                            for track_index, track in enumerate(tracks):
+                                if track_index in assigned_tracks:
+                                    continue
+                                previous = track[-1]
+                                slot_gap = int(slot) - int(previous["slot"])
+                                if slot_gap <= 0:
+                                    continue
+                                previous_text = "".join(
+                                    previous["text"].split()
+                                ).casefold()
+                                same_text = bool(
+                                    item_text
+                                    and previous_text
+                                    and item_text == previous_text
+                                )
+                                allowed_missing = (
+                                    persistent_gap_frames
+                                    if same_text
+                                    else max_internal_gap_frames
+                                )
+                                if slot_gap - 1 > allowed_missing:
+                                    continue
+                                px, py, pw, ph = polygon_metrics(
+                                    previous["polygon"]
+                                )
+                                width_ratio = max(iw, pw) / max(1.0, min(iw, pw))
+                                height_ratio = max(ih, ph) / max(1.0, min(ih, ph))
+                                if width_ratio > 2.5 or height_ratio > 2.5:
+                                    continue
+                                distance = ((ix - px) ** 2 + (iy - py) ** 2) ** 0.5
+                                max_distance = (
+                                    max(20.0, max(iw, ih, pw, ph) * 2.5)
+                                    if same_text
+                                    else max(12.0, max(iw, ih, pw, ph) * 1.25)
+                                )
+                                if distance > max_distance:
+                                    continue
+                                candidates.append(
+                                    (
+                                        0 if same_text else 1,
+                                        distance / max(1.0, max(iw, ih, pw, ph)),
+                                        slot_gap,
+                                        track_index,
+                                    )
+                                )
+                            if candidates:
+                                track_index = min(candidates)[-1]
+                                tracks[track_index].append(item)
+                                assigned_tracks.add(track_index)
+                            else:
+                                tracks.append([item])
+                                assigned_tracks.add(len(tracks) - 1)
+
+                    for track in tracks:
+                        for left, right in zip(track, track[1:]):
+                            missing = int(right["slot"]) - int(left["slot"]) - 1
+                            if missing < 1:
+                                continue
+                            left_text = "".join(left["text"].split()).casefold()
+                            right_text = "".join(right["text"].split()).casefold()
+                            same_text = bool(
+                                left_text and right_text and left_text == right_text
+                            )
+                            allowed_gap = (
+                                persistent_gap_frames
+                                if same_text
+                                else max_internal_gap_frames
+                            )
+                            if missing > allowed_gap:
+                                continue
+                            left_polygon = left["polygon"]
+                            right_polygon = right["polygon"]
+                            if len(left_polygon) != len(right_polygon):
+                                continue
+                            for offset in range(1, missing + 1):
+                                ratio = offset / float(missing + 1)
+                                polygon = [
+                                    [
+                                        int(round(lp[0] + (rp[0] - lp[0]) * ratio)),
+                                        int(round(lp[1] + (rp[1] - lp[1]) * ratio)),
+                                    ]
+                                    for lp, rp in zip(left_polygon, right_polygon)
+                                ]
+                                timeline.setdefault(
+                                    int(left["slot"]) + offset, []
+                                ).append(polygon)
+
+                # Protect only the outer event edges. Expanding every scene
+                # edge would bridge a hard cut between adjacent scenes.
+                if exact_slots and expansion_frames > 0:
+                    first_slot = min(exact_slots)
+                    last_slot = max(exact_slots)
+                    for edge_slot, direction in (
+                        (first_slot, -expansion_frames),
+                        (last_slot, expansion_frames),
+                    ):
+                        edge_polygons = [
+                            item["polygon"]
+                            for item in observations
+                            if item["slot"] == edge_slot
+                        ]
+                        step = -1 if direction < 0 else 1
+                        for offset in range(1, abs(direction) + 1):
+                            slot = edge_slot + (step * offset)
+                            if slot < 0 or slot > max_frame or slot in exact_slots:
+                                continue
+                            timeline.setdefault(slot, []).extend(edge_polygons)
                 continue
 
             # Fallback: rectangular mask by time range when polygon history is unavailable.
@@ -603,6 +937,222 @@ class SubtitleProcessor:
             for idx in range(start_idx, end_idx + 1):
                 timeline.setdefault(idx, []).append(rect_poly)
 
+        # A dense decorative Chinese panel is a single physical text-bearing
+        # surface even when OCR recognizes only changing subsets of its words.
+        # Build a bounded per-frame envelope for high-density independent OCR
+        # groups, excluding isolated subtitles and wide title lines.  The
+        # envelope is tracked like any other same-text polygon below, so it
+        # follows camera motion and remains scene/time bounded.
+        dense_marker = "__dense_chinese_layout__"
+        dense_vertical_gap = max(24.0, float(frame_h) * 0.10)
+        # Expand each observed word inside a dense panel instead of blurring
+        # one large panel rectangle. This covers nearby clipped glyphs while
+        # preserving foreground products and empty gaps between labels.
+        # Keep this deliberately tight.  A decorative panel can sit directly
+        # behind the advertised product, so percentage-wide padding causes
+        # neighbouring word masks to coalesce and obscure the foreground.
+        # The renderer adds its own small mask dilation afterwards; this pad
+        # only covers glyph antialiasing and modest OCR box jitter.
+        dense_word_pad_x = max(6, int(round(float(frame_w) * 0.012)))
+        dense_word_pad_y = max(8, int(round(float(frame_h) * 0.012)))
+        for scene_id, scene_items in list(global_scene_observations.items()):
+            by_slot: Dict[int, List[Dict[str, Any]]] = {}
+            for item in scene_items:
+                if not str(item.get("source", "") or "").startswith("rapidocr_"):
+                    continue
+                polygon = item["polygon"]
+                xs = [point[0] for point in polygon]
+                ys = [point[1] for point in polygon]
+                width = max(xs) - min(xs)
+                height = max(ys) - min(ys)
+                if (
+                    width <= 0
+                    or height <= 0
+                    or width > frame_w * 0.65
+                    or height > frame_h * 0.30
+                ):
+                    continue
+                enriched = dict(item)
+                enriched["box"] = [min(xs), min(ys), max(xs), max(ys)]
+                by_slot.setdefault(int(item["slot"]), []).append(enriched)
+
+            for slot, slot_items in by_slot.items():
+                # Approximate duplicate removal prevents the base and enlarged
+                # OCR passes from inflating density for one physical word.
+                unique_items = []
+                seen_boxes = set()
+                for item in sorted(slot_items, key=lambda value: value["box"][1]):
+                    box = item["box"]
+                    key = tuple(int(round(value / 8.0)) for value in box)
+                    if key in seen_boxes:
+                        continue
+                    seen_boxes.add(key)
+                    unique_items.append(item)
+
+                vertical_groups: List[List[Dict[str, Any]]] = []
+                for item in unique_items:
+                    if (
+                        not vertical_groups
+                        or item["box"][1]
+                        > max(member["box"][3] for member in vertical_groups[-1])
+                        + dense_vertical_gap
+                    ):
+                        vertical_groups.append([item])
+                    else:
+                        vertical_groups[-1].append(item)
+
+                for group in vertical_groups:
+                    texts = {
+                        "".join(member["text"].split()).casefold()
+                        for member in group
+                        if "".join(member["text"].split())
+                    }
+                    if len(group) < 6 or len(texts) < 4:
+                        continue
+                    x1 = min(member["box"][0] for member in group)
+                    y1 = min(member["box"][1] for member in group)
+                    x2 = max(member["box"][2] for member in group)
+                    y2 = max(member["box"][3] for member in group)
+                    bbox_area = max(1.0, (x2 - x1) * (y2 - y1))
+                    observed_area = sum(
+                        max(0.0, member["box"][2] - member["box"][0])
+                        * max(0.0, member["box"][3] - member["box"][1])
+                        for member in group
+                    )
+                    if (
+                        observed_area / bbox_area < 0.12
+                        or (x2 - x1) > frame_w * 0.95
+                        or (y2 - y1) > frame_h * 0.60
+                    ):
+                        continue
+                    for member in group:
+                        box = member["box"]
+                        mx1 = max(0, int(round(box[0])) - dense_word_pad_x)
+                        my1 = max(0, int(round(box[1])) - dense_word_pad_y)
+                        mx2 = min(
+                            frame_w - 1,
+                            int(round(box[2])) + dense_word_pad_x,
+                        )
+                        my2 = min(
+                            frame_h - 1,
+                            int(round(box[3])) + dense_word_pad_y,
+                        )
+                        if mx2 <= mx1 or my2 <= my1:
+                            continue
+                        dense_item = {
+                            "slot": int(slot),
+                            "scene_id": scene_id,
+                            "polygon": [
+                                [mx1, my1],
+                                [mx2, my1],
+                                [mx2, my2],
+                                [mx1, my2],
+                            ],
+                            "text": dense_marker,
+                            "source": "rapidocr_dense_layout",
+                        }
+                        timeline.setdefault(int(slot), []).append(
+                            dense_item["polygon"]
+                        )
+                        global_exact_groups.setdefault(
+                            (scene_id, dense_marker), []
+                        ).append(dense_item)
+                        global_scene_observations[scene_id].append(dense_item)
+
+        # Dense layouts can make the detector's spatial aggregation absorb
+        # neighboring labels into different region objects over time.  Join
+        # exact same-text observations once more across all regions, while
+        # keeping simultaneous copies one-to-one by spatial proximity.  This
+        # restores short OCR dropouts without creating a row-wide envelope.
+        for (_scene_id, _normalized_text), items in global_exact_groups.items():
+            if len(items) < 2:
+                continue
+            tracks: List[List[Dict[str, Any]]] = []
+            for item in sorted(items, key=lambda value: int(value["slot"])):
+                polygon = item["polygon"]
+                xs = [point[0] for point in polygon]
+                ys = [point[1] for point in polygon]
+                ix = (min(xs) + max(xs)) / 2.0
+                iy = (min(ys) + max(ys)) / 2.0
+                iw = max(1.0, float(max(xs) - min(xs)))
+                ih = max(1.0, float(max(ys) - min(ys)))
+                candidates = []
+                for track_index, track in enumerate(tracks):
+                    previous = track[-1]
+                    slot_gap = int(item["slot"]) - int(previous["slot"])
+                    if slot_gap <= 0 or slot_gap - 1 > persistent_gap_frames:
+                        continue
+                    previous_polygon = previous["polygon"]
+                    pxs = [point[0] for point in previous_polygon]
+                    pys = [point[1] for point in previous_polygon]
+                    px = (min(pxs) + max(pxs)) / 2.0
+                    py = (min(pys) + max(pys)) / 2.0
+                    pw = max(1.0, float(max(pxs) - min(pxs)))
+                    ph = max(1.0, float(max(pys) - min(pys)))
+                    width_ratio = max(iw, pw) / max(1.0, min(iw, pw))
+                    height_ratio = max(ih, ph) / max(1.0, min(ih, ph))
+                    if width_ratio > 2.5 or height_ratio > 2.5:
+                        continue
+                    distance = ((ix - px) ** 2 + (iy - py) ** 2) ** 0.5
+                    per_frame_motion = max(
+                        8.0, max(iw, ih, pw, ph) * 0.35
+                    )
+                    max_distance = per_frame_motion * max(1, slot_gap)
+                    if distance > max_distance:
+                        continue
+                    candidates.append(
+                        (
+                            distance / max(1.0, max(iw, ih, pw, ph)),
+                            slot_gap,
+                            track_index,
+                        )
+                    )
+                if candidates:
+                    tracks[min(candidates)[-1]].append(item)
+                else:
+                    tracks.append([item])
+
+            for track in tracks:
+                for left, right in zip(track, track[1:]):
+                    missing = int(right["slot"]) - int(left["slot"]) - 1
+                    if missing < 1 or missing > persistent_gap_frames:
+                        continue
+                    left_polygon = left["polygon"]
+                    right_polygon = right["polygon"]
+                    if len(left_polygon) != len(right_polygon):
+                        continue
+                    for offset in range(1, missing + 1):
+                        ratio = offset / float(missing + 1)
+                        interpolated = [
+                            [
+                                int(round(lp[0] + (rp[0] - lp[0]) * ratio)),
+                                int(round(lp[1] + (rp[1] - lp[1]) * ratio)),
+                            ]
+                            for lp, rp in zip(left_polygon, right_polygon)
+                        ]
+                        timeline.setdefault(int(left["slot"]) + offset, []).append(
+                            interpolated
+                        )
+
+        # One physical frame of scene-bounded hold covers OCR onset/offset
+        # jitter without recreating the old 0.4-second temporal overreach. A
+        # target slot must already contain an observation from the same scene,
+        # so the hold can never cross a hard cut into an unrelated scene.
+        hold_frames = max(
+            0, int(getattr(OCRThresholds, "PRECISION_BUFFER_FRAMES", 1))
+        )
+        if hold_frames > 0:
+            for _scene_id, items in global_scene_observations.items():
+                scene_slots = {int(item["slot"]) for item in items}
+                for item in items:
+                    source_slot = int(item["slot"])
+                    for offset in range(1, hold_frames + 1):
+                        for target_slot in (source_slot - offset, source_slot + offset):
+                            if target_slot in scene_slots:
+                                timeline.setdefault(target_slot, []).append(
+                                    item["polygon"]
+                                )
+
         # Deduplicate polygons per frame.
         for idx, polygons in list(timeline.items()):
             seen = set()
@@ -617,19 +1167,29 @@ class SubtitleProcessor:
         return timeline
 
     def _build_time_aware_blur_boxes(
-        self, subtitle_positions: List[Dict[str, Any]], w: int, h: int, video_duration: float
+        self,
+        subtitle_positions: List[Dict[str, Any]],
+        w: int,
+        h: int,
+        video_duration: float,
+        *,
+        exclude_polygon_regions: bool = False,
     ) -> List[Dict[str, Any]]:
-        """Build conservative blur boxes with temporal stabilization."""
+        """Build bounded timed boxes without cross-time row envelopes."""
         base_height = 1080
         base_min_pad = 5
         min_pad = max(2, int(base_min_pad * (h / base_height)))
-        extra_side_pad = int(w * 0.09)
+        extra_side_pad = max(4, int(w * 0.006))
         row_merge_threshold = max(14, int(h * 0.03))
-        # ★ 시간 갭 허용치 확대: 같은 자막의 연속 검출 사이 갭을 허용 (0.35 -> 1.0)
-        max_time_gap = 1.0
+        horizontal_merge_gap = max(12, int(w * 0.025))
 
         prepared: List[Dict[str, Any]] = []
         for pos in subtitle_positions:
+            if exclude_polygon_regions and pos.get("frame_regions"):
+                # Polygon-backed tracks are represented by their exact or
+                # bounded interpolated samples.  Their accumulated rectangle
+                # would over-blur motion paths and must not be added as well.
+                continue
             try:
                 x = float(pos.get("x", 0))
                 y = float(pos.get("y", 0))
@@ -649,7 +1209,7 @@ class SubtitleProcessor:
             box_height = y2 - y1
             pad_x = max(min_pad, int(box_width * 0.12))
             pad_y = max(min_pad, int(box_height * 0.15))
-            side_pad = max(extra_side_pad, int(box_width * 0.2))
+            side_pad = max(extra_side_pad, int(box_width * 0.12))
 
             start_time = pos.get("start_time", 0)
             end_time = pos.get("end_time", video_duration)
@@ -706,11 +1266,16 @@ class SubtitleProcessor:
                 ex_box = existing["box"]
                 ex_center_y = (ex_box[1] + ex_box[3]) / 2.0
                 same_row = abs(ex_center_y - center_y) <= row_merge_threshold
-                # ★ 양방향 시간 근접성 체크: 두 구간이 서로 겹치거나 가까운 경우
-                close_in_time = (entry["start_time"] <= existing["end_time"] + max_time_gap
-                                 and entry["end_time"] >= existing["start_time"] - max_time_gap)
+                overlaps_in_time = (
+                    entry["start_time"] <= existing["end_time"]
+                    and entry["end_time"] >= existing["start_time"]
+                )
+                horizontal_gap = max(
+                    0,
+                    max(box[0] - ex_box[2], ex_box[0] - box[2]),
+                )
 
-                if same_row and close_in_time:
+                if same_row and overlaps_in_time and horizontal_gap <= horizontal_merge_gap:
                     ex_box[0] = min(ex_box[0], box[0])
                     ex_box[1] = min(ex_box[1], box[1])
                     ex_box[2] = max(ex_box[2], box[2])
@@ -731,38 +1296,6 @@ class SubtitleProcessor:
                         "text": entry["text"],
                     }
                 )
-
-        # Row-level horizontal envelope ensures left/right edges stay covered.
-        rows: List[Dict[str, Any]] = []
-        for entry in merged:
-            box = entry["box"]
-            center_y = (box[1] + box[3]) / 2.0
-            assigned = False
-            for row in rows:
-                if abs(row["center_y"] - center_y) <= row_merge_threshold:
-                    row["entries"].append(entry)
-                    row["center_y"] = (row["center_y"] + center_y) / 2.0
-                    row["left"] = min(row["left"], box[0])
-                    row["right"] = max(row["right"], box[2])
-                    assigned = True
-                    break
-            if not assigned:
-                rows.append(
-                    {
-                        "center_y": center_y,
-                        "left": box[0],
-                        "right": box[2],
-                        "entries": [entry],
-                    }
-                )
-
-        row_extra = max(8, int(w * 0.015))
-        for row in rows:
-            row_left = max(0, row["left"] - row_extra)
-            row_right = min(w - 1, row["right"] + row_extra)
-            for entry in row["entries"]:
-                entry["box"][0] = min(entry["box"][0], row_left)
-                entry["box"][2] = max(entry["box"][2], row_right)
 
         merged.sort(key=lambda e: (e["start_time"], e["box"][1], e["box"][0]))
         return merged
@@ -796,10 +1329,29 @@ class SubtitleProcessor:
             w=w,
             h=h,
             video_duration=float(video.duration),
+            exclude_polygon_regions=bool(polygon_timeline),
         )
         logger.info(f"[BLUR APPLY V2] Stabilized region count: {len(boxes_with_time)}")
         if not boxes_with_time and not polygon_timeline:
             return video
+
+        coverage_stats = {
+            "expected_polygon_slots": len(polygon_timeline),
+            "rendered_unique_slots": 0,
+            "active_unique_slots": 0,
+            "changed_unique_slots": 0,
+            "minimum_mask_delta": None,
+            "maximum_mask_delta": None,
+        }
+        seen_slots = set()
+        active_slots = set()
+        changed_slots = set()
+        slot_deltas: Dict[int, float] = {}
+        self.gui._precision_blur_stats = coverage_stats
+        self.gui._precision_blur_expected_slots = set(polygon_timeline)
+        self.gui._precision_blur_seen_slots = seen_slots
+        self.gui._precision_blur_active_slots = active_slots
+        self.gui._precision_blur_slot_deltas = slot_deltas
 
         base_height = 1080
         base_kernel = 25
@@ -810,7 +1362,7 @@ class SubtitleProcessor:
         feather_size = max(11, min(feather_size, 51))
 
         def _auto_kernel(a: int, b: int) -> int:
-            k = max(min_kernel, ((a + b) // 2) // 12)
+            k = max(min_kernel, min(151, max(a, b) // 4))
             return k + 1 if k % 2 == 0 else k
 
         last_log_time = [-1.0]
@@ -822,95 +1374,87 @@ class SubtitleProcessor:
                 last_log_time[0] = int(t)
 
             frame_index = int(round(t * fps))
+            if frame_index not in seen_slots:
+                seen_slots.add(frame_index)
+                coverage_stats["rendered_unique_slots"] = len(seen_slots)
             frame_polygons = polygon_timeline.get(frame_index, []) if polygon_timeline else []
-            if frame_polygons:
-                min_x = w - 1
-                min_y = h - 1
-                max_x = 0
-                max_y = 0
-                valid_polygons = []
-                for polygon in frame_polygons:
-                    normalized = self._normalize_polygon_points(
-                        polygon, frame_w=w, frame_h=h
-                    )
-                    if not normalized:
-                        continue
+            valid_polygons = []
+            for polygon in frame_polygons:
+                normalized = self._normalize_polygon_points(
+                    polygon, frame_w=w, frame_h=h
+                )
+                if normalized:
                     valid_polygons.append(normalized)
-                    xs = [p[0] for p in normalized]
-                    ys = [p[1] for p in normalized]
-                    min_x = min(min_x, min(xs))
-                    min_y = min(min_y, min(ys))
-                    max_x = max(max_x, max(xs))
-                    max_y = max(max_y, max(ys))
 
-                if valid_polygons and max_x > min_x and max_y > min_y:
-                    # Keep blur work limited to polygon envelope ROI.
-                    roi_x1 = max(0, min_x - 2)
-                    roi_y1 = max(0, min_y - 2)
-                    roi_x2 = min(w, max_x + 3)
-                    roi_y2 = min(h, max_y + 3)
-                    roi = frame[roi_y1:roi_y2, roi_x1:roi_x2]
-                    if roi.size > 0:
-                        roi_mask = np.zeros(
-                            (roi_y2 - roi_y1, roi_x2 - roi_x1), dtype=np.uint8
-                        )
-                        for polygon in valid_polygons:
-                            shifted = np.array(
-                                [[p[0] - roi_x1, p[1] - roi_y1] for p in polygon],
-                                dtype=np.int32,
-                            ).reshape((-1, 1, 2))
-                            cv2.fillPoly(roi_mask, [shifted], 255)
+            mask_polygons = []
+            for polygon in valid_polygons:
+                mask_polygon = polygon
+                polygon_xs = [point[0] for point in polygon]
+                polygon_ys = [point[1] for point in polygon]
+                polygon_height = max(polygon_ys) - min(polygon_ys)
+                # Bottom subtitle OCR can recognize adjacent glyph groups as
+                # separate boxes and intermittently lose a short side group.
+                # Add horizontal row padding only for shallow lower-third
+                # polygons; dense panels and arbitrary product regions keep
+                # their own exact geometry.
+                if (
+                    min(polygon_ys) >= h * 0.70
+                    and polygon_height <= h * 0.15
+                ):
+                    row_pad_x = max(12, int(round(w * 0.06)))
+                    row_pad_y = max(4, int(round(h * 0.012)))
+                    px1 = max(0, min(polygon_xs) - row_pad_x)
+                    py1 = max(0, min(polygon_ys) - row_pad_y)
+                    px2 = min(w - 1, max(polygon_xs) + row_pad_x)
+                    py2 = min(h - 1, max(polygon_ys) + row_pad_y)
+                    mask_polygon = [
+                        [px1, py1],
+                        [px2, py1],
+                        [px2, py2],
+                        [px1, py2],
+                    ]
+                mask_polygons.append(mask_polygon)
 
-                        edge_kernel = max(3, int(min(w, h) * 0.004))
-                        if edge_kernel % 2 == 0:
-                            edge_kernel += 1
-                        edge_struct = cv2.getStructuringElement(
-                            cv2.MORPH_ELLIPSE, (edge_kernel, edge_kernel)
-                        )
-                        roi_mask = cv2.dilate(roi_mask, edge_struct, iterations=1)
-
-                        blur_kernel = _auto_kernel(roi_x2 - roi_x1, roi_y2 - roi_y1)
-                        blurred_roi = cv2.GaussianBlur(roi, (blur_kernel, blur_kernel), 0)
-                        feathered = cv2.GaussianBlur(
-                            roi_mask, (feather_size, feather_size), 0
-                        )
-                        m3 = (
-                            np.dstack([feathered, feathered, feathered]).astype(np.float32)
-                            / 255.0
-                        )
-                        frame[roi_y1:roi_y2, roi_x1:roi_x2] = (
-                            blurred_roi.astype(np.float32) * m3
-                            + roi.astype(np.float32) * (1 - m3)
-                        ).astype(np.uint8)
-                        if should_log:
-                            logger.debug(
-                                f"[BLUR APPLY V2] t={t:.2f}s polygons={len(valid_polygons)} "
-                                f"roi={roi_x2 - roi_x1}x{roi_y2 - roi_y1}"
-                            )
-                        return frame
-
-            active = [bt for bt in boxes_with_time if bt["start_time"] <= t <= bt["end_time"]]
-            if not active:
-                return frame
-
+            frame_duration = 1.0 / fps
+            active = [
+                bt
+                for bt in boxes_with_time
+                if bt["start_time"] - (frame_duration * 0.5)
+                <= t
+                < bt["end_time"] + frame_duration
+            ]
             merged_boxes = self._merge_spatial_boxes(
                 [entry["box"] for entry in active], frame_width=w
             )
-            if not merged_boxes:
+
+            if not valid_polygons and not merged_boxes:
                 return frame
 
-            global_x1 = min(box[0] for box in merged_boxes)
-            global_y1 = min(box[1] for box in merged_boxes)
-            global_x2 = max(box[2] for box in merged_boxes)
-            global_y2 = max(box[3] for box in merged_boxes)
+            bounds = [list(box) for box in merged_boxes]
+            for polygon in mask_polygons:
+                xs = [p[0] for p in polygon]
+                ys = [p[1] for p in polygon]
+                bounds.append([min(xs), min(ys), max(xs) + 1, max(ys) + 1])
+
+            global_x1 = max(0, min(box[0] for box in bounds) - 2)
+            global_y1 = max(0, min(box[1] for box in bounds) - 2)
+            global_x2 = min(w, max(box[2] for box in bounds) + 3)
+            global_y2 = min(h, max(box[3] for box in bounds) + 3)
             if global_x2 <= global_x1 or global_y2 <= global_y1:
                 return frame
 
             roi = frame[global_y1:global_y2, global_x1:global_x2]
             if roi.size == 0:
                 return frame
+            original_roi = roi.copy()
 
             roi_mask = np.zeros((global_y2 - global_y1, global_x2 - global_x1), np.uint8)
+            for mask_polygon in mask_polygons:
+                shifted = np.array(
+                    [[p[0] - global_x1, p[1] - global_y1] for p in mask_polygon],
+                    dtype=np.int32,
+                ).reshape((-1, 1, 2))
+                cv2.fillPoly(roi_mask, [shifted], 255)
             for box in merged_boxes:
                 x1, y1, x2, y2 = box
                 rx1 = max(0, x1 - global_x1)
@@ -920,26 +1464,92 @@ class SubtitleProcessor:
                 if rx2 > rx1 and ry2 > ry1:
                     cv2.rectangle(roi_mask, (rx1, ry1), (rx2 - 1, ry2 - 1), 255, -1)
 
-            gap_kernel = max(3, int(w * 0.015))
-            if gap_kernel % 2 == 0:
-                gap_kernel += 1
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (gap_kernel, gap_kernel))
-            roi_mask = cv2.morphologyEx(roi_mask, cv2.MORPH_CLOSE, kernel)
-            roi_mask = cv2.dilate(roi_mask, kernel, iterations=1)
+            # Expand glyph edges and shadows but never close distant masks into
+            # one large rectangle.
+            # OCR polygons are often tight to the visible glyph body. Leave
+            # enough room for a one-frame camera move, outlines, and shadows
+            # while keeping disconnected labels as separate components.
+            edge_kernel = max(5, int(min(w, h) * 0.012))
+            if edge_kernel % 2 == 0:
+                edge_kernel += 1
+            edge_struct = cv2.getStructuringElement(
+                cv2.MORPH_ELLIPSE, (edge_kernel, edge_kernel)
+            )
+            roi_mask = cv2.dilate(roi_mask, edge_struct, iterations=1)
 
-            blur_kernel = _auto_kernel(global_x2 - global_x1, global_y2 - global_y1)
-            blurred_roi = cv2.GaussianBlur(roi, (blur_kernel, blur_kernel), 0)
-            feathered = cv2.GaussianBlur(roi_mask, (feather_size, feather_size), 0)
-            m3 = np.dstack([feathered, feathered, feathered]).astype(np.float32) / 255.0
+            # Blur each disconnected subtitle component independently. This is
+            # both stronger and faster than blurring the empty space between a
+            # top caption and a bottom badge in one full-height ROI.
+            output_roi = original_roi.copy()
+            component_count, labels, component_stats, _centroids = (
+                cv2.connectedComponentsWithStats((roi_mask > 0).astype(np.uint8), 8)
+            )
+            component_pad = max(4, feather_size)
+            for component_id in range(1, component_count):
+                cx, cy, cw, ch, area = component_stats[component_id]
+                if area <= 0 or cw <= 0 or ch <= 0:
+                    continue
+                sx1 = max(0, int(cx) - component_pad)
+                sy1 = max(0, int(cy) - component_pad)
+                sx2 = min(roi.shape[1], int(cx + cw) + component_pad)
+                sy2 = min(roi.shape[0], int(cy + ch) + component_pad)
+                component_roi = original_roi[sy1:sy2, sx1:sx2]
+                component_mask = (
+                    (labels[sy1:sy2, sx1:sx2] == component_id).astype(np.uint8)
+                    * 255
+                )
+                blur_kernel = _auto_kernel(cw, ch)
+                blurred_component = cv2.GaussianBlur(
+                    component_roi, (blur_kernel, blur_kernel), 0
+                )
+                blurred_component = cv2.GaussianBlur(
+                    blurred_component, (blur_kernel, blur_kernel), 0
+                )
+                feathered = cv2.GaussianBlur(
+                    component_mask, (feather_size, feather_size), 0
+                )
+                component_alpha = np.dstack(
+                    [feathered, feathered, feathered]
+                ).astype(np.float32) / 255.0
+                output_roi[sy1:sy2, sx1:sx2] = (
+                    blurred_component.astype(np.float32) * component_alpha
+                    + output_roi[sy1:sy2, sx1:sx2].astype(np.float32)
+                    * (1 - component_alpha)
+                ).astype(np.uint8)
 
-            frame[global_y1:global_y2, global_x1:global_x2] = (
-                blurred_roi.astype(np.float32) * m3
-                + roi.astype(np.float32) * (1 - m3)
-            ).astype(np.uint8)
+            frame[global_y1:global_y2, global_x1:global_x2] = output_roi
+
+            if frame_index not in active_slots:
+                active_slots.add(frame_index)
+                coverage_stats["active_unique_slots"] = len(active_slots)
+                changed_roi = frame[global_y1:global_y2, global_x1:global_x2]
+                core_mask = roi_mask >= 128
+                if np.any(core_mask):
+                    delta = float(
+                        np.abs(
+                            changed_roi.astype(np.float32)
+                            - original_roi.astype(np.float32)
+                        )[core_mask].mean()
+                    )
+                else:
+                    delta = 0.0
+                slot_deltas[frame_index] = delta
+                if delta > 0.5:
+                    changed_slots.add(frame_index)
+                    coverage_stats["changed_unique_slots"] = len(changed_slots)
+                current_min = coverage_stats["minimum_mask_delta"]
+                current_max = coverage_stats["maximum_mask_delta"]
+                coverage_stats["minimum_mask_delta"] = (
+                    delta if current_min is None else min(float(current_min), delta)
+                )
+                coverage_stats["maximum_mask_delta"] = (
+                    delta if current_max is None else max(float(current_max), delta)
+                )
 
             if should_log:
                 logger.debug(
-                    f"[BLUR APPLY V2] t={t:.2f}s merged={len(merged_boxes)} "
+                    f"[BLUR APPLY V2] t={t:.2f}s polygons={len(valid_polygons)} "
+                    f"boxes={len(merged_boxes)} "
                     f"roi={global_x2 - global_x1}x{global_y2 - global_y1}"
                 )
             return frame

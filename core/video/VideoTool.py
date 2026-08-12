@@ -300,6 +300,24 @@ def _create_single_line_subtitle(
             app, desired_w, desired_h, video_width, video_height
         )
 
+        # Precision QA must distinguish the Korean subtitle intentionally
+        # rendered by this application from source-language text.  Record the
+        # exact time/pixel rectangle used by the compositor; the independent
+        # OCR audit may ignore only detections fully contained in this known
+        # overlay, never a broad subtitle band.
+        if getattr(app, "_precision_record_korean_subtitle_overlays", False):
+            records = getattr(app, "_precision_korean_subtitle_overlays", None)
+            if not isinstance(records, list):
+                records = []
+                app._precision_korean_subtitle_overlays = records
+            records.append(
+                {
+                    "start_time": float(start_time),
+                    "end_time": float(start_time + duration),
+                    "box": [int(bg_x), int(bg_y), int(bg_x + bg_w), int(bg_y + bg_h)],
+                }
+            )
+
         # 둥근 모서리 반경 (살짝만 - 박스 높이의 15%)
         corner_radius = max(8, int(bg_h * 0.15))
 

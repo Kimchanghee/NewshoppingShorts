@@ -69,8 +69,21 @@ class VideoHelpers:
         try:
             from processors.subtitle_detector import SubtitleDetector
 
-            detector = SubtitleDetector(self.app)
-            return detector.detect_subtitles_with_opencv()
+            detector = getattr(self.app, "_cached_subtitle_detector", None)
+            if detector is None:
+                detector = SubtitleDetector(self.app)
+                self.app._cached_subtitle_detector = detector
+            positions = detector.detect_subtitles_with_opencv()
+            self.app.subtitle_review_required = bool(
+                getattr(detector, "review_required", False)
+            )
+            self.app.invalid_coordinate_count = int(
+                getattr(detector, "invalid_coordinate_count", 0) or 0
+            )
+            self.app.ocr_review_reasons = list(
+                getattr(detector, "review_reasons", []) or []
+            )
+            return positions
         except Exception as e:
             logger.warning(f"[OCR] 자막 감지 실패: {e}")
             return []

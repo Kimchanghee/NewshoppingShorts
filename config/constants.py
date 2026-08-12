@@ -66,6 +66,14 @@ class OCRThresholds:
     TIME_BUFFER_BEFORE: float = 0.8  # ?먮쭑 ?쒖옉 ??踰꾪띁 (0.5 -> 0.8)
     TIME_BUFFER_AFTER: float = 1.2  # ?먮쭑 醫낅즺 ??踰꾪띁 (0.8 -> 1.2)
 
+    # Frame-accurate timing for the precision polygon pipeline.
+    PRECISION_MAX_GAP_FRAMES: int = 2
+    PRECISION_BUFFER_FRAMES: int = 1
+    # Protect an event edge by one rendered frame only. Longer persistence
+    # requires per-frame evidence and must never be a blind time buffer.
+    PRECISION_EVENT_EDGE_SECONDS: float = 0.0
+    PRECISION_PERSISTENT_TRACK_GAP_SECONDS: float = 1.0
+
     # Spatial clustering (怨듦컙-?곗꽑 ?대윭?ㅽ꽣留?
     SAME_ROW_MULTIPLIER: float = 0.8  # Same row proximity multiplier
     HORIZONTAL_GAP_THRESHOLD: float = 6.0  # Horizontal gap threshold (%)
@@ -81,10 +89,12 @@ class OCRThresholds:
     SUBTITLE_Y_VARIANCE_MAX: float = 8.0  # Maximum vertical variance (%)
     SUBTITLE_X_VARIANCE_MAX: float = 14.0  # Maximum horizontal variance (%)
     SUBTITLE_SCORE_THRESHOLD: float = 2.5  # Minimum subtitle likelihood score
+    HIGH_CONFIDENCE_CHINESE: float = 0.70
 
     # Ultra accuracy mode
     FULL_FRAME_SCAN_MODE: bool = True  # Scan every frame for OCR detection
     PRECISION_POLYGON_BLUR: bool = True  # Apply per-frame polygon mask blur
+    ENABLE_BROAD_BOTTOM_BAND_FALLBACK: bool = False
 
 @dataclass(frozen=True)
 class VideoSettings:
@@ -298,6 +308,7 @@ class GLMOCRSettings:
     # Batch processing
     MAX_BATCH_SIZE: int = 20  # Maximum images per API request
     OPTIMAL_BATCH_SIZE: int = 10  # Default batch size for efficiency
+    BATCH_CONCURRENCY: int = 2  # Conservative bounded requests, returned in input order
 
     # Image compression
     TARGET_WIDTH: int = 1280  # Resize larger images
@@ -313,7 +324,8 @@ class GLMOCRSettings:
 
     # Rate limiting
     REQUEST_DELAY_MS: int = 50  # Delay between batch requests (ms)
-    RATE_LIMIT_WAIT_SECONDS: float = 1.0  # Wait time when rate limited
+    RATE_LIMIT_WAIT_SECONDS: float = 5.0  # Shared cooldown floor after HTTP 429
+    RATE_LIMIT_RETRIES: int = 4  # Application retries after adapter retries are exhausted
 
 
 # === Convenience accessors ===
@@ -370,4 +382,3 @@ def get_max_workers(high_performance: bool = False) -> int:
         return MemoryLimits.MAX_WORKERS_HIGH
     else:
         return MemoryLimits.MAX_WORKERS_DEFAULT
-

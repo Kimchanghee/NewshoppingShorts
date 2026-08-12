@@ -60,7 +60,7 @@ def test_processor_merge_spatial_boxes_fills_middle_gap():
     assert merged[0][2] == 520
 
 
-def test_processor_time_aware_boxes_merge_over_time():
+def test_processor_time_aware_boxes_keep_separate_events_separate():
     processor = SubtitleProcessor(_DummyGUI())
 
     positions = [
@@ -76,6 +76,5 @@ def test_processor_time_aware_boxes_merge_over_time():
     )
 
     assert boxes
-    assert len(boxes) == 1
-    x1, _, x2, _ = boxes[0]["box"]
-    assert x2 - x1 > 300
+    assert len(boxes) == 2
+    assert all(entry["box"][2] - entry["box"][0] < 300 for entry in boxes)

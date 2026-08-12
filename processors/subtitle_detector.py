@@ -6,7 +6,13 @@ Integrates HybridSubtitleDetector for optimized OCR calls (40% reduction).
 """
 
 import gc
+import json
 import os
+import subprocess
+import sys
+import tempfile
+import threading
+from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Iterable
 
 # Logging configuration
@@ -117,7 +123,98 @@ class SubtitleDetector:
         """
         self.gui = gui
         self.hybrid_detector = None
+        self._diagnostics_lock = threading.Lock()
+        self.invalid_coordinate_count = 0
+        self.review_required = False
+        self.review_reasons: List[str] = []
+        self._ocr_invalid_coordinate_synced = 0
+        self._ocr_request_failure_synced = 0
+        self.unresolved_oversized_observations: List[Dict[str, Any]] = []
+        self.visual_track_diagnostics: List[Dict[str, Any]] = []
         self._init_hybrid_detector()
+
+    def _reader_invalid_coordinate_count(self) -> int:
+        reader = getattr(self.gui, "ocr_reader", None)
+        candidates = [reader, getattr(reader, "_glm_client", None)]
+        counts = []
+        for candidate in candidates:
+            try:
+                counts.append(max(0, int(getattr(candidate, "invalid_coordinate_count", 0) or 0)))
+            except Exception:
+                continue
+        return max(counts, default=0)
+
+    def _sync_reader_coordinate_diagnostics(self) -> None:
+        current = self._reader_invalid_coordinate_count()
+        reader = getattr(self.gui, "ocr_reader", None)
+        candidates = [reader, getattr(reader, "_glm_client", None)]
+        request_failures = 0
+        for candidate in candidates:
+            try:
+                request_failures = max(
+                    request_failures,
+                    max(0, int(getattr(candidate, "request_failure_count", 0) or 0)),
+                )
+            except Exception:
+                continue
+        with self._diagnostics_lock:
+            delta = max(0, current - self._ocr_invalid_coordinate_synced)
+            self._ocr_invalid_coordinate_synced = max(self._ocr_invalid_coordinate_synced, current)
+            request_delta = max(0, request_failures - self._ocr_request_failure_synced)
+            self._ocr_request_failure_synced = max(
+                self._ocr_request_failure_synced, request_failures
+            )
+        if delta:
+            self._mark_review_required(
+                "ocr_reader_invalid_coordinates", invalid_coordinates=delta
+            )
+        if request_delta:
+            self._mark_review_required("ocr_reader_request_failures")
+
+    def _reset_precision_diagnostics(self) -> None:
+        """Reset per-video precision diagnostics exposed to the UI/tests."""
+        with self._diagnostics_lock:
+            self.invalid_coordinate_count = 0
+            self.review_required = False
+            self.review_reasons = []
+            self.unresolved_oversized_observations = []
+            self.visual_track_diagnostics = []
+            self._ocr_invalid_coordinate_synced = self._reader_invalid_coordinate_count()
+            reader = getattr(self.gui, "ocr_reader", None)
+            self._ocr_request_failure_synced = max(
+                int(getattr(reader, "request_failure_count", 0) or 0),
+                int(
+                    getattr(
+                        getattr(reader, "_glm_client", None),
+                        "request_failure_count",
+                        0,
+                    )
+                    or 0
+                ),
+            )
+        try:
+            self.gui.ocr_invalid_coordinate_count = 0
+            self.gui.ocr_review_required = False
+            self.gui.ocr_review_reasons = []
+        except Exception:
+            pass
+
+    def _mark_review_required(self, reason: str, *, invalid_coordinates: int = 0) -> None:
+        """Accumulate non-fatal precision problems without losing valid detections."""
+        with self._diagnostics_lock:
+            if invalid_coordinates > 0:
+                self.invalid_coordinate_count += int(invalid_coordinates)
+            self.review_required = True
+            if reason and reason not in self.review_reasons:
+                self.review_reasons.append(reason)
+            invalid_coordinate_count = self.invalid_coordinate_count
+            review_reasons = list(self.review_reasons)
+        try:
+            self.gui.ocr_invalid_coordinate_count = invalid_coordinate_count
+            self.gui.ocr_review_required = True
+            self.gui.ocr_review_reasons = review_reasons
+        except Exception:
+            pass
 
     def _init_hybrid_detector(self):
         """?섏씠釉뚮━??媛먯?湲?珥덇린??(?듭뀡)"""
@@ -151,6 +248,35 @@ class SubtitleDetector:
             # Hybrid detector initialization failed - fallback to basic mode silently
             self.hybrid_detector = None
 
+    def _use_batch_ocr(self, *, full_scan_mode: bool) -> bool:
+        """Use ordered batch transport whenever the active OCR backend supports it.
+
+        Full-frame precision controls *which* frames are scanned, not whether
+        independent GLM requests must be serialized. Keeping these decisions
+        separate preserves exhaustive coverage without avoidable network delay.
+        """
+        ocr_reader = getattr(self.gui, "ocr_reader", None)
+        return bool(
+            ocr_reader is not None
+            and hasattr(ocr_reader, "supports_batch")
+            and ocr_reader.supports_batch()
+            and getattr(ocr_reader, "engine_name", None) == "glm_ocr"
+        )
+
+    @staticmethod
+    def _segment_has_frames(
+        start_sec: float, end_sec: float, fps: float, total_frames: int
+    ) -> bool:
+        """Return whether a segment contains any physical source frame."""
+        if fps <= 0 or total_frames <= 0 or end_sec <= start_sec:
+            return False
+        # Segment boundaries are derived with the same rounding rule on both
+        # sides.  Truncation can turn ``fps * (total_frames / fps)`` into
+        # ``total_frames - 1`` at fractional frame rates and lose the tail.
+        start_frame = min(total_frames, max(0, int(round(fps * start_sec))))
+        end_frame = min(total_frames, max(0, int(round(fps * end_sec))))
+        return start_frame < end_frame
+
     def detect_subtitles_with_opencv(self):
         """
         OCR-based Chinese subtitle detection with GPU/NumPy acceleration.
@@ -164,6 +290,7 @@ class SubtitleDetector:
             or None if no Chinese subtitles found
         """
         
+        self._reset_precision_diagnostics()
         video_path = getattr(self.gui, 'local_file_path', '') if getattr(self.gui, 'video_source', 'none') == 'local' else getattr(self.gui, '_temp_downloaded_file', None)
 
         # OCR reader 媛?⑹꽦 ?뺤씤
@@ -232,7 +359,7 @@ class SubtitleDetector:
             while current_start < total_duration:
                 end_sec = min(current_start + segment_duration, total_duration)
                 # 理쒖냼 1珥??댁긽??援ш컙留?異붽?
-                if end_sec - current_start >= 1:
+                if self._segment_has_frames(current_start, end_sec, fps, total_frames):
                     segments.append({
                         'name': f"{int(current_start)}-{int(end_sec)}s",
                         'start_sec': current_start,
@@ -288,8 +415,37 @@ class SubtitleDetector:
 
             # 蹂묐젹 泥섎━ 寃곌낵 ?ъ슜
             all_regions = all_regions_combined
+            if full_scan_mode:
+                all_regions.extend(
+                    self._scan_with_independent_local_ocr(
+                        video_path,
+                        fps=fps,
+                        total_frames=total_frames,
+                        W=W,
+                        H=H,
+                    )
+                )
+                all_regions.extend(
+                    self._scan_with_independent_corner_ocr(
+                        video_path,
+                        fps=fps,
+                        total_frames=total_frames,
+                        W=W,
+                        H=H,
+                    )
+                )
+                if all_regions:
+                    all_regions = self._augment_static_visual_tracks(
+                        video_path,
+                        all_regions,
+                        fps=fps,
+                        total_frames=total_frames,
+                        W=W,
+                        H=H,
+                    )
             frames_with_chinese = frames_with_chinese_total
             sample_frames_count = total_sample_frames
+            self._sync_reader_coordinate_diagnostics()
 
             # 寃곌낵 遺꾩꽍
             if not all_regions:
@@ -317,7 +473,9 @@ class SubtitleDetector:
             # ===== GPU/NumPy 媛?? 鍮덈룄 湲곕컲 ?꾪꽣留?=====
             accel_name = "GPU Accel" if GPU_ACCEL_AVAILABLE else "NumPy Accel"
             logger.debug(f"[{accel_name}] Region aggregation starting - {len(all_regions)} regions")
-            reliable_regions = self._gpu_aggregate_regions(all_regions)
+            reliable_regions = self._gpu_aggregate_regions(
+                all_regions, fps=fps, total_duration=total_duration
+            )
 
             if not reliable_regions:
                 logger.debug(f'[OCR {accel_name}] No trusted subtitle region found - using fallback with spatial clustering')
@@ -400,6 +558,9 @@ class SubtitleDetector:
                             'y_positions': [float(r.get('y', 0)) for r in cluster],
                             'x_positions': [float(r.get('x', 0)) for r in cluster],
                             'time_group_count': len(set(round(r.get('time', 0) * 2) / 2 for r in cluster)),
+                            'invalid_coordinate_count': self.invalid_coordinate_count,
+                            'review_required': self.review_required,
+                            'review_reasons': list(self.review_reasons),
                             'frame_regions': [
                                 {
                                     'time': float(r.get('time', 0)),
@@ -451,6 +612,14 @@ class SubtitleDetector:
         - ?곸긽?먯꽌 紐??꾨젅?꾩쓣 ?섑뵆留?        - ?섎떒 ROI(湲곕낯 72%~95%)???ｌ? 諛?꾨? 怨꾩궛
         - ?띿뒪???먮쭑泥섎읆 怨좎＜???ｌ?)媛 吏?띿쟻?쇰줈 ?섑??섎㈃ ?섎떒 諛대뱶瑜?釉붾윭 ??곸쑝濡?諛섑솚
         """
+        if not bool(getattr(OCRThresholds, "ENABLE_BROAD_BOTTOM_BAND_FALLBACK", False)):
+            self._mark_review_required("broad_bottom_band_fallback_disabled")
+            logger.warning(
+                "[Fallback] Broad bottom-band blur is disabled for precision mode; manual review is required."
+            )
+            return None
+
+        self._mark_review_required("broad_bottom_band_fallback_used")
         if not video_path or not isinstance(video_path, str) or not os.path.exists(video_path):
             return None
         if not CV2_AVAILABLE:
@@ -536,6 +705,8 @@ class SubtitleDetector:
                     "language": "",
                     "confidence": 0.25,
                     "source": "fallback_region_edges",
+                    "review_required": True,
+                    "review_reasons": list(self.review_reasons),
                 }
                 return [region]
             finally:
@@ -622,7 +793,15 @@ class SubtitleDetector:
             logger.debug(f"  Size: w={width_pct:.1f}%, h={height_pct:.1f}%")
 
             area_ratio = (width_pct / 100.0) * (height_pct / 100.0)
-            if area_ratio > 0.35 or height_pct > 45.0:
+            exact_polygon_chinese = bool(entry.get("frame_regions")) and bool(
+                any("\u4e00" <= char <= "\u9fff" for char in f"{text}{sample}")
+                or "chinese" in lang
+                or lang.startswith("zh")
+            )
+            if (area_ratio > 0.35 or height_pct > 45.0) and not exact_polygon_chinese:
+                self._mark_review_required(
+                    "oversized_region_without_exact_chinese_polygon"
+                )
                 logger.debug(f"  -> Excluded: Region too large (area={area_ratio*100:.1f}%, height={height_pct:.1f}%)")
                 self.gui.add_log(f"[釉붾윭] ?섏떖?ㅻ윭?????곸뿭???쒖쇅?⑸땲?? "
                              f"w={width_pct:.1f}%, h={height_pct:.1f}% (source={entry.get('source')})")
@@ -647,11 +826,24 @@ class SubtitleDetector:
             time_group_count = entry.get('time_group_count', 1)
             y_positions = entry.get('y_positions', [])
             region_start_time = entry.get('start_time', 999)
+            sample_text = str(entry.get('text', '') or entry.get('sample_text', ''))
+            explicit_chinese = any('\u4e00' <= ch <= '\u9fff' for ch in sample_text)
+            max_confidence = float(
+                entry.get('max_confidence', entry.get('confidence', 0.0)) or 0.0
+            )
+            high_confidence_chinese = bool(entry.get('high_confidence_chinese')) or (
+                explicit_chinese
+                and max_confidence >= OCRThresholds.HIGH_CONFIDENCE_CHINESE
+            )
 
             # 議곌굔 1: ?ㅼ쨷 ?쒓컙 洹몃９(?꾨젅???먯꽌 異쒗쁽?댁빞 ?먮쭑
             # ???? ?곸긽 ?쒖옉 遺遺?~1珥?? 硫댁젣: ?쒓컙 洹몃９??異⑸텇???볦씠吏 ?딆쑝誘濡?
             is_early_region = region_start_time <= 1.0
-            if time_group_count < OCRThresholds.SUBTITLE_MIN_TIME_GROUPS and not is_early_region:
+            if (
+                time_group_count < OCRThresholds.SUBTITLE_MIN_TIME_GROUPS
+                and not is_early_region
+                and not high_confidence_chinese
+            ):
                 logger.debug(f"  -> Excluded: ?⑥씪 ?꾨젅??異쒗쁽 (time_groups={time_group_count} < {OCRThresholds.SUBTITLE_MIN_TIME_GROUPS}) ???곹뭹 ?띿뒪?몃줈 ?먯젙")
                 self.gui.add_log(f"[釉붾윭] ?곹뭹 ?띿뒪???쒖쇅: ?⑥씪 ?꾨젅??異쒗쁽 ('{str(entry.get('text', '') or str(entry.get('sample_text', '')))[:15]}...')")
                 continue
@@ -668,7 +860,7 @@ class SubtitleDetector:
                 except Exception:
                     y_std = 0.0
 
-                if y_std > OCRThresholds.SUBTITLE_Y_VARIANCE_MAX:
+                if y_std > OCRThresholds.SUBTITLE_Y_VARIANCE_MAX and not high_confidence_chinese:
                     logger.debug(
                         f"  -> Excluded: unstable Y (std={y_std:.1f}% > {OCRThresholds.SUBTITLE_Y_VARIANCE_MAX}%)"
                     )
@@ -689,7 +881,7 @@ class SubtitleDetector:
                     )
                 except Exception:
                     x_std = 0.0
-                if x_std > OCRThresholds.SUBTITLE_X_VARIANCE_MAX:
+                if x_std > OCRThresholds.SUBTITLE_X_VARIANCE_MAX and not high_confidence_chinese:
                     logger.debug(f"  -> Excluded: X unstable (X std={x_std:.1f}% > {OCRThresholds.SUBTITLE_X_VARIANCE_MAX}%)")
                     continue
 
@@ -700,13 +892,12 @@ class SubtitleDetector:
             score += 1.0 if x_std <= (OCRThresholds.SUBTITLE_X_VARIANCE_MAX * 0.5) else 0.0
             if x_std > 0 and x_std <= OCRThresholds.SUBTITLE_X_VARIANCE_MAX:
                 score += 0.5
-            sample_text = str(entry.get('text', '') or entry.get('sample_text', ''))
             chinese_chars = sum(1 for ch in sample_text if '\u4e00' <= ch <= '\u9fff')
             score += 1.0 if chinese_chars >= 2 else (0.5 if chinese_chars >= 1 else 0.0)
             score += 0.5 if float(entry.get('frequency', 0) or 0) >= 3 else 0.0
             if is_early_region and time_group_count < OCRThresholds.SUBTITLE_MIN_TIME_GROUPS:
                 score += 0.5
-            if score < OCRThresholds.SUBTITLE_SCORE_THRESHOLD:
+            if score < OCRThresholds.SUBTITLE_SCORE_THRESHOLD and not high_confidence_chinese:
                 logger.debug(f"  -> Excluded: low subtitle score ({score:.2f} < {OCRThresholds.SUBTITLE_SCORE_THRESHOLD})")
                 continue
 
@@ -826,88 +1017,134 @@ class SubtitleDetector:
         if len(polygon) < 3:
             return []
         return polygon
-    def _gpu_process_bbox_batch(self, bboxes, W, H):
+
+    @staticmethod
+    def _snap_polygon_to_near_frame_edges(polygon, W, H):
+        """Include glyph fragments clipped by a nearby physical frame edge.
+
+        OCR boxes commonly begin a few pixels inside the image when the first
+        glyph of a watermark/subtitle is itself clipped by the video boundary.
+        Expanding only a small, bounded near-edge box to that same edge avoids
+        leaving the readable fragment behind without broadening interior masks.
         """
-        GPU/NumPy accelerated batch processing of bounding boxes.
-
-        Args:
-            bboxes: List of bounding boxes (each with 4 points)
-            W: Video width
-            H: Video height
-
-        Returns:
-            List of processed region info (x%, y%, width%, height%)
-        """
-        if not NUMPY_AVAILABLE or not bboxes:
-            return []
-
+        if not polygon or not W or not H:
+            return polygon or []
         try:
-            regions = []
-            use_gpu = GPU_ACCEL_AVAILABLE
+            xs = [float(point[0]) for point in polygon]
+            ys = [float(point[1]) for point in polygon]
+        except (TypeError, ValueError, IndexError):
+            return polygon
+        edge_x = max(4, min(32, int(round(float(W) * 0.025))))
+        edge_y = max(4, min(32, int(round(float(H) * 0.025))))
+        x1, x2 = min(xs), max(xs)
+        y1, y2 = min(ys), max(ys)
+        snapped_x1 = 0.0 if x1 <= edge_x else x1
+        snapped_y1 = 0.0 if y1 <= edge_y else y1
+        snapped_x2 = float(W - 1) if x2 >= (W - 1 - edge_x) else x2
+        snapped_y2 = float(H - 1) if y2 >= (H - 1 - edge_y) else y2
+        if (snapped_x1, snapped_y1, snapped_x2, snapped_y2) == (x1, y1, x2, y2):
+            return polygon
+        return [
+            [round(snapped_x1, 2), round(snapped_y1, 2)],
+            [round(snapped_x2, 2), round(snapped_y1, 2)],
+            [round(snapped_x2, 2), round(snapped_y2, 2)],
+            [round(snapped_x1, 2), round(snapped_y2, 2)],
+        ]
 
-            for bbox in bboxes:
-                if len(bbox) >= 4:
-                    try:
-                        if use_gpu:
-                            try:
-                                # GPU 媛??踰꾩쟾
-                                coords = xp.array(bbox, dtype=xp.float32)
-                                x_coords = coords[:, 0]
-                                y_coords = coords[:, 1]
+    @staticmethod
+    def _independent_box_is_tight_line(info):
+        """Trust a precise all-frame OCR polygon for a shallow full-width line."""
+        if not isinstance(info, dict):
+            return False
+        return bool(float(info.get("height", 100.0) or 100.0) <= 15.0)
 
-                                x_min = max(0, int(xp.min(x_coords).get()))
-                                y_min = max(0, int(xp.min(y_coords).get()))
-                                x_max = min(W, int(xp.max(x_coords).get()))
-                                y_max = min(H, int(xp.max(y_coords).get()))
-                            except Exception:
-                                # GPU ?ㅽ뙣 ??NumPy濡??대갚
-                                use_gpu = False
-                                coords = np.array(bbox, dtype=np.float32)
-                                x_coords = coords[:, 0]
-                                y_coords = coords[:, 1]
-
-                                x_min = max(0, int(np.min(x_coords)))
-                                y_min = max(0, int(np.min(y_coords)))
-                                x_max = min(W, int(np.max(x_coords)))
-                                y_max = min(H, int(np.max(y_coords)))
-                        else:
-                            # NumPy 踰꾩쟾
-                            coords = np.array(bbox, dtype=np.float32)
-                            x_coords = coords[:, 0]
-                            y_coords = coords[:, 1]
-
-                            x_min = max(0, int(np.min(x_coords)))
-                            y_min = max(0, int(np.min(y_coords)))
-                            x_max = min(W, int(np.max(x_coords)))
-                            y_max = min(H, int(np.max(y_coords)))
-
-                        width = x_max - x_min
-                        height = y_max - y_min
-
-                        # ??理쒖냼 bbox ?ш린 寃利?(constants.py?먯꽌 ?ㅼ젙)
-                        if width < OCRThresholds.MIN_BBOX_WIDTH or height < OCRThresholds.MIN_BBOX_HEIGHT:
-                            continue
-                        if width > W * 0.98 or height > H * 0.5:  # ?믪씠 ?쒗븳 ?꾪솕 (0.4 -> 0.5)
-                            continue
-
-                        regions.append({
-                            'x': round(100.0 * x_min / W, 1),
-                            'y': round(100.0 * y_min / H, 1),
-                            'width': max(0.5, round(100.0 * width / W, 1)),
-                            'height': max(0.5, round(100.0 * height / H, 1)),
-                            'x_min': x_min,
-                            'y_min': y_min,
-                            'x_max': x_max,
-                            'y_max': y_max
-                        })
-                    except Exception:
-                        continue
-
-            return regions
-        except Exception as e:
-            ui_controller.write_error_log(e)
-            logger.error(f"[GPU Accel] bbox processing error: {e}")
+    def _gpu_process_bbox_batch(self, bboxes, W, H):
+        """Return one processed result per input bbox, preserving alignment."""
+        if not bboxes:
             return []
+
+        regions: List[Optional[Dict[str, Any]]] = [None] * len(bboxes)
+        if not NUMPY_AVAILABLE or not W or not H:
+            self._mark_review_required(
+                "bbox_processing_unavailable", invalid_coordinates=len(bboxes)
+            )
+            return regions
+
+        use_gpu = GPU_ACCEL_AVAILABLE
+        for index, bbox in enumerate(bboxes):
+            invalid_reason = "invalid_bbox_coordinates"
+            try:
+                if bbox is None or len(bbox) < 4:
+                    raise ValueError("bbox requires at least four points")
+
+                if use_gpu:
+                    try:
+                        coords = xp.asarray(bbox, dtype=xp.float32)
+                        if coords.ndim != 2 or coords.shape[1] < 2:
+                            raise ValueError("bbox must contain xy points")
+                        if not bool(xp.all(xp.isfinite(coords)).get()):
+                            raise ValueError("bbox contains non-finite values")
+                        x_min_f = float(xp.min(coords[:, 0]).get())
+                        y_min_f = float(xp.min(coords[:, 1]).get())
+                        x_max_f = float(xp.max(coords[:, 0]).get())
+                        y_max_f = float(xp.max(coords[:, 1]).get())
+                    except Exception:
+                        use_gpu = False
+                        coords = np.asarray(bbox, dtype=np.float32)
+                        if coords.ndim != 2 or coords.shape[1] < 2 or not np.all(np.isfinite(coords)):
+                            raise ValueError("bbox contains invalid coordinates")
+                        x_min_f = float(np.min(coords[:, 0]))
+                        y_min_f = float(np.min(coords[:, 1]))
+                        x_max_f = float(np.max(coords[:, 0]))
+                        y_max_f = float(np.max(coords[:, 1]))
+                else:
+                    coords = np.asarray(bbox, dtype=np.float32)
+                    if coords.ndim != 2 or coords.shape[1] < 2 or not np.all(np.isfinite(coords)):
+                        raise ValueError("bbox contains invalid coordinates")
+                    x_min_f = float(np.min(coords[:, 0]))
+                    y_min_f = float(np.min(coords[:, 1]))
+                    x_max_f = float(np.max(coords[:, 0]))
+                    y_max_f = float(np.max(coords[:, 1]))
+
+                x_min = max(0, min(int(W), int(np.floor(x_min_f))))
+                y_min = max(0, min(int(H), int(np.floor(y_min_f))))
+                x_max = max(0, min(int(W), int(np.ceil(x_max_f))))
+                y_max = max(0, min(int(H), int(np.ceil(y_max_f))))
+                width = x_max - x_min
+                height = y_max - y_min
+
+                if width < OCRThresholds.MIN_BBOX_WIDTH or height < OCRThresholds.MIN_BBOX_HEIGHT:
+                    invalid_reason = "bbox_below_minimum_size"
+                    raise ValueError(invalid_reason)
+                # Large multi-line banners are valid OCR targets.  Their exact
+                # polygon is safer than silently dropping the text and claiming
+                # a successful render; downstream filtering still rejects broad
+                # heuristic fallback bands that have no per-frame polygon.
+                oversized = bool(width > W * 0.98 or height > H * 0.5)
+
+                regions[index] = {
+                    'x': round(100.0 * x_min / W, 1),
+                    'y': round(100.0 * y_min / H, 1),
+                    'width': max(0.5, round(100.0 * width / W, 1)),
+                    'height': max(0.5, round(100.0 * height / H, 1)),
+                    'x_min': x_min,
+                    'y_min': y_min,
+                    'x_max': x_max,
+                    'y_max': y_max,
+                    'oversized': oversized,
+                }
+            except Exception:
+                if invalid_reason in {
+                    "bbox_below_minimum_size",
+                }:
+                    # A valid coordinate can still be intentionally rejected by
+                    # the subtitle-size safety policy.  Do not misreport that as
+                    # a malformed OCR contract or fail a precision render.
+                    logger.debug("[BBox] Rejected by size policy: %s", invalid_reason)
+                else:
+                    self._mark_review_required(invalid_reason, invalid_coordinates=1)
+
+        return regions
 
     def _calculate_iou(self, box1, box2):
         """Calculate IoU (Intersection over Union) between two boxes."""
@@ -932,143 +1169,1143 @@ class SubtitleDetector:
 
         return inter_area / union_area if union_area > 0 else 0.0
 
-    def _gpu_aggregate_regions(self, all_regions):
+    def _repair_oversized_observations(self, all_regions, fps):
+        """Replace imprecise page-scale GLM boxes with nearby text-matched boxes."""
+        regions = [item for item in (all_regions or []) if isinstance(item, dict)]
+        normal = [item for item in regions if not item.get("oversized")]
+        if not normal:
+            if any(item.get("oversized") for item in regions):
+                self._mark_review_required("oversized_ocr_bbox_without_precise_anchor")
+            return regions
+
+        max_time_delta = max(1.0, 6.0 / max(float(fps or 30.0), 1.0))
+        repaired = []
+        for region in regions:
+            if not region.get("oversized"):
+                repaired.append(region)
+                continue
+
+            oversized_text = "".join(
+                char
+                for char in str(region.get("text", "") or "")
+                if "\u4e00" <= char <= "\u9fff" or char.isalnum()
+            )
+            oversized_parts = [
+                "".join(
+                    char
+                    for char in line
+                    if "\u4e00" <= char <= "\u9fff" or char.isalnum()
+                )
+                for line in str(region.get("text", "") or "").splitlines()
+            ]
+            oversized_parts = [part for part in oversized_parts if len(part) >= 2]
+            region_time = float(region.get("time", 0.0) or 0.0)
+            scene_id = region.get("scene_id")
+            candidates = []
+            for candidate in normal:
+                time_delta = abs(float(candidate.get("time", 0.0) or 0.0) - region_time)
+                if time_delta > max_time_delta:
+                    continue
+                same_physical_frame = bool(
+                    int(candidate.get("frame_index", -2))
+                    == int(region.get("frame_index", -1))
+                )
+                if candidate.get("scene_id") != scene_id and not same_physical_frame:
+                    continue
+                candidate_text = "".join(
+                    char
+                    for char in str(candidate.get("text", "") or "")
+                    if "\u4e00" <= char <= "\u9fff" or char.isalnum()
+                )
+                if len(candidate_text) < 2 or not oversized_text:
+                    continue
+                matcher = SequenceMatcher(None, oversized_text, candidate_text)
+                longest = matcher.find_longest_match(
+                    0, len(oversized_text), 0, len(candidate_text)
+                ).size
+                is_substring = candidate_text in oversized_text
+                sequence_ratio = matcher.ratio()
+                independent_anchor = str(candidate.get("source", "") or "").startswith(
+                    "rapidocr_"
+                )
+                candidate_center_x = float(candidate.get("x", 0.0)) + float(
+                    candidate.get("width", 0.0)
+                ) / 2.0
+                candidate_center_y = float(candidate.get("y", 0.0)) + float(
+                    candidate.get("height", 0.0)
+                ) / 2.0
+                inside_oversized = bool(
+                    float(region.get("x", 0.0)) <= candidate_center_x
+                    <= float(region.get("x", 0.0)) + float(region.get("width", 0.0))
+                    and float(region.get("y", 0.0)) <= candidate_center_y
+                    <= float(region.get("y", 0.0)) + float(region.get("height", 0.0))
+                )
+                layout_only_anchor = bool(
+                    independent_anchor and same_physical_frame and inside_oversized
+                )
+                if not is_substring and not layout_only_anchor and (
+                    longest < 2
+                    or (sequence_ratio < 0.55 and not independent_anchor)
+                ):
+                    continue
+                candidates.append(
+                    (
+                        time_delta,
+                        candidate,
+                        candidate_text,
+                        matcher,
+                        is_substring,
+                        layout_only_anchor,
+                    )
+                )
+
+            # An oversized layout belongs to one source frame.  Mixing anchors
+            # from the whole +/-1 second window can replicate unrelated labels
+            # that merely share a common character.  Keep only the closest
+            # timestamp group (one decoder frame of tolerance).
+            if candidates:
+                closest_delta = min(item[0] for item in candidates)
+                same_frame_tolerance = 1.5 / max(float(fps or 30.0), 1.0)
+                candidates = [
+                    item
+                    for item in candidates
+                    if item[0] <= closest_delta + same_frame_tolerance
+                ]
+
+            anchors = []
+            anchor_texts = []
+            anchor_layout_flags = []
+            covered_indices = set()
+            ambiguous = False
+            for (
+                _time_delta,
+                candidate,
+                candidate_text,
+                matcher,
+                is_substring,
+                layout_only_anchor,
+            ) in sorted(
+                candidates, key=lambda item: item[0]
+            ):
+                same_anchor = any(
+                    self._calculate_iou(candidate, existing) > 0.2
+                    for existing in anchors
+                )
+                if same_anchor:
+                    continue
+                if candidate_text in anchor_texts:
+                    # The same phrase at multiple disjoint locations is
+                    # ambiguous unless the combined OCR text itself contains
+                    # multiple copies in the same order.
+                    if oversized_text.count(candidate_text) <= anchor_texts.count(
+                        candidate_text
+                    ):
+                        ambiguous = True
+                        continue
+                anchors.append(candidate)
+                anchor_texts.append(candidate_text)
+                anchor_layout_flags.append(layout_only_anchor)
+                if is_substring:
+                    search_from = 0
+                    while True:
+                        start = oversized_text.find(candidate_text, search_from)
+                        if start < 0:
+                            break
+                        covered_indices.update(
+                            range(start, min(len(oversized_text), start + len(candidate_text)))
+                        )
+                        search_from = start + 1
+                else:
+                    for block in matcher.get_matching_blocks():
+                        if block.size >= 2:
+                            covered_indices.update(
+                                range(block.a, min(len(oversized_text), block.a + block.size))
+                            )
+
+            coverage = (
+                len(covered_indices) / len(oversized_text)
+                if oversized_text
+                else 0.0
+            )
+            if (
+                len(oversized_parts) >= 1
+                and sum(1 for value in anchor_layout_flags if value)
+                >= len(oversized_parts)
+            ):
+                # A second engine confirmed at least the same number of
+                # spatially distinct Chinese layout items on the exact
+                # physical frame.  This applies to a single line as well as a
+                # multi-line document box: stylized text can be recognized
+                # differently by the two engines while the independent pixel
+                # polygon remains a precise layout anchor.  The exact-frame
+                # requirement above prevents borrowing unrelated text from a
+                # nearby frame or across a scene cut.
+                coverage = 1.0
+            if anchors and coverage >= 0.75 and not ambiguous:
+                for anchor in anchors:
+                    clone = dict(anchor)
+                    clone.update(
+                        {
+                            "time": region_time,
+                            "frame_index": int(region.get("frame_index", -1)),
+                            "scene_id": scene_id,
+                            "source": "oversized_bbox_repaired",
+                            "oversized": False,
+                            "repaired_from_oversized": True,
+                            "independent_chinese": bool(
+                                str(anchor.get("source", "") or "").startswith(
+                                    "rapidocr_"
+                                )
+                            ),
+                        }
+                    )
+                    repaired.append(clone)
+            else:
+                reason = (
+                    "oversized_ocr_bbox_ambiguous_anchor"
+                    if ambiguous
+                    else "oversized_ocr_bbox_without_precise_anchor"
+                )
+                self._mark_review_required(reason)
+                self.unresolved_oversized_observations.append(
+                    {
+                        "time": region_time,
+                        "frame_index": int(region.get("frame_index", -1)),
+                        "scene_id": scene_id,
+                        "text": str(region.get("text", "") or "")[:200],
+                        "candidate_count": len(candidates),
+                        "coverage": round(float(coverage), 4),
+                        "ambiguous": bool(ambiguous),
+                    }
+                )
+                # Never render the unresolved page-scale polygon.  It is kept
+                # out of the automatic blur path and the diagnostic forces a
+                # manual/retry decision instead of obscuring most of the frame.
+        return repaired
+
+    @staticmethod
+    def _normalized_track_text(value: Any) -> str:
+        return "".join(
+            char
+            for char in str(value or "")
+            if "\u4e00" <= char <= "\u9fff" or char.isalnum()
+        ).casefold()
+
+    @staticmethod
+    def _visual_track_signature(crop):
+        """Return a normalized high-pass signature for a tight OCR crop."""
+        if crop is None or not getattr(crop, "size", 0):
+            return None
+        try:
+            gray = (
+                cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                if len(crop.shape) == 3
+                else crop
+            ).astype(np.float32)
+            gray = cv2.resize(gray, (128, 48), interpolation=cv2.INTER_AREA)
+            high_pass = gray - cv2.GaussianBlur(gray, (0, 0), 2.0)
+            high_pass -= float(high_pass.mean())
+            norm = float(np.linalg.norm(high_pass))
+            if not np.isfinite(norm) or norm < 1e-5:
+                return None
+            return high_pass / norm
+        except Exception:
+            return None
+
+    @staticmethod
+    def _fill_short_visual_gaps(flags: List[bool], max_gap: int) -> List[bool]:
+        """Fill only short false runs that are bounded by visual matches."""
+        filled = list(flags)
+        index = 0
+        while index < len(filled):
+            if filled[index]:
+                index += 1
+                continue
+            start = index
+            while index < len(filled) and not filled[index]:
+                index += 1
+            if (
+                start > 0
+                and index < len(filled)
+                and (index - start) <= max(0, int(max_gap))
+            ):
+                for gap_index in range(start, index):
+                    filled[gap_index] = True
+        return filled
+
+    @staticmethod
+    def _extend_visual_match_edges(
+        flags: List[bool], scores: List[float], max_frames: int, threshold: float
+    ) -> List[bool]:
+        """Extend strong visual components only over adjacent weaker matches.
+
+        Tiny moving labels often fade or slide into view for a few frames
+        before OCR becomes readable.  A bounded hysteresis edge follows the
+        actual pixel similarity while avoiding a blind temporal buffer.
+        Scene isolation is applied by the caller before this helper runs.
         """
-        GPU/NumPy accelerated region aggregation with spatial-first clustering.
+        extended = list(flags)
+        limit = max(0, int(max_frames))
+        original = list(flags)
+        index = 0
+        while index < len(original):
+            if not original[index]:
+                index += 1
+                continue
+            start = index
+            while index < len(original) and original[index]:
+                index += 1
+            end = index
+            for distance in range(1, limit + 1):
+                left = start - distance
+                if left < 0 or float(scores[left]) < float(threshold):
+                    break
+                extended[left] = True
+            for distance in range(limit):
+                right = end + distance
+                if right >= len(original) or float(scores[right]) < float(threshold):
+                    break
+                extended[right] = True
+        return extended
 
-        ?끸쁾??媛쒖꽑: 怨듦컙-?곗꽑(spatial-first) ?대윭?ㅽ꽣留??끸쁾??        湲곗〈 臾몄젣: ?쒓컙-?곗꽑 洹몃９?????쒓컙??蹂묓빀 ??Y醫뚰몴 誘몄꽭蹂?숈쑝濡?蹂묓빀 ?ㅽ뙣 ???쒓컙 媛?諛쒖깮
-        ?닿껐: 紐⑤뱺 ?쒓컙???媛먯?瑜?怨듦컙?곸쑝濡?癒쇱? ?대윭?ㅽ꽣留???媛??대윭?ㅽ꽣???쒓컙 踰붿쐞瑜??곗냽?쇰줈 怨꾩궛
+    @staticmethod
+    def _stable_compact_track_envelope(track, frame_width, frame_height):
+        """Return a padded full-label envelope for a stable local OCR track."""
+        if not track or frame_width <= 0 or frame_height <= 0:
+            return None
+        if not any(
+            str(item.get("region", {}).get("source", "") or "")
+            == "rapidocr_independent"
+            for item in track
+        ):
+            return None
+        boxes = [item.get("box") for item in track if item.get("box")]
+        if not boxes:
+            return None
+        centers_x = [(box[0] + box[2]) / 2.0 for box in boxes]
+        centers_y = [(box[1] + box[3]) / 2.0 for box in boxes]
+        x1 = int(max(0, round(min(box[0] for box in boxes) - 3)))
+        y1 = int(max(0, round(min(box[1] for box in boxes) - 3)))
+        x2 = int(min(frame_width - 1, round(max(box[2] for box in boxes) + 3)))
+        y2 = int(min(frame_height - 1, round(max(box[3] for box in boxes) + 3)))
+        if (
+            x2 <= x1
+            or y2 <= y1
+            or (x2 - x1) > frame_width * 0.25
+            or (y2 - y1) > frame_height * 0.18
+            or (max(centers_x) - min(centers_x))
+            > max(12.0, (x2 - x1) * 0.75)
+            or (max(centers_y) - min(centers_y))
+            > max(10.0, (y2 - y1) * 0.75)
+        ):
+            return None
+        return [[x1, y1], [x2, y1], [x2, y2], [x1, y2]]
 
-        Phase 1: ?꾩껜 媛먯? 寃곌낵瑜?怨듦컙???좎궗??IoU + ??洹쇱젒???쇰줈 ?대윭?ㅽ꽣留?        Phase 2: 媛?怨듦컙 ?대윭?ㅽ꽣?먯꽌 媛먯? ?쒓컙?ㅼ쓣 ?섏쭛?섏뿬 ?곗냽 ?쒓컙 援ш컙 怨꾩궛
-        Phase 3: ?쒓컙 援ш컙蹂?釉붾윭 ?곸뿭 異쒕젰 (?숈씪 ?꾩튂 ?먮쭑???щ씪議뚮떎 ?ъ텧?꾪븯硫?蹂꾨룄 援ш컙)
+    def _augment_static_visual_tracks(
+        self, video_path, all_regions, fps, total_frames, W, H
+    ):
+        """Fill OCR misses only where a stable subtitle is visibly present.
 
-        Args:
-            all_regions: List of all detected regions across all time groups
-
-        Returns:
-            List of regions with continuous time ranges per spatial cluster
+        GLM can miss an animated badge on alternating animation phases even
+        during exhaustive scanning.  This pass builds high-pass templates from
+        exact OCR observations, then adds a polygon only on source frames whose
+        tight crop matches that template bank.  Long unbounded time extension
+        is deliberately forbidden: every inferred frame belongs to a connected
+        visual-match component containing at least one exact OCR observation.
         """
+        regions = [item for item in (all_regions or []) if isinstance(item, dict)]
+        if (
+            not CV2_AVAILABLE
+            or not NUMPY_AVAILABLE
+            or not video_path
+            or not os.path.exists(video_path)
+            or not fps
+            or fps <= 0
+            or total_frames <= 0
+        ):
+            return regions
+
+        candidates = []
+        for region in regions:
+            if region.get("oversized") or not region.get("polygon"):
+                continue
+            text = self._normalized_track_text(region.get("text"))
+            if not text or not any("\u4e00" <= char <= "\u9fff" for char in text):
+                continue
+            try:
+                frame_index = int(region.get("frame_index", -1))
+                polygon = self._normalize_polygon(region.get("polygon"), W, H)
+            except Exception:
+                continue
+            if frame_index < 0 or frame_index >= total_frames or not polygon:
+                continue
+            xs = [point[0] for point in polygon]
+            ys = [point[1] for point in polygon]
+            candidates.append(
+                {
+                    "region": region,
+                    "text": text,
+                    "frame_index": frame_index,
+                    "box": [min(xs), min(ys), max(xs), max(ys)],
+                }
+            )
+        if len(candidates) < 3:
+            return regions
+
+        def box_iou(left, right):
+            x1 = max(left[0], right[0])
+            y1 = max(left[1], right[1])
+            x2 = min(left[2], right[2])
+            y2 = min(left[3], right[3])
+            intersection = max(0, x2 - x1) * max(0, y2 - y1)
+            left_area = max(1, (left[2] - left[0]) * (left[3] - left[1]))
+            right_area = max(1, (right[2] - right[0]) * (right[3] - right[1]))
+            return intersection / float(left_area + right_area - intersection)
+
+        tracks = []
+        for candidate in sorted(candidates, key=lambda item: item["frame_index"]):
+            assigned = False
+            for track in tracks:
+                track_match = False
+                # Animated stickers can alternate between boxes that do not
+                # overlap on consecutive frames.  Compare against the track's
+                # recent template bank, not only its immediately previous box.
+                for representative in reversed(track[-48:]):
+                    matcher = SequenceMatcher(
+                        None, candidate["text"], representative["text"]
+                    )
+                    text_related = bool(
+                        candidate["text"] in representative["text"]
+                        or representative["text"] in candidate["text"]
+                        or matcher.ratio() >= 0.65
+                    )
+                    candidate_box = candidate["box"]
+                    representative_box = representative["box"]
+                    candidate_width = max(1, candidate_box[2] - candidate_box[0])
+                    candidate_height = max(1, candidate_box[3] - candidate_box[1])
+                    representative_width = max(
+                        1, representative_box[2] - representative_box[0]
+                    )
+                    representative_height = max(
+                        1, representative_box[3] - representative_box[1]
+                    )
+                    center_close = bool(
+                        abs(
+                            (candidate_box[0] + candidate_box[2]) / 2.0
+                            - (representative_box[0] + representative_box[2]) / 2.0
+                        )
+                        <= max(candidate_width, representative_width) * 1.25
+                        and abs(
+                            (candidate_box[1] + candidate_box[3]) / 2.0
+                            - (representative_box[1] + representative_box[3]) / 2.0
+                        )
+                        <= max(candidate_height, representative_height) * 1.25
+                    )
+                    spatially_related = bool(
+                        box_iou(candidate_box, representative_box) >= 0.15
+                        or center_close
+                    )
+                    both_independent = bool(
+                        str(candidate["region"].get("source", "") or "").startswith(
+                            "rapidocr_"
+                        )
+                        and str(
+                            representative["region"].get("source", "") or ""
+                        ).startswith("rapidocr_")
+                    )
+                    width_ratio = max(candidate_width, representative_width) / max(
+                        1.0, min(candidate_width, representative_width)
+                    )
+                    height_ratio = max(candidate_height, representative_height) / max(
+                        1.0, min(candidate_height, representative_height)
+                    )
+                    independent_center_close = bool(
+                        abs(
+                            (candidate_box[0] + candidate_box[2]) / 2.0
+                            - (representative_box[0] + representative_box[2]) / 2.0
+                        )
+                        <= max(16.0, min(candidate_width, representative_width) * 0.85)
+                        and abs(
+                            (candidate_box[1] + candidate_box[3]) / 2.0
+                            - (representative_box[1] + representative_box[3]) / 2.0
+                        )
+                        <= max(10.0, min(candidate_height, representative_height) * 0.85)
+                        and width_ratio <= 2.5
+                        and height_ratio <= 2.5
+                    )
+                    independent_visual_match = bool(
+                        width_ratio <= 2.5
+                        and height_ratio <= 2.5
+                        and (
+                            box_iou(candidate_box, representative_box) >= 0.20
+                            or independent_center_close
+                        )
+                    )
+                    frame_gap = int(candidate["frame_index"]) - int(
+                        representative["frame_index"]
+                    )
+                    # Independent OCR can vary one glyph between adjacent
+                    # frames (e.g. 如意/如惠), but a merely similar box much
+                    # later in the same long scene is not the same track.
+                    # The old spatial-only rule merged unrelated labels into
+                    # an oversized envelope, disabling visual onset recovery.
+                    independent_text_continuity = bool(
+                        text_related
+                        or (
+                            0 <= frame_gap <= 6
+                            and box_iou(candidate_box, representative_box) >= 0.50
+                        )
+                    )
+                    independent_temporal_continuity = bool(
+                        0 <= frame_gap <= max(6, int(round(float(fps))))
+                    )
+                    if (
+                        both_independent
+                        and candidate["region"].get("scene_id")
+                        == representative["region"].get("scene_id")
+                        and independent_visual_match
+                        and independent_text_continuity
+                        and independent_temporal_continuity
+                    ) or (
+                        not both_independent
+                        and spatially_related
+                        and text_related
+                    ):
+                        track_match = True
+                        break
+                if track_match:
+                    track.append(candidate)
+                    assigned = True
+                    break
+            if not assigned:
+                tracks.append([candidate])
+
+        inferred = []
+        self.visual_track_diagnostics = []
+        for track in tracks:
+            exact_frames = sorted({item["frame_index"] for item in track})
+            if len(exact_frames) < 3:
+                continue
+            independent_track = any(
+                str(item["region"].get("source", "") or "").startswith("rapidocr_")
+                for item in track
+            )
+            centers_x = [(item["box"][0] + item["box"][2]) / 2.0 for item in track]
+            centers_y = [(item["box"][1] + item["box"][3]) / 2.0 for item in track]
+            x1 = int(max(0, round(min(item["box"][0] for item in track) - 3)))
+            y1 = int(max(0, round(min(item["box"][1] for item in track) - 3)))
+            x2 = int(min(W - 1, round(max(item["box"][2] for item in track) + 3)))
+            y2 = int(min(H - 1, round(max(item["box"][3] for item in track) + 3)))
+            if x2 <= x1 or y2 <= y1:
+                continue
+            if (x2 - x1) > W * 0.85 or (y2 - y1) > H * 0.40:
+                continue
+            envelope_polygon = self._stable_compact_track_envelope(track, W, H)
+            stable_compact_envelope = bool(envelope_polygon)
+
+            # Preserve temporal and animation diversity without unbounded
+            # memory/API cost.
+            seed_frames = exact_frames
+            if len(seed_frames) > 24:
+                sample_indices = np.linspace(0, len(seed_frames) - 1, 24, dtype=int)
+                seed_frames = [seed_frames[int(index)] for index in sample_indices]
+            templates = []
+            cap = cv2.VideoCapture(video_path)
+            try:
+                # Frame-index seeking is not exact on VFR media: OpenCV may
+                # seek by the stream's average FPS and return a neighboring
+                # decoded frame.  OCR observations and rendering both use the
+                # sequential decode order, so collect templates in that same
+                # order to keep the visual onset aligned frame-for-frame.
+                seed_frame_set = set(int(value) for value in seed_frames)
+                last_seed_frame = max(seed_frame_set, default=-1)
+                seed_items_by_frame = {
+                    seed_frame: min(
+                        track,
+                        key=lambda item: abs(item["frame_index"] - seed_frame),
+                    )
+                    for seed_frame in seed_frame_set
+                }
+                sequential_index = 0
+                while sequential_index <= last_seed_frame:
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
+                    if sequential_index not in seed_frame_set:
+                        sequential_index += 1
+                        continue
+                    signature = self._visual_track_signature(frame[y1:y2, x1:x2])
+                    if signature is not None:
+                        seed_item = seed_items_by_frame[sequential_index]
+                        seed_polygon = self._normalize_polygon(
+                            seed_item["region"].get("polygon"), W, H
+                        )
+                        if seed_polygon:
+                            templates.append((signature, seed_polygon))
+                    sequential_index += 1
+            finally:
+                cap.release()
+            if not templates:
+                continue
+
+            scores = []
+            matched_polygons = []
+            frame_times = []
+            visual_scene_ids = []
+            visual_scene_counter = 0
+            previous_scene_frame = None
+            cap = cv2.VideoCapture(video_path)
+            previous_time = None
+            try:
+                for frame_index in range(total_frames):
+                    ok, frame = cap.read()
+                    if not ok:
+                        scores.append(float("-inf"))
+                        matched_polygons.append(None)
+                        frame_times.append(frame_index / float(fps))
+                        visual_scene_ids.append(visual_scene_counter)
+                        continue
+                    if self._is_scene_cut(previous_scene_frame, frame):
+                        visual_scene_counter += 1
+                    previous_scene_frame = frame
+                    visual_scene_ids.append(visual_scene_counter)
+                    frame_time = self._frame_time_after_read(
+                        cap, frame_index, fps, previous_time=previous_time
+                    )
+                    previous_time = frame_time
+                    signature = self._visual_track_signature(frame[y1:y2, x1:x2])
+                    if signature is None:
+                        score = float("-inf")
+                        matched_polygon = None
+                    else:
+                        scored_templates = [
+                            (float(np.sum(signature * template[0])), template[1])
+                            for template in templates
+                        ]
+                        score, matched_polygon = max(
+                            scored_templates, key=lambda item: item[0]
+                        )
+                    scores.append(score)
+                    matched_polygons.append(matched_polygon)
+                    frame_times.append(frame_time)
+            finally:
+                cap.release()
+
+            matched = [score >= 0.68 for score in scores]
+            for frame_index in exact_frames:
+                if 0 <= frame_index < len(matched):
+                    matched[frame_index] = True
+            # Fill only inside a visual scene.  A matching logo-like crop on
+            # both sides of a hard cut must never bridge the scene boundary.
+            scene_start = 0
+            while scene_start < len(matched):
+                scene_end = scene_start + 1
+                while (
+                    scene_end < len(matched)
+                    and visual_scene_ids[scene_end]
+                    == visual_scene_ids[scene_start]
+                ):
+                    scene_end += 1
+                scene_flags = self._fill_short_visual_gaps(
+                    matched[scene_start:scene_end],
+                    max_gap=max(2, int(round(float(fps) * 0.12))),
+                )
+                scene_flags = self._extend_visual_match_edges(
+                    scene_flags,
+                    scores[scene_start:scene_end],
+                    max_frames=max(1, int(round(float(fps) * 0.10))),
+                    threshold=0.55,
+                )
+                matched[scene_start:scene_end] = scene_flags
+                scene_start = scene_end
+
+            exact_set = set(exact_frames)
+            keep = [False] * len(matched)
+            index = 0
+            while index < len(matched):
+                if not matched[index]:
+                    index += 1
+                    continue
+                start = index
+                scene_id = visual_scene_ids[index]
+                while (
+                    index < len(matched)
+                    and matched[index]
+                    and visual_scene_ids[index] == scene_id
+                ):
+                    index += 1
+                if any(frame in exact_set for frame in range(start, index)):
+                    for frame in range(start, index):
+                        keep[frame] = True
+
+            self.visual_track_diagnostics.append(
+                {
+                    "texts": sorted({item["text"] for item in track})[:12],
+                    "exact_count": len(exact_frames),
+                    "first_exact": exact_frames[0],
+                    "last_exact": exact_frames[-1],
+                    "box": [x1, y1, x2, y2],
+                    "template_count": len(templates),
+                    "matched_count": sum(1 for value in matched if value),
+                    "kept_count": sum(1 for value in keep if value),
+                    "inferred_count": sum(
+                        1
+                        for frame_index, value in enumerate(keep)
+                        if value and frame_index not in exact_set
+                    ),
+                    "score_min": round(
+                        min((score for score in scores if np.isfinite(score)), default=-1.0),
+                        4,
+                    ),
+                    "score_max": round(
+                        max((score for score in scores if np.isfinite(score)), default=-1.0),
+                        4,
+                    ),
+                    "stable_compact_envelope": stable_compact_envelope,
+                }
+            )
+
+            exact_scene_by_frame = {
+                item["frame_index"]: item["region"].get("scene_id") for item in track
+            }
+            representative_region = max(
+                track,
+                key=lambda item: float(item["region"].get("confidence", 0.0) or 0.0),
+            )["region"]
+            for frame_index, should_keep in enumerate(keep):
+                if not should_keep or frame_index in exact_set:
+                    continue
+                nearest_exact = min(exact_frames, key=lambda value: abs(value - frame_index))
+                scene_id = exact_scene_by_frame.get(nearest_exact)
+                polygon = matched_polygons[frame_index]
+                if stable_compact_envelope:
+                    polygon = envelope_polygon
+                if not polygon:
+                    continue
+                polygon_xs = [point[0] for point in polygon]
+                polygon_ys = [point[1] for point in polygon]
+                polygon_x1, polygon_x2 = min(polygon_xs), max(polygon_xs)
+                polygon_y1, polygon_y2 = min(polygon_ys), max(polygon_ys)
+                inferred.append(
+                    {
+                        "x": round(100.0 * polygon_x1 / W, 4),
+                        "y": round(100.0 * polygon_y1 / H, 4),
+                        "width": round(100.0 * (polygon_x2 - polygon_x1) / W, 4),
+                        "height": round(100.0 * (polygon_y2 - polygon_y1) / H, 4),
+                        "oversized": False,
+                        "confidence": float(
+                            representative_region.get("confidence", 1.0) or 1.0
+                        ),
+                        "time": float(frame_times[frame_index]),
+                        "frame_index": frame_index,
+                        "text": str(representative_region.get("text", "") or ""),
+                        "language": "chinese",
+                        "source": (
+                            "rapidocr_visual_inferred"
+                            if independent_track
+                            else "visual_track_inferred"
+                        ),
+                        "polygon": polygon,
+                        "scene_id": scene_id,
+                        "visual_match_score": float(scores[frame_index]),
+                    }
+                )
+
+        if inferred:
+            logger.info(
+                "[OCR visual tracking] Added %d frame-backed observations across %d tracks",
+                len(inferred),
+                len(tracks),
+            )
+        return regions + inferred
+
+    def _scan_with_independent_local_ocr(
+        self, video_path: str, fps: float, total_frames: int, W: int, H: int
+    ) -> List[Dict[str, Any]]:
+        """Run all-frame RapidOCR in an isolated process and normalize boxes."""
+        script_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "scripts",
+            "independent_rapidocr_source_scan.py",
+        )
+        if not os.path.isfile(script_path):
+            self._mark_review_required("independent_source_ocr_script_missing")
+            return []
+        result_path = None
+        try:
+            handle = tempfile.NamedTemporaryFile(
+                prefix="precision_source_ocr_", suffix=".json", delete=False
+            )
+            result_path = handle.name
+            handle.close()
+            command = [sys.executable, script_path, video_path, result_path]
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=creationflags,
+            )
+            if process.stdout is not None:
+                for line in process.stdout:
+                    if line.strip():
+                        logger.info(line.rstrip())
+            return_code = process.wait()
+            try:
+                with open(result_path, "r", encoding="utf-8") as result_file:
+                    payload = json.load(result_file)
+            except Exception:
+                payload = None
+            if (
+                return_code != 0
+                or not isinstance(payload, dict)
+                or not payload.get("ok")
+                or int(payload.get("scanned_frames", -1)) != int(total_frames)
+            ):
+                self._mark_review_required("independent_source_ocr_failed")
+                return []
+
+            normalized = []
+            for item in payload.get("regions") or []:
+                polygon = item.get("polygon") if isinstance(item, dict) else None
+                normalized_polygon = self._normalize_polygon(polygon, W, H)
+                normalized_polygon = self._snap_polygon_to_near_frame_edges(
+                    normalized_polygon, W, H
+                )
+                processed = self._gpu_process_bbox_batch([normalized_polygon], W, H)
+                if not processed or processed[0] is None or not normalized_polygon:
+                    continue
+                info = processed[0]
+                # A high-confidence independent OCR line can legitimately span
+                # almost the entire frame width.  Width alone previously marked
+                # these shallow banners as page-scale failures and dropped the
+                # exact polygon (case: 98.4% wide, 6.5% high Chinese caption).
+                oversized = bool(info.get("oversized", False))
+                if oversized and self._independent_box_is_tight_line(info):
+                    oversized = False
+                normalized.append(
+                    {
+                        "x": info["x"],
+                        "y": info["y"],
+                        "width": info["width"],
+                        "height": info["height"],
+                        "oversized": oversized,
+                        "confidence": float(item.get("confidence", 0.0) or 0.0),
+                        "time": float(item.get("time", 0.0) or 0.0),
+                        "frame_index": int(item.get("frame_index", -1)),
+                        "text": str(item.get("text", "") or ""),
+                        "language": "chinese",
+                        "source": "rapidocr_independent",
+                        "polygon": normalized_polygon,
+                        "scene_id": str(item.get("scene_id", "rapidocr:0") or "rapidocr:0"),
+                    }
+                )
+            logger.info(
+                "[OCR independent source] Added %d exact observations",
+                len(normalized),
+            )
+            return normalized
+        except Exception as exc:
+            logger.warning("[OCR independent source] Failed: %s", type(exc).__name__)
+            self._mark_review_required("independent_source_ocr_failed")
+            return []
+        finally:
+            if result_path:
+                try:
+                    os.unlink(result_path)
+                except OSError:
+                    pass
+
+    def _scan_with_independent_corner_ocr(
+        self, video_path: str, fps: float, total_frames: int, W: int, H: int
+    ) -> List[Dict[str, Any]]:
+        """Run a cached 3x top-corner OCR pass for small rotated labels."""
+        script_path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+            "scripts",
+            "independent_rapidocr_corner_scan.py",
+        )
+        if not os.path.isfile(script_path):
+            self._mark_review_required("independent_corner_ocr_script_missing")
+            return []
+        result_path = None
+        try:
+            handle = tempfile.NamedTemporaryFile(
+                prefix="precision_corner_ocr_", suffix=".json", delete=False
+            )
+            result_path = handle.name
+            handle.close()
+            command = [sys.executable, script_path, video_path, result_path]
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            process = subprocess.Popen(
+                command,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                creationflags=creationflags,
+            )
+            if process.stdout is not None:
+                for line in process.stdout:
+                    if line.strip():
+                        logger.info(line.rstrip())
+            return_code = process.wait()
+            try:
+                with open(result_path, "r", encoding="utf-8") as result_file:
+                    payload = json.load(result_file)
+            except Exception:
+                payload = None
+            if (
+                return_code != 0
+                or not isinstance(payload, dict)
+                or not payload.get("ok")
+                or int(payload.get("scanned_frames", -1)) != int(total_frames)
+            ):
+                self._mark_review_required("independent_corner_ocr_failed")
+                return []
+            normalized = []
+            for item in payload.get("regions") or []:
+                polygon = item.get("polygon") if isinstance(item, dict) else None
+                normalized_polygon = self._normalize_polygon(polygon, W, H)
+                normalized_polygon = self._snap_polygon_to_near_frame_edges(
+                    normalized_polygon, W, H
+                )
+                processed = self._gpu_process_bbox_batch([normalized_polygon], W, H)
+                if not processed or processed[0] is None or not normalized_polygon:
+                    continue
+                info = processed[0]
+                normalized.append(
+                    {
+                        "x": info["x"],
+                        "y": info["y"],
+                        "width": info["width"],
+                        "height": info["height"],
+                        "oversized": False,
+                        "confidence": float(item.get("confidence", 0.0) or 0.0),
+                        "time": float(item.get("time", 0.0) or 0.0),
+                        "frame_index": int(item.get("frame_index", -1)),
+                        "text": str(item.get("text", "") or ""),
+                        "language": "chinese",
+                        "source": "rapidocr_corner",
+                        "polygon": normalized_polygon,
+                        "scene_id": str(
+                            item.get("scene_id", "rapidocr:0") or "rapidocr:0"
+                        ),
+                    }
+                )
+            logger.info("[OCR independent corner] Added %d observations", len(normalized))
+            return normalized
+        except Exception as exc:
+            logger.warning("[OCR independent corner] Failed: %s", type(exc).__name__)
+            self._mark_review_required("independent_corner_ocr_failed")
+            return []
+        finally:
+            if result_path:
+                try:
+                    os.unlink(result_path)
+                except OSError:
+                    pass
+
+    def _gpu_aggregate_regions(self, all_regions, fps=None, total_duration=None):
+        """Aggregate detections with frame-scale timing and scene boundaries."""
         if not all_regions or not NUMPY_AVAILABLE:
             return []
 
+        import math
+
+        precision_timing = bool(fps and math.isfinite(float(fps)) and float(fps) > 0)
+        safe_fps = float(fps) if precision_timing else 30.0
+        if precision_timing:
+            max_gap = max(1, int(OCRThresholds.PRECISION_MAX_GAP_FRAMES)) / safe_fps
+            buffer_before = max(0, int(OCRThresholds.PRECISION_BUFFER_FRAMES)) / safe_fps
+            buffer_after = buffer_before
+            persistent_gap = max(
+                max_gap,
+                float(OCRThresholds.PRECISION_PERSISTENT_TRACK_GAP_SECONDS),
+            )
+        else:
+            # Compatibility for direct callers that do not provide video FPS.
+            max_gap = float(OCRThresholds.TIME_SEGMENT_GAP)
+            buffer_before = float(OCRThresholds.TIME_BUFFER_BEFORE)
+            buffer_after = float(OCRThresholds.TIME_BUFFER_AFTER)
+            persistent_gap = max_gap
+
         try:
-            # ===== Phase 1: 怨듦컙-?곗꽑 ?대윭?ㅽ꽣留?(?꾩껜 ?쒓컙? ?듯빀) =====
-            # 紐⑤뱺 媛먯? 寃곌낵瑜?怨듦컙???좎궗?깅쭔?쇰줈 ?대윭?ㅽ꽣留?            # ?대젃寃??섎㈃ Y醫뚰몴 誘몄꽭蹂?숈뿉??媛숈? ?먮쭑?쇰줈 臾띠엫
             spatial_clusters = []
-
-            for region in all_regions:
+            ordered_regions = sorted(
+                self._repair_oversized_observations(all_regions, safe_fps),
+                key=lambda item: (float(item.get('time', 0.0)), int(item.get('frame_index', -1))),
+            )
+            for region in ordered_regions:
                 added = False
+                region_text = str(region.get('text', '') or '').strip()
                 for cluster in spatial_clusters:
-                    # ?대윭?ㅽ꽣?????bbox(泥?硫ㅻ쾭 湲곕컲 以묒븰媛?? 鍮꾧탳?섏뿬 ?쒕━?꾪듃 諛⑹?
-                    rep = cluster['representative']
-                    iou = self._calculate_iou(region, rep)
-
-                    # Y 以묒떖 洹쇱젒??泥댄겕 (媛숈? ?됱쓽 ?먮쭑)
+                    representative = cluster['representative']
+                    iou = self._calculate_iou(region, representative)
                     y_center_region = region['y'] + region['height'] / 2.0
-                    y_center_cluster = rep['y'] + rep['height'] / 2.0
-                    same_row = abs(y_center_region - y_center_cluster) <= max(region['height'], rep['height']) * OCRThresholds.SAME_ROW_MULTIPLIER
-
-                    # ?섑룊 媛?泥댄겕
+                    y_center_cluster = representative['y'] + representative['height'] / 2.0
+                    same_row = abs(y_center_region - y_center_cluster) <= max(
+                        region['height'], representative['height']
+                    ) * OCRThresholds.SAME_ROW_MULTIPLIER
                     region_right = region['x'] + region['width']
-                    rep_right = rep['x'] + rep['width']
-                    horizontal_gap = max(0.0, max(region['x'] - rep_right, rep['x'] - region_right))
+                    representative_right = representative['x'] + representative['width']
+                    horizontal_gap = max(
+                        0.0,
+                        max(region['x'] - representative_right, representative['x'] - region_right),
+                    )
                     proximity = same_row and horizontal_gap <= OCRThresholds.HORIZONTAL_GAP_THRESHOLD
-
-                    if iou > OCRThresholds.IOU_CLUSTER_THRESHOLD or proximity:
+                    last_member = cluster['members'][-1]
+                    same_scene = region.get('scene_id') == last_member.get('scene_id')
+                    close_in_time = (
+                        float(region.get('time', 0.0)) - float(last_member.get('time', 0.0))
+                    ) <= (max_gap + 1e-6)
+                    persistent_close = (
+                        float(region.get('time', 0.0)) - float(last_member.get('time', 0.0))
+                    ) <= (persistent_gap + 1e-6)
+                    same_moving_text = bool(
+                        region_text
+                        and region_text == str(last_member.get('text', '') or '').strip()
+                        and same_scene
+                        and persistent_close
+                    )
+                    same_track_window = same_scene and close_in_time
+                    same_size_class = bool(region.get('oversized', False)) == bool(
+                        last_member.get('oversized', False)
+                    )
+                    if same_size_class and (
+                        (
+                            same_track_window
+                            and (
+                                iou > OCRThresholds.IOU_CLUSTER_THRESHOLD
+                                or proximity
+                            )
+                        )
+                        or same_moving_text
+                    ):
                         cluster['members'].append(region)
-                        # union bbox 媛깆떊 (異쒕젰??
-                        bbox = cluster['bbox']
-                        new_left = min(bbox['x'], region['x'])
-                        new_top = min(bbox['y'], region['y'])
-                        new_right = max(bbox['x'] + bbox['width'], region['x'] + region['width'])
-                        new_bottom = max(bbox['y'] + bbox['height'], region['y'] + region['height'])
-                        cluster['bbox'] = {
-                            'x': new_left,
-                            'y': new_top,
-                            'width': new_right - new_left,
-                            'height': new_bottom - new_top,
+                        # The latest observation is a better motion-track anchor.
+                        cluster['representative'] = {
+                            'x': region['x'],
+                            'y': region['y'],
+                            'width': region['width'],
+                            'height': region['height'],
                         }
-                        # representative??媛깆떊?섏? ?딆쓬 ??泥댁씤 癒몄? 諛⑹?
                         added = True
                         break
-
                 if not added:
-                    init_bbox = {
+                    bbox = {
                         'x': region['x'],
                         'y': region['y'],
                         'width': region['width'],
                         'height': region['height'],
                     }
                     spatial_clusters.append({
-                        'bbox': dict(init_bbox),
-                        'representative': dict(init_bbox),
+                        'representative': dict(bbox),
                         'members': [region],
                     })
 
-            logger.debug(f"[Spatial-first clustering] {len(all_regions)} detections -> {len(spatial_clusters)} spatial clusters")
-
-            # ===== Phase 2: 媛?怨듦컙 ?대윭?ㅽ꽣?먯꽌 ?곗냽 ?쒓컙 援ш컙 怨꾩궛 =====
             merged_regions = []
+            for cluster_index, cluster in enumerate(spatial_clusters):
+                members = sorted(
+                    cluster['members'],
+                    key=lambda item: (float(item.get('time', 0.0)), int(item.get('frame_index', -1))),
+                )
+                segments = []
+                current = []
+                for member in members:
+                    if current:
+                        previous = current[-1]
+                        time_gap = float(member.get('time', 0.0)) - float(previous.get('time', 0.0))
+                        scene_changed = member.get('scene_id') != previous.get('scene_id')
+                        same_text = bool(
+                            str(member.get('text', '') or '').strip()
+                            and str(member.get('text', '') or '').strip()
+                            == str(previous.get('text', '') or '').strip()
+                        )
+                        persistent_text_gap = same_text and time_gap <= (
+                            persistent_gap + 1e-6
+                        )
+                        if (
+                            (time_gap > (max_gap + 1e-6) and not persistent_text_gap)
+                            or scene_changed
+                        ):
+                            segments.append(current)
+                            current = []
+                    current.append(member)
+                if current:
+                    segments.append(current)
 
-            for cluster_idx, cluster in enumerate(spatial_clusters):
-                members = cluster['members']
-                bbox = cluster['bbox']
+                for segment_index, seg_members in enumerate(segments):
+                    seg_start = min(float(item.get('time', 0.0)) for item in seg_members)
+                    seg_end = max(float(item.get('time', 0.0)) for item in seg_members)
+                    buffered_start = max(0.0, seg_start - buffer_before)
+                    buffered_end = seg_end + buffer_after
+                    if total_duration is not None and float(total_duration) > 0:
+                        buffered_end = min(float(total_duration), buffered_end)
 
-                # 紐⑤뱺 媛먯? ?쒓컙 ?섏쭛 諛??뺣젹
-                times = sorted(set(round(m.get('time', 0), 2) for m in members))
-                if not times:
-                    continue
-
-                # ?곗냽 ?쒓컙 援ш컙 遺꾪븷 (媛?씠 ?꾧퀎媛??댁긽?대㈃ 蹂꾨룄 援ш컙)
-                # 媛숈? ?꾩튂 ?먮쭑???좉퉸 ?щ씪議뚮떎 ?ъ텧?꾪븯??寃쎌슦瑜?泥섎━
-                time_segments = []
-                seg_start = times[0]
-                seg_end = times[0]
-
-                for t in times[1:]:
-                    if t - seg_end <= OCRThresholds.TIME_SEGMENT_GAP:
-                        seg_end = t
-                    else:
-                        time_segments.append((seg_start, seg_end))
-                        seg_start = t
-                        seg_end = t
-                time_segments.append((seg_start, seg_end))
-
-                # ===== Phase 3: ?쒓컙 援ш컙蹂?釉붾윭 ?곸뿭 異쒕젰 =====
-                for seg_idx, (seg_start, seg_end) in enumerate(time_segments):
-                    # ?쒓컙 踰꾪띁 ?곸슜
-                    buffered_start = max(0.0, seg_start - OCRThresholds.TIME_BUFFER_BEFORE)
-                    buffered_end = seg_end + OCRThresholds.TIME_BUFFER_AFTER
-
-                    # 怨듦컙 諛붿슫??諛뺤뒪???⑤뵫 異붽?
+                    # Recompute the box from this time segment only.  Using the
+                    # all-time cluster union caused long moving-caption trails.
+                    left = min(float(item['x']) for item in seg_members)
+                    top = min(float(item['y']) for item in seg_members)
+                    right = max(float(item['x']) + float(item['width']) for item in seg_members)
+                    bottom = max(float(item['y']) + float(item['height']) for item in seg_members)
                     pad = OCRThresholds.SPATIAL_PADDING
-                    x = max(0.0, bbox['x'] - pad)
-                    y = max(0.0, bbox['y'] - pad)
-                    right = min(100.0, bbox['x'] + bbox['width'] + pad)
-                    bottom = min(100.0, bbox['y'] + bbox['height'] + pad)
+                    x = max(0.0, left - pad)
+                    y = max(0.0, top - pad)
+                    right = min(100.0, right + pad)
+                    bottom = min(100.0, bottom + pad)
 
-                    sample_text = next((m.get('text', '') for m in members if m.get('text')), '')
-                    # ???쒓컙 援ш컙???랁븯??硫ㅻ쾭?ㅼ쓽 Y ?꾩튂 ?섏쭛
-                    seg_members = [m for m in members if seg_start <= m.get('time', 0) <= seg_end]
-                    y_positions = [float(m.get('y', 0)) for m in seg_members]
-                    x_positions = [float(m.get('x', 0)) for m in seg_members]
+                    confidences = [float(item.get('confidence', 0.0) or 0.0) for item in seg_members]
+                    sample_text = next(
+                        (str(item.get('text', '')) for item in seg_members if item.get('text')),
+                        '',
+                    )
+                    has_chinese = any('\u4e00' <= char <= '\u9fff' for char in sample_text)
+                    has_independent_chinese = any(
+                        (
+                            str(item.get('source', '') or '').startswith('rapidocr_')
+                            or bool(item.get('independent_chinese'))
+                        )
+                        and any(
+                            '\u4e00' <= char <= '\u9fff'
+                            for char in str(item.get('text', '') or '')
+                        )
+                        for item in seg_members
+                    )
+                    max_confidence = max(confidences) if confidences else 0.0
+                    scene_ids = []
                     frame_regions = []
                     for member in seg_members:
+                        scene_id = member.get('scene_id')
+                        if scene_id not in scene_ids:
+                            scene_ids.append(scene_id)
                         polygon = member.get('polygon')
-                        if not polygon:
-                            continue
-                        frame_regions.append({
-                            'time': float(member.get('time', 0)),
-                            'frame_index': int(member.get('frame_index', -1)),
-                            'polygon': polygon,
-                            'text': str(member.get('text', '')),
-                            'confidence': float(member.get('confidence', 0.0)),
-                        })
-                    frame_regions.sort(key=lambda fr: (fr.get('frame_index', -1), fr.get('time', 0.0)))
-                    # 異쒗쁽???쒓컙 洹몃９(0.5珥??⑥쐞) ??怨꾩궛
-                    time_group_count = len(set(round(m.get('time', 0) * 2) / 2 for m in seg_members))
-
-                    source_name = 'opencv_ocr_gpu' if GPU_ACCEL_AVAILABLE else 'opencv_ocr_numpy'
+                        if polygon:
+                            frame_regions.append({
+                                'time': float(member.get('time', 0.0)),
+                                'frame_index': int(member.get('frame_index', -1)),
+                                'polygon': polygon,
+                                'text': str(member.get('text', '')),
+                                'confidence': float(member.get('confidence', 0.0) or 0.0),
+                                'scene_id': scene_id,
+                                'source': str(member.get('source', '') or ''),
+                                'visual_match_score': member.get('visual_match_score'),
+                            })
+                    frame_regions.sort(
+                        key=lambda item: (item.get('time', 0.0), item.get('frame_index', -1))
+                    )
+                    distinct_frames = {
+                        int(item.get('frame_index', -1))
+                        for item in seg_members
+                        if int(item.get('frame_index', -1)) >= 0
+                    }
+                    time_group_count = len(distinct_frames) or len(
+                        {round(float(item.get('time', 0.0)), 6) for item in seg_members}
+                    )
                     merged_regions.append({
                         'x': x,
                         'y': y,
@@ -1076,38 +2313,101 @@ class SubtitleDetector:
                         'height': max(1.0, bottom - y),
                         'frequency': len(seg_members),
                         'language': 'chinese',
-                        'source': source_name,
+                        'source': 'opencv_ocr_gpu' if GPU_ACCEL_AVAILABLE else 'opencv_ocr_numpy',
                         'sample_text': sample_text,
                         'start_time': buffered_start,
                         'end_time': buffered_end,
-                        'cluster_id': f"spatial_{cluster_idx}_{seg_idx}",
-                        'y_positions': y_positions,
-                        'x_positions': x_positions,
+                        'cluster_id': f"spatial_{cluster_index}_{segment_index}",
+                        'y_positions': [float(item.get('y', 0.0)) for item in seg_members],
+                        'x_positions': [float(item.get('x', 0.0)) for item in seg_members],
                         'time_group_count': time_group_count,
                         'frame_regions': frame_regions,
+                        'scene_id': scene_ids[0] if len(scene_ids) == 1 else None,
+                        'scene_ids': scene_ids,
+                        'max_confidence': max_confidence,
+                        'mean_confidence': float(sum(confidences) / len(confidences)) if confidences else 0.0,
+                        'high_confidence_chinese': bool(
+                            has_chinese
+                            and (
+                                max_confidence >= OCRThresholds.HIGH_CONFIDENCE_CHINESE
+                                or has_independent_chinese
+                            )
+                        ),
+                        'independent_chinese': has_independent_chinese,
+                        'oversized_observation_count': sum(
+                            1 for item in seg_members if item.get('oversized')
+                        ),
+                        'invalid_coordinate_count': self.invalid_coordinate_count,
+                        'review_required': self.review_required,
+                        'review_reasons': list(self.review_reasons),
                     })
 
-            # ?쒓컙???뺣젹
-            merged_regions.sort(key=lambda r: (r['start_time'], r['y']))
-
-            logger.info(f"[Multi-subtitle merge] {len(all_regions)} detections -> {len(spatial_clusters)} clusters -> {len(merged_regions)} blur regions")
-            for i, r in enumerate(merged_regions):
-                tg = r.get('time_group_count', 1)
-                yp = r.get('y_positions', [])
-                y_std_str = ""
-                if yp and len(yp) >= 2:
-                    try:
-                        y_std_val = float(np.std(yp)) if NUMPY_AVAILABLE else 0.0
-                        y_std_str = f", Y?몄감={y_std_val:.1f}%"
-                    except Exception:
-                        pass
-                logger.debug(f"  Region #{i+1}: pos=({r['x']:.0f}%, {r['y']:.0f}%), size=({r['width']:.0f}%, {r['height']:.0f}%), time={r['start_time']:.1f}s~{r['end_time']:.1f}s, frames={tg}{y_std_str}, text='{r.get('sample_text', '')[:20]}'")
-
+            merged_regions.sort(key=lambda item: (item['start_time'], item['y']))
+            logger.info(
+                f"[Precision merge] {len(all_regions)} detections -> "
+                f"{len(spatial_clusters)} tracks -> {len(merged_regions)} blur regions"
+            )
             return merged_regions
-        except Exception as e:
-            ui_controller.write_error_log(e)
-            logger.error(f"[GPU Accel] Region aggregation error: {e}")
+        except Exception as exc:
+            ui_controller.write_error_log(exc)
+            logger.error(f"[Precision merge] Region aggregation error: {exc}")
             return []
+
+    def _frame_time_after_read(self, cap, frame_index, fps, previous_time=None):
+        """Prefer the decoder timestamp after ``read`` and enforce monotonicity."""
+        import math
+
+        safe_fps = float(fps) if fps and math.isfinite(float(fps)) and float(fps) > 0 else 30.0
+        fallback = max(0.0, float(frame_index) / safe_fps)
+        reported = None
+        try:
+            msec = float(cap.get(cv2.CAP_PROP_POS_MSEC))
+            if math.isfinite(msec) and msec >= 0:
+                reported = msec / 1000.0
+                if int(frame_index) > 0 and reported <= 0.0:
+                    reported = None
+        except Exception:
+            reported = None
+
+        candidate = reported if reported is not None else fallback
+        if previous_time is not None and candidate <= float(previous_time):
+            candidate = max(fallback, float(previous_time) + (1.0 / safe_fps))
+        return candidate
+
+    @staticmethod
+    def _read_scheduled_frame(cap, frame_pos: int, next_expected_frame: Optional[int]):
+        """Read consecutive scheduled frames without redundant decoder seeks."""
+        if next_expected_frame != int(frame_pos):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, int(frame_pos))
+        ok, frame = cap.read()
+        return ok, frame, (int(frame_pos) + 1 if ok else None)
+
+    def _is_scene_cut(self, previous_frame, current_frame):
+        """Deterministic low-cost cut detector for interpolation boundaries."""
+        if previous_frame is None or current_frame is None or not CV2_AVAILABLE or not NUMPY_AVAILABLE:
+            return False
+        try:
+            def _gray160(frame):
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+                height, width = gray.shape[:2]
+                if width != 160:
+                    target_h = max(1, int(round(height * (160.0 / max(1, width)))))
+                    gray = cv2.resize(gray, (160, target_h), interpolation=cv2.INTER_AREA)
+                return gray
+
+            gray_a = _gray160(previous_frame)
+            gray_b = _gray160(current_frame)
+            if gray_a.shape != gray_b.shape:
+                gray_b = cv2.resize(gray_b, (gray_a.shape[1], gray_a.shape[0]), interpolation=cv2.INTER_AREA)
+            mad = float(np.mean(np.abs(gray_a.astype(np.float32) - gray_b.astype(np.float32)))) / 255.0
+            hist_a = cv2.calcHist([gray_a], [0], None, [32], [0, 256])
+            hist_b = cv2.calcHist([gray_b], [0], None, [32], [0, 256])
+            cv2.normalize(hist_a, hist_a)
+            cv2.normalize(hist_b, hist_b)
+            correlation = float(cv2.compareHist(hist_a, hist_b, cv2.HISTCMP_CORREL))
+            return mad >= 0.28 and correlation < 0.55
+        except Exception:
+            return False
 
     def _detect_text_edge_changes(self, frame1, frame2):
         """
@@ -1304,6 +2604,176 @@ class SubtitleDetector:
             logger.debug(f"[OCR preprocessing] Error: {e}")
             return frame
 
+    def _analyze_segment_batch_streaming(
+        self, cap, sample_frames, segment_name, W, H, fps, optimizer
+    ):
+        """Read, OCR, and release one bounded frame batch at a time."""
+        import cv2
+
+        ocr_reader = getattr(self.gui, "ocr_reader", None)
+        if ocr_reader is None:
+            return None
+
+        batch_size = max(1, int(GLMOCRSettings.OPTIMAL_BATCH_SIZE))
+        all_regions: List[Dict[str, Any]] = []
+        frames_with_chinese = 0
+        frames_checked = 0
+        ocr_call_count = 0
+        batch_number = 0
+
+        def append_results(batch, batch_results) -> int:
+            nonlocal frames_with_chinese
+            accepted = 0
+            if not isinstance(batch_results, (list, tuple)):
+                self._mark_review_required("ocr_batch_result_malformed")
+                batch_results = []
+            if len(batch_results) != len(batch):
+                self._mark_review_required("ocr_batch_result_alignment")
+
+            for index, (frame_pos, time_sec, _frame, scale, scene_id) in enumerate(batch):
+                results = batch_results[index] if index < len(batch_results) else []
+                frame_has_chinese = False
+                for result in results or []:
+                    if not isinstance(result, (list, tuple)) or len(result) < 2:
+                        continue
+                    bbox, text = result[0], str(result[1] or "")
+                    try:
+                        prob = float(result[2]) if len(result) >= 3 else 1.0
+                    except (TypeError, ValueError):
+                        continue
+                    if prob < OCRThresholds.CONFIDENCE_MIN:
+                        continue
+                    if not any("\u4e00" <= char <= "\u9fff" for char in text):
+                        continue
+
+                    try:
+                        adjusted_bbox = (
+                            [(x / scale, y / scale) for x, y in bbox]
+                            if scale != 1.0
+                            else bbox
+                        )
+                    except Exception:
+                        adjusted_bbox = bbox
+                    region_info = self._gpu_process_bbox_batch([adjusted_bbox], W, H)
+                    polygon = self._normalize_polygon(adjusted_bbox, W, H)
+                    if not region_info or region_info[0] is None or not polygon:
+                        continue
+                    info = region_info[0]
+                    all_regions.append(
+                        {
+                            "x": info["x"],
+                            "y": info["y"],
+                            "width": info["width"],
+                            "height": info["height"],
+                            "oversized": bool(info.get("oversized", False)),
+                            "confidence": prob,
+                            "time": time_sec,
+                            "frame_index": int(frame_pos),
+                            "text": text,
+                            "language": "chinese",
+                            "source": "glm_ocr_batch",
+                            "polygon": polygon,
+                            "scene_id": scene_id,
+                        }
+                    )
+                    frame_has_chinese = True
+                if frame_has_chinese:
+                    frames_with_chinese += 1
+                    accepted += 1
+            return accepted
+
+        def flush(batch) -> None:
+            nonlocal ocr_call_count, batch_number
+            if not batch:
+                return
+            batch_number += 1
+            frames_only = [item[2] for item in batch]
+            try:
+                batch_results = ocr_reader.readtext_batch(frames_only)
+                ocr_call_count += 1
+                append_results(batch, batch_results)
+            except Exception as exc:
+                logger.warning(
+                    "[OCR %s] Batch %d error: %s", segment_name, batch_number, exc
+                )
+                self._mark_review_required("ocr_batch_exception")
+                for item in batch:
+                    try:
+                        results = ocr_reader.readtext(item[2])
+                        ocr_call_count += 1
+                        append_results([item], [results])
+                    except Exception:
+                        self._mark_review_required("ocr_single_frame_fallback_failed")
+
+        logger.info(
+            "[OCR %s] Streaming batch mode: %d scheduled frames, batch=%d",
+            segment_name,
+            len(sample_frames),
+            batch_size,
+        )
+        previous_time = None
+        previous_scene_frame = None
+        scene_counter = 0
+        next_expected_frame = None
+        pending = []
+
+        for frame_pos in sample_frames:
+            ret, frame, next_expected_frame = self._read_scheduled_frame(
+                cap, frame_pos, next_expected_frame
+            )
+            if not ret:
+                self._mark_review_required("scheduled_frame_decode_failed")
+                continue
+            time_sec = self._frame_time_after_read(
+                cap, frame_pos, fps, previous_time=previous_time
+            )
+            previous_time = time_sec
+            if self._is_scene_cut(previous_scene_frame, frame):
+                scene_counter += 1
+            scene_id = f"{segment_name}:{scene_counter}"
+            previous_scene_frame = frame.copy()
+
+            scale = 1.0
+            try:
+                height, width = frame.shape[:2]
+                if optimizer:
+                    params = optimizer.get_optimized_ocr_params()
+                    target_width = int(params.get("downscale_target", 1440))
+                else:
+                    target_width = 1440 if width > 1920 else width
+                if width > target_width:
+                    scale = target_width / float(width)
+                    frame = cv2.resize(
+                        frame,
+                        (target_width, max(1, int(height * scale))),
+                        interpolation=cv2.INTER_AREA,
+                    )
+            except Exception:
+                scale = 1.0
+
+            pending.append((frame_pos, time_sec, frame, scale, scene_id))
+            frames_checked += 1
+            if len(pending) >= batch_size:
+                flush(pending)
+                pending.clear()
+        flush(pending)
+
+        logger.info(
+            "[OCR %s] Streaming complete: %d/%d frames with Chinese, %d OCR calls",
+            segment_name,
+            frames_with_chinese,
+            frames_checked,
+            ocr_call_count,
+        )
+        if frames_checked == 0:
+            return None
+        return {
+            "regions": all_regions,
+            "frames_with_chinese": frames_with_chinese,
+            "total_frames_checked": frames_checked,
+            "ocr_calls": ocr_call_count,
+        }
+
     def _analyze_segment_batch_mode(
         self, cap, sample_frames, segment_name, W, H, fps, optimizer
     ):
@@ -1328,22 +2798,40 @@ class SubtitleDetector:
         if ocr_reader is None:
             return None
 
+        return self._analyze_segment_batch_streaming(
+            cap, sample_frames, segment_name, W, H, fps, optimizer
+        )
+
         batch_size = GLMOCRSettings.OPTIMAL_BATCH_SIZE
         all_regions = []
         frames_with_chinese = 0
         ocr_call_count = 0
 
         # ?꾨젅???섏쭛 諛?諛곗튂 泥섎━
-        frame_data = []  # (frame_pos, frame, scale)
+        frame_data = []  # (frame_pos, time_sec, frame, scale, scene_id)
+        previous_time = None
+        previous_scene_frame = None
+        scene_counter = 0
 
         logger.info(f"[OCR {segment_name}] Batch mode: collecting {len(sample_frames)} frames")
 
         # 1?④퀎: 紐⑤뱺 ?꾨젅???섏쭛 諛??꾩쿂由?
+        next_expected_frame = None
         for frame_pos in sample_frames:
-            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-            ret, frame = cap.read()
+            ret, frame, next_expected_frame = self._read_scheduled_frame(
+                cap, frame_pos, next_expected_frame
+            )
             if not ret:
                 continue
+
+            time_sec = self._frame_time_after_read(
+                cap, frame_pos, fps, previous_time=previous_time
+            )
+            previous_time = time_sec
+            if self._is_scene_cut(previous_scene_frame, frame):
+                scene_counter += 1
+            scene_id = f"{segment_name}:{scene_counter}"
+            previous_scene_frame = frame.copy()
 
             # Downscale frame
             scale = 1.0
@@ -1362,7 +2850,7 @@ class SubtitleDetector:
             except Exception:
                 scale = 1.0
 
-            frame_data.append((frame_pos, frame, scale))
+            frame_data.append((frame_pos, time_sec, frame, scale, scene_id))
 
         if not frame_data:
             return None
@@ -1373,19 +2861,18 @@ class SubtitleDetector:
 
         for batch_idx in range(0, len(frame_data), batch_size):
             batch = frame_data[batch_idx:batch_idx + batch_size]
-            frames_only = [f[1] for f in batch]
+            frames_only = [f[2] for f in batch]
 
             try:
                 # 諛곗튂 OCR ?몄텧
                 batch_results = ocr_reader.readtext_batch(frames_only)
                 ocr_call_count += 1  # 諛곗튂??1???몄텧濡?移댁슫??
                 # 媛??꾨젅?꾨퀎 寃곌낵 泥섎━
-                for i, (frame_pos, frame, scale) in enumerate(batch):
+                for i, (frame_pos, time_sec, frame, scale, scene_id) in enumerate(batch):
                     if i >= len(batch_results):
                         continue
 
                     results = batch_results[i]
-                    time_sec = frame_pos / fps
                     frame_has_chinese = False
 
                     for result in results:
@@ -1419,7 +2906,7 @@ class SubtitleDetector:
                         # Region ?뺣낫 ?앹꽦
                         region_info = self._gpu_process_bbox_batch([adjusted_bbox], W, H)
                         polygon = self._normalize_polygon(adjusted_bbox, W, H)
-                        if region_info and polygon:
+                        if region_info and region_info[0] is not None and polygon:
                             region = {
                                 'x': region_info[0]['x'],
                                 'y': region_info[0]['y'],
@@ -1432,6 +2919,7 @@ class SubtitleDetector:
                                 'language': 'chinese',
                                 'source': 'glm_ocr_batch',
                                 'polygon': polygon,
+                                'scene_id': scene_id,
                             }
                             all_regions.append(region)
 
@@ -1441,7 +2929,7 @@ class SubtitleDetector:
             except Exception as e:
                 logger.warning(f"[OCR {segment_name}] Batch {batch_idx // batch_size + 1} error: {e}")
                 # 諛곗튂 ?ㅽ뙣 ??媛쒕퀎 泥섎━濡??대갚
-                for frame_pos, frame, scale in batch:
+                for frame_pos, time_sec, frame, scale, scene_id in batch:
                     try:
                         results = ocr_reader.readtext(frame)
                         ocr_call_count += 1
@@ -1590,8 +3078,8 @@ class SubtitleDetector:
                 return None
 
             # ?꾨젅??踰붿쐞 怨꾩궛
-            start_frame = int(fps * start_sec)
-            end_frame = min(int(fps * end_sec), total_frames)
+            start_frame = min(total_frames, max(0, int(round(fps * start_sec))))
+            end_frame = min(total_frames, max(0, int(round(fps * end_sec))))
 
             # ?쒖뒪??理쒖쟻???뚮씪誘명꽣 媛?몄삤湲?
             optimizer = _get_optimizer(self.gui)
@@ -1615,15 +3103,7 @@ class SubtitleDetector:
                 logger.debug(f"[OCR {segment_name}] Default sampling mode")
 
             # GLM-OCR 諛곗튂 紐⑤뱶 ?뺤씤
-            ocr_reader = getattr(self.gui, 'ocr_reader', None)
-            use_batch_mode = (
-                ocr_reader is not None and
-                hasattr(ocr_reader, 'supports_batch') and
-                ocr_reader.supports_batch() and
-                ocr_reader.engine_name == 'glm_ocr'
-            )
-            if full_scan_mode:
-                use_batch_mode = False
+            use_batch_mode = self._use_batch_ocr(full_scan_mode=full_scan_mode)
 
             if use_batch_mode:
                 logger.info(f"[OCR {segment_name}] GLM-OCR batch mode enabled")
@@ -1703,6 +3183,9 @@ class SubtitleDetector:
             edge_detected_count = 0  # Edge detection?쇰줈 蹂??媛먯????잛닔
             prev_frame_roi = None  # ?댁쟾 ?꾨젅??(SSIM 鍮꾧탳??
             consecutive_similar_count = 0  # ?곗냽 ?좎궗 ?꾨젅??移댁슫??
+            previous_time = None
+            previous_scene_frame = None
+            scene_counter = 0
             # ?끸쁾??珥덉븞??紐⑤뱶: 留ㅼ슦 蹂댁닔?곸씤 ?꾧퀎媛?+ ?곗냽 泥댄겕 ?끸쁾??            # Use constants for thresholds
             # ?꾧퀎媛??곸닔 ?ъ슜
             ssim_threshold = OCRThresholds.SSIM_THRESHOLD  # 98% (嫄곗쓽 ?쎌? ?숈씪)
@@ -1712,13 +3195,22 @@ class SubtitleDetector:
             # ?끸쁾??異붽? ?덉쟾?μ튂: ?곗냽 2?꾨젅???댁긽 ?숈씪?댁빞 ?ㅽ궢 ?끸쁾??            # ?먮쭑??諛붾뚮뒗 ?쒓컙(?꾪솚 ?꾨젅?????볦튂吏 ?딄린 ?꾪븿
             min_consecutive_similar = 2
 
+            next_expected_frame = None
             for i, frame_pos in enumerate(sample_frames):
-                cap.set(cv2.CAP_PROP_POS_FRAMES, frame_pos)
-                ret, frame = cap.read()
+                ret, frame, next_expected_frame = self._read_scheduled_frame(
+                    cap, frame_pos, next_expected_frame
+                )
                 if not ret:
                     continue
 
-                time_sec = frame_pos / fps
+                time_sec = self._frame_time_after_read(
+                    cap, frame_pos, fps, previous_time=previous_time
+                )
+                previous_time = time_sec
+                if self._is_scene_cut(previous_scene_frame, frame):
+                    scene_counter += 1
+                scene_id = f"{segment_name}:{scene_counter}"
+                previous_scene_frame = frame.copy()
 
                 # Downscale frame for faster OCR
                 scale = 1.0
@@ -1882,6 +3374,7 @@ class SubtitleDetector:
                             'y': region_info['y'],
                             'width': region_info['width'],
                             'height': region_info['height'],
+                            'oversized': bool(region_info.get('oversized', False)),
                             'confidence': prob,
                             'time': time_sec,
                             'frame_index': int(frame_pos),
@@ -1890,6 +3383,7 @@ class SubtitleDetector:
                             'source': source_tag,
                             'roi_type': attempt_name,  # ?대뒓 ROI?먯꽌 媛먯??섏뿀?붿? 湲곕줉
                             'polygon': polygon,
+                            'scene_id': scene_id,
                         }
 
                         current_frame_regions.append(region)
@@ -1965,12 +3459,24 @@ class SubtitleDetector:
                         cap2 = cv2.VideoCapture(video_path)
                         try:
                             if cap2.isOpened():
+                                boundary_previous_time = None
+                                boundary_previous_frame = None
+                                boundary_scene_counter = 0
                                 for bf in boundary_list:
                                     cap2.set(cv2.CAP_PROP_POS_FRAMES, bf)
                                     ret2, frame2 = cap2.read()
                                     if not ret2:
                                         continue
-                                    time_sec2 = bf / fps
+                                    time_sec2 = self._frame_time_after_read(
+                                        cap2, bf, fps, previous_time=boundary_previous_time
+                                    )
+                                    boundary_previous_time = time_sec2
+                                    if self._is_scene_cut(boundary_previous_frame, frame2):
+                                        boundary_scene_counter += 1
+                                    boundary_scene_id = (
+                                        f"{segment_name}:boundary:{boundary_scene_counter}"
+                                    )
+                                    boundary_previous_frame = frame2.copy()
 
                                     # ?ㅼ슫?ㅼ???(硫붿씤 ?ㅼ틪怨??숈씪???듯떚留덉씠? ?ㅼ젙 ?ъ슜)
                                     scale2 = 1.0
@@ -2019,12 +3525,13 @@ class SubtitleDetector:
 
                                         region_info2 = self._gpu_process_bbox_batch([bbox2], W, H)
                                         polygon2 = self._normalize_polygon(bbox2, W, H)
-                                        if region_info2 and polygon2:
+                                        if region_info2 and region_info2[0] is not None and polygon2:
                                             all_regions.append({
                                                 'x': region_info2[0]['x'],
                                                 'y': region_info2[0]['y'],
                                                 'width': region_info2[0]['width'],
                                                 'height': region_info2[0]['height'],
+                                                'oversized': bool(region_info2[0].get('oversized', False)),
                                                 'confidence': prob2,
                                                 'time': time_sec2,
                                                 'frame_index': int(bf),
@@ -2032,6 +3539,7 @@ class SubtitleDetector:
                                                 'language': 'chinese',
                                                 'source': 'boundary_refine',
                                                 'polygon': polygon2,
+                                                'scene_id': boundary_scene_id,
                                             })
                                             frames_with_chinese += 1
                         finally:

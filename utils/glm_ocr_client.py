@@ -13,7 +13,9 @@ Usage:
 """
 
 import base64
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import json
+import math
 import os
 import threading
 import time
@@ -90,6 +92,9 @@ class GLMOCRClient:
         self._consecutive_failures = 0
         self._offline_mode = False
         self._state_lock = threading.Lock()  # Thread safety for state mutations
+        self.invalid_coordinate_count = 0
+        self.request_failure_count = 0
+        self._rate_limit_until = 0.0
 
         # 설정
         self._endpoint = GLMOCRSettings.ENDPOINT
@@ -107,10 +112,16 @@ class GLMOCRClient:
         retry_strategy = Retry(
             total=GLMOCRSettings.MAX_RETRIES,
             backoff_factor=GLMOCRSettings.BACKOFF_FACTOR,
-            status_forcelist=[429, 500, 502, 503, 504],
+            # 429 is handled by the application-level shared cooldown below.
+            # Retrying it in urllib3 as well multiplied one logical request into
+            # as many as 20 POSTs and bypassed the cross-worker cooldown.
+            status_forcelist=[500, 502, 503, 504],
             allowed_methods=["POST"],
             raise_on_status=False,
-            respect_retry_after_header=True,
+            # 429 is owned exclusively by the application-level shared
+            # cooldown below. urllib3 otherwise retries a 429 carrying a
+            # Retry-After header even when absent from status_forcelist.
+            respect_retry_after_header=False,
         )
 
         adapter = HTTPAdapter(
@@ -171,6 +182,134 @@ class GLMOCRClient:
 
         return base64.b64encode(buffer).decode('utf-8')
 
+    @staticmethod
+    def _get_source_size(image) -> Tuple[int, int]:
+        """Return the original image size as ``(width, height)`` before compression."""
+        import cv2
+        import numpy as np
+
+        if isinstance(image, str):
+            frame = cv2.imread(image)
+        elif isinstance(image, bytes):
+            nparr = np.frombuffer(image, np.uint8)
+            frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        elif hasattr(image, '__array__'):
+            frame = np.asarray(image)
+        else:
+            frame = image
+
+        if frame is None or not hasattr(frame, "shape") or len(frame.shape) < 2:
+            raise ValueError("Failed to load image")
+
+        height, width = frame.shape[:2]
+        if width <= 0 or height <= 0:
+            raise ValueError("Image dimensions must be positive")
+        return int(width), int(height)
+
+    def _record_invalid_coordinate(self) -> None:
+        """Increment the malformed-coordinate diagnostic counter safely."""
+        with self._state_lock:
+            self.invalid_coordinate_count += 1
+
+    def _record_request_failure(self) -> None:
+        """Record an exhausted OCR request so precision QA can fail closed."""
+        with self._state_lock:
+            self.request_failure_count += 1
+
+    def _set_rate_limit_cooldown(self, seconds: float) -> None:
+        with self._state_lock:
+            self._rate_limit_until = max(
+                self._rate_limit_until, time.monotonic() + max(0.0, float(seconds))
+            )
+
+    def _wait_for_rate_limit_slot(self) -> None:
+        with self._state_lock:
+            remaining = self._rate_limit_until - time.monotonic()
+        if remaining > 0:
+            time.sleep(remaining)
+
+    @staticmethod
+    def _get_uploaded_size(source_size: Tuple[int, int]) -> Tuple[int, int]:
+        """Return the JPEG dimensions sent to GLM for a source image."""
+        width, height = source_size
+        target_width = int(GLMOCRSettings.TARGET_WIDTH)
+        if width > target_width:
+            scale = target_width / float(width)
+            return target_width, max(1, int(height * scale))
+        return int(width), int(height)
+
+    def _bbox_to_pixel_polygon(
+        self,
+        bbox_2d: Any,
+        source_size: Optional[Tuple[int, int]],
+        response_size: Optional[Tuple[int, int]] = None,
+    ) -> Optional[List[List[float]]]:
+        """Validate GLM coordinates and map them to source-image pixels.
+
+        GLM deployments have returned both documented normalized coordinates
+        and uploaded-image pixel coordinates. Accept both explicit spaces and
+        reject ambiguous malformed values instead of silently clamping them.
+        """
+        if not isinstance(bbox_2d, (list, tuple)) or len(bbox_2d) < 4:
+            self._record_invalid_coordinate()
+            return None
+
+        coordinates = bbox_2d[:4]
+        if any(isinstance(value, bool) or not isinstance(value, (int, float)) for value in coordinates):
+            self._record_invalid_coordinate()
+            return None
+
+        x1, y1, x2, y2 = (float(value) for value in coordinates)
+        if not all(math.isfinite(value) for value in (x1, y1, x2, y2)) or x2 <= x1 or y2 <= y1:
+            self._record_invalid_coordinate()
+            return None
+
+        if source_size is None:
+            self._record_invalid_coordinate()
+            return None
+        width, height = source_size
+        if (
+            isinstance(width, bool)
+            or isinstance(height, bool)
+            or not isinstance(width, (int, float))
+            or not isinstance(height, (int, float))
+            or not math.isfinite(float(width))
+            or not math.isfinite(float(height))
+            or width <= 0
+            or height <= 0
+        ):
+            self._record_invalid_coordinate()
+            return None
+
+        if all(0.0 <= value <= 1.0 for value in (x1, y1, x2, y2)):
+            px1, px2 = x1 * float(width), x2 * float(width)
+            py1, py2 = y1 * float(height), y2 * float(height)
+        else:
+            # A value just outside 0..1 mixed with normalized-looking values is
+            # far more likely to be a corrupt normalized box than a sub-pixel
+            # pixel-space box. Real GLM pixel coordinates are integral/larger.
+            if max(x1, y1, x2, y2) <= 2.0 and min(x1, y1, x2, y2) < 1.0:
+                self._record_invalid_coordinate()
+                return None
+            response_width, response_height = response_size or source_size
+            if (
+                not all(value >= 0.0 for value in (x1, y1, x2, y2))
+                or x2 > float(response_width)
+                or y2 > float(response_height)
+            ):
+                self._record_invalid_coordinate()
+                return None
+            scale_x = float(width) / float(response_width)
+            scale_y = float(height) / float(response_height)
+            px1, px2 = x1 * scale_x, x2 * scale_x
+            py1, py2 = y1 * scale_y, y2 * scale_y
+        return [
+            [px1, py1],
+            [px2, py1],
+            [px2, py2],
+            [px1, py2],
+        ]
+
     def _build_request(self, images_b64: List[str]) -> Dict[str, Any]:
         """
         Build API request payload for layout_parsing endpoint
@@ -190,12 +329,20 @@ class GLMOCRClient:
             "file": f"data:image/jpeg;base64,{img_b64}"
         }
 
-    def _parse_response(self, response_data: Dict[str, Any]) -> List[Tuple[List[List[float]], str, float]]:
+    def _parse_response(
+        self,
+        response_data: Dict[str, Any],
+        source_size: Optional[Tuple[int, int]] = None,
+        response_size: Optional[Tuple[int, int]] = None,
+    ) -> List[Tuple[List[List[float]], str, float]]:
         """
         Parse layout_parsing API response to OCR format
 
         Args:
             response_data: Parsed JSON response from API
+            source_size: Original input image size as ``(width, height)``. GLM
+                returns normalized ``bbox_2d`` coordinates, so production
+                callers pass this even when the uploaded JPEG was resized.
 
         Returns:
             List of (bbox, text, confidence) tuples
@@ -203,9 +350,17 @@ class GLMOCRClient:
         results = []
 
         try:
+            if not isinstance(response_data, dict) or "layout_details" not in response_data:
+                self._record_request_failure()
+                logger.warning("[GLM-OCR] Response missing layout_details")
+                return results
             # layout_parsing response format:
             # {"layout_details": [{"bbox_2d": [x1,y1,x2,y2], "content": "text", "label": "text"}], "md_results": "..."}
             layout_details = response_data.get("layout_details", [])
+            if not isinstance(layout_details, list):
+                self._record_request_failure()
+                logger.warning("[GLM-OCR] layout_details is not a list")
+                return results
 
             # layout_details can be nested list or flat list
             if layout_details and isinstance(layout_details[0], list):
@@ -213,25 +368,21 @@ class GLMOCRClient:
                 layout_details = layout_details[0]
 
             for item in layout_details:
+                if not isinstance(item, dict):
+                    self._record_request_failure()
+                    logger.warning("[GLM-OCR] Ignoring malformed layout item")
+                    continue
                 label = item.get("label", "")
                 if label in ("text", "paragraph", "title", "paragraph_title", "table"):
                     text_content = item.get("content", "")
                     # Remove markdown formatting
                     text_content = text_content.replace("## ", "").replace("# ", "").strip()
 
-                    bbox_2d = item.get("bbox_2d", [0, 0, 0, 0])
-
-                    # Convert [x1,y1,x2,y2] to [[x1,y1],[x2,y1],[x2,y2],[x1,y2]]
-                    if len(bbox_2d) >= 4:
-                        x1, y1, x2, y2 = bbox_2d[:4]
-                        bbox = [
-                            [x1, y1],
-                            [x2, y1],
-                            [x2, y2],
-                            [x1, y2]
-                        ]
-                    else:
-                        bbox = [[0, 0], [0, 0], [0, 0], [0, 0]]
+                    bbox = self._bbox_to_pixel_polygon(
+                        item.get("bbox_2d"), source_size, response_size=response_size
+                    )
+                    if bbox is None:
+                        continue
 
                     # layout_parsing doesn't return confidence, use default 0.9
                     confidence = 0.9
@@ -240,6 +391,7 @@ class GLMOCRClient:
                         results.append((bbox, text_content, confidence))
 
         except Exception as e:
+            self._record_request_failure()
             logger.warning(f"[GLM-OCR] Response parse error: {e}")
 
         return results
@@ -263,45 +415,66 @@ class GLMOCRClient:
             "Content-Type": "application/json"
         }
 
-        try:
-            response = self._session.post(
-                self._endpoint,
-                json=payload,
-                headers=headers,
-                timeout=self._timeout
-            )
+        rate_limit_retries = max(0, int(getattr(GLMOCRSettings, "RATE_LIMIT_RETRIES", 4)))
+        for rate_attempt in range(rate_limit_retries + 1):
+            self._wait_for_rate_limit_slot()
+            try:
+                response = self._session.post(
+                    self._endpoint,
+                    json=payload,
+                    headers=headers,
+                    timeout=self._timeout,
+                )
 
-            if response.status_code == 200:
-                with self._state_lock:
-                    self._consecutive_failures = 0
-                data = response.json()
-                # layout_parsing returns full response object
-                return data
+                if response.status_code == 200:
+                    with self._state_lock:
+                        self._consecutive_failures = 0
+                    return response.json()
 
-            elif response.status_code == 401:
-                logger.error("[GLM-OCR] Invalid API key")
+                if response.status_code == 429:
+                    retry_after = 0.0
+                    try:
+                        retry_after = float(response.headers.get("Retry-After") or 0.0)
+                    except (TypeError, ValueError):
+                        retry_after = 0.0
+                    cooldown = max(
+                        float(GLMOCRSettings.RATE_LIMIT_WAIT_SECONDS), retry_after
+                    )
+                    self._set_rate_limit_cooldown(cooldown)
+                    logger.warning(
+                        "[GLM-OCR] Rate limit exceeded; cooldown %.1fs (%d/%d)",
+                        cooldown,
+                        rate_attempt + 1,
+                        rate_limit_retries + 1,
+                    )
+                    if rate_attempt < rate_limit_retries:
+                        continue
+                    self._record_request_failure()
+                    return None
+
+                if response.status_code == 401:
+                    logger.error("[GLM-OCR] Invalid API key")
+                else:
+                    logger.warning(f"[GLM-OCR] API error: {response.status_code}")
                 self._handle_failure()
+                self._record_request_failure()
+                return None
 
-            elif response.status_code == 429:
-                logger.warning("[GLM-OCR] Rate limit exceeded")
-                time.sleep(GLMOCRSettings.RATE_LIMIT_WAIT_SECONDS)
+            except requests.exceptions.Timeout:
+                logger.warning("[GLM-OCR] Request timeout")
                 self._handle_failure()
-
-            else:
-                logger.warning(f"[GLM-OCR] API error: {response.status_code}")
+                self._record_request_failure()
+                return None
+            except requests.exceptions.ConnectionError:
+                logger.warning("[GLM-OCR] Connection error")
                 self._handle_failure()
-
-        except requests.exceptions.Timeout:
-            logger.warning("[GLM-OCR] Request timeout")
-            self._handle_failure()
-
-        except requests.exceptions.ConnectionError:
-            logger.warning("[GLM-OCR] Connection error")
-            self._handle_failure()
-
-        except Exception as e:
-            logger.error(f"[GLM-OCR] Unexpected error: {e}")
-            self._handle_failure()
+                self._record_request_failure()
+                return None
+            except Exception as e:
+                logger.error(f"[GLM-OCR] Unexpected error: {e}")
+                self._handle_failure()
+                self._record_request_failure()
+                return None
 
         return None
 
@@ -361,12 +534,18 @@ class GLMOCRClient:
             return []
 
         try:
+            source_size = self._get_source_size(image)
+            response_size = self._get_uploaded_size(source_size)
             img_b64 = self._compress_image(image)
             payload = self._build_request([img_b64])
             response_data = self._call_api(payload)
 
             if response_data and isinstance(response_data, dict):
-                return self._parse_response(response_data)
+                return self._parse_response(
+                    response_data,
+                    source_size=source_size,
+                    response_size=response_size,
+                )
 
         except Exception as e:
             logger.error(f"[GLM-OCR] Single recognition error: {e}")
@@ -379,10 +558,11 @@ class GLMOCRClient:
         batch_size: int = None
     ) -> List[List[Tuple[List[List[float]], str, float]]]:
         """
-        Recognize text in multiple images (sequential processing)
+        Recognize text in multiple images with bounded request concurrency.
 
-        Note: layout_parsing API processes one image at a time,
-        so we process images sequentially with delays.
+        The layout_parsing endpoint accepts one image per request. Requests are
+        independent, so a small worker pool avoids serial network latency while
+        preserving the exact input/result ordering expected by callers.
 
         Args:
             images: List of images (numpy arrays, file paths, or bytes)
@@ -394,21 +574,29 @@ class GLMOCRClient:
         if not self.is_available():
             return [[] for _ in images]
 
-        all_results = []
+        if not images:
+            return []
 
-        # Process images sequentially (layout_parsing = 1 image per request)
-        for i, image in enumerate(images):
-            try:
-                result = self.recognize_single(image)
-                all_results.append(result)
+        concurrency = max(
+            1,
+            min(int(getattr(GLMOCRSettings, "BATCH_CONCURRENCY", 4)), len(images)),
+        )
+        all_results: List[List[Tuple[List[List[float]], str, float]]] = [
+            [] for _ in images
+        ]
 
-                # Small delay between requests to avoid rate limiting
-                if i < len(images) - 1:
-                    time.sleep(GLMOCRSettings.REQUEST_DELAY_MS / 1000.0)
-
-            except Exception as e:
-                logger.error(f"[GLM-OCR] Batch item {i} error: {e}")
-                all_results.append([])
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = {
+                executor.submit(self.recognize_single, image): index
+                for index, image in enumerate(images)
+            }
+            for future in as_completed(futures):
+                index = futures[future]
+                try:
+                    all_results[index] = future.result()
+                except Exception as e:
+                    logger.error(f"[GLM-OCR] Batch item {index} error: {e}")
+                    all_results[index] = []
 
         return all_results
 

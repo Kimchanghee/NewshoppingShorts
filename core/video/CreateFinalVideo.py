@@ -116,18 +116,8 @@ def create_final_video_thread(app):
 
         app.update_progress_state("video", "processing", 20)
 
-        # 醫뚯슦 諛섏쟾 泥섎━
-
-        if getattr(app, "mirror_video", False):
-            logger.debug("[鍮꾨뵒??泥섎━] 醫뚯슦 諛섏쟾 ?곸슜")
-
-            video = video.fx(vfx.mirror_x)
-
-        else:
-            logger.debug("[鍮꾨뵒??泥섎━] 醫뚯슦 諛섏쟾 誘몄쟻??(?먮낯 ?좎?)")
-
-        # 以묎뎅???먮쭑 ?쒓굅 泥섎━try:
-
+        # OCR polygons are expressed in decoded source coordinates. Apply the
+        # blur before mirroring so the mask and source pixels transform together.
         try:
             video = app.apply_chinese_subtitle_removal(video)
 
@@ -137,6 +127,16 @@ def create_final_video_thread(app):
             logger.warning("[DEBUG] 중국어 자막 제거 실패: %s", e)
 
             ui_controller.write_error_log(e)
+
+        # 醫뚯슦 諛섏쟾 泥섎━
+
+        if getattr(app, "mirror_video", False):
+            logger.debug("[鍮꾨뵒??泥섎━] 醫뚯슦 諛섏쟾 ?곸슜")
+
+            video = video.fx(vfx.mirror_x)
+
+        else:
+            logger.debug("[鍮꾨뵒??泥섎━] 醫뚯슦 諛섏쟾 誘몄쟻??(?먮낯 ?좎?)")
 
         app.update_progress_state("video", "processing", 30)
 
