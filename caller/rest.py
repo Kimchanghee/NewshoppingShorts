@@ -503,6 +503,87 @@ def _extract_error_fields(login_object: Dict[str, Any]) -> tuple[str, str, str]:
     return code, message, request_id
 
 
+def _classify_login_failure(login_object: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a safe, structured login failure for the startup UI.
+
+    The UI must distinguish an unavailable auth service from an authentication
+    rejection without parsing localized message text. Offline settings mode is
+    recovery for connectivity/service failures only; it never grants auth.
+    """
+    result = dict(login_object or {})
+    if result.get("status") is True:
+        return result
+
+    status = result.get("status")
+    try:
+        http_status = int(result.get("http_status") or 0)
+    except (TypeError, ValueError):
+        http_status = 0
+    backend_code, _, _ = _extract_error_fields(result)
+    backend_code = backend_code.upper()
+
+    error_code = str(result.get("error_code") or "").strip()
+    retryable = result.get("retryable")
+    offline_allowed = result.get("offline_allowed")
+
+    if not error_code:
+        if (
+            http_status == 429
+            or status in (429, "EU429", "EU005")
+            or backend_code == "RATE_LIMIT_ERROR"
+        ):
+            error_code, retryable, offline_allowed = "LOGIN_RATE_LIMITED", True, True
+        elif http_status >= 500 or backend_code == "INTERNAL_ERROR":
+            error_code, retryable, offline_allowed = "LOGIN_SERVER_ERROR", True, True
+        elif http_status == 401:
+            error_code, retryable, offline_allowed = (
+                "LOGIN_INVALID_CREDENTIALS",
+                False,
+                False,
+            )
+        elif http_status == 403 or backend_code == "FORBIDDEN_ERROR":
+            error_code, retryable, offline_allowed = "LOGIN_FORBIDDEN", False, False
+        elif http_status == 402:
+            error_code, retryable, offline_allowed = "LOGIN_SERVICE_DISABLED", False, True
+        elif (
+            status in (False, "EU001", "EU004", "INVALID_CREDENTIALS", "AUTH_FAIL")
+            or backend_code == "AUTH_ERROR"
+        ):
+            error_code, retryable, offline_allowed = (
+                "LOGIN_INVALID_CREDENTIALS",
+                False,
+                False,
+            )
+        elif backend_code == "VALIDATION_ERROR":
+            error_code, retryable, offline_allowed = "LOGIN_INVALID_INPUT", False, False
+        elif status == "EU003":
+            error_code, retryable, offline_allowed = "LOGIN_ALREADY_ACTIVE", False, False
+        elif status == "EU002":
+            error_code, retryable, offline_allowed = "LOGIN_SUBSCRIPTION_EXPIRED", False, False
+        else:
+            error_code, retryable, offline_allowed = "LOGIN_REJECTED", False, False
+
+    result.setdefault("status", "error")
+    result["error_module"] = "caller.rest"
+    result["error_code"] = error_code
+    result["retryable"] = bool(retryable)
+    result["offline_allowed"] = bool(offline_allowed)
+    return result
+
+
+def _login_transport_failure(error_code: str, message: str) -> Dict[str, Any]:
+    """Build a non-sensitive failure payload for a transient transport error."""
+    return _classify_login_failure(
+        {
+            "status": "error",
+            "message": message,
+            "error_code": error_code,
+            "retryable": True,
+            "offline_allowed": True,
+        }
+    )
+
+
 def _friendly_login_message(login_object: Dict[str, Any]) -> str:
     """
     Convert server/login payload into a user-friendly Korean message.
@@ -625,7 +706,15 @@ def login(**data) -> Dict[str, Any]:
     # HTTPS security check for production
     # ? ?? HTTPS  ?
     if not _check_https_security():
-        return {"status": "error", "message": "Secure connection required"}
+        return _classify_login_failure(
+            {
+                "status": "error",
+                "message": "Secure connection required",
+                "error_code": "LOGIN_SECURE_CONNECTION_REQUIRED",
+                "retryable": False,
+                "offline_allowed": False,
+            }
+        )
 
     # Input validation
     # ?
@@ -634,7 +723,15 @@ def login(**data) -> Dict[str, Any]:
         logger.error(
             f"Invalid user ID format: {_sanitize_user_id_for_logging(user_id)}"
         )
-        return {"status": "error", "message": _ERROR_MESSAGES["invalid_input"]}
+        return _classify_login_failure(
+            {
+                "status": "error",
+                "message": _ERROR_MESSAGES["invalid_input"],
+                "error_code": "LOGIN_INVALID_INPUT",
+                "retryable": False,
+                "offline_allowed": False,
+            }
+        )
 
     ip_address = data.get("ip", "")
     if not validate_ip_address(ip_address):
@@ -699,14 +796,18 @@ def login(**data) -> Dict[str, Any]:
             break
 
         if response is None:
-            return {"status": "error", "message": _ERROR_MESSAGES["network"]}
+            return _login_transport_failure(
+                "LOGIN_NETWORK_ERROR", _ERROR_MESSAGES["network"]
+            )
 
         if _is_deployment_disabled_response(response):
-            return {
-                "status": "error",
-                "http_status": 402,
-                "message": _deployment_disabled_message(),
-            }
+            return _classify_login_failure(
+                {
+                    "status": "error",
+                    "http_status": 402,
+                    "message": _deployment_disabled_message(),
+                }
+            )
 
         # Raw response logged at TRACE level only (contains token)
         logger.debug("[Login] Raw response received (length=%d)", len(response.text))
@@ -737,12 +838,12 @@ def login(**data) -> Dict[str, Any]:
             if not isinstance(loginObject, dict):
                 loginObject = {"status": "error"}
             loginObject.setdefault("status", "error")
-            loginObject.setdefault("http_status", response.status_code)
+            loginObject["http_status"] = response.status_code
             _, _, request_id = _extract_error_fields(loginObject)
             if request_id:
                 loginObject.setdefault("requestId", request_id)
             loginObject["message"] = _friendly_login_message(loginObject)
-            return loginObject
+            return _classify_login_failure(loginObject)
 
         # Store JWT token securely on successful login
         if loginObject.get("status") == True and "data" in loginObject:
@@ -764,6 +865,7 @@ def login(**data) -> Dict[str, Any]:
         else:
             # Normalize message for common failure cases
             loginObject["message"] = _friendly_login_message(loginObject)
+            loginObject = _classify_login_failure(loginObject)
             
             # Log login failure (if user exists but password wrong, etc.)
             try:
@@ -779,16 +881,31 @@ def login(**data) -> Dict[str, Any]:
         return loginObject
     except requests.exceptions.Timeout:
         logger.error("Login request timed out")
-        return {"status": "error", "message": _ERROR_MESSAGES["timeout"]}
+        return _login_transport_failure("LOGIN_TIMEOUT", _ERROR_MESSAGES["timeout"])
     except requests.exceptions.ConnectionError as e:
         logger.error(f"Login connection error: {e}")
-        return {"status": "error", "message": _ERROR_MESSAGES["connection"]}
+        error_code = (
+            "LOGIN_DNS_ERROR"
+            if _is_dns_resolution_error(e)
+            else "LOGIN_CONNECTION_ERROR"
+        )
+        return _login_transport_failure(error_code, _ERROR_MESSAGES["connection"])
     except requests.exceptions.RequestException as e:
         logger.error(f"Login network error: {str(e)[:100]}")
-        return {"status": "error", "message": _ERROR_MESSAGES["network"]}
+        return _login_transport_failure(
+            "LOGIN_NETWORK_ERROR", _ERROR_MESSAGES["network"]
+        )
     except Exception as e:
         logger.exception(f"Unexpected login error: {e}")
-        return {"status": "error", "message": _ERROR_MESSAGES["unexpected"]}
+        return _classify_login_failure(
+            {
+                "status": "error",
+                "message": _ERROR_MESSAGES["unexpected"],
+                "error_code": "LOGIN_UNEXPECTED_ERROR",
+                "retryable": False,
+                "offline_allowed": False,
+            }
+        )
 
 
 def logOut(**data) -> str:

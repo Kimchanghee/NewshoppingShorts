@@ -16,6 +16,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import webbrowser
@@ -365,6 +366,7 @@ class YouTubeManager:
         self._last_oauth_authorization_url: str = ""
         self._upload_settings = AutoUploadSettings()
         self._secrets_manager = get_secrets_manager()
+        self._startup_issues: List[Dict[str, str]] = []
 
         self._runtime_report = get_youtube_runtime_diagnostics()
         logger.info(
@@ -462,38 +464,116 @@ class YouTubeManager:
                 with open(settings_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
 
+                if not isinstance(data, dict):
+                    raise ValueError("YouTube settings root must be an object")
+
                 # Load channel info
-                if "channel" in data:
+                if isinstance(data.get("channel"), dict):
                     ch = data["channel"]
                     self._channel = YouTubeChannel(
-                        channel_id=ch.get("channel_id", ""),
-                        channel_name=ch.get("channel_name", ""),
+                        channel_id=str(ch.get("channel_id", "") or ""),
+                        channel_name=str(ch.get("channel_name", "") or ""),
                         account_email=str(ch.get("account_email", "") or "").strip().lower(),
-                        thumbnail_url=ch.get("thumbnail_url", ""),
-                        subscriber_count=ch.get("subscriber_count", "0"),
-                        video_count=ch.get("video_count", "0"),
-                        connected_at=ch.get("connected_at", "")
+                        thumbnail_url=str(ch.get("thumbnail_url", "") or ""),
+                        subscriber_count=str(ch.get("subscriber_count", "0") or "0"),
+                        video_count=str(ch.get("video_count", "0") or "0"),
+                        connected_at=str(ch.get("connected_at", "") or "")
                     )
 
                 # Load upload settings
-                if "upload_settings" in data:
+                if isinstance(data.get("upload_settings"), dict):
                     us = data["upload_settings"]
                     self._upload_settings = AutoUploadSettings(
-                        enabled=us.get("enabled", False),
-                        interval_minutes=us.get("interval_minutes", 30),
-                        auto_title=us.get("auto_title", True),
-                        auto_description=us.get("auto_description", True),
-                        auto_hashtags=us.get("auto_hashtags", True),
-                        max_hashtags=us.get("max_hashtags", 10),
-                        default_privacy=us.get("default_privacy", "public"),
-                        category_id=us.get("category_id", "22"),
-                        made_for_kids=us.get("made_for_kids", False)
+                        enabled=self._coerce_setting_bool(us.get("enabled"), False),
+                        interval_minutes=self._coerce_setting_int(
+                            us.get("interval_minutes"), 30, 1, 1440
+                        ),
+                        auto_title=self._coerce_setting_bool(us.get("auto_title"), True),
+                        auto_description=self._coerce_setting_bool(
+                            us.get("auto_description"), True
+                        ),
+                        auto_hashtags=self._coerce_setting_bool(
+                            us.get("auto_hashtags"), True
+                        ),
+                        max_hashtags=self._coerce_setting_int(
+                            us.get("max_hashtags"), 10, 0, 30
+                        ),
+                        default_privacy=self._coerce_privacy(
+                            us.get("default_privacy")
+                        ),
+                        category_id=str(us.get("category_id") or "22"),
+                        made_for_kids=self._coerce_setting_bool(
+                            us.get("made_for_kids"), False
+                        )
                     )
 
                 logger.debug("[YouTube] 설정 로드 완료")
                 self._sync_settings_manager_state()
-        except Exception as e:
-            logger.error(f"[YouTube] 설정 로드 실패: {e}")
+        except Exception:
+            logger.error("[YouTube][ST-Y001] Settings load failed", exc_info=True)
+            recovery_path = self._copy_invalid_settings_for_recovery(settings_path)
+            self._channel = None
+            self._upload_settings = AutoUploadSettings()
+            self._startup_issues.append(
+                {
+                    "code": "ST-Y001",
+                    "component": "settings.youtube",
+                    "message": "YouTube 설정을 읽지 못해 안전한 기본값으로 복구했습니다.",
+                    "source_path": os.path.abspath(settings_path),
+                    "recovery_path": recovery_path,
+                }
+            )
+            self._save_settings()
+
+    @staticmethod
+    def _coerce_setting_bool(value: Any, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "enabled"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "disabled", ""}:
+                return False
+        return default
+
+    @staticmethod
+    def _coerce_setting_int(value: Any, default: int, minimum: int, maximum: int) -> int:
+        try:
+            if isinstance(value, bool):
+                raise ValueError
+            normalized = int(value)
+        except (TypeError, ValueError):
+            normalized = default
+        return max(minimum, min(maximum, normalized))
+
+    @staticmethod
+    def _coerce_privacy(value: Any) -> str:
+        privacy = str(value or "public")
+        return privacy if privacy in {"public", "unlisted", "private"} else "public"
+
+    def _copy_invalid_settings_for_recovery(self, source_path: str) -> str:
+        if not source_path or not os.path.exists(source_path):
+            return ""
+        try:
+            recovery_dir = os.path.join(self._get_user_data_dir(), "recovery")
+            os.makedirs(recovery_dir, exist_ok=True)
+            timestamp = datetime.now().strftime("%Y%m%dT%H%M%S%f")
+            recovery_path = os.path.join(
+                recovery_dir,
+                f"youtube_settings.{timestamp}.corrupt.json",
+            )
+            shutil.copy2(source_path, recovery_path)
+            return os.path.abspath(recovery_path)
+        except Exception:
+            logger.warning("[YouTube][ST-Y001] Could not copy invalid settings", exc_info=True)
+            return ""
+
+    def get_startup_issues(self) -> List[Dict[str, str]]:
+        """Return non-secret diagnostics for nonfatal startup recovery."""
+        return [dict(issue) for issue in self._startup_issues]
 
     def _sync_settings_manager_state(self) -> None:
         """Keep the shared SettingsManager in sync with this manager state."""
@@ -520,6 +600,7 @@ class YouTubeManager:
     def _save_settings(self) -> bool:
         """Save settings to file"""
         settings_path = self._get_settings_path()
+        temporary_path = ""
 
         try:
             self._ensure_writable_dir(os.path.dirname(settings_path))
@@ -546,12 +627,29 @@ class YouTubeManager:
                 }
             }
 
-            with open(settings_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                encoding="utf-8",
+                dir=os.path.dirname(settings_path) or ".",
+                prefix=f".{os.path.basename(settings_path)}.",
+                suffix=".tmp",
+                delete=False,
+            ) as settings_stream:
+                temporary_path = settings_stream.name
+                json.dump(data, settings_stream, ensure_ascii=False, indent=2)
+                settings_stream.flush()
+                os.fsync(settings_stream.fileno())
+            os.replace(temporary_path, settings_path)
+            temporary_path = ""
 
             logger.debug("[YouTube] 설정 저장 완료")
             return True
         except Exception as e:
+            if temporary_path:
+                try:
+                    os.remove(temporary_path)
+                except OSError:
+                    pass
             logger.error(f"[YouTube] 설정 저장 실패: {e}")
             return False
 

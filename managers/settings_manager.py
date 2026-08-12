@@ -6,7 +6,11 @@ Saves and loads user preferences (CTA, voice selection, font) to a JSON file.
 
 import json
 import os
+import shutil
+import tempfile
 import threading
+from copy import deepcopy
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
 from utils.logging_config import get_logger
@@ -19,6 +23,8 @@ logger = get_logger(__name__)
 
 class SettingsManager:
     """Manages persistent storage of UI preferences (thread-safe)"""
+
+    CURRENT_SETTINGS_SCHEMA_VERSION = 1
 
     REMOTE_SECRET_STRING_KEYS = {
         "coupang_access_key",
@@ -123,6 +129,7 @@ class SettingsManager:
     )
 
     DEFAULT_SETTINGS = {
+        "settings_schema_version": CURRENT_SETTINGS_SCHEMA_VERSION,
         "cta_id": "default",
         "font_id": "seoul_hangang",
         "selected_voices": [],  # List of selected voice IDs
@@ -220,6 +227,7 @@ class SettingsManager:
         """
         self.settings_file = settings_file
         self._settings: Dict[str, Any] = {}
+        self._recovery_issues: List[Dict[str, str]] = []
         self._lock = threading.Lock()  # Thread safety lock
         self._remote_sync_enabled = False
         self._remote_push_running = False
@@ -253,77 +261,406 @@ class SettingsManager:
             base_dir = os.getcwd()
         return os.path.join(base_dir, self.settings_file)
 
+    def _get_legacy_settings_paths(self) -> List[str]:
+        """Return historical settings locations in migration precedence order."""
+        home_dir = os.path.expanduser("~")
+        candidates = [
+            self._get_legacy_settings_path(),
+            os.path.join(home_dir, ".newshopping", self.settings_file),
+        ]
+
+        appdata_dir = os.getenv("APPDATA", "").strip()
+        if appdata_dir:
+            candidates.append(os.path.join(appdata_dir, "SSMaker", self.settings_file))
+
+        # Some unpackaged builds used Local AppData even though the normal Windows
+        # AppData location is Roaming.
+        local_appdata_dir = os.getenv("LOCALAPPDATA", "").strip()
+        if local_appdata_dir:
+            candidates.append(os.path.join(local_appdata_dir, "SSMaker", self.settings_file))
+
+        current_path = os.path.normcase(os.path.abspath(self._get_settings_path()))
+        unique_paths: List[str] = []
+        seen = {current_path}
+        for candidate in candidates:
+            normalized = os.path.normcase(os.path.abspath(candidate))
+            if normalized not in seen:
+                seen.add(normalized)
+                unique_paths.append(candidate)
+        return unique_paths
+
+    @classmethod
+    def _default_settings(cls) -> Dict[str, Any]:
+        """Return defaults without sharing mutable lists/dicts between instances."""
+        return deepcopy(cls.DEFAULT_SETTINGS)
+
+    @staticmethod
+    def _coerce_bool(value: Any, default: bool) -> bool:
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, int) and value in (0, 1):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"1", "true", "yes", "on", "enabled"}:
+                return True
+            if normalized in {"0", "false", "no", "off", "disabled", ""}:
+                return False
+        return default
+
+    @staticmethod
+    def _coerce_string_list(value: Any, default: List[str]) -> List[str]:
+        raw_items: Any = value
+        if isinstance(value, str):
+            stripped = value.strip()
+            if not stripped:
+                raw_items = []
+            else:
+                try:
+                    parsed = json.loads(stripped)
+                except (TypeError, ValueError):
+                    parsed = None
+                raw_items = parsed if isinstance(parsed, list) else stripped.split(",")
+        if not isinstance(raw_items, list):
+            return list(default)
+
+        cleaned: List[str] = []
+        for item in raw_items:
+            if not isinstance(item, str):
+                continue
+            item = item.strip()
+            if item and item not in cleaned:
+                cleaned.append(item)
+        return cleaned
+
+    @staticmethod
+    def _normalize_cookie_value(value: Any) -> Any:
+        if isinstance(value, dict):
+            return deepcopy(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.startswith("fernet:"):
+                return stripped
+            try:
+                decoded = json.loads(stripped)
+            except (TypeError, ValueError):
+                return {}
+            return decoded if isinstance(decoded, dict) else {}
+        return {}
+
+    @classmethod
+    def _normalize_settings(cls, loaded: Dict[str, Any]) -> Dict[str, Any]:
+        """Migrate and normalize a validated JSON settings object."""
+        normalized = cls._default_settings()
+
+        # Unknown JSON keys can belong to a newer feature or plugin. Retain them;
+        # json.load has already constrained their values to JSON-safe structures.
+        for key, value in loaded.items():
+            if key not in cls.DEFAULT_SETTINGS:
+                normalized[key] = deepcopy(value)
+
+        for key, default in cls.DEFAULT_SETTINGS.items():
+            if key == "settings_schema_version":
+                continue
+            value = loaded.get(key, deepcopy(default))
+
+            if key == "youtube_upload_interval":
+                if isinstance(value, str):
+                    try:
+                        value = int(value.strip())
+                    except (TypeError, ValueError):
+                        value = default
+                if isinstance(value, bool) or value not in (60, 120, 180, 240):
+                    value = default
+                normalized[key] = value
+            elif key in cls.REMOTE_SECRET_JSON_KEYS:
+                normalized[key] = cls._normalize_cookie_value(value)
+            elif key == "platform_video_sources":
+                sources = cls._coerce_string_list(value, default)
+                sources = list(dict.fromkeys(
+                    source.lower()
+                    for source in sources
+                    if source.lower() in cls.VALID_PLATFORM_VIDEO_SOURCES
+                ))
+                normalized[key] = sources or list(default)
+            elif isinstance(default, bool):
+                normalized[key] = cls._coerce_bool(value, default)
+            elif isinstance(default, list):
+                normalized[key] = cls._coerce_string_list(value, default)
+            elif isinstance(default, int):
+                if isinstance(value, str):
+                    try:
+                        value = int(value.strip())
+                    except (TypeError, ValueError):
+                        value = default
+                if isinstance(value, bool) or not isinstance(value, int):
+                    value = default
+                if key == "sourcing_min_similarity_percent":
+                    value = max(0, min(100, value))
+                normalized[key] = value
+            elif isinstance(default, str):
+                normalized[key] = value if isinstance(value, str) else default
+            else:
+                normalized[key] = deepcopy(value)
+
+        normalized["settings_schema_version"] = cls.CURRENT_SETTINGS_SCHEMA_VERSION
+        return normalized
+
+    @staticmethod
+    def _settings_component(key: str) -> str:
+        if key.startswith("youtube_"):
+            return "settings.youtube"
+        if key.startswith("linktree_") or key == "cookies_inpock":
+            return "settings.linktree"
+        return "settings.core"
+
+    @classmethod
+    def _normalization_issues(
+        cls,
+        loaded: Dict[str, Any],
+        normalized: Dict[str, Any],
+        source_path: str,
+    ) -> List[Dict[str, str]]:
+        components = set()
+        if loaded.get("settings_schema_version") != cls.CURRENT_SETTINGS_SCHEMA_VERSION:
+            components.add("settings.core")
+        for key in cls.DEFAULT_SETTINGS:
+            if key in loaded and loaded.get(key) != normalized.get(key):
+                components.add(cls._settings_component(key))
+
+        messages = {
+            "settings.youtube": "YouTube preferences were normalized to the current settings schema.",
+            "settings.linktree": "Linktree preferences were normalized to the current settings schema.",
+            "settings.core": "Application preferences were migrated to the current settings schema.",
+        }
+        return [
+            {
+                "code": "ST-S002",
+                "component": component,
+                "message": messages[component],
+                "source_path": os.path.abspath(source_path),
+            }
+            for component in sorted(components)
+        ]
+
+    @staticmethod
+    def _validated_recovery_issues(value: Any) -> List[Dict[str, str]]:
+        if not isinstance(value, list):
+            return []
+        issues: List[Dict[str, str]] = []
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            code = item.get("code")
+            component = item.get("component")
+            source_path = item.get("source_path")
+            if code not in {"ST-S001", "ST-S002"}:
+                continue
+            if component not in {"settings.core", "settings.youtube", "settings.linktree"}:
+                continue
+            if not isinstance(source_path, str):
+                continue
+            messages = {
+                ("ST-S001", "settings.core"): (
+                    "The settings file could not be parsed, so safe defaults were loaded."
+                ),
+                ("ST-S002", "settings.core"): (
+                    "Application preferences were migrated to the current settings schema."
+                ),
+                ("ST-S002", "settings.youtube"): (
+                    "YouTube preferences were normalized to the current settings schema."
+                ),
+                ("ST-S002", "settings.linktree"): (
+                    "Linktree preferences were normalized to the current settings schema."
+                ),
+                ("ST-S001", "settings.linktree"): (
+                    "Linktree secure settings could not be decrypted and were reset."
+                ),
+            }
+            safe_issue = {
+                "code": code,
+                "component": component,
+                "message": messages.get(
+                    (code, component),
+                    "Application preferences required a safe startup recovery.",
+                ),
+                "source_path": source_path,
+            }
+            for optional_key in ("recovery_path", "recovered_at"):
+                optional_value = item.get(optional_key)
+                if isinstance(optional_value, str):
+                    safe_issue[optional_key] = optional_value
+            issues.append(safe_issue)
+        return issues
+
+    @staticmethod
+    def _deduplicate_recovery_issues(issues: List[Dict[str, str]]) -> List[Dict[str, str]]:
+        unique: List[Dict[str, str]] = []
+        seen = set()
+        for issue in issues:
+            identity = (
+                issue.get("code", ""),
+                issue.get("component", ""),
+                issue.get("source_path", ""),
+                issue.get("message", ""),
+            )
+            if identity not in seen:
+                seen.add(identity)
+                unique.append(issue)
+        return unique
+
+    @staticmethod
+    def _read_settings_dict(path: str) -> Dict[str, Any]:
+        with open(path, "r", encoding="utf-8") as settings_stream:
+            loaded = json.load(settings_stream)
+        if not isinstance(loaded, dict):
+            raise ValueError("settings JSON root must be an object")
+        return loaded
+
+    def _recover_invalid_settings(self, source_path: str, error: Exception) -> Dict[str, str]:
+        """Copy invalid data aside and return user-support-friendly issue metadata."""
+        recovered_at = datetime.now(timezone.utc)
+        stamp = recovered_at.strftime("%Y%m%dT%H%M%S%fZ")
+        recovery_dir = os.path.join(self._get_settings_dir(), "recovery")
+        source_name = os.path.basename(source_path) or "settings.json"
+        stem, extension = os.path.splitext(source_name)
+        recovery_name = f"{stem}.{stamp}.corrupt{extension or '.json'}"
+        recovery_path = os.path.join(recovery_dir, recovery_name)
+        try:
+            os.makedirs(recovery_dir, exist_ok=True)
+            shutil.copy2(source_path, recovery_path)
+        except Exception as copy_error:
+            recovery_path = ""
+            logger.warning("[SettingsManager] Could not copy invalid settings: %s", copy_error)
+
+        invalid_root = isinstance(error, ValueError) and not isinstance(error, json.JSONDecodeError)
+        metadata = {
+            "code": "ST-S002" if invalid_root else "ST-S001",
+            "component": "settings.core",
+            "message": (
+                "The settings file had an invalid schema, so safe defaults were loaded."
+                if invalid_root
+                else "The settings file could not be parsed, so safe defaults were loaded."
+            ),
+            "source_path": os.path.abspath(source_path),
+            "recovery_path": os.path.abspath(recovery_path) if recovery_path else "",
+            "recovered_at": recovered_at.isoformat(),
+        }
+        return metadata
+
     def _load_settings(self) -> None:
         """Load settings from file (thread-safe)"""
         settings_path = self._get_settings_path()
-        legacy_path = self._get_legacy_settings_path()
         needs_save = False
+        loaded: Optional[Dict[str, Any]] = None
+        source_path = ""
+        source_was_invalid = False
 
-        try:
-            with self._lock:
-                # One-time migration: if new path missing but legacy file exists, copy.
-                if not os.path.exists(settings_path) and os.path.exists(legacy_path):
-                    try:
-                        os.makedirs(os.path.dirname(settings_path), exist_ok=True)
-                        with open(legacy_path, "r", encoding="utf-8") as f:
-                            legacy_loaded = json.load(f)
-                        with open(settings_path, "w", encoding="utf-8") as f:
-                            json.dump(legacy_loaded, f, ensure_ascii=False, indent=2)
-                        logger.info("[SettingsManager] Migrated settings to user directory")
-                    except Exception as e:
-                        logger.warning(f"[SettingsManager] Settings migration failed: {e}")
-
-                if os.path.exists(settings_path):
-                    with open(settings_path, 'r', encoding='utf-8') as f:
-                        loaded = json.load(f)
-                        # Merge with defaults to handle new settings
-                        self._settings = {**self.DEFAULT_SETTINGS, **loaded}
-                        # Settings loaded successfully
-                else:
-                    self._settings = self.DEFAULT_SETTINGS.copy()
-                    # Using default settings (no file found)
-
-                # Reset accidental/test watermark defaults (avoid shipping dev watermark).
+        with self._lock:
+            if os.path.exists(settings_path):
+                source_path = settings_path
                 try:
-                    user_cfg = bool(self._settings.get("watermark_user_configured", False))
-                    enabled = bool(self._settings.get("watermark_enabled", False))
-                    channel = str(self._settings.get("watermark_channel_name", "") or "").strip()
-                    suspicious = (not channel) or ("?" in channel) or ("\ufffd" in channel) or (channel == "와이엠")
-                    if enabled and (not user_cfg) and suspicious:
-                        self._settings["watermark_enabled"] = False
-                        self._settings["watermark_channel_name"] = ""
-                        logger.info("[SettingsManager] Reset suspicious watermark defaults")
+                    loaded = self._read_settings_dict(settings_path)
+                except Exception as error:
+                    logger.warning("[SettingsManager] Settings loading failed: %s", error)
+                    self._recovery_issues.append(
+                        self._recover_invalid_settings(settings_path, error)
+                    )
+                    loaded = {}
+                    source_was_invalid = True
+                    needs_save = True
+            else:
+                for legacy_path in self._get_legacy_settings_paths():
+                    if not os.path.exists(legacy_path):
+                        continue
+                    try:
+                        loaded = self._read_settings_dict(legacy_path)
+                        source_path = legacy_path
+                        source_was_invalid = False
                         needs_save = True
-                except Exception:
-                    pass
-        except Exception as e:
-            # Settings loading failed - using defaults
-            logger.warning(f"[SettingsManager] Settings loading failed: {e}")
-            self._settings = self.DEFAULT_SETTINGS.copy()
+                        self._recovery_issues.append(
+                            {
+                                "code": "ST-S002",
+                                "component": "settings.core",
+                                "message": "Application preferences were migrated from a legacy settings location.",
+                                "source_path": os.path.abspath(legacy_path),
+                            }
+                        )
+                        logger.info("[SettingsManager] Migrating settings from %s", legacy_path)
+                        break
+                    except Exception as error:
+                        logger.warning("[SettingsManager] Legacy settings invalid: %s", error)
+                        self._recovery_issues.append(
+                            self._recover_invalid_settings(legacy_path, error)
+                        )
+                        needs_save = True
 
-        # Save outside the lock if we reset suspicious watermark defaults.
+            if loaded is None:
+                self._settings = self._default_settings()
+            else:
+                self._settings = self._normalize_settings(loaded)
+                self._recovery_issues.extend(
+                    self._validated_recovery_issues(loaded.get("settings_recovery_issues"))
+                )
+                if not source_was_invalid:
+                    self._recovery_issues.extend(
+                        self._normalization_issues(loaded, self._settings, source_path)
+                    )
+                needs_save = needs_save or self._settings != loaded
+
+            self._recovery_issues = self._deduplicate_recovery_issues(self._recovery_issues)
+            if self._recovery_issues:
+                self._settings["settings_recovery_issues"] = deepcopy(self._recovery_issues)
+
+            # Reset accidental/test watermark defaults (avoid shipping dev watermark).
+            user_cfg = self._settings.get("watermark_user_configured", False)
+            enabled = self._settings.get("watermark_enabled", False)
+            channel = self._settings.get("watermark_channel_name", "").strip()
+            suspicious = (not channel) or ("?" in channel) or ("\ufffd" in channel) or (channel == "와이엠")
+            if enabled and (not user_cfg) and suspicious:
+                self._settings["watermark_enabled"] = False
+                self._settings["watermark_channel_name"] = ""
+                logger.info("[SettingsManager] Reset suspicious watermark defaults")
+                needs_save = True
+
+        # Save outside the lock so _save_settings can acquire it normally.
         if needs_save:
-            try:
-                # Only save when file already exists (avoid creating file for fresh installs).
-                if os.path.exists(settings_path):
-                    self._save_settings()
-            except Exception:
-                pass
+            if not self._save_settings(sync_remote=False):
+                logger.warning("[SettingsManager] Could not persist normalized settings from %s", source_path)
 
     def _save_settings(self, sync_remote: bool = True) -> bool:
         """Save settings to file (thread-safe)"""
         settings_path = self._get_settings_path()
+        temporary_path = ""
 
         try:
             with self._lock:
-                os.makedirs(os.path.dirname(settings_path), exist_ok=True)
-                with open(settings_path, 'w', encoding='utf-8') as f:
-                    json.dump(self._settings, f, ensure_ascii=False, indent=2)
+                settings_dir = os.path.dirname(settings_path) or "."
+                os.makedirs(settings_dir, exist_ok=True)
+                with tempfile.NamedTemporaryFile(
+                    mode="w",
+                    encoding="utf-8",
+                    dir=settings_dir,
+                    prefix=f".{os.path.basename(settings_path)}.",
+                    suffix=".tmp",
+                    delete=False,
+                ) as settings_stream:
+                    temporary_path = settings_stream.name
+                    json.dump(self._settings, settings_stream, ensure_ascii=False, indent=2)
+                    settings_stream.flush()
+                    os.fsync(settings_stream.fileno())
+                os.replace(temporary_path, settings_path)
+                temporary_path = ""
             logger.debug(f"[SettingsManager] Settings saved: {settings_path}")
             if sync_remote:
                 self.schedule_remote_push()
             return True
         except Exception as e:
+            if temporary_path:
+                try:
+                    os.remove(temporary_path)
+                except OSError:
+                    pass
             logger.error(f"[SettingsManager] Settings save failed: {e}")
             return False
 
@@ -350,6 +687,10 @@ class SettingsManager:
 
         exported: Dict[str, Any] = {}
         for key, value in snapshot.items():
+            if key == "settings_recovery_issues":
+                # Diagnostics contain local file paths and are intentionally
+                # device-local rather than part of account settings sync.
+                continue
             if key in self.REMOTE_SECRET_STRING_KEYS:
                 if isinstance(value, str) and value:
                     try:
@@ -378,7 +719,8 @@ class SettingsManager:
         if not isinstance(remote_settings, dict):
             remote_settings = {}
 
-        prepared = {**self.DEFAULT_SETTINGS, **remote_settings}
+        prepared = self._normalize_settings(remote_settings)
+        prepared.pop("settings_recovery_issues", None)
 
         for key in self.REMOTE_SECRET_STRING_KEYS:
             value = prepared.get(key, "")
@@ -1376,6 +1718,39 @@ class SettingsManager:
         webhook_url = self._decrypt_value(raw_webhook).strip()
         api_key = self._decrypt_value(raw_api_key).strip()
 
+        corrupt_secure_value = (
+            bool(raw_webhook)
+            and str(raw_webhook).startswith("fernet:")
+            and not webhook_url
+        ) or (
+            bool(raw_api_key)
+            and str(raw_api_key).startswith("fernet:")
+            and not api_key
+        )
+        if corrupt_secure_value:
+            with self._lock:
+                self._settings["linktree_webhook_url"] = ""
+                self._settings["linktree_api_key"] = ""
+                self._settings["linktree_auto_publish"] = False
+                self._recovery_issues.append(
+                    {
+                        "code": "ST-S001",
+                        "component": "settings.linktree",
+                        "message": "Linktree 보안 설정을 해독하지 못해 해당 설정만 초기화했습니다.",
+                        "source_path": os.path.abspath(self._get_settings_path()),
+                    }
+                )
+                self._recovery_issues = self._deduplicate_recovery_issues(
+                    self._recovery_issues
+                )
+                self._settings["settings_recovery_issues"] = deepcopy(
+                    self._recovery_issues
+                )
+            self._save_settings(sync_remote=False)
+            raw_webhook = ""
+            raw_api_key = ""
+            auto_publish = False
+
         migrated = False
         if raw_webhook and not str(raw_webhook).startswith("fernet:") and webhook_url:
             migrated = True
@@ -1529,6 +1904,11 @@ class SettingsManager:
         return self._save_settings()
 
     # ============ Bulk Operations ============
+
+    def get_recovery_issues(self) -> list[dict]:
+        """Return value-free startup recovery diagnostics for the UI/support flow."""
+        with self._lock:
+            return deepcopy(self._recovery_issues)
 
     def get_all_settings(self) -> Dict[str, Any]:
         """Get all settings as a dictionary"""

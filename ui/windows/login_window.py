@@ -5,6 +5,7 @@ Login window for PyQt6
 import os
 import sys
 import socket
+import errno
 import threading
 import hashlib
 import json
@@ -24,6 +25,18 @@ from startup.constants import DEFAULT_PROCESS_PORT
 
 logger = get_logger(__name__)
 
+
+class StartupLockError(RuntimeError):
+    """Structured local startup-lock failure; never eligible for offline bypass."""
+
+    def __init__(self, code: str, context: Dict[str, Any]):
+        self.code = str(code or "STARTUP_SINGLE_INSTANCE_FAILED")
+        self.context = dict(context or {})
+        super().__init__(
+            f"[{self.code}] Unable to acquire the application startup lock; "
+            f"context={self.context}"
+        )
+
 class Login(QMainWindow, Ui_LoginWindow):
     """Login window with authentication functionality for PyQt6"""
 
@@ -42,6 +55,8 @@ class Login(QMainWindow, Ui_LoginWindow):
         self.serverSocket: Optional[socket.socket] = None
         self.serverSockets: list[socket.socket] = []
         self.server_port: Optional[int] = None
+        self.startup_error_code: Optional[str] = None
+        self.startup_error_context: Dict[str, Any] = {}
         self.auto_login_enabled = False
         
         if self.setPort():
@@ -54,6 +69,7 @@ class Login(QMainWindow, Ui_LoginWindow):
             
             # Connect signals
             self.loginButton.clicked.connect(self._loginCheck)
+            self.offlineSettingsButton.clicked.connect(self._enter_offline_mode)
             self.minimumButton.clicked.connect(self.showMinimized)
             self.exitButton.clicked.connect(self._closeWindow)
             self.registerRequestButton.clicked.connect(self._openRegistrationDialog)
@@ -62,7 +78,9 @@ class Login(QMainWindow, Ui_LoginWindow):
             self._warmup_server()
             QtCore.QTimer.singleShot(450, self._attempt_auto_login)
         else:
-            raise RuntimeError("이미 실행 중이거나 단일 실행 포트를 사용할 수 없습니다.")
+            code = self.startup_error_code or "STARTUP_SINGLE_INSTANCE_FAILED"
+            context = self.startup_error_context or {"reason": "unknown"}
+            raise StartupLockError(code, context)
 
     def _center_on_active_screen(self) -> None:
         """Keep the frameless login window inside the monitor work area."""
@@ -135,71 +153,103 @@ class Login(QMainWindow, Ui_LoginWindow):
                 pass
 
     def setPort(self) -> bool:
+        """Acquire the authoritative per-user startup lock.
+
+        The deterministic (or explicitly configured) port decides whether this
+        process may start. Port 20022 is retained only as a best-effort legacy
+        guard, so another program using that old global port cannot prevent a
+        valid per-user instance from launching.
+        """
+        self.startup_error_code = None
+        self.startup_error_context = {}
         raw_port = os.getenv("SSMAKER_PORT")
         try:
-            if raw_port:
-                ports_to_try = [int(raw_port)]
-            else:
-                default_port = int(DEFAULT_PROCESS_PORT)
-                fallback_port = self._fallback_port()
-                ports_to_try = [fallback_port]
-                if fallback_port != default_port:
-                    ports_to_try.append(default_port)
-        except ValueError as e:
-            logger.error(f"Invalid SSMAKER_PORT value: {e}")
+            authoritative_port = int(raw_port) if raw_port else self._fallback_port()
+            legacy_port = int(DEFAULT_PROCESS_PORT)
+            if not 1 <= authoritative_port <= 65535:
+                raise ValueError("port must be between 1 and 65535")
+        except (TypeError, ValueError) as exc:
+            self.startup_error_code = "STARTUP_PORT_CONFIG_INVALID"
+            self.startup_error_context = {
+                "setting": "SSMAKER_PORT",
+                "value": str(raw_port or ""),
+                "reason": str(exc),
+            }
+            logger.error(
+                "[%s] Invalid startup port configuration: %s",
+                self.startup_error_code,
+                self.startup_error_context,
+            )
             return False
 
-        last_error: Optional[OSError] = None
-        bound_sockets: list[socket.socket] = []
+        authoritative_socket: Optional[socket.socket] = None
+        try:
+            authoritative_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._configure_single_instance_socket(authoritative_socket)
+            authoritative_socket.bind(("127.0.0.1", authoritative_port))
+            authoritative_socket.listen(1)
+        except OSError as exc:
+            if authoritative_socket is not None:
+                try:
+                    authoritative_socket.close()
+                except OSError:
+                    pass
+            os_error = getattr(exc, "errno", None)
+            already_active = os_error in {errno.EADDRINUSE, 10048}
+            self.startup_error_code = (
+                "STARTUP_INSTANCE_ALREADY_RUNNING"
+                if already_active
+                else "STARTUP_LOCK_BIND_FAILED"
+            )
+            self.startup_error_context = {
+                "authoritative_port": authoritative_port,
+                "errno": os_error,
+                "reason": "port_in_use" if already_active else "bind_failed",
+            }
+            logger.warning(
+                "[%s] Authoritative single-instance port %s could not be bound: %s",
+                self.startup_error_code,
+                authoritative_port,
+                exc,
+            )
+            return False
 
-        for index, port in enumerate(ports_to_try):
-            sock: Optional[socket.socket] = None
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                self._configure_single_instance_socket(sock)
-                sock.bind(("127.0.0.1", port))
-                sock.listen(1)
-                bound_sockets.append(sock)
+        self.serverSockets = [authoritative_socket]
+        self.serverSocket = authoritative_socket
+        self.server_port = authoritative_port
+        logger.info(
+            "Authoritative single-instance socket bound to deterministic port %s",
+            authoritative_port,
+        )
 
-                if index > 0:
-                    logger.info(
-                        "Additional single-instance guard bound to legacy port %s",
-                        port,
-                    )
-                else:
-                    logger.info(f"Server socket bound to port {port}")
-            except OSError as e:
-                last_error = e
-                if sock:
-                    try:
-                        sock.close()
-                    except OSError:
-                        pass
-                for bound in bound_sockets:
-                    try:
-                        bound.close()
-                    except OSError:
-                        pass
-                bound_sockets.clear()
-                logger.warning(
-                    "Single-instance port %s is already in use or unavailable: %s",
-                    port,
-                    e,
-                )
-                return False
-
-        if bound_sockets:
-            self.serverSockets = bound_sockets
-            self.serverSocket = bound_sockets[0]
-            self.server_port = ports_to_try[0]
+        if legacy_port == authoritative_port:
             return True
 
-        logger.warning(
-            "Failed to bind single-instance socket (attempted_ports=%s): %s",
-            ports_to_try,
-            last_error,
-        )
-        return False
+        legacy_socket: Optional[socket.socket] = None
+        try:
+            legacy_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self._configure_single_instance_socket(legacy_socket)
+            legacy_socket.bind(("127.0.0.1", legacy_port))
+            legacy_socket.listen(1)
+            self.serverSockets.append(legacy_socket)
+            logger.info(
+                "Additional single-instance guard bound to legacy port %s",
+                legacy_port,
+            )
+        except OSError as exc:
+            if legacy_socket is not None:
+                try:
+                    legacy_socket.close()
+                except OSError:
+                    pass
+            logger.warning(
+                "Legacy single-instance port %s is unavailable; continuing with "
+                "authoritative port %s: %s",
+                legacy_port,
+                authoritative_port,
+                exc,
+            )
+        return True
 
     def _preload_ip(self):
         threading.Thread(target=self._get_local_ip, daemon=True).start()
@@ -269,10 +319,14 @@ class Login(QMainWindow, Ui_LoginWindow):
                 self._handle_login_success(res)
             elif res.get("status") == "EU003":
                 logger.info("Duplicate login detected (EU003)")
+                error_module = str(res.get("error_module") or "caller.rest")
+                error_code = str(res.get("error_code") or "LOGIN_ALREADY_ACTIVE")
                 reply = show_question(
                     self,
                     "중복 로그인",
-                    "다른 기기에서 이미 로그인되어 있습니다.\n기존 세션을 종료하고 이 기기에서 계속할까요?",
+                    f"[{error_module}/{error_code}]\n"
+                    "다른 기기에서 이미 로그인되어 있습니다.\n"
+                    "기존 세션을 종료하고 이 기기에서 계속할까요?",
                 )
                 if reply and not force:
                     self._loginCheck(force=True)
@@ -281,13 +335,54 @@ class Login(QMainWindow, Ui_LoginWindow):
             else:
                 # Use friendly message converter
                 error_msg = rest._friendly_login_message(res)
-                logger.warning(f"Login failed: {error_msg} (status={res.get('status')})")
-                self.showCustomMessageBox("로그인 실패", error_msg)
+                error_module = str(res.get("error_module") or "caller.rest")
+                error_code = str(res.get("error_code") or "LOGIN_REJECTED")
+                display_msg = f"[{error_module}/{error_code}]\n{error_msg}"
+                if res.get("offline_allowed"):
+                    display_msg += (
+                        "\n\n서버 연결 없이 설정을 확인하려면 "
+                        "'오프라인 설정 모드'를 선택하세요."
+                    )
+                logger.warning(
+                    "Login failed: module=%s code=%s retryable=%s offline_allowed=%s status=%s",
+                    error_module,
+                    error_code,
+                    bool(res.get("retryable")),
+                    bool(res.get("offline_allowed")),
+                    res.get("status"),
+                )
+                self.showCustomMessageBox("로그인 실패", display_msg)
                 self.loginButton.setText("로그인")
         except Exception as e:
             logger.error(f"Login exception: {str(e)}", exc_info=True)
-            self.showCustomMessageBox("오류", "로그인 처리 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.")
+            self.showCustomMessageBox(
+                "오류",
+                "[ui.windows.login_window/LOGIN_UI_ERROR]\n"
+                "로그인 처리 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.",
+            )
             self.loginButton.setText("로그인")
+
+    def _enter_offline_mode(self) -> None:
+        """Delegate to startup recovery without creating authenticated state."""
+        controller = getattr(self, "controller", None)
+        enter_offline_mode = getattr(controller, "enter_offline_mode", None)
+        if not callable(enter_offline_mode):
+            logger.error(
+                "[ui.windows.login_window/OFFLINE_CONTROLLER_UNAVAILABLE] "
+                "Offline settings mode has no controller"
+            )
+            self.showCustomMessageBox(
+                "오프라인 설정 모드",
+                "[ui.windows.login_window/OFFLINE_CONTROLLER_UNAVAILABLE]\n"
+                "오프라인 설정 모드를 시작할 수 없습니다.",
+            )
+            return
+
+        logger.warning(
+            "[ui.windows.login_window/OFFLINE_SETTINGS_REQUESTED] "
+            "Delegating offline settings mode; authentication remains unset"
+        )
+        enter_offline_mode()
 
     def _handle_login_success(self, res):
         # 로그인 정보 저장 처리

@@ -439,6 +439,14 @@ class BatchHandler:
 
     def start_batch_processing(self):
         """배치 처리 시작 - 동적 URL 처리 지원 (중복 실행 방지)"""
+        if bool(getattr(self.app, "offline_mode", False)):
+            logger.warning("[BatchHandler][ST-N001] Work denied in offline settings mode")
+            show_warning(
+                self.app,
+                "오프라인 설정 모드",
+                "오프라인 설정 모드에서는 영상 제작을 시작할 수 없습니다. 다시 로그인해 주세요.",
+            )
+            return
         # 이미 실행 중인 스레드가 있는지 확인
         if self.app.batch_thread and self.app.batch_thread.is_alive():
             self.app.add_log("이미 작업이 진행 중입니다. 기다려주세요.")

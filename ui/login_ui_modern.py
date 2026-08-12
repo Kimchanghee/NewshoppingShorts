@@ -486,6 +486,31 @@ class ModernLoginUi:
         right_layout.addWidget(self.loginButton)
         right_layout.addSpacing(8)
 
+        self.offlineSettingsButton = QPushButton(self.rightFrame)
+        self.offlineSettingsButton.setObjectName("offlineSettingsButton")
+        self.offlineSettingsButton.setAccessibleName("오프라인 설정 모드")
+        self.offlineSettingsButton.setMinimumHeight(ds.button_sizes["md"].height)
+        self.offlineSettingsButton.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
+        self.offlineSettingsButton.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.offlineSettingsButton.setStyleSheet(f"""
+            QPushButton {{
+                color: {login_color('text_secondary')};
+                background-color: {login_color('surface_variant')};
+                border: 1px solid {login_color('border')};
+                border-radius: {ds.radius.md}px;
+            }}
+            QPushButton:hover {{
+                color: {login_color('primary')};
+                border-color: {login_color('primary')};
+            }}
+        """)
+        self.offlineSettingsButton.setText("오프라인 설정 모드")
+        self.offlineSettingsButton.setToolTip(
+            "로그인 없이 로컬 설정만 엽니다. 인증이 필요한 작업은 사용할 수 없습니다."
+        )
+        right_layout.addWidget(self.offlineSettingsButton)
+        right_layout.addSpacing(8)
+
         self.registerRequestButton = QPushButton(self.rightFrame)
         self.registerRequestButton.setMinimumHeight(ds.button_sizes["lg"].height)
         self.registerRequestButton.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))

@@ -84,12 +84,6 @@ from managers.progress_manager import ProgressManager
 from managers.session_manager import SessionManager
 from managers.subscription_manager import SubscriptionManager
 from managers.generated_video_manager import GeneratedVideoManager
-from managers.youtube_manager import get_youtube_manager
-from managers.tiktok_manager import get_tiktok_manager
-from managers.instagram_manager import get_instagram_manager
-from managers.coupang_manager import CoupangManager
-from managers.inpock_manager import get_inpock_manager
-from managers.sourcing_manager import get_sourcing_manager
 from ui.theme_manager import get_theme_manager
 from ui.design_system_v2 import get_design_system
 from pathlib import Path
@@ -118,11 +112,22 @@ class VideoAnalyzerGUI(
     log_signal = pyqtSignal(str, str)
     ui_callback_signal = pyqtSignal(object)
 
-    def __init__(self, parent=None, login_data=None, preloaded_ocr=None, ocr_init_attempted: bool = False):
+    def __init__(
+        self,
+        parent=None,
+        login_data=None,
+        preloaded_ocr=None,
+        ocr_init_attempted: bool = False,
+        offline_mode: bool = False,
+        safe_mode: bool = False,
+    ):
         super().__init__(parent)
         self.login_data = login_data
         self.preloaded_ocr = preloaded_ocr
         self.ocr_init_attempted = ocr_init_attempted
+        self.offline_mode = bool(offline_mode)
+        self.safe_mode = bool(safe_mode)
+        self.startup_component_issues = []
         self.config = config
 
         # Core state and design
@@ -152,19 +157,69 @@ class VideoAnalyzerGUI(
         self.batch_handler = BatchHandler(self)
         self._video_helpers = VideoHelpers(self)
         self._generated_video_manager = GeneratedVideoManager(self)
-        self.youtube_manager = get_youtube_manager(gui=self)
-        self.tiktok_manager = get_tiktok_manager(gui=self)
-        self.instagram_manager = get_instagram_manager(gui=self)
-        self.coupang_manager = CoupangManager()
+        self.youtube_manager = self._load_optional_manager(
+            "youtube",
+            "ST-Y001",
+            lambda: __import__(
+                "managers.youtube_manager", fromlist=["get_youtube_manager"]
+            ).get_youtube_manager(gui=self),
+        )
+        self.tiktok_manager = self._load_optional_manager(
+            "tiktok",
+            "ST-U201",
+            lambda: __import__(
+                "managers.tiktok_manager", fromlist=["get_tiktok_manager"]
+            ).get_tiktok_manager(gui=self),
+        )
+        self.instagram_manager = self._load_optional_manager(
+            "instagram",
+            "ST-U202",
+            lambda: __import__(
+                "managers.instagram_manager", fromlist=["get_instagram_manager"]
+            ).get_instagram_manager(gui=self),
+        )
+        self.coupang_manager = self._load_optional_manager(
+            "coupang",
+            "ST-U203",
+            lambda: __import__(
+                "managers.coupang_manager", fromlist=["CoupangManager"]
+            ).CoupangManager(),
+        )
         # Selenium-based managers must not crash the app on machines without selenium/chrome.
         # Their heavy imports are guarded and the driver is created lazily.
-        self.inpock_manager = get_inpock_manager()
-        self.sourcing_manager = get_sourcing_manager()
+        self.inpock_manager = self._load_optional_manager(
+            "inpock",
+            "ST-U204",
+            lambda: __import__(
+                "managers.inpock_manager", fromlist=["get_inpock_manager"]
+            ).get_inpock_manager(),
+        )
+        self.sourcing_manager = self._load_optional_manager(
+            "sourcing",
+            "ST-U205",
+            lambda: __import__(
+                "managers.sourcing_manager", fromlist=["get_sourcing_manager"]
+            ).get_sourcing_manager(),
+        )
 
         # Load API keys and initialize provider
         self.api_handler.load_saved_api_keys()
+        try:
+            from utils.secrets_manager import SecretsManager
+
+            self.startup_component_issues.extend(SecretsManager.get_startup_issues())
+        except Exception:
+            logger.debug("[Startup] Secure-storage recovery summary unavailable", exc_info=True)
         self._init_api_key_manager()
-        self.model_provider = VertexGeminiProvider()
+        self.model_provider = self._load_optional_manager(
+            "gemini",
+            "ST-G001",
+            VertexGeminiProvider,
+        )
+        if self.model_provider is None:
+            self.model_provider = VertexGeminiProvider.__new__(VertexGeminiProvider)
+            self.model_provider.gemini_client = None
+            self.model_provider._api_key_configured = False
         self._warn_if_vertex_unset()
 
         # Set genai_client from model_provider
@@ -192,7 +247,8 @@ class VideoAnalyzerGUI(
 
         # Subscription manager
         self.subscription_manager = SubscriptionManager(self)
-        self.subscription_manager.start()
+        if not self.offline_mode:
+            self.subscription_manager.start()
 
         # Login/exit handlers
         self.login_handler = LoginHandler(self)
@@ -203,6 +259,122 @@ class VideoAnalyzerGUI(
         # Connect signals
         self.log_signal.connect(self._on_log_signal)
         self.ui_callback_signal.connect(self._execute_ui_callback)
+        if self.offline_mode:
+            self.setWindowTitle(f"{self.windowTitle()} - 오프라인 설정 모드")
+            self.startup_component_issues.append(
+                {
+                    "code": "ST-N001",
+                    "component": "network.auth",
+                    "message": "오프라인 설정 모드에서는 로그인과 제작 작업이 비활성화됩니다.",
+                }
+            )
+            self._enforce_offline_settings_mode()
+        QTimer.singleShot(250, self._show_startup_recovery_summary)
+
+    def _enforce_offline_settings_mode(self) -> None:
+        """Disable visible work controls in addition to auth checks."""
+        controls = [
+            getattr(self, "start_batch_button", None),
+            getattr(getattr(self, "sourcing_panel", None), "btn_start", None),
+        ]
+        for control in controls:
+            if control is None:
+                continue
+            control.setEnabled(False)
+            control.setToolTip(
+                "오프라인 설정 모드에서는 제작 작업을 실행할 수 없습니다."
+            )
+
+    def _load_optional_manager(self, component: str, code: str, factory):
+        """Contain optional integration failures so the core shell can open."""
+        if self.safe_mode and component in {
+            "youtube",
+            "tiktok",
+            "instagram",
+            "coupang",
+            "inpock",
+            "sourcing",
+            "gemini",
+        }:
+            self.startup_component_issues.append(
+                {"component": component, "code": code, "safe_mode": True}
+            )
+            return None
+        try:
+            manager = factory()
+            issue_getter = getattr(manager, "get_startup_issues", None)
+            if callable(issue_getter):
+                for issue in issue_getter() or []:
+                    if isinstance(issue, dict):
+                        self.startup_component_issues.append(dict(issue))
+            return manager
+        except Exception as exc:
+            logger.error(
+                "[Startup][%s] Optional component %s failed",
+                code,
+                component,
+                exc_info=True,
+            )
+            try:
+                from startup.diagnostics import record_startup_exception
+
+                issue = record_startup_exception(
+                    "main",
+                    f"integration.{component}",
+                    exc,
+                    code=code,
+                    recoverable=True,
+                    offline_allowed=True,
+                )
+                self.startup_component_issues.append(issue.to_dict())
+            except Exception:
+                self.startup_component_issues.append(
+                    {"component": component, "code": code}
+                )
+            return None
+
+    def _show_startup_recovery_summary(self) -> None:
+        """Surface nonfatal component/settings recovery instead of hiding it."""
+        issues = list(self.startup_component_issues)
+        try:
+            from managers.settings_manager import get_settings_manager
+
+            settings = get_settings_manager()
+            getter = getattr(settings, "get_recovery_issues", None)
+            if callable(getter):
+                issues.extend(getter() or [])
+        except Exception:
+            logger.debug("[Startup] Settings recovery summary unavailable", exc_info=True)
+        if not issues:
+            return
+
+        unique = []
+        seen = set()
+        for issue in issues:
+            if not isinstance(issue, dict):
+                continue
+            code = str(issue.get("code") or "ST-U001")
+            component = str(issue.get("component") or "startup")
+            key = (code, component)
+            if key in seen:
+                continue
+            seen.add(key)
+            message = str(issue.get("message") or "해당 기능을 다시 설정해 주세요.")
+            unique.append(f"- [{code}] {component}: {message}")
+        if not unique:
+            return
+
+        try:
+            from ui.components.custom_dialog import show_warning
+
+            show_warning(
+                self,
+                "일부 기능 복구 안내",
+                "프로그램은 계속 사용할 수 있지만 다음 항목을 확인해야 합니다.\n\n"
+                + "\n".join(unique[:8]),
+            )
+        except Exception:
+            logger.warning("[Startup] Recovery issues: %s", "; ".join(unique))
 
     def _init_api_key_manager(self):
         """Initialize API key manager for key rotation."""
@@ -271,6 +443,7 @@ class VideoAnalyzerGUI(
 
         # Store panel references
         self.mode_selection_panel = widgets["mode_selection_panel"]
+        self.sourcing_panel = widgets["sourcing_panel"]
         self.url_input_panel = widgets["url_input_panel"]
         self.voice_panel = widgets["voice_panel"]
         self.cta_panel = widgets["cta_panel"]

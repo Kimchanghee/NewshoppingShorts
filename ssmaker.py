@@ -6,6 +6,7 @@ import sys
 import os
 import time
 import logging
+import traceback
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
@@ -47,10 +48,16 @@ try:
 except Exception as e:
     # Logging isn't configured yet; best-effort stderr for troubleshooting.
     try:
-        import traceback
-
         print(f"[WARN] setup_dpi_awareness failed: {e}", file=sys.stderr)
         traceback.print_exc()
+        from startup.diagnostics import record_startup_exception
+
+        record_startup_exception(
+            "bootstrap",
+            "runtime_environment",
+            e,
+            recoverable=True,
+        )
     except Exception:
         pass
 
@@ -133,7 +140,7 @@ def setup_logging():
 
 
 def install_keyboardinterrupt_hook():
-    """Suppress noisy traceback on Ctrl+C from Qt callback contexts."""
+    """Handle Ctrl+C and persist complete traces for all other exceptions."""
     original_hook = sys.excepthook
 
     def _hook(exc_type, exc_value, exc_traceback):
@@ -146,6 +153,22 @@ def install_keyboardinterrupt_hook():
             except Exception:
                 pass
             return
+        try:
+            from startup.diagnostics import record_startup_exception
+
+            record_startup_exception(
+                "runtime",
+                "sys.excepthook",
+                exc_value,
+                code="startup_uncaught_exception",
+                recoverable=False,
+            )
+        except Exception:
+            pass
+        logging.critical(
+            "Unhandled exception",
+            exc_info=(exc_type, exc_value, exc_traceback),
+        )
         original_hook(exc_type, exc_value, exc_traceback)
 
     sys.excepthook = _hook
@@ -219,8 +242,16 @@ class StartupWorker(QtCore.QThread):
 
             self.finished.emit()
         except Exception as e:
-            self.error.emit(str(e))
-            logging.error(f"Worker exception: {e}", exc_info=True)
+            from startup.diagnostics import record_startup_exception
+
+            issue = record_startup_exception(
+                "bootstrap",
+                "startup_worker",
+                e,
+                recoverable=False,
+            )
+            self.error.emit(issue.user_message())
+            logging.exception("Startup worker exception")
 
 if __name__ == "__main__":
     if "--youtube-runtime-smoke" in sys.argv:
@@ -229,13 +260,24 @@ if __name__ == "__main__":
     # Setup logging first
     log_file = setup_logging()
     install_keyboardinterrupt_hook()
+    from startup.diagnostics import record_startup_event
+
+    record_startup_event("bootstrap", "entrypoint", code="startup_started")
     logging.info("Application starting...")
     try:
         from managers.settings_manager import get_settings_manager
 
         get_settings_manager().sync_launch_on_startup()
     except Exception as exc:
-        logging.warning("Launch-on-startup sync skipped: %s", exc)
+        from startup.diagnostics import record_startup_exception
+
+        record_startup_exception(
+            "bootstrap",
+            "launch_on_startup_sync",
+            exc,
+            recoverable=True,
+        )
+        logging.warning("Launch-on-startup sync skipped", exc_info=True)
 
     app = QApplication(sys.argv)
     
@@ -291,10 +333,18 @@ if __name__ == "__main__":
 
             logging.info("Application controller started successfully")
         except Exception as e:
-            logging.error(f"Startup error: {e}", exc_info=True)
+            from startup.diagnostics import record_startup_exception
+
+            issue = record_startup_exception(
+                "bootstrap",
+                "app_controller",
+                e,
+                recoverable=False,
+            )
+            logging.exception("Application controller startup error")
             splash.close()
             QMessageBox.critical(None, "시작 오류",
-                f"애플리케이션 초기화 중 오류가 발생했습니다.\n{str(e)}\n\n"
+                f"{issue.user_message()}\n\n"
                 f"로그 파일: {log_file}")
             sys.exit(1)
 

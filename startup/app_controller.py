@@ -494,7 +494,10 @@ class AppController:
         self._latest_version: str = ""
         self._release_notes: str = ""
         self._main_launched: bool = False
+        self._main_launching: bool = False
         self._loading_started: bool = False
+        self._offline_mode: bool = False
+        self._safe_mode: bool = False
         self._quit_policy_overridden: bool = False
         self._quit_policy_original: bool = True
         if hasattr(self.app, "quitOnLastWindowClosed"):
@@ -646,12 +649,21 @@ class AppController:
         except Exception as e:
             self._close_splash()
             logger.error("Failed to create login window: %s", e, exc_info=True)
-            QMessageBox.critical(
-                None,
-                "?쒖옉 ?ㅻ쪟",
-                f"濡쒓렇???붾㈃???????놁뒿?덈떎:\n{e}",
+            failure_code = str(getattr(e, "code", "ST-L001") or "ST-L001")
+            lock_failure = failure_code.startswith("STARTUP_")
+            issue = self._record_startup_failure(
+                phase="login",
+                component=("login.single_instance" if lock_failure else "login.window"),
+                exc=e,
+                code=failure_code,
+                offline_allowed=not lock_failure,
             )
-            sys.exit(1)
+            self._show_startup_recovery(
+                issue,
+                retry_callback=self._show_login,
+                allow_offline=not lock_failure,
+            )
+            return
         self.login_window.controller = self
 
         if self.splash:
@@ -660,6 +672,19 @@ class AppController:
             QtCore.QTimer.singleShot(3000, self._close_splash)
 
         self.login_window.show()
+
+    def enter_offline_mode(self) -> None:
+        """Open the local settings shell without granting authenticated work."""
+        if self._loading_started or self._main_launching or self._main_launched:
+            return
+        self._offline_mode = True
+        self.login_data = None
+        logger.warning(
+            "[Startup][ST-N001] Offline settings mode requested; work remains disabled"
+        )
+        if self.login_window:
+            self.login_window.hide()
+        self._proceed_to_loading()
 
     def on_login_success(self, login_data: Dict[str, Any]) -> None:
         """After login: check for updates, then proceed to main app."""
@@ -737,9 +762,25 @@ class AppController:
             logger.debug("Ignoring duplicate loading transition")
             return
         self._loading_started = True
-        from ui.windows.process_window import ProcessWindow
+        try:
+            from ui.windows.process_window import ProcessWindow
 
-        self.loading_window = ProcessWindow()
+            self.loading_window = ProcessWindow()
+        except Exception as exc:
+            self._loading_started = False
+            issue = self._record_startup_failure(
+                phase="loading",
+                component="loading.window",
+                exc=exc,
+                code="ST-I001",
+                offline_allowed=True,
+            )
+            self._show_startup_recovery(
+                issue,
+                retry_callback=self._proceed_to_loading,
+                allow_offline=False,
+            )
+            return
         if self.login_window:
             self.login_window.hide()
         self.loading_window.show()
@@ -752,6 +793,8 @@ class AppController:
         self.initializer.checkItemChanged.connect(self.loading_window.updateCheckItem)
         self.initializer.ocrReaderReady.connect(self._on_ocr_ready)
         self.initializer.updateInfoReady.connect(self._on_update_info_ready)
+        if hasattr(self.initializer, "failed"):
+            self.initializer.failed.connect(self._on_initializer_failed)
         self.initializer.finished.connect(self._on_loading_finished)
         self.thread.started.connect(self.initializer.run)
         self.thread.start()
@@ -764,6 +807,43 @@ class AppController:
         """Store update info for showing popup after main app launches."""
         self._pending_update_info = update_info
         logger.debug(f"Update info received: {update_info}")
+
+    def _on_initializer_failed(self, issue_data: Dict[str, Any]) -> None:
+        """Keep the loading surface alive and offer a clean retry."""
+        self._loading_started = False
+        self._stop_initializer_thread()
+        issue = dict(issue_data or {})
+        issue.setdefault("code", "ST-I001")
+        issue.setdefault("component", "startup.initializer")
+        issue.setdefault("phase", "initializer")
+        self._show_startup_recovery(
+            issue,
+            retry_callback=self._retry_loading,
+            allow_offline=True,
+        )
+
+    def _stop_initializer_thread(self) -> None:
+        thread = getattr(self, "thread", None)
+        if thread is None:
+            return
+        try:
+            thread.quit()
+            thread.wait(3000)
+        except Exception:
+            pass
+        self.thread = None
+        self.initializer = None
+
+    def _retry_loading(self) -> None:
+        self._stop_initializer_thread()
+        if self.loading_window:
+            try:
+                self.loading_window.close()
+            except Exception:
+                pass
+            self.loading_window = None
+        self._loading_started = False
+        self._proceed_to_loading()
 
     def _on_loading_finished(self) -> None:
         try:
@@ -799,18 +879,24 @@ class AppController:
         except Exception as e:
             logger.error(f"Loading finished handler failed: {e}", exc_info=True)
             self._restore_auto_quit()
-            if self.loading_window:
-                self.loading_window.close()
-            QMessageBox.critical(
-                None,
-                "?쒖옉 ?ㅻ쪟",
-                f"珥덇린??以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎:\n{e}",
+            self._loading_started = False
+            issue = self._record_startup_failure(
+                phase="loading",
+                component="loading.handoff",
+                exc=e,
+                code="ST-I002",
+                offline_allowed=True,
+            )
+            self._show_startup_recovery(
+                issue,
+                retry_callback=self._retry_loading,
+                allow_offline=True,
             )
 
     def launch_main_app(self) -> None:
-        if self._main_launched:
+        if self._main_launched or self._main_launching:
             return
-        self._main_launched = True
+        self._main_launching = True
         try:
             logger.info("Launching main application...")
             from main import VideoAnalyzerGUI
@@ -819,9 +905,13 @@ class AppController:
                 login_data=self.login_data,
                 preloaded_ocr=self.ocr_reader,
                 ocr_init_attempted=self.ocr_init_attempted,
+                offline_mode=self._offline_mode,
+                safe_mode=self._safe_mode,
             )
             logger.info("VideoAnalyzerGUI created successfully")
             self.main_gui.show()
+            self._main_launched = True
+            self._main_launching = False
             logger.info("Main window shown")
             # Close loading window AFTER main window is shown
             if self.loading_window:
@@ -841,14 +931,114 @@ class AppController:
 
         except Exception as e:
             logger.error(f"Failed to launch main app: {e}", exc_info=True)
+            self._main_launching = False
+            self._main_launched = False
             self._restore_auto_quit()
-            if self.loading_window:
-                self.loading_window.close()
-            QMessageBox.critical(
-                None,
-                "?쒖옉 ?ㅻ쪟",
-                self._build_launch_error_message(e),
+            issue = self._record_startup_failure(
+                phase="main",
+                component="main.window",
+                exc=e,
+                code="ST-M001",
+                offline_allowed=True,
             )
+            self._show_startup_recovery(
+                issue,
+                retry_callback=self._retry_main_launch,
+                allow_offline=True,
+            )
+
+    def _retry_main_launch(self) -> None:
+        self._main_launched = False
+        self._main_launching = False
+        self.launch_main_app()
+
+    def _launch_safe_offline_mode(self) -> None:
+        self._offline_mode = True
+        self._safe_mode = True
+        self.login_data = None
+        self._main_launched = False
+        self._main_launching = False
+        self.launch_main_app()
+
+    @staticmethod
+    def _record_startup_failure(
+        *,
+        phase: str,
+        component: str,
+        exc: Exception,
+        code: str,
+        offline_allowed: bool,
+    ) -> Dict[str, Any]:
+        try:
+            from startup.diagnostics import record_startup_exception
+
+            issue = record_startup_exception(
+                phase,
+                component,
+                exc,
+                code=code,
+                recoverable=True,
+                offline_allowed=offline_allowed,
+            )
+            return issue.to_dict() if hasattr(issue, "to_dict") else dict(issue)
+        except Exception:
+            logger.error(
+                "Failed to persist startup diagnostic (%s/%s)",
+                phase,
+                component,
+                exc_info=True,
+            )
+            return {
+                "code": code,
+                "phase": phase,
+                "component": component,
+                "run_id": "unknown",
+                "offline_allowed": offline_allowed,
+            }
+
+    def _show_startup_recovery(
+        self,
+        issue: Dict[str, Any],
+        *,
+        retry_callback,
+        allow_offline: bool,
+    ) -> None:
+        """Show actionable startup recovery without the generic error wrapper."""
+        try:
+            from startup.diagnostics import get_startup_log_path
+
+            log_path = str(get_startup_log_path())
+        except Exception:
+            log_path = os.path.join(os.path.expanduser("~"), ".ssmaker", "logs")
+
+        code = str(issue.get("code") or "ST-B001")
+        component = str(issue.get("component") or "startup")
+        run_id = str(issue.get("run_id") or "unknown")[:12]
+        message = (
+            "시작 구성요소를 불러오지 못했습니다.\n\n"
+            f"모듈: {component}\n오류 코드: {code}\n진단 ID: {run_id}\n\n"
+            "상세 스택트레이스는 아래 로그에 저장했습니다.\n"
+            f"{log_path}"
+        )
+
+        box = QMessageBox(getattr(self, "loading_window", None))
+        box.setIcon(QMessageBox.Icon.Critical)
+        box.setWindowTitle("SSMaker 시작 복구")
+        box.setText(message)
+        retry_button = box.addButton("다시 시도", QMessageBox.ButtonRole.AcceptRole)
+        offline_button = None
+        if allow_offline and bool(issue.get("offline_allowed", True)):
+            offline_button = box.addButton(
+                "오프라인 설정 모드",
+                QMessageBox.ButtonRole.ActionRole,
+            )
+        box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is retry_button:
+            QtCore.QTimer.singleShot(0, retry_callback)
+        elif offline_button is not None and clicked is offline_button:
+            QtCore.QTimer.singleShot(0, self._launch_safe_offline_mode)
 
     # ---- Runtime update monitoring ----
 

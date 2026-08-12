@@ -20,12 +20,14 @@ from utils.tts_config import get_safe_tts_base_dir
 from .constants import (
     CHECK_ITEM_IMPACTS, REQUIRED_FONTS, OPTIONAL_FONTS, CONNECTIVITY_ENDPOINTS,
 )
+from .diagnostics import record_startup_exception
 from .system_check import check_system_requirements
 
 logger = get_logger(__name__)
 
 class Initializer(QtCore.QObject):
     finished = QtCore.pyqtSignal()
+    failed = QtCore.pyqtSignal(dict)
     progressChanged = QtCore.pyqtSignal(int)
     checkItemChanged = QtCore.pyqtSignal(str, str, str)
     statusChanged = QtCore.pyqtSignal(str)
@@ -33,7 +35,7 @@ class Initializer(QtCore.QObject):
     initWarnings = QtCore.pyqtSignal(list)
     updateInfoReady = QtCore.pyqtSignal(dict)  # 업데이트 정보 전달용
     def run(self) -> None:
-        emit_finished = True
+        current_component = "secure_environment"
         try:
             # 0. Initialize secure environment (API keys from encrypted config)
             try:
@@ -44,6 +46,7 @@ class Initializer(QtCore.QObject):
 
             init_issues = []
             # 1. System requirements (0-10%)
+            current_component = "system_requirements"
             self.checkItemChanged.emit("system", "checking", "")
             self.statusChanged.emit("컴퓨터 환경을 확인하고 있습니다...")
             time.sleep(0.3)
@@ -57,6 +60,7 @@ class Initializer(QtCore.QObject):
             time.sleep(0.2)
 
             # 2. Fonts (10-20%)
+            current_component = "fonts"
             self.checkItemChanged.emit("fonts", "checking", "")
             self.statusChanged.emit("자막 폰트를 준비하고 있습니다...")
             time.sleep(0.3)
@@ -65,6 +69,7 @@ class Initializer(QtCore.QObject):
             time.sleep(0.2)
 
             # 3. FFmpeg (20-30%)
+            current_component = "ffmpeg"
             self.checkItemChanged.emit("ffmpeg", "checking", "")
             self.statusChanged.emit("영상 편집 도구를 확인하고 있습니다...")
             time.sleep(0.3)
@@ -73,6 +78,7 @@ class Initializer(QtCore.QObject):
             time.sleep(0.2)
 
             # 4. Internet connectivity (30-45%)
+            current_component = "internet"
             self.checkItemChanged.emit("internet", "checking", "")
             self.statusChanged.emit("인터넷 연결 상태를 확인하고 있습니다...")
             time.sleep(0.3)
@@ -81,6 +87,7 @@ class Initializer(QtCore.QObject):
             time.sleep(0.2)
 
             # 5. Core modules (45-60%)
+            current_component = "core_modules"
             self.checkItemChanged.emit("modules", "checking", "")
             self.statusChanged.emit("필수 기능을 확인하고 있습니다...")
             time.sleep(0.3)
@@ -89,6 +96,7 @@ class Initializer(QtCore.QObject):
             time.sleep(0.2)
 
             # 6. OCR Engine (60-75%)
+            current_component = "ocr"
             self.checkItemChanged.emit("ocr", "checking", "")
             self.statusChanged.emit("자막 인식 기능을 준비하고 있습니다...")
             time.sleep(0.3)
@@ -97,6 +105,7 @@ class Initializer(QtCore.QObject):
             time.sleep(0.2)
 
             # 7. TTS directory (75-85%)
+            current_component = "tts_directory"
             self.checkItemChanged.emit("tts_dir", "checking", "")
             self.statusChanged.emit("음성 저장소를 준비하고 있습니다...")
             time.sleep(0.3)
@@ -105,6 +114,7 @@ class Initializer(QtCore.QObject):
             time.sleep(0.2)
 
             # 8. API (85-92%)
+            current_component = "api_connectivity"
             self.checkItemChanged.emit("api", "checking", "")
             self.statusChanged.emit("서비스 서버에 연결하고 있습니다...")
             time.sleep(0.3)
@@ -116,6 +126,7 @@ class Initializer(QtCore.QObject):
             time.sleep(0.2)
 
             # 9. Update check (92-100%)
+            current_component = "update_check"
             self.checkItemChanged.emit("update_check", "checking", "")
             self.statusChanged.emit("새로운 업데이트를 확인하고 있습니다...")
             time.sleep(0.3)
@@ -127,8 +138,14 @@ class Initializer(QtCore.QObject):
             time.sleep(0.5)
             self.finished.emit()
         except Exception as e:
-            logger.error("초기화 중 오류: %s", e)
-            self.finished.emit()
+            logger.exception("Unexpected startup initialization failure")
+            issue = record_startup_exception(
+                "initialization",
+                current_component,
+                e,
+                recoverable=False,
+            )
+            self.failed.emit(issue.to_dict())
 
     def _init_ocr(self):
         try:
@@ -138,9 +155,25 @@ class Initializer(QtCore.QObject):
             self.checkItemChanged.emit("ocr", "success", "준비 완료")
         except ImportError as e:
             logger.warning(f"OCR module not available: {e}")
+            record_startup_exception(
+                "initialization",
+                "ocr",
+                e,
+                code="startup_ocr_unavailable",
+                recoverable=True,
+                offline_allowed=True,
+            )
             self.checkItemChanged.emit("ocr", "warning", "수동 모드")
         except Exception as e:
             logger.error(f"OCR initialization failed: {e}", exc_info=True)
+            record_startup_exception(
+                "initialization",
+                "ocr",
+                e,
+                code="startup_ocr_unavailable",
+                recoverable=True,
+                offline_allowed=True,
+            )
             self.checkItemChanged.emit("ocr", "warning", "수동 모드")
 
     def _check_update_info(self) -> Dict[str, Any]:

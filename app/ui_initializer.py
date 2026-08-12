@@ -62,6 +62,25 @@ class CurrentPageStack(QStackedWidget):
         return current.minimumSizeHint() if current is not None else super().minimumSizeHint()
 
 
+class UnavailableFeaturePanel(QWidget):
+    """Small recovery card used when one optional feature cannot initialize."""
+
+    def __init__(self, component: str, code: str, parent=None):
+        super().__init__(parent)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 24, 24, 24)
+        title = QLabel(f"{component} 기능을 불러오지 못했습니다")
+        title.setFont(QFont("", 14, QFont.Weight.Bold))
+        detail = QLabel(
+            f"오류 코드: {code}\n다른 기능은 계속 사용할 수 있습니다. "
+            "설정을 확인한 뒤 프로그램을 다시 실행해 주세요."
+        )
+        detail.setWordWrap(True)
+        layout.addWidget(title)
+        layout.addWidget(detail)
+        layout.addStretch(1)
+
+
 class UIInitializer:
     """Handles UI construction for VideoAnalyzerGUI."""
 
@@ -69,6 +88,34 @@ class UIInitializer:
         self.gui = gui
         self.design = gui.design
         self.theme_manager = gui.theme_manager
+
+    def _optional_panel(self, component: str, code: str, factory):
+        try:
+            return factory()
+        except Exception as exc:
+            logger.error(
+                "[Startup][%s] Optional panel %s failed",
+                code,
+                component,
+                exc_info=True,
+            )
+            try:
+                from startup.diagnostics import record_startup_exception
+
+                issue = record_startup_exception(
+                    "main-ui",
+                    f"panel.{component}",
+                    exc,
+                    code=code,
+                    recoverable=True,
+                    offline_allowed=True,
+                )
+                issues = getattr(self.gui, "startup_component_issues", None)
+                if isinstance(issues, list):
+                    issues.append(issue.to_dict())
+            except Exception:
+                pass
+            return UnavailableFeaturePanel(component, code)
 
     def build_ui(self) -> Dict[str, Any]:
         """Construct all UI components.
@@ -196,7 +243,11 @@ class UIInitializer:
         # Build pages as cards
         logger.info("[UI] 패널 생성 중... (잠시 기다려주세요)")
         mode_selection_panel = ModeSelectionPanel(stack, gui, theme_manager=self.theme_manager)
-        sourcing_panel = SourcingPanel(stack, gui, theme_manager=self.theme_manager)
+        sourcing_panel = self._optional_panel(
+            "전체 자동 만들기",
+            "ST-U101",
+            lambda: SourcingPanel(stack, gui, theme_manager=self.theme_manager),
+        )
         url_input_panel = URLInputPanel(stack, gui, theme_manager=self.theme_manager)
         voice_panel = VoicePanel(stack, gui, theme_manager=self.theme_manager)
         cta_panel = CTAPanel(stack, gui, theme_manager=self.theme_manager)
@@ -204,11 +255,23 @@ class UIInitializer:
         subtitle_settings_panel = SubtitleSettingsPanel(stack, gui, theme_manager=self.theme_manager)
         watermark_panel = WatermarkPanel(stack, gui, theme_manager=self.theme_manager)
         logger.info("[UI] 업로드/대기열 패널 생성 중...")
-        upload_panel = UploadPanel(stack, gui, theme_manager=self.theme_manager)
+        upload_panel = self._optional_panel(
+            "YouTube 업로드",
+            "ST-Y001",
+            lambda: UploadPanel(stack, gui, theme_manager=self.theme_manager),
+        )
         queue_panel = QueuePanel(stack, gui, theme_manager=self.theme_manager)
-        settings_tab = SettingsTab(stack, gui, theme_manager=self.theme_manager)
+        settings_tab = self._optional_panel(
+            "설정",
+            "ST-T001",
+            lambda: SettingsTab(stack, gui, theme_manager=self.theme_manager),
+        )
         subscription_panel = SubscriptionPanel(stack, gui)
-        multi_account_panel = MultiAccountPanel(stack, gui, theme_manager=self.theme_manager)
+        multi_account_panel = self._optional_panel(
+            "다계정 자동화",
+            "ST-Y002",
+            lambda: MultiAccountPanel(stack, gui, theme_manager=self.theme_manager),
+        )
         logger.info("[UI] 모든 패널 생성 완료")
 
         pages = [
@@ -277,7 +340,7 @@ class UIInitializer:
             "multi_account_panel": multi_account_panel,
             "settings_tab": settings_tab,
             "subscription_panel": subscription_panel,
-            "api_key_section": settings_tab.api_section,
+            "api_key_section": getattr(settings_tab, "api_section", settings_tab),
         }
 
     def _wrap_card(self, widget: QWidget, title: str, subtitle: str) -> QWidget:

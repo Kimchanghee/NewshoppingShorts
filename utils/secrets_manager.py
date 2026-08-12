@@ -24,6 +24,7 @@ import shutil
 import base64
 import hashlib
 import threading
+import time
 from typing import Optional, Dict
 from pathlib import Path
 
@@ -55,6 +56,9 @@ class SecretsManager:
     # Fallback to file-based storage if keyring unavailable
     _use_keyring = True
     _fallback_file = None
+    _issue_lock = threading.Lock()
+    _startup_issues: list[Dict[str, str]] = []
+    _reported_issue_sources: set[str] = set()
 
     # Regex pattern for validating key names (security: prevent injection)
     # 키 이름 검증용 정규식 패턴 (보안: 주입 방지)
@@ -402,7 +406,17 @@ class SecretsManager:
             if encrypted:
                 return cls._simple_decrypt(encrypted)
         except Exception:
-            pass
+            cls._record_startup_issue(
+                code="ST-G002",
+                component=(
+                    "settings.gemini"
+                    if str(key_name).lower().startswith("gemini")
+                    else "settings.secure_storage"
+                ),
+                source_path="",
+                recovery_path="",
+                message="저장된 인증 정보를 해독하지 못해 해당 설정만 초기화했습니다.",
+            )
         return None
 
     @classmethod
@@ -454,8 +468,72 @@ class SecretsManager:
                         if k not in merged:
                             merged[k] = v
             except Exception:
+                cls._record_corrupt_store_issue(secrets_file)
                 continue
         return merged
+
+    @classmethod
+    def _record_corrupt_store_issue(cls, source_path: Path) -> None:
+        resolved_source = str(source_path.resolve())
+        identity = f"ST-G001|settings.gemini|{resolved_source}"
+        with cls._issue_lock:
+            if identity in cls._reported_issue_sources:
+                return
+            cls._reported_issue_sources.add(identity)
+
+        recovery_path = cls._copy_corrupt_store_for_recovery(source_path)
+        with cls._issue_lock:
+            cls._startup_issues.append(
+                {
+                    "code": "ST-G001",
+                    "component": "settings.gemini",
+                    "message": "Gemini 보안 설정 파일을 읽지 못해 해당 설정만 초기화했습니다.",
+                    "source_path": resolved_source,
+                    "recovery_path": recovery_path,
+                }
+            )
+
+    @classmethod
+    def _copy_corrupt_store_for_recovery(cls, source_path: Path) -> str:
+        try:
+            recovery_dir = cls._candidate_base_dirs()[0] / "recovery"
+            recovery_dir.mkdir(parents=True, exist_ok=True)
+            target = recovery_dir / f"secrets.{time.time_ns()}.corrupt"
+            shutil.copy2(source_path, target)
+            return str(target.resolve())
+        except Exception:
+            return ""
+
+    @classmethod
+    def _record_startup_issue(
+        cls,
+        *,
+        code: str,
+        component: str,
+        source_path: str,
+        recovery_path: str,
+        message: str,
+    ) -> None:
+        identity = f"{code}|{component}|{source_path}"
+        with cls._issue_lock:
+            if identity in cls._reported_issue_sources:
+                return
+            cls._reported_issue_sources.add(identity)
+            cls._startup_issues.append(
+                {
+                    "code": code,
+                    "component": component,
+                    "message": message,
+                    "source_path": source_path,
+                    "recovery_path": recovery_path,
+                }
+            )
+
+    @classmethod
+    def get_startup_issues(cls) -> list[Dict[str, str]]:
+        """Return value-free secure-storage recovery details for startup UI."""
+        with cls._issue_lock:
+            return [dict(issue) for issue in cls._startup_issues]
 
     # Cache for machine-specific key to ensure consistency
     _cached_machine_key: Optional[bytes] = None

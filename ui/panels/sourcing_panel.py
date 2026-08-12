@@ -1259,6 +1259,12 @@ class SourcingPanel(QWidget):
             return "platform_video"
 
     def _on_start_clicked(self):
+        if bool(getattr(self.gui, "offline_mode", False)):
+            self.results_label.setText(
+                "오프라인 설정 모드에서는 영상 제작을 시작할 수 없습니다. 다시 로그인해 주세요."
+            )
+            self.results_label.setStyleSheet(f"color: {get_color('warning')};")
+            return
         # 3플랫폼 방식이면 별도 흐름(영상 다운로드→재편집→업로드)으로 분기.
         if self._current_sourcing_method() == "platform_video":
             self._on_start_platform_video()
