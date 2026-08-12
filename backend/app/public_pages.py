@@ -3,8 +3,8 @@
 from html import escape
 
 
-LEGAL_EFFECTIVE_DATE = "2026년 8월 8일"
-PRIVACY_EFFECTIVE_DATE = LEGAL_EFFECTIVE_DATE
+PRIVACY_EFFECTIVE_DATE = "2026년 8월 8일"
+TERMS_EFFECTIVE_DATE = "2026년 8월 13일"
 PRIVACY_CONTACT_EMAIL = "k931103@gmail.com"
 PRIVACY_CONTACT_URL = f"mailto:{PRIVACY_CONTACT_EMAIL}"
 PRIVACY_URL = "https://newshopping-shorts-auth.vercel.app/privacy"
@@ -42,6 +42,9 @@ def _render_page(*, title: str, label: str, body: str) -> str:
     p, li, td, th {{ font-size:15px; }}
     .meta {{ margin:12px 0 32px; color:#73757b; font-size:14px; }}
     .summary {{ padding:18px 20px; background:#fff5f6; border:1px solid #ffd8df; border-radius:12px; }}
+    .notice {{ margin:24px 0 8px; padding:18px 20px; background:#f5f7fb; border:1px solid #dfe4ec; border-radius:12px; }}
+    .notice h2 {{ margin:0 0 8px; padding:0; font-size:17px; }}
+    .notice p {{ margin:6px 0; color:#424750; }}
     ul, ol {{ padding-left:23px; }}
     li + li {{ margin-top:6px; }}
     table {{ width:100%; border-collapse:collapse; margin:14px 0 20px; display:block; overflow-x:auto; }}
@@ -83,7 +86,7 @@ def render_privacy_policy() -> str:
     mailto = escape(PRIVACY_CONTACT_URL, quote=True)
     body = f"""
     <h1>SSMaker 개인정보처리방침</h1>
-    <p class="meta">시행일 및 최종 개정일: {LEGAL_EFFECTIVE_DATE}</p>
+    <p class="meta">시행일 및 최종 개정일: {PRIVACY_EFFECTIVE_DATE}</p>
     <p class="summary">YMcompany(이하 “회사”)는 「개인정보 보호법」 제30조에 따라 SSMaker 이용자의 개인정보를 보호하고 관련 고충을 신속하게 처리하기 위해 이 방침을 공개합니다.</p>
 
     <h2>제1조 개인정보의 처리 목적</h2>
@@ -172,8 +175,14 @@ def render_terms_of_service() -> str:
     privacy = escape(PRIVACY_URL, quote=True)
     body = f"""
     <h1>SSMaker 서비스 이용약관</h1>
-    <p class="meta">시행일 및 최종 개정일: {LEGAL_EFFECTIVE_DATE}</p>
+    <p class="meta">시행일 및 최종 개정일: {TERMS_EFFECTIVE_DATE}</p>
     <p class="summary">이 약관은 YMcompany(이하 “회사”)가 제공하는 SSMaker 데스크톱 앱, 인증·구독 및 관련 서비스의 이용 조건과 회사와 회원의 권리·의무를 정합니다.</p>
+
+    <section class="notice" aria-labelledby="service-result-notice">
+      <h2 id="service-result-notice">서비스 이용 전에 확인해 주세요</h2>
+      <p><strong>SSMaker는 콘텐츠 제작과 운영을 돕는 도구이며 조회수·판매·제휴 수익을 보장하지 않습니다.</strong></p>
+      <p>연결한 계정과 게시물은 회원이 직접 확인하고 각 플랫폼 정책, 광고 표시 및 저작권 기준에 맞게 운영해 주세요. 외부 플랫폼의 정책·심사·장애로 생기는 제한에는 해당 플랫폼 기준이 적용됩니다.</p>
+    </section>
 
     <h2>제1조 목적 및 적용</h2>
     <p>회원이 회원가입 화면에서 이 약관을 확인하고 개별 동의한 뒤 가입을 완료하면 약관에 동의한 것으로 봅니다. 개인정보 처리에는 별도의 <a href="{privacy}">개인정보처리방침</a>이 적용됩니다.</p>
@@ -199,6 +208,7 @@ def render_terms_of_service() -> str:
 
     <h2>제5조 서비스의 제공 및 변경</h2>
     <p>회사는 영상 제작 보조, 외부 플랫폼 연결·업로드, 계정·구독 관리와 업데이트 기능을 제공합니다. 보안, 기술 개선, 외부 API 정책 변경 또는 운영상 필요에 따라 기능을 변경할 수 있으며 중요한 변경은 가능한 범위에서 사전 안내합니다. 유지보수·장애·천재지변·외부 사업자 중단 등 불가피한 사유가 있으면 일시 중단할 수 있습니다.</p>
+    <p>서비스는 콘텐츠 제작과 운영을 보조하는 도구이며, 조회수·노출·판매·제휴 승인 또는 수익 등 특정한 결과를 보장하지 않습니다.</p>
 
     <h2>제6조 무료 체험과 유료서비스</h2>
     <ol>
@@ -209,6 +219,7 @@ def render_terms_of_service() -> str:
     </ol>
 
     <h2>제7조 회원의 의무</h2>
+    <p>회원은 연결한 외부 계정과 접근 권한을 안전하게 관리하고, 게시 전에 콘텐츠·링크·공개 범위를 확인하며, 각 플랫폼의 약관과 광고 표시·저작권 등 적용 기준을 준수해야 합니다.</p>
     <p>회원은 다음 행위를 해서는 안 됩니다.</p>
     <ul>
       <li>타인의 계정·개인정보·결제수단 또는 저작물을 무단 사용하는 행위</li>
@@ -221,7 +232,7 @@ def render_terms_of_service() -> str:
     <p>회원이 적법하게 보유한 원본 콘텐츠의 권리는 회원에게 있습니다. 회원은 서비스 처리와 자신이 선택한 외부 플랫폼 전송에 필요한 범위에서만 회사와 해당 사업자가 콘텐츠를 처리하도록 허용합니다. 앱, UI, 문서, 상표와 회사가 제공한 소프트웨어의 권리는 회사 또는 정당한 권리자에게 있습니다.</p>
 
     <h2>제9조 외부 서비스</h2>
-    <p>외부 서비스 연결은 회원이 직접 승인하며 해당 사업자의 약관·정책·API 할당량과 심사 기준이 적용됩니다. 외부 사업자의 정책 변경, 계정 제한, API 중단 또는 콘텐츠 심사 결과는 회사가 통제할 수 없습니다. 회원은 업로드 전에 콘텐츠, 공개 범위, 링크와 표시 내용을 확인해야 합니다.</p>
+    <p>외부 서비스 연결은 회원이 직접 승인하며 해당 사업자의 약관·정책·API 할당량과 심사 기준이 적용됩니다. 외부 사업자의 정책 변경, 계정 제한, API 중단 또는 콘텐츠 심사 결과는 회사가 통제하기 어려운 영역입니다. 회원은 업로드 전에 콘텐츠, 공개 범위, 링크와 표시 내용을 확인하고 연결 계정의 보안·권한·정책 준수 상태를 관리해야 합니다.</p>
 
     <h2>제10조 이용 제한 및 계약 해지</h2>
     <p>회사는 약관·법령 위반이나 보안 위험이 확인되면 사전 통지 후 이용을 제한할 수 있습니다. 긴급한 보안 침해나 타인 피해 방지를 위해 먼저 제한한 뒤 알릴 수 있습니다. 회원은 고객 문의를 통해 탈퇴 또는 유료서비스 해지를 요청할 수 있으며, 회사는 법적 보존 의무가 없는 정보를 처리 목적 종료 후 삭제합니다.</p>
@@ -230,7 +241,7 @@ def render_terms_of_service() -> str:
     <p>회사는 관계 법령과 이 약관을 준수하고 서비스를 안정적으로 제공하기 위해 합리적인 보안·운영 조치를 취합니다. 회원의 정당한 문의와 불만을 처리하고 개인정보를 개인정보처리방침에 따라 보호합니다.</p>
 
     <h2>제12조 책임의 범위</h2>
-    <p>회사는 고의 또는 과실로 회원에게 발생한 손해에 대해 관계 법령에 따라 책임을 부담합니다. 회원의 귀책, 불가항력, 외부 서비스 장애 또는 회원이 검토하지 않은 자동 생성 결과로 발생한 손해에 대해서는 회사의 책임 없는 범위에서 책임을 지지 않습니다. 이 조항은 소비자보호법상 배제할 수 없는 권리를 제한하지 않습니다.</p>
+    <p>회사는 고의 또는 과실로 회원에게 발생한 손해에 대해 관계 법령에 따라 책임을 부담합니다. 콘텐츠 성과, 광고·제휴 심사, 수익 발생 여부와 연결 계정 상태는 회원의 운영과 외부 사업자의 판단에 따라 달라질 수 있습니다. 회원의 귀책, 불가항력, 외부 서비스의 정책·심사·장애 또는 회원이 검토하지 않은 자동 생성 결과로 발생한 손해에 대해서는 회사의 책임 없는 범위에서 책임을 부담하지 않습니다. 이 조항은 소비자보호법상 배제할 수 없는 권리를 제한하지 않습니다.</p>
 
     <h2>제13조 준거법 및 분쟁 해결</h2>
     <p>이 약관은 대한민국 법률을 따릅니다. 분쟁이 발생하면 상호 협의하여 해결하며, 해결되지 않으면 민사소송법 등 관계 법령이 정한 관할 법원에서 처리합니다. 소비자는 관계 기관의 분쟁조정 절차를 이용할 수 있습니다.</p>

@@ -28,3 +28,9 @@ def test_terms_of_service_is_public_html_page():
     assert "회원의 의무" in html
     assert "유료서비스" in html
     assert PRIVACY_CONTACT_EMAIL in html
+    assert "2026년 8월 13일" in html
+    assert "조회수·판매·제휴 수익을 보장하지 않습니다" in html
+    assert "연결한 계정과 게시물은 회원이 직접 확인" in html
+    assert "외부 서비스의 정책·심사·장애" in html
+    assert "고의 또는 과실로 회원에게 발생한 손해" in html
+    assert 'aria-labelledby="service-result-notice"' in html
