@@ -58,6 +58,26 @@ MAX_SOURCE_SECONDS = 300.0
 MIN_SOURCE_SHORT_SIDE = 480
 
 
+def _diagnostic_event(
+    diagnostics: Optional[Dict[str, Any]],
+    code: str,
+    *,
+    platform: str = "",
+    detail: str = "",
+) -> None:
+    """Accumulate safe failure evidence without changing the search result API."""
+    if diagnostics is None:
+        return
+    counts = diagnostics.setdefault("counts", {})
+    counts[code] = int(counts.get(code, 0) or 0) + 1
+    if platform:
+        platforms = diagnostics.setdefault("platforms", {})
+        platform_counts = platforms.setdefault(platform, {})
+        platform_counts[code] = int(platform_counts.get(code, 0) or 0) + 1
+    if detail:
+        diagnostics["last_detail"] = str(detail).strip()[:160]
+
+
 def _normalized_relevance_text(value: str) -> str:
     return " ".join(re.findall(r"[0-9a-zA-Z가-힣\u3400-\u9fff]+", str(value or "").lower()))
 
@@ -860,12 +880,14 @@ async def search_one_platform(
     relevance_references: Optional[List[str]] = None,
     min_relevance_score: float = 0.9,
     category_terms: Optional[List[str]] = None,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Return the first technically valid candidate that also passes relevance."""
     import time as _time
 
     tmpl = _SEARCH_URL.get(platform)
     if not tmpl:
+        _diagnostic_event(diagnostics, "unsupported_platform", platform=platform)
         return None
     os.makedirs(output_dir, exist_ok=True)
     skip = _canonical_source_ids(skip_source_ids)
@@ -891,6 +913,7 @@ async def search_one_platform(
     for q in _queries_for_chinese_platform(queries):
         if _time.monotonic() > deadline:
             logger.info("[PlatformSearch] %s: 시간 예산 초과 — 다음 플랫폼으로", platform)
+            _diagnostic_event(diagnostics, "time_budget_exceeded", platform=platform)
             return None
         url = tmpl.format(kw=urllib.parse.quote(str(q)))
         logger.info("[PlatformSearch] %s 검색: %s", platform, q)
@@ -899,11 +922,17 @@ async def search_one_platform(
             tab = await asyncio.wait_for(browser.get(url, new_tab=True), timeout=PAGE_OPEN_TIMEOUT)
         except asyncio.TimeoutError:
             logger.warning("[PlatformSearch] %s 페이지 열기 %.0fs 초과 — 스킵", platform, PAGE_OPEN_TIMEOUT)
+            _diagnostic_event(diagnostics, "page_open_timeout", platform=platform)
             continue
         except Exception as e:
             logger.warning("[PlatformSearch] %s 열기 실패: %s", platform, e)
+            _diagnostic_event(
+                diagnostics, "page_open_error", platform=platform,
+                detail=type(e).__name__,
+            )
             continue
         if tab is None:
+            _diagnostic_event(diagnostics, "empty_page", platform=platform)
             continue
         hit = None
         try:
@@ -911,10 +940,15 @@ async def search_one_platform(
                 browser, tab, platform, q, url, output_dir, page_wait, skip, deadline,
                 relevance_references or [], min_relevance_score,
                 category_terms or [], tried_source_ids,
+                diagnostics=diagnostics,
             )
         except Exception as e:
             # 쿼리 하나가 죽어도 다음 쿼리/플랫폼은 계속 — 전체 소싱을 무너뜨리지 않는다.
             logger.warning("[PlatformSearch] %s 쿼리 처리 오류(계속 진행): %s", platform, str(e)[:140])
+            _diagnostic_event(
+                diagnostics, "query_error", platform=platform,
+                detail=type(e).__name__,
+            )
         finally:
             try:
                 await asyncio.wait_for(tab.close(), timeout=5)
@@ -938,6 +972,7 @@ async def _search_query_on_tab(
     relevance_references: List[str], min_relevance_score: float,
     category_terms: List[str],
     tried_source_ids: Optional[Set[str]] = None,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """열린 탭에서 챌린지 확인→링크 추출→다운로드까지. 성공 시 hit dict."""
     import time as _time
@@ -946,6 +981,7 @@ async def _search_query_on_tab(
         try:
             if await asyncio.wait_for(_page_has_access_challenge(tab), timeout=EVAL_TIMEOUT):
                 logger.info("[PlatformSearch] %s 로그인/차단 화면 — 스킵(프로필 로그인 필요)", platform)
+                _diagnostic_event(diagnostics, "access_challenge", platform=platform)
                 return None
         except Exception:
             pass
@@ -984,6 +1020,13 @@ async def _search_query_on_tab(
             if len(page_links) != len(fresh_links):
                 logger.info("[PlatformSearch] %s: 이미 사용/시도한 영상 %d개 스킵",
                             platform, len(page_links) - len(fresh_links))
+                _diagnostic_event(
+                    diagnostics, "duplicate_source",
+                    platform=platform,
+                    detail=str(len(page_links) - len(fresh_links)),
+                )
+            if not page_links:
+                _diagnostic_event(diagnostics, "no_results", platform=platform)
             ytdlp_cookies = (
                 await _browser_cookies_for(browser, platform) if fresh_links else {}
             )
@@ -993,6 +1036,7 @@ async def _search_query_on_tab(
             for link in fresh_links:
                 if _time.monotonic() > deadline:
                     logger.info("[PlatformSearch] %s: 시간 예산 초과(yt-dlp 단계)", platform)
+                    _diagnostic_event(diagnostics, "time_budget_exceeded", platform=platform)
                     return None
                 try:
                     got = await asyncio.wait_for(
@@ -1009,10 +1053,16 @@ async def _search_query_on_tab(
                     )
                 except asyncio.TimeoutError:
                     logger.warning("[PlatformSearch] %s yt-dlp 240s 초과: %s", platform, link[:60])
+                    _diagnostic_event(diagnostics, "download_timeout", platform=platform)
                     got = None
                 if got and (
                     got.get("relevance_rejected") or got.get("technical_rejected")
                 ):
+                    _diagnostic_event(
+                        diagnostics,
+                        "relevance_rejected" if got.get("relevance_rejected") else "technical_rejected",
+                        platform=platform,
+                    )
                     continue
                 if not got and platform == "bilibili":
                     # 412 리스크컨트롤 폴백: 브라우저 컨텍스트에서 직접 스트림 다운로드.
@@ -1022,6 +1072,7 @@ async def _search_query_on_tab(
                     # 시청 가능 — 페이지를 열어 mp4를 직접 추출·다운로드.
                     got = await _browser_page_video_download(browser, link, platform, output_dir)
                 if not got:
+                    _diagnostic_event(diagnostics, "download_failed", platform=platform)
                     continue
                 ok, why = validate_source_video(got["local_path"])
                 if not ok:
@@ -1030,6 +1081,10 @@ async def _search_query_on_tab(
                         os.remove(got["local_path"])
                     except OSError:
                         pass
+                    _diagnostic_event(
+                        diagnostics, "technical_rejected", platform=platform,
+                        detail=why,
+                    )
                     continue
                 size_mb = os.path.getsize(got["local_path"]) / (1024 * 1024)
                 via = str(got.get("via") or "yt-dlp")
@@ -1050,6 +1105,7 @@ async def _search_query_on_tab(
                         os.remove(got["local_path"])
                     except OSError:
                         pass
+                    _diagnostic_event(diagnostics, "relevance_rejected", platform=platform)
                     continue
                 logger.info("[PlatformSearch] %s %s 성공 %.1fMB: %s", platform, via, size_mb, link[:60])
                 return {
@@ -1065,12 +1121,14 @@ async def _search_query_on_tab(
         video_urls = [u for u in video_urls if _normalize_source_id(u) not in skip]
         if not video_urls:
             logger.info("[PlatformSearch] %s: 영상 URL 못 찾음", platform)
+            _diagnostic_event(diagnostics, "no_video_url", platform=platform)
             return None
 
         referer = _REFERER.get(platform, url)
         for vurl in video_urls[:5]:
             if _time.monotonic() > deadline:
                 logger.info("[PlatformSearch] %s: 시간 예산 초과(직접 다운로드 단계)", platform)
+                _diagnostic_event(diagnostics, "time_budget_exceeded", platform=platform)
                 return None
             filepath = os.path.join(output_dir, f"platform_{platform}_{uuid.uuid4().hex[:8]}.mp4")
             session_cookies = await _browser_cookies_for(browser, platform, vurl)
@@ -1082,8 +1140,10 @@ async def _search_query_on_tab(
                     timeout=180,
                 )
             except asyncio.TimeoutError:
+                _diagnostic_event(diagnostics, "download_timeout", platform=platform)
                 size = None
             if not size:
+                _diagnostic_event(diagnostics, "download_failed", platform=platform)
                 continue
             ok, why = validate_source_video(filepath)
             if not ok:
@@ -1092,6 +1152,10 @@ async def _search_query_on_tab(
                     os.remove(filepath)
                 except OSError:
                     pass
+                _diagnostic_event(
+                    diagnostics, "technical_rejected", platform=platform,
+                    detail=why,
+                )
                 continue
             # Direct media URLs do not carry candidate-owned title/caption
             # evidence.  Treat them as unknown instead of trusting the search
@@ -1101,6 +1165,7 @@ async def _search_query_on_tab(
                 os.remove(filepath)
             except OSError:
                 pass
+            _diagnostic_event(diagnostics, "missing_candidate_metadata", platform=platform)
             continue
     return None
 
@@ -1113,6 +1178,7 @@ async def search_platform_shorts(
     min_relevance_score: float = 0.9,
     category_terms: Optional[List[str]] = None,
     prefer_best: bool = True,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """Return the strongest relevance-safe candidate across enabled platforms.
 
@@ -1127,6 +1193,8 @@ async def search_platform_shorts(
         for platform in requested
         if str(platform or "").strip().lower() in SUPPORTED_COMMERCE_PLATFORMS
     )) or list(DEFAULT_PLATFORM_ORDER)
+    if diagnostics is not None:
+        diagnostics["requested_platforms"] = list(active_platforms)
 
     safe_hits: List[Dict[str, Any]] = []
     for platform in active_platforms:
@@ -1139,8 +1207,10 @@ async def search_platform_shorts(
             relevance_references=relevance_references,
             min_relevance_score=min_relevance_score,
             category_terms=category_terms,
+            diagnostics=diagnostics,
         )
         if hit:
+            _diagnostic_event(diagnostics, "success", platform=platform)
             if not prefer_best:
                 return hit
             safe_hits.append(hit)

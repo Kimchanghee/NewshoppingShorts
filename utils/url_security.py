@@ -8,6 +8,7 @@ from urllib.parse import ParseResult, urlparse
 
 
 COUPANG_HOSTS = frozenset({"coupang.com", "coupa.ng"})
+COUPANG_PARTNER_LINK_HOSTS = frozenset({"link.coupang.com", "link.coupa.ng"})
 
 
 def _normalized_host(url: str) -> tuple[object, str]:
@@ -43,6 +44,30 @@ def is_official_coupang_url(url: str, *, allow_shortlinks: bool = True) -> bool:
             return False
         except ValueError:
             return True
+    except (TypeError, ValueError):
+        return False
+
+
+def is_coupang_partner_link(url: str) -> bool:
+    """Return whether *url* is a Coupang Partners tracking short link.
+
+    A normal ``www.coupang.com`` product page is an official Coupang URL, but
+    it is not an affiliate link and must not be accepted by inputs that promise
+    commission tracking.  Keep this stricter check separate from
+    :func:`is_official_coupang_url`, which is still used for product scraping.
+    """
+    try:
+        parsed, host = _normalized_host(url)
+        if (
+            parsed.scheme.lower() != "https"
+            or host not in COUPANG_PARTNER_LINK_HOSTS
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+        ):
+            return False
+        path = str(parsed.path or "").strip("/")
+        return bool(path)
     except (TypeError, ValueError):
         return False
 

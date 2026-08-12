@@ -124,32 +124,113 @@ async def _convert_keywords(product_name: str, gemini_client: Any) -> Dict[str, 
 
 
 def _resolve_purchase_link(coupang_url: str) -> Dict[str, str]:
-    """구매 링크 결정 — 수동 링크가 항상 최우선(파트너스 API 키는 선택 사항).
+    """구매 링크 결정 — 입력 파트너스 링크 또는 API 딥링크를 우선한다.
 
     우선순위:
-      1) 사용자가 설정에 넣어둔 수동 파트너스/상품 링크 (API 키·매출 조건 불필요)
+      1) 사용자가 소싱 입력에 넣은 쿠팡 파트너스 링크
       2) 파트너스 API 딥링크 (키가 연결된 경우에만, 조용히 시도)
       3) 쿠팡 원본 링크
+
+    ``youtube_comment_manual_product_link``는 이름 그대로 댓글에 표시할 원상품
+    주소이므로 구매/제휴 링크로 승격하지 않는다.
     """
-    manual = ""
-    try:
-        from managers.settings_manager import get_settings_manager
-        manual = str(get_settings_manager().get_youtube_comment_manual_product_link() or "").strip()
-    except Exception:
-        manual = ""
-    if manual:
-        return {"purchase_url": manual, "deep_link": manual, "source": "manual"}
+    from utils.url_security import is_coupang_partner_link
+
+    if is_coupang_partner_link(coupang_url):
+        link = str(coupang_url or "").strip()
+        return {"purchase_url": link, "deep_link": link, "source": "manual"}
 
     try:
         from managers.coupang_manager import get_coupang_manager
         cm = get_coupang_manager()
         if cm.is_connected():
             link = str(cm.generate_deep_link(coupang_url) or "").strip()
-            if link:
+            if is_coupang_partner_link(link):
                 return {"purchase_url": link, "deep_link": link, "source": "api"}
+            return {
+                "purchase_url": coupang_url,
+                "deep_link": "",
+                "source": "original",
+                "warning": cm.get_last_error_message(),
+            }
     except Exception as e:
         logger.debug("[PlatformPipeline] API 딥링크 생략: %s", e)
     return {"purchase_url": coupang_url, "deep_link": "", "source": "original"}
+
+
+def _failure(
+    code: str,
+    cause: str,
+    action: str,
+    *,
+    retriable: bool = True,
+    diagnostics: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    return {
+        "code": code,
+        "cause": str(cause or "").strip(),
+        "action": str(action or "").strip(),
+        "retriable": bool(retriable),
+        "can_choose_other_product": True,
+        "diagnostics": dict(diagnostics or {}),
+    }
+
+
+def describe_platform_search_failure(diagnostics: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Turn low-level search counters into one actionable user-facing cause."""
+    diagnostics = dict(diagnostics or {})
+    counts = dict(diagnostics.get("counts") or {})
+    if counts.get("access_challenge"):
+        return _failure(
+            "platform_access_blocked",
+            "검색 사이트가 로그인 또는 안티봇 확인 화면을 표시했습니다.",
+            "열린 Chrome에서 해당 사이트에 로그인한 뒤 같은 상품을 다시 검색해 주세요.",
+            diagnostics=diagnostics,
+        )
+    if any(counts.get(key) for key in ("page_open_timeout", "page_open_error", "query_error", "time_budget_exceeded")):
+        return _failure(
+            "platform_search_unavailable",
+            "검색 사이트 응답이 없거나 네트워크 시간 제한을 넘었습니다.",
+            "인터넷 연결과 사이트 상태를 확인하고 잠시 후 다시 검색해 주세요.",
+            diagnostics=diagnostics,
+        )
+    if counts.get("duplicate_source") and not any(
+        counts.get(key) for key in ("relevance_rejected", "technical_rejected", "download_failed")
+    ):
+        return _failure(
+            "all_sources_already_used",
+            "검색된 영상이 모두 이전에 사용했거나 이미 점검한 소스였습니다.",
+            "다른 상품을 선택하거나 잠시 후 새 검색 결과가 생겼을 때 다시 시도해 주세요.",
+            diagnostics=diagnostics,
+        )
+    if counts.get("relevance_rejected") or counts.get("missing_candidate_metadata"):
+        return _failure(
+            "no_relevant_video",
+            "검색 결과는 있었지만 상품 일치 근거가 부족해 안전 기준에서 제외했습니다.",
+            "다른 상품을 선택하거나 상품명이 더 명확한 파트너스 링크로 다시 시도해 주세요.",
+            diagnostics=diagnostics,
+        )
+    if any(counts.get(key) for key in ("technical_rejected", "download_failed", "download_timeout")):
+        return _failure(
+            "candidate_download_failed",
+            "검색된 영상이 재생 조건을 충족하지 못했거나 다운로드에 실패했습니다.",
+            "같은 상품을 다시 검색하면 다른 후보를 시도합니다. 계속 실패하면 다른 상품을 선택해 주세요.",
+            diagnostics=diagnostics,
+        )
+    return _failure(
+        "no_search_results",
+        "선택한 검색 사이트에서 사용할 수 있는 상품 영상을 찾지 못했습니다.",
+        "같은 상품을 다시 검색하거나 다른 상품을 선택해 주세요.",
+        diagnostics=diagnostics,
+    )
+
+
+def format_failure_message(title: str, failure: Dict[str, Any]) -> str:
+    return (
+        f"{title}\n"
+        f"원인: {failure.get('cause') or '확인되지 않은 오류'}\n"
+        f"해결: {failure.get('action') or '다시 시도해 주세요.'}"
+    )
 
 
 async def run_platform_sourcing(
@@ -184,6 +265,7 @@ async def run_platform_sourcing(
         "product_info": {}, "deep_link": "", "keywords": {},
         "queries": [], "hit": None, "final_video": "",
         "render_integrity": {"ok": False, "source": "platform_video"},
+        "failure": None,
     }
 
     own_browser = False
@@ -192,7 +274,12 @@ async def run_platform_sourcing(
             browser = await start_browser()
             own_browser = True
         except Exception as e:
-            report["error"] = f"브라우저를 시작할 수 없습니다: {e}"
+            report["failure"] = _failure(
+                "browser_start_failed",
+                f"자동 검색 브라우저를 시작하지 못했습니다 ({type(e).__name__}).",
+                "열려 있는 자동화 Chrome 창을 모두 닫고 다시 검색해 주세요.",
+            )
+            report["error"] = format_failure_message("상품 검색을 시작하지 못했어요.", report["failure"])
             _emit(progress, "product_analysis", report["error"], 0.0)
             return report
 
@@ -200,10 +287,12 @@ async def run_platform_sourcing(
         # ── 1) 쿠팡 상품 분석 ──
         _emit(progress, "product_analysis", "쿠팡 상품 분석 중...", 0.0)
         product: Dict[str, Any] = {}
+        product_error = ""
         try:
             product = await scrape_product(browser, coupang_url) or {}
         except Exception as e:
             logger.warning("[PlatformPipeline] 상품 스크랩 실패: %s", e)
+            product_error = type(e).__name__
         product_name = str(product.get("name") or product.get("title") or "").strip()
         if not product_name:
             product_name = str(product_name_hint or "").strip()
@@ -211,7 +300,16 @@ async def run_platform_sourcing(
                 product = dict(product or {})
                 product["name"] = product_name
         if not product_name:
-            report["error"] = "쿠팡 상품명을 가져오지 못했어요. 링크를 확인해 주세요."
+            report["failure"] = _failure(
+                "coupang_product_unavailable",
+                (
+                    "쿠팡 상품 페이지가 삭제·차단되었거나 응답을 읽지 못했습니다"
+                    + (f" ({product_error})" if product_error else "")
+                    + "."
+                ),
+                "파트너스 링크가 현재 열리는지 확인한 뒤 다시 검색하거나 다른 상품을 선택해 주세요.",
+            )
+            report["error"] = format_failure_message("쿠팡 상품 확인에 실패했어요.", report["failure"])
             _emit(progress, "product_analysis", report["error"], 0.0)
             return report
         report["product_info"] = product
@@ -223,6 +321,8 @@ async def run_platform_sourcing(
         report["deep_link"] = link_info["deep_link"]
         report["purchase_url"] = link_info["purchase_url"]
         report["purchase_link_source"] = link_info["source"]
+        if link_info.get("warning"):
+            report["purchase_link_warning"] = str(link_info["warning"])
         _label = {"manual": "수동 링크 사용", "api": "API 딥링크 생성", "original": "원본 링크 사용"}
         _emit(progress, "deep_link", _label.get(link_info["source"], "링크 준비 완료"), 1.0)
 
@@ -256,6 +356,7 @@ async def run_platform_sourcing(
             report["error"] = f"중복 업로드 기록을 확인할 수 없어 자동 제작을 중단했어요: {exc}"
             _emit(progress, "overseas_search", report["error"], 0.0)
             return report
+        search_diagnostics: Dict[str, Any] = {}
         hit = await search_platform_shorts(
             browser,
             queries,
@@ -268,9 +369,11 @@ async def run_platform_sourcing(
             # A related product-family clip is sufficient. Later platforms are
             # fallbacks, not a contest for an identical-listing score.
             prefer_best=False,
+            diagnostics=search_diagnostics,
         )
         if not hit:
-            report["error"] = "샤오홍슈·도우인·콰이쇼우에서 관련 영상을 찾지 못했어요. (로그인 필요/안티봇/중복 가능)"
+            report["failure"] = describe_platform_search_failure(search_diagnostics)
+            report["error"] = format_failure_message("상품 영상 검색에 실패했어요.", report["failure"])
             _emit(progress, "overseas_search", report["error"], 0.0)
             return report
         report["hit"] = hit

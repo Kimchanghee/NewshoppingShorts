@@ -12,7 +12,7 @@ from typing import List, Optional
 
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-    QFrame, QWidget, QCheckBox, QScrollArea, QSizePolicy,
+    QFrame, QWidget, QCheckBox, QScrollArea,
     QTextEdit, QSpinBox, QRadioButton, QButtonGroup,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
@@ -21,7 +21,7 @@ from PyQt6.QtGui import QFont
 from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 from ui.components.automation_readiness import AutomationReadinessCard
 from utils.logging_config import get_logger
-from utils.url_security import is_official_coupang_url
+from utils.url_security import is_coupang_partner_link, is_official_coupang_url
 from utils.auth_helpers import extract_user_id
 from managers.work_quota import DurableWorkReservation
 
@@ -202,6 +202,7 @@ class SourcingPanel(QWidget):
     pipeline_progress = pyqtSignal(str, str, float)
     pipeline_finished = pyqtSignal(bool, object)
     platform_result_ready = pyqtSignal(str)
+    platform_failure_ready = pyqtSignal(dict)
     platform_reset_requested = pyqtSignal()
 
     def __init__(self, parent, gui, theme_manager=None):
@@ -225,6 +226,7 @@ class SourcingPanel(QWidget):
         self.pipeline_progress.connect(self._update_step)
         self.pipeline_finished.connect(self._on_pipeline_done)
         self.platform_result_ready.connect(self._set_platform_result)
+        self.platform_failure_ready.connect(self._set_platform_failure)
         self.platform_reset_requested.connect(self._reset_platform_controls)
         self._setup_ui()
 
@@ -292,13 +294,17 @@ class SourcingPanel(QWidget):
         input_layout.addWidget(self._build_sourcing_method_card())
 
         # URL input
-        url_label = QLabel("쿠팡 상품 링크")
+        url_label = QLabel("쿠팡 파트너스 상품 링크")
         url_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
         input_layout.addWidget(url_label)
 
         url_row = QHBoxLayout()
         self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://www.coupang.com/vp/products/...")
+        self.url_input.setPlaceholderText("https://link.coupang.com/a/...")
+        self.url_input.setToolTip(
+            "쿠팡 파트너스에서 생성한 추적 링크만 사용할 수 있습니다. "
+            "일반 www.coupang.com 상품 링크는 수익 추적이 되지 않아 차단합니다."
+        )
         self.url_input.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
         self.url_input.setMinimumHeight(36)
         self.url_input.setStyleSheet(f"""
@@ -523,6 +529,29 @@ class SourcingPanel(QWidget):
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
         self.results_label.setWordWrap(True)
         results_layout.addWidget(self.results_label)
+
+        self.search_recovery_frame = QFrame()
+        self.search_recovery_frame.setStyleSheet("QFrame { border: none; background: transparent; }")
+        recovery_layout = QHBoxLayout(self.search_recovery_frame)
+        recovery_layout.setContentsMargins(0, 4, 0, 0)
+        recovery_layout.setSpacing(ds.spacing.space_2)
+
+        self.btn_retry_search = QPushButton("같은 상품 다시 검색")
+        self.btn_retry_search.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_retry_search.setToolTip("현재 파트너스 링크로 검색을 처음부터 다시 시도합니다.")
+        self.btn_retry_search.clicked.connect(self._retry_last_search)
+        recovery_layout.addWidget(self.btn_retry_search)
+
+        self.btn_choose_other_product = QPushButton("다른 상품 선택")
+        self.btn_choose_other_product.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_choose_other_product.setToolTip(
+            "다음 링크 목록의 상품을 선택하거나 새 파트너스 링크를 입력합니다."
+        )
+        self.btn_choose_other_product.clicked.connect(self._choose_other_product)
+        recovery_layout.addWidget(self.btn_choose_other_product)
+        recovery_layout.addStretch()
+        self.search_recovery_frame.setVisible(False)
+        results_layout.addWidget(self.search_recovery_frame)
 
         main_layout.addWidget(self.results_frame)
         main_layout.addStretch()
@@ -1039,7 +1068,7 @@ class SourcingPanel(QWidget):
     def _current_coupang_link_count(self) -> int:
         if not hasattr(self, "url_input"):
             return 0
-        return 1 if is_official_coupang_url(self.url_input.text().strip()) else 0
+        return 1 if is_coupang_partner_link(self.url_input.text().strip()) else 0
 
     def _update_next_links_count(self):
         next_count = len(self._extract_next_links())
@@ -1091,7 +1120,7 @@ class SourcingPanel(QWidget):
         seen = set()
         for token in re.split(r"[\s,]+", raw):
             url = token.strip()
-            if url and url not in seen and is_official_coupang_url(url):
+            if url and url not in seen and is_coupang_partner_link(url):
                 seen.add(url)
                 links.append(url)
         return links
@@ -1237,11 +1266,11 @@ class SourcingPanel(QWidget):
 
         url = self.url_input.text().strip()
         if not url:
-            self.results_label.setText("쿠팡 상품 링크를 붙여넣어 주세요.")
+            self.results_label.setText("쿠팡 파트너스 상품 링크를 붙여넣어 주세요.")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
-        if not is_official_coupang_url(url):
-            self.results_label.setText("공식 HTTPS 쿠팡 상품 링크인지 확인해 주세요.")
+        if not is_coupang_partner_link(url):
+            self.results_label.setText(self._partner_link_error_message(url))
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if self._running:
@@ -1252,6 +1281,7 @@ class SourcingPanel(QWidget):
         if not self._validate_youtube_upload_ready():
             return
         self._running = True
+        self._set_search_recovery_visible(False)
         self.btn_start.setEnabled(False)
         self.btn_start.setText(
             "영상 만들고 업로드 준비 중..." if self._is_upload_mode() else "영상 파일 만드는 중..."
@@ -1273,8 +1303,8 @@ class SourcingPanel(QWidget):
     def _on_start_platform_video(self):
         """숏폼 플랫폼 방식: 상품명으로 지원 플랫폼을 순차 검색·다운로드·재편집·업로드."""
         url = self.url_input.text().strip()
-        if not is_official_coupang_url(url):
-            self.results_label.setText("공식 HTTPS 쿠팡 상품 링크를 붙여넣어 주세요. (상품명으로 숏폼 플랫폼을 검색합니다)")
+        if not is_coupang_partner_link(url):
+            self.results_label.setText(self._partner_link_error_message(url))
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
         if self._running:
@@ -1285,6 +1315,7 @@ class SourcingPanel(QWidget):
             return
 
         self._running = True
+        self._set_search_recovery_visible(False)
         self.btn_start.setEnabled(False)
         self.btn_start.setText("영상 찾아 만드는 중...")
         self._apply_button_style(disabled=True)
@@ -1406,7 +1437,7 @@ class SourcingPanel(QWidget):
                 before_commit=finalize_before_commit,
             ))
             if not report.get("ok"):
-                self._safe_set_results(report.get("error") or "3플랫폼 소싱에 실패했어요.")
+                self._safe_set_platform_failure(report)
                 return
 
             product_name = str((report.get("product_info") or {}).get("name") or "")
@@ -1497,7 +1528,20 @@ class SourcingPanel(QWidget):
             )
         except Exception as e:
             logger.warning("[Sourcing] platform pipeline 실패: %s", e)
-            self._safe_set_results(f"3플랫폼 처리 중 오류: {e}")
+            self._safe_set_platform_failure({
+                "error": (
+                    "상품 검색 처리 중 오류가 발생했어요.\n"
+                    f"원인: 내부 처리 오류 ({type(e).__name__})\n"
+                    "해결: 같은 상품을 다시 검색해 주세요. 계속 실패하면 다른 상품을 선택해 주세요."
+                ),
+                "failure": {
+                    "code": "unexpected_search_error",
+                    "cause": f"내부 처리 오류 ({type(e).__name__})",
+                    "action": "같은 상품을 다시 검색하거나 다른 상품을 선택해 주세요.",
+                    "retriable": True,
+                    "can_choose_other_product": True,
+                },
+            })
         finally:
             try:
                 loop.close()
@@ -1516,8 +1560,64 @@ class SourcingPanel(QWidget):
         """Queue a platform result update onto the Qt UI thread."""
         self.platform_result_ready.emit(str(text))
 
+    def _safe_set_platform_failure(self, report: dict):
+        """Queue a structured search failure onto the Qt UI thread."""
+        self.platform_failure_ready.emit(dict(report or {}))
+
     def _set_platform_result(self, text: str):
+        self._set_search_recovery_visible(False)
         self.results_label.setText(text)
+        self.results_label.setStyleSheet(f"color: {get_color('text_secondary')};")
+
+    def _set_platform_failure(self, report: dict):
+        failure = dict((report or {}).get("failure") or {})
+        message = str((report or {}).get("error") or "상품 검색에 실패했어요.").strip()
+        if "원인:" not in message:
+            message += f"\n원인: {failure.get('cause') or '확인되지 않은 오류'}"
+        if "해결:" not in message:
+            message += f"\n해결: {failure.get('action') or '다시 시도해 주세요.'}"
+        self.results_label.setText(message)
+        self.results_label.setStyleSheet(f"color: {get_color('error')};")
+        self._set_search_recovery_visible(True)
+
+    def _set_search_recovery_visible(self, visible: bool) -> None:
+        if hasattr(self, "search_recovery_frame"):
+            self.search_recovery_frame.setVisible(bool(visible))
+
+    @staticmethod
+    def _partner_link_error_message(url: str) -> str:
+        if is_official_coupang_url(url) and not is_coupang_partner_link(url):
+            return (
+                "일반 쿠팡 상품 링크는 사용할 수 없습니다.\n"
+                "원인: 이 주소에는 쿠팡 파트너스 수익 추적 정보가 없습니다.\n"
+                "해결: 쿠팡 파트너스에서 생성한 https://link.coupang.com/... 링크를 입력해 주세요."
+            )
+        return (
+            "올바른 쿠팡 파트너스 링크가 아닙니다.\n"
+            "해결: https://link.coupang.com/... 형식의 공식 파트너스 링크를 입력해 주세요."
+        )
+
+    def _retry_last_search(self) -> None:
+        if self._running:
+            return
+        self._set_search_recovery_visible(False)
+        self._on_start_clicked()
+
+    def _choose_other_product(self) -> None:
+        if self._running:
+            return
+        next_url = self._pop_next_sourcing_url()
+        self.url_input.setText(next_url or "")
+        self.url_input.setFocus()
+        self._set_search_recovery_visible(False)
+        if next_url:
+            self.results_label.setText(
+                "다음 상품의 파트너스 링크를 선택했습니다. 내용을 확인하고 자동 만들기를 시작해 주세요."
+            )
+        else:
+            self.results_label.setText(
+                "다른 상품을 선택해 쿠팡 파트너스 링크를 붙여넣어 주세요."
+            )
         self.results_label.setStyleSheet(f"color: {get_color('text_secondary')};")
 
     def _reset_start_button(self):
@@ -1654,8 +1754,15 @@ class SourcingPanel(QWidget):
             self.sourcing_completed.emit(report)
         else:
             error_msg = pipeline.error or "자동 만들기에 실패했어요."
-            self.results_label.setText(f"자동 만들기 실패: {error_msg}")
-            self.results_label.setStyleSheet(f"color: {get_color('error')};")
+            self._set_platform_failure({
+                "error": f"자동 만들기 실패: {error_msg}",
+                "failure": {
+                    "cause": error_msg,
+                    "action": "같은 상품을 다시 검색하거나 다른 상품을 선택해 주세요.",
+                    "retriable": True,
+                    "can_choose_other_product": True,
+                },
+            })
 
     def _enqueue_sourced_videos(self, pipeline):
         """Add sourced video files to the processing queue."""

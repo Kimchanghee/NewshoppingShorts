@@ -2,6 +2,7 @@
 """Network boundary validation tests."""
 
 from utils.url_security import (
+    is_coupang_partner_link,
     is_official_coupang_url,
     is_public_http_url,
     is_trusted_service_url,
@@ -14,6 +15,16 @@ def test_coupang_validator_rejects_lookalikes_credentials_and_http():
     assert not is_official_coupang_url("https://coupang.com.evil.example/product/123")
     assert not is_official_coupang_url("https://coupang.com@evil.example/product/123")
     assert not is_official_coupang_url("http://www.coupang.com/vp/products/123")
+
+
+def test_coupang_partner_link_validator_rejects_normal_product_urls():
+    assert is_coupang_partner_link("https://link.coupang.com/a/example")
+    assert is_coupang_partner_link("https://link.coupa.ng/a/example")
+    assert not is_coupang_partner_link("https://www.coupang.com/vp/products/123")
+    assert not is_coupang_partner_link("https://coupang.com/vp/products/123")
+    assert not is_coupang_partner_link("https://link.coupang.com/")
+    assert not is_coupang_partner_link("https://link.coupang.com.evil.example/a/x")
+    assert not is_coupang_partner_link("http://link.coupang.com/a/example")
 
 
 def test_public_url_validator_rejects_private_network_targets():
