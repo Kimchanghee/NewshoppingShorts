@@ -393,8 +393,11 @@ class AutomationReadinessCard(QFrame):
                     profile = lm.get_profile_url()
                 except Exception:
                     profile = ""
-                return STATUS_READY, f"발행 준비됨{f': {profile}' if profile else ''}"
-            return STATUS_MISSING, str(message or "설정 > Coupang/Linktree 자동화에서 Webhook URL을 등록하세요.")
+                return STATUS_READY, f"Webhook 발행 준비됨{f': {profile}' if profile else ''}"
+            return STATUS_MISSING, str(
+                message
+                or "공개 Linktree 주소만으로는 자동 등록되지 않습니다. 설정에서 Webhook URL을 등록하세요."
+            )
         except Exception as exc:
             logger.debug("[ReadinessCard] Linktree status error: %s", exc)
             return STATUS_MISSING, "연결 상태를 확인하지 못했습니다. 설정 > Coupang/Linktree 자동화를 확인하세요."

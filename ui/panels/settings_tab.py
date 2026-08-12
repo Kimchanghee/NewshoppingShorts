@@ -469,7 +469,7 @@ class SettingsTab(QWidget, ThemedMixin):
         # API KEY 발급 안내 링크 (타이틀 바로 아래)
         api_guide_link = QLabel('<a href="https://ssmaker.lovable.app/notice" style="color: #3B82F6; text-decoration: none;">API KEY 발급 안내 →</a>')
         api_guide_link.setOpenExternalLinks(True)
-        api_guide_link.setStyleSheet(f"border: none; background: transparent; font-size: 12px;")
+        api_guide_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
         self.api_section.content_layout.addWidget(api_guide_link)
 
         # 설명 라벨
@@ -657,8 +657,8 @@ class SettingsTab(QWidget, ThemedMixin):
         self.link_automation_section = SettingsSection("고급 설정 (쿠팡 키 · 직접 입력)")
 
         automation_intro = QLabel(
-            "쿠팡 단축 링크를 직접 쓰면 아래 공개 주소만 저장하면 됩니다. "
-            "API와 Webhook은 자동화가 필요할 때만 열어 설정하세요."
+            "Linktree 공개 주소는 영상에 링크 모음을 표시하는 용도이며 상품을 자동 등록하지 않습니다. "
+            "실제 자동 상품 등록에는 Webhook URL과 Make/Zapier/n8n의 Linktree 카드 추가 시나리오가 반드시 필요합니다."
         )
         automation_intro.setWordWrap(True)
         automation_intro.setStyleSheet(
@@ -3981,7 +3981,7 @@ class SettingsTab(QWidget, ThemedMixin):
             else ""
         )
 
-        status_parts = ["공개 주소 저장됨" if linktree_profile_ready else "공개 주소 미설정"]
+        status_parts = ["공개 주소 저장됨(표시 전용)" if linktree_profile_ready else "공개 주소 미설정"]
         if expected_email:
             status_parts.append("계정 확인 완료" if account_email.lower() == expected_email.lower() else "Linktree 계정 확인 필요")
         if coupang_ready:
@@ -3989,7 +3989,9 @@ class SettingsTab(QWidget, ThemedMixin):
         if auto_enabled:
             status_parts.append("Linktree 자동 발행 준비" if linktree_auto_ready else "자동 발행은 Webhook 필요")
         elif linktree_auto_ready:
-            status_parts.append("Webhook 저장됨")
+            status_parts.append("Webhook 저장됨 · 자동 발행 꺼짐")
+        elif linktree_profile_ready:
+            status_parts.append("자동 상품 등록 안 됨 · Webhook 필요")
 
         self.link_automation_status.setText("상태: " + " · ".join(status_parts))
         if hasattr(self, "setup_chip_gemini"):
@@ -4071,7 +4073,11 @@ class SettingsTab(QWidget, ThemedMixin):
             if manager.check_connection():
                 show_info(self, "연결 성공", "쿠팡 딥링크 생성 테스트가 성공했습니다.")
             else:
-                show_warning(self, "연결 실패", "쿠팡 딥링크 생성 테스트가 실패했습니다. 키 권한/값을 확인하세요.")
+                show_warning(
+                    self,
+                    "연결 실패",
+                    manager.get_last_error_message(),
+                )
         except Exception as exc:
             logger.error("[Settings] Coupang connection test failed: %s", exc)
             show_error(self, "연결 테스트 실패", f"쿠팡 연결 테스트 중 오류가 발생했습니다.\n{exc}")
@@ -4157,7 +4163,14 @@ class SettingsTab(QWidget, ThemedMixin):
                 return
             self._update_link_automation_status()
             self._refresh_setup_assistant_status()
-            show_info(self, "저장 완료", "링크트리 설정을 저장했습니다.")
+            if auto_publish:
+                saved_message = "Webhook 기반 Linktree 자동 상품 등록 설정을 저장했습니다."
+            else:
+                saved_message = (
+                    "Linktree 공개 주소를 저장했습니다. 공개 주소만으로는 상품이 자동 등록되지 않으며, "
+                    "자동 등록을 켜려면 Webhook이 필요합니다."
+                )
+            show_info(self, "저장 완료", saved_message)
         except Exception as exc:
             logger.error("[Settings] Failed to save Linktree settings: %s", exc)
             show_error(self, "저장 실패", f"링크트리 설정 저장 중 오류가 발생했습니다.\n{exc}")
@@ -4498,7 +4511,6 @@ class SettingsTab(QWidget, ThemedMixin):
     def _load_version_info() -> dict:
         """version.json에서 앱 버전 정보 로드 (PyInstaller frozen 빌드 지원)"""
         import json
-        import sys
         try:
             # 1순위: auto_updater의 경로 탐색 (frozen/dev 모두 지원)
             from utils.auto_updater import get_version_file_path, get_current_version

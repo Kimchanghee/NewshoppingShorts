@@ -91,15 +91,15 @@ class LinktreeSetupPanel(QWidget):
         scroll.setWidget(body)
 
         # 헤더
-        title = QLabel("Linktree 자동 등록, 한 번만 연결하면 끝나요")
+        title = QLabel("Linktree 공개 주소만으로는 자동 등록되지 않아요")
         title.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_lg, QFont.Weight.Bold))
         title.setStyleSheet(f"color: {c('text_primary')};")
         layout.addWidget(title)
 
         intro = QLabel(
-            "Linktree에는 자동 등록 기능이 따로 없어, ‘자동 등록 주소(Webhook)’라는 중계 주소를 통해 "
-            "쿠팡 링크 카드가 자동으로 추가돼요. 아래 3단계만 따라 하시면 됩니다. "
-            "한 번 연결해 두면 이후에는 알아서 등록돼요."
+            "공개 Linktree 주소는 프로필을 보여 주는 용도일 뿐, 상품 카드를 추가할 권한이 없습니다. "
+            "실제 자동 상품 등록을 켜려면 Make·Zapier·n8n 등에서 만든 Webhook과 "
+            "Linktree 카드 추가 시나리오를 반드시 연결해야 합니다."
         )
         intro.setWordWrap(True)
         intro.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
@@ -109,7 +109,9 @@ class LinktreeSetupPanel(QWidget):
         # STEP 1 — 공개 주소
         step1 = self._step_box("1단계", "내 Linktree 주소")
         s1 = step1.body
-        s1_desc = QLabel("영상 설명이나 확인 화면에 보여줄 내 Linktree 주소를 적어 주세요.")
+        s1_desc = QLabel(
+            "영상 설명이나 확인 화면에 보여줄 공개 주소입니다. 이 주소만 저장해도 상품은 자동 등록되지 않습니다."
+        )
         s1_desc.setWordWrap(True)
         s1_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent; padding-bottom: 3px;")
         s1.addWidget(s1_desc)
@@ -132,7 +134,7 @@ class LinktreeSetupPanel(QWidget):
         s2_desc = QLabel(
             "Make·Zapier·n8n 같은 서비스에서 ‘Webhook’을 만들면 주소가 하나 생겨요. "
             "그 주소를 아래에 붙여넣으세요. 자동 등록할 때 이 주소로 아래 예시 같은 정보가 전달돼요. "
-            "그 정보를 받아 Linktree 카드로 추가하도록 설정해 두면 됩니다."
+            "Webhook을 받는 자동화 시나리오에서 Linktree 카드 추가 단계까지 활성화해야 실제 등록됩니다."
         )
         s2_desc.setWordWrap(True)
         s2_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent; padding-bottom: 3px;")
@@ -201,7 +203,10 @@ class LinktreeSetupPanel(QWidget):
         s3.addWidget(s3_desc)
 
         self.auto_publish_checkbox = QCheckBox("쿠팡 링크가 만들어지면 Linktree에 자동으로 등록하기")
-        self.auto_publish_checkbox.setChecked(True)
+        self.auto_publish_checkbox.setChecked(False)
+        self.auto_publish_checkbox.setToolTip(
+            "공개 주소만으로는 동작하지 않습니다. Webhook URL과 Linktree 카드 추가 시나리오가 필요합니다."
+        )
         self.auto_publish_checkbox.setStyleSheet(checkbox_qss())
         s3.addWidget(self.auto_publish_checkbox)
 
@@ -305,7 +310,7 @@ class LinktreeSetupPanel(QWidget):
             self.profile_input.setText(str(s.get("profile_url", "") or ""))
             self.webhook_input.setText(str(s.get("webhook_url", "") or ""))
             self.api_key_input.setText(str(s.get("api_key", "") or ""))
-            self.auto_publish_checkbox.setChecked(bool(s.get("auto_publish", True)))
+            self.auto_publish_checkbox.setChecked(bool(s.get("auto_publish", False)))
         except Exception as exc:
             logger.debug("[LinktreeSetup] load existing skipped: %s", exc)
 
@@ -398,7 +403,11 @@ class LinktreeSetupPanel(QWidget):
             except Exception as exc:
                 logger.debug("[LinktreeSetup] on_saved callback failed: %s", exc)
 
-        show_info(self, "저장 완료", "Linktree 자동 등록 설정을 저장했어요.")
+        if self.auto_publish_checkbox.isChecked():
+            message = "Webhook 기반 Linktree 자동 등록 설정을 저장했어요. 테스트 발행으로 카드 추가까지 확인해 주세요."
+        else:
+            message = "Linktree 공개 주소를 저장했어요. 자동 상품 등록은 꺼져 있으며, 켜려면 Webhook 연결이 필요합니다."
+        show_info(self, "저장 완료", message)
 
 
 class LinktreeSetupDialog(QDialog):

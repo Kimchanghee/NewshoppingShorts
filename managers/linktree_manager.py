@@ -15,6 +15,7 @@ import requests
 
 from managers.settings_manager import get_settings_manager
 from utils.logging_config import get_logger
+from utils.url_security import is_coupang_partner_link
 
 logger = get_logger(__name__)
 
@@ -301,7 +302,8 @@ class LinktreeManager:
 
     def reset_publish_counter(self) -> None:
         """Reset the [001] prefix counter back to 0."""
-        import json, os
+        import json
+        import os
         path = self._counter_path()
         try:
             if os.path.exists(path):
@@ -322,6 +324,23 @@ class LinktreeManager:
         Reuse this index on connected channels so users can match the Linktree
         card to YouTube descriptions, comments, and future social posts.
         """
+        if not is_coupang_partner_link(coupang_url):
+            logger.warning(
+                "[Linktree] Non-Partners Coupang URL blocked. Generate a link.coupang.com URL first."
+            )
+            return {
+                "ok": False,
+                "publish_index": None,
+                "number": "",
+                "title": "",
+                "url": str(coupang_url or "").strip(),
+                "description": COUPANG_AFFILIATE_DISCLOSURE,
+                "error_code": "coupang_partner_link_required",
+                "error": (
+                    "일반 쿠팡 상품 링크는 Linktree 상품 등록에 사용할 수 없습니다. "
+                    "쿠팡 파트너스에서 생성한 link.coupang.com 링크가 필요합니다."
+                ),
+            }
         index = self._next_publish_index()
         number = self.format_publish_index(index)
         title = self._build_numbered_product_title(product_name, index)
