@@ -52,6 +52,16 @@ def test_platform_video_threshold_targets_related_category_not_identical_listing
     assert pp._platform_relevance_threshold(0.9) == 0.75
     assert pp._platform_relevance_threshold(0.5) == 0.70
     assert pp._platform_relevance_threshold(1.0) == 0.75
+    assert pp._platform_relevance_threshold(0.9, required_score=0.950001) == pytest.approx(
+        0.950001
+    )
+    assert pp._platform_relevance_threshold(0.9, required_score=1.0) == 1.0
+
+
+@pytest.mark.parametrize("required", ["bad", float("nan"), float("inf"), 0.69, 1.01])
+def test_explicit_platform_video_threshold_fails_closed(required):
+    with pytest.raises(ValueError, match="required relevance score"):
+        pp._platform_relevance_threshold(0.9, required_score=required)
 
 
 def test_chinese_platform_queries_drop_korean_and_prefer_chinese():

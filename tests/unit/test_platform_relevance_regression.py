@@ -40,6 +40,126 @@ def test_live_product_families_keep_exact_chinese_compound(
 
 
 @pytest.mark.parametrize(
+    ("title", "expected_chinese", "expected_english"),
+    [
+        (
+            "커피세컨즈 전동 우유거품기, 노즐3종, 거치대",
+            "电动奶泡器",
+            "electric milk frother",
+        ),
+        (
+            "키친아트 솔리드 전기주전자, KAEK-B1500FT",
+            "电水壶",
+            "electric kettle",
+        ),
+        (
+            "이코코 자동 치약 짜개 디스펜서, 혼합색상, 1개",
+            "自动挤牙膏器",
+            "automatic toothpaste dispenser",
+        ),
+        (
+            "YEAAYE 전동 후추 그라인더 KT-701S, 1개, 80ml",
+            "电动胡椒研磨器",
+            "electric pepper grinder",
+        ),
+    ],
+)
+def test_live_product_variants_preserve_specific_automatic_intent(
+    title, expected_chinese, expected_english
+):
+    converted = convert_keywords_rule_based(title)
+    assert converted["chinese"].startswith(expected_chinese)
+    assert converted["english"].startswith(expected_english)
+
+
+def test_specific_compound_suppresses_nested_generic_product_family():
+    frother = convert_keywords_rule_based("전동 우유거품기 노즐 3종")
+    toothpaste = convert_keywords_rule_based("자동 치약 짜개 디스펜서")
+    grinder = convert_keywords_rule_based("전동 후추 그라인더")
+
+    assert "打蛋器" not in frother["chinese"]
+    assert "egg whisk" not in frother["english"]
+    assert toothpaste["chinese"] == "自动挤牙膏器"
+    assert grinder["chinese"] == "电动胡椒研磨器"
+
+
+@pytest.mark.parametrize(
+    ("title", "candidate", "wrong_candidate"),
+    [
+        (
+            "전동 우유거품기",
+            "南极人调速电动奶泡器 手持咖啡打奶泡器",
+            "无线电动打蛋器 烘焙奶油搅拌器",
+        ),
+        (
+            "전동 휘핑기",
+            "无线电动打蛋器 奶油烘焙打发器",
+            "咖啡电动奶泡器 手持打奶泡器",
+        ),
+        (
+            "전기주전자",
+            "小熊电热水壶 家用自动断电烧水壶",
+            "不锈钢保温随行杯",
+        ),
+        (
+            "전동 후추 그라인더",
+            "电动胡椒研磨器 厨房自动研磨瓶",
+            "咖啡豆电动研磨器",
+        ),
+    ],
+)
+def test_narrow_platform_product_family_can_exceed_strict_95_gate(
+    title, candidate, wrong_candidate
+):
+    converted = convert_keywords_rule_based(title)
+    references = [title, converted["chinese"], converted["english"]]
+    terms = _category_terms_for_keyword(
+        converted["english"], reference_name=title, keyword_cn=converted["chinese"]
+    )
+
+    relevant, score = platform_searcher._relevance_result(
+        candidate, references, 0.950001, terms
+    )
+    wrong, _ = platform_searcher._relevance_result(
+        wrong_candidate, references, 0.950001, terms
+    )
+
+    assert terms
+    assert relevant is True
+    assert score is not None and score > 0.95
+    assert wrong is False
+
+
+def test_bathroom_scrubber_rejects_explicit_kitchen_dish_brush():
+    title = "화장실 무선 전동 욕실 청소기 2in1 화장실 청소솔"
+    converted = convert_keywords_rule_based(title)
+    references = [title, converted["chinese"], converted["english"]]
+    terms = _category_terms_for_keyword(
+        converted["english"], reference_name=title, keyword_cn=converted["chinese"]
+    )
+
+    relevant, score = platform_searcher._relevance_result(
+        "无线电动浴室清洁刷 家用卫生间长柄刷", references, 0.950001, terms
+    )
+    wrong, wrong_score = platform_searcher._relevance_result(
+        "厨房洗碗电动刷 餐具清洁刷", references, 0.950001, terms
+    )
+    negative_manual_wording, negative_manual_score = platform_searcher._relevance_result(
+        "多功能电动清洁刷 浴室瓷砖轻松刷洗 省力告别手动硬搓",
+        references,
+        0.950001,
+        terms,
+    )
+
+    assert relevant is True
+    assert score is not None and score > 0.95
+    assert wrong is False
+    assert wrong_score == 0.0
+    assert negative_manual_wording is True
+    assert negative_manual_score is not None and negative_manual_score > 0.95
+
+
+@pytest.mark.parametrize(
     ("keyword_en", "keyword_cn", "candidate", "wrong_candidate"),
     [
         ("portable wireless blender cup", "便携式无线榨汁杯", "无线榨汁杯搅拌机", "保温随行杯"),

@@ -11,7 +11,9 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import math
 import os
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -78,6 +80,37 @@ def _probe_video(path: str) -> dict[str, Any]:
     return result
 
 
+def _required_relevance_score(value: Any) -> float:
+    try:
+        required = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "required relevance score must be finite and within 0.70..1.0"
+        ) from exc
+    if not math.isfinite(required) or not 0.70 <= required <= 1.0:
+        raise ValueError(
+            "required relevance score must be finite and within 0.70..1.0"
+        )
+    return required
+
+
+def _safe_case_slug(value: Any) -> str:
+    safe = re.sub(r"[^\w-]+", "_", str(value or "product"), flags=re.UNICODE)
+    return safe.strip("_-")[:80] or "product"
+
+
+def _meets_relevance_threshold(score: Any, required_score: float) -> bool:
+    """Fail closed when a live result does not meet the requested QA gate."""
+    try:
+        score_value = float(score)
+        required_value = _required_relevance_score(required_score)
+    except (TypeError, ValueError):
+        return False
+    if not math.isfinite(score_value) or not 0.0 <= score_value <= 1.0:
+        return False
+    return score_value >= required_value
+
+
 def _write_summary(path: Path, started_at: str, results: list[dict[str, Any]]) -> None:
     succeeded = sum(
         1
@@ -104,6 +137,7 @@ async def _run(args: argparse.Namespace) -> int:
         raise ValueError("input JSON must contain a non-empty list")
 
     started_at = datetime.now().astimezone().isoformat()
+    required_relevance_score = _required_relevance_score(args.min_similarity)
     run_dir = Path(args.output) / datetime.now().strftime("%Y%m%d_%H%M%S")
     run_dir.mkdir(parents=True, exist_ok=True)
     summary_path = run_dir / "live_platform_summary.json"
@@ -120,7 +154,11 @@ async def _run(args: argparse.Namespace) -> int:
 
     try:
         for index, case in enumerate(cases, 1):
-            case_dir = run_dir / f"{index:02d}_{case.get('slug') or 'product'}"
+            safe_slug = _safe_case_slug(case.get("slug"))
+            resolved_run_dir = run_dir.resolve()
+            case_dir = (resolved_run_dir / f"{index:02d}_{safe_slug}").resolve()
+            if resolved_run_dir not in case_dir.parents:
+                raise ValueError("case output escaped run directory")
             case_dir.mkdir(parents=True, exist_ok=True)
 
             def progress(step: str, message: str, pct: float) -> None:
@@ -137,6 +175,7 @@ async def _run(args: argparse.Namespace) -> int:
                     product_name_hint=str(case.get("title") or ""),
                     min_similarity_score=float(args.min_similarity),
                     download_only=True,
+                    platform_min_relevance_score=required_relevance_score,
                 )
             except Exception as exc:
                 report = {"ok": False, "error": f"unhandled: {exc}"}
@@ -148,20 +187,33 @@ async def _run(args: argparse.Namespace) -> int:
                 or ""
             )
             hit = report.get("hit") or {}
+            relevance_score = hit.get("relevance_score")
+            threshold_passed = _meets_relevance_threshold(
+                relevance_score, required_relevance_score
+            )
+            report_ok = bool(report.get("ok"))
+            error = str(report.get("error") or "")
+            if report_ok and not threshold_passed:
+                error = (
+                    f"relevance score {relevance_score!r} is below requested "
+                    f"threshold {required_relevance_score:.6f}"
+                )
             item = {
                 "index": index,
                 "slug": case.get("slug", ""),
                 "affiliate_url": case.get("url", ""),
                 "title_hint": case.get("title", ""),
                 "product_name": (report.get("product_info") or {}).get("name", ""),
-                "ok": bool(report.get("ok")),
-                "error": report.get("error", ""),
+                "ok": report_ok and threshold_passed,
+                "error": error,
                 "keywords": report.get("keywords") or {},
                 "queries": report.get("queries") or [],
                 "platform": hit.get("platform", ""),
                 "source_url": hit.get("video_url", ""),
                 "source_title": hit.get("title", ""),
-                "relevance_score": hit.get("relevance_score", 0.0),
+                "relevance_score": relevance_score,
+                "required_relevance_score": required_relevance_score,
+                "relevance_threshold_passed": threshold_passed,
                 "via": hit.get("via", ""),
                 "video_path": video_path,
                 "media": _probe_video(video_path),

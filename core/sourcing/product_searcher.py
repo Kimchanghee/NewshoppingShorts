@@ -190,8 +190,8 @@ def _similarity_score(name1: str, name2: str) -> float:
 _SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
     # Electric food chopper / garlic mincer family
     "electric": (
-        "electric", "cordless", "rechargeable", "usb", "전동", "충전",
-        "电动", "充电", "无线", "無線",
+        "electric", "cordless", "rechargeable", "usb", "전동", "충전", "무선",
+        "电动", "电热", "充电", "无线", "無線",
     ),
     "chopper": (
         "chopper", "chop", "mincer", "mince", "crusher", "grinder", "garlic press",
@@ -220,8 +220,21 @@ _SEMANTIC_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
     "frother": (
         "frother", "frothers", "milk frother", "whisk", "egg beater",
         "beater", "cream whipper", "hand mixer", "휘핑기", "거품기", "머랭",
+        "奶泡器", "打奶泡器", "打泡器", "起泡器", "打蛋器", "打蛋",
     ),
-    "milk": ("milk", "coffee", "cappuccino", "latte", "우유", "커피"),
+    "milk": (
+        "milk", "coffee", "cappuccino", "latte", "우유", "커피",
+        "奶泡", "牛奶", "咖啡",
+    ),
+    "kettle": (
+        "electric kettle", "kettle", "전기주전자", "전기 주전자", "주전자",
+        "电水壶", "电热水壶", "烧水壶",
+    ),
+    "pepper_grinder": (
+        "electric pepper grinder", "pepper grinder", "pepper mill",
+        "전동 후추 그라인더", "후추 그라인더", "후추 분쇄기",
+        "电动胡椒研磨器", "胡椒研磨器", "胡椒磨", "胡椒磨粉器",
+    ),
     "handheld": (
         "handheld", "hand held", "portable", "mini", "clip", "hand press",
         "휴대용", "미니", "핸드", "손잡이", "手持", "便携", "便攜",
@@ -297,6 +310,8 @@ _SEMANTIC_FEATURE_WEIGHTS: dict[str, float] = {
     "brush": 3.0,
     "sealer": 3.0,
     "frother": 3.0,
+    "kettle": 3.0,
+    "pepper_grinder": 3.0,
     "vacuum": 3.0,
     "vehicle": 2.6,
     "fan": 3.0,
@@ -716,8 +731,16 @@ def _has_explicit_reference_contradiction(
     ref_manual = any(marker in ref for marker in manual_markers)
     title_electric = any(marker in title_l for marker in electric_markers)
     title_manual = any(marker in title_l for marker in manual_markers)
+    # A seller caption may describe an electric tool as "告别手动" (goodbye
+    # manual work) or "无需手动". A bare manual token is therefore a subtype
+    # signal only when the candidate carries no electric evidence; reserve the
+    # hard veto for phrases that explicitly say the product needs no power.
     explicitly_non_electric = any(
-        marker in title_l for marker in ("non-electric", "non electric", "수동", "手动")
+        marker in title_l
+        for marker in (
+            "non-electric", "non electric", "without electricity", "no electricity",
+            "비전동", "전기 불필요", "无电", "不用电", "不插电",
+        )
     )
     if ref_electric and title_manual and (explicitly_non_electric or not title_electric):
         return True
@@ -780,6 +803,19 @@ def _has_explicit_reference_contradiction(
             marker in title_l for marker in complete_bundle_markers
         ):
             return True
+
+        bathroom_markers = (
+            "bathroom", "toilet", "shower", "욕실", "화장실", "浴室", "卫生间", "厕所",
+        )
+        kitchen_dish_markers = (
+            "kitchen", "dish", "dishwashing", "tableware", "주방", "설거지", "식기",
+            "厨房", "洗碗", "餐具",
+        )
+        if any(marker in ref for marker in bathroom_markers):
+            if any(marker in title_l for marker in kitchen_dish_markers) and not any(
+                marker in title_l for marker in bathroom_markers
+            ):
+                return True
 
     neck_fan_ref_markers = (
         "neck fan", "neckband fan", "hanging neck", "wearable neck fan",
@@ -1021,6 +1057,18 @@ def _semantic_similarity_score(candidate_title: str, references: List[str]) -> f
             candidate,
             required={"frother"},
             optional={"electric", "handheld", "milk", "food", "processor_mixer"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"kettle"},
+            optional={"electric"},
+        ),
+        _family_score(
+            reference,
+            candidate,
+            required={"pepper_grinder"},
+            optional={"electric", "food"},
         ),
         _family_score(
             reference,
@@ -2771,6 +2819,20 @@ _CATEGORY_GUARDS: Dict[str, List[str]] = {
     "bottle opener": ["bottle", "open", "병따개", "开瓶"],
     "egg beater": ["egg", "beater", "whisk", "거품기", "蛋", "打蛋"],
     "whisk": ["whisk", "beater", "거품기", "打蛋"],
+    "milk frother": [
+        "milk frother", "frother", "우유거품기", "우유 거품기",
+        "奶泡器", "打奶泡", "打泡器",
+    ],
+    "electric milk frother": [
+        "milk frother", "frother", "우유거품기", "우유 거품기",
+        "奶泡器", "打奶泡", "打泡器",
+    ],
+    "pepper grinder": [
+        "pepper grinder", "pepper mill", "후추", "胡椒研磨", "胡椒磨",
+    ],
+    "electric pepper grinder": [
+        "pepper grinder", "pepper mill", "후추", "胡椒研磨", "胡椒磨",
+    ],
     "ladle": ["ladle", "spoon", "국자", "勺"],
     "spatula": ["spatula", "turner", "뒤집개", "주걱", "铲", "勺"],
     "tongs": ["tong", "집게", "夹"],

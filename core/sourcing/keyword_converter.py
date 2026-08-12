@@ -42,10 +42,16 @@ _COMPOUND_MAP = {
     "욕실 청소기": {"cn": "电动浴室清洁刷", "en": "electric bathroom cleaning brush"},
     "화장실 청소기": {"cn": "电动浴室清洁刷", "en": "electric bathroom cleaning brush"},
     "휴대용 선풍기": {"cn": "便携式手持风扇", "en": "portable handheld fan"},
+    "전동 우유거품기": {"cn": "电动奶泡器", "en": "electric milk frother"},
+    "우유거품기": {"cn": "电动奶泡器", "en": "electric milk frother"},
     "우유 거품기": {"cn": "电动奶泡器", "en": "electric milk frother"},
     "전동 휘핑기": {"cn": "电动打蛋器", "en": "electric whisk"},
     "무선 미니 청소기": {"cn": "无线迷你吸尘器", "en": "cordless mini vacuum cleaner"},
     "에어건 진공": {"cn": "吹吸一体吸尘器", "en": "vacuum cleaner air duster 2 in 1"},
+    "전기주전자": {"cn": "电水壶", "en": "electric kettle"},
+    "자동 치약 짜개": {"cn": "自动挤牙膏器", "en": "automatic toothpaste dispenser"},
+    "자동 치약 디스펜서": {"cn": "自动挤牙膏器", "en": "automatic toothpaste dispenser"},
+    "전동 후추 그라인더": {"cn": "电动胡椒研磨器", "en": "electric pepper grinder"},
     # 주방 — 수세미 / 식기 류
     "물빠짐 수세미": {"cn": "海绵架 沥水架", "en": "sponge holder kitchen sink"},
     "수세미거치대": {"cn": "海绵架 沥水架", "en": "sponge holder kitchen sink"},
@@ -366,14 +372,23 @@ def convert_keywords_rule_based(product_name: str) -> Dict[str, str]:
     cn_parts, en_parts = [], []
     matched_compound = False
 
-    # Pass 1: compound terms (literal substring scan, multiple may apply)
-    for kr, tr in _COMPOUND_MAP.items():
-        if kr in product_name:
-            if tr["cn"]:
-                cn_parts.append(tr["cn"])
-            if tr["en"]:
-                en_parts.append(tr["en"])
-            matched_compound = True
+    # Pass 1: compound terms (literal substring scan). When both a specific
+    # phrase and one of its nested generic phrases match, keep only the longer
+    # phrase. For example, "전동 우유거품기" must not also inject the unrelated
+    # generic "거품기 → egg whisk" intent into the platform search query.
+    compound_hits = [kr for kr in _COMPOUND_MAP if kr in product_name]
+    compound_hits = [
+        kr
+        for kr in compound_hits
+        if not any(kr != other and kr in other for other in compound_hits)
+    ]
+    for kr in compound_hits:
+        tr = _COMPOUND_MAP[kr]
+        if tr["cn"]:
+            cn_parts.append(tr["cn"])
+        if tr["en"]:
+            en_parts.append(tr["en"])
+        matched_compound = True
 
     # Pass 2: single-word fallback only if no compound matched
     if not matched_compound:

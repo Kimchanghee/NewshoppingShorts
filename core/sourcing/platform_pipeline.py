@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import math
 import os
 import re
 import time
@@ -26,13 +27,29 @@ ProgressCb = Optional[Callable[[str, str, float], None]]
 BeforeCommitCb = Optional[Callable[[str], None]]
 
 
-def _platform_relevance_threshold(configured_score: float) -> float:
+def _platform_relevance_threshold(
+    configured_score: float,
+    *,
+    required_score: Optional[float] = None,
+) -> float:
     """Threshold for a related product-family clip, not an identical listing.
 
     Marketplace product matching can remain at 90%, but a short-form source
     only needs to demonstrate the same product category. Category guards and
     explicit attribute contradictions are still evaluated separately.
     """
+    if required_score is not None:
+        try:
+            required = float(required_score)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "required relevance score must be finite and within 0.70..1.0"
+            ) from exc
+        if not math.isfinite(required) or not 0.70 <= required <= 1.0:
+            raise ValueError(
+                "required relevance score must be finite and within 0.70..1.0"
+            )
+        return required
     try:
         configured = float(configured_score)
     except (TypeError, ValueError):
@@ -245,6 +262,7 @@ async def run_platform_sourcing(
     min_similarity_score: float = 0.9,
     before_commit: BeforeCommitCb = None,
     download_only: bool = False,
+    platform_min_relevance_score: Optional[float] = None,
 ) -> Dict[str, Any]:
     """쿠팡 링크 → 3플랫폼 소싱 + 재편집. 결과 report dict 반환(업로드는 호출자 몫)."""
     from core.sourcing.coupang_scraper import scrape_product
@@ -364,7 +382,10 @@ async def run_platform_sourcing(
             platforms=platforms,
             skip_source_ids=skip_ids,
             relevance_references=relevance_references,
-            min_relevance_score=_platform_relevance_threshold(min_similarity_score),
+            min_relevance_score=_platform_relevance_threshold(
+                min_similarity_score,
+                required_score=platform_min_relevance_score,
+            ),
             category_terms=category_terms,
             # A related product-family clip is sufficient. Later platforms are
             # fallbacks, not a contest for an identical-listing score.
