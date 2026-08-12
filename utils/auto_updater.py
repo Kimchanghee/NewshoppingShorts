@@ -27,7 +27,7 @@ from utils.windows_package import is_msix_package
 logger = get_logger(__name__)
 
 # 현재 앱 버전(배포 시 version.json이 우선)
-CURRENT_VERSION = "1.5.58"
+CURRENT_VERSION = "1.5.59"
 
 # 버전 확인 API 기본 주소
 _DEFAULT_UPDATE_BASE_URL = (
