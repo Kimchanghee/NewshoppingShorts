@@ -21,7 +21,11 @@ from PyQt6.QtGui import QFont
 from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 from ui.components.automation_readiness import AutomationReadinessCard
 from utils.logging_config import get_logger
-from utils.url_security import is_coupang_partner_link, is_official_coupang_url
+from utils.url_security import (
+    is_coupang_partner_link,
+    is_official_coupang_url,
+    normalize_coupang_partner_link,
+)
 from utils.auth_helpers import extract_user_id
 from managers.work_quota import DurableWorkReservation
 
@@ -1119,7 +1123,7 @@ class SourcingPanel(QWidget):
         links = []
         seen = set()
         for token in re.split(r"[\s,]+", raw):
-            url = token.strip()
+            url = normalize_coupang_partner_link(token)
             if url and url not in seen and is_coupang_partner_link(url):
                 seen.add(url)
                 links.append(url)
@@ -1270,15 +1274,17 @@ class SourcingPanel(QWidget):
             self._on_start_platform_video()
             return
 
-        url = self.url_input.text().strip()
-        if not url:
+        raw_url = self.url_input.text()
+        if not raw_url.strip():
             self.results_label.setText("쿠팡 파트너스 상품 링크를 붙여넣어 주세요.")
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
-        if not is_coupang_partner_link(url):
-            self.results_label.setText(self._partner_link_error_message(url))
+        url = normalize_coupang_partner_link(raw_url)
+        if not url:
+            self.results_label.setText(self._partner_link_error_message(raw_url))
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
+        self.url_input.setText(url)
         if self._running:
             return
 
@@ -1308,11 +1314,13 @@ class SourcingPanel(QWidget):
 
     def _on_start_platform_video(self):
         """숏폼 플랫폼 방식: 상품명으로 지원 플랫폼을 순차 검색·다운로드·재편집·업로드."""
-        url = self.url_input.text().strip()
-        if not is_coupang_partner_link(url):
-            self.results_label.setText(self._partner_link_error_message(url))
+        raw_url = self.url_input.text()
+        url = normalize_coupang_partner_link(raw_url)
+        if not url:
+            self.results_label.setText(self._partner_link_error_message(raw_url))
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
+        self.url_input.setText(url)
         if self._running:
             return
         # YouTube 모드에서만 채널 연결을 필수로 검증한다. Linktree는 선택이며
@@ -1582,6 +1590,9 @@ class SourcingPanel(QWidget):
             message += f"\n원인: {failure.get('cause') or '확인되지 않은 오류'}"
         if "해결:" not in message:
             message += f"\n해결: {failure.get('action') or '다시 시도해 주세요.'}"
+        report_path = str((report or {}).get("report_path") or "").strip()
+        if report_path:
+            message += f"\n오류 기록: {report_path}"
         self.results_label.setText(message)
         self.results_label.setStyleSheet(f"color: {get_color('error')};")
         self._set_search_recovery_visible(True)

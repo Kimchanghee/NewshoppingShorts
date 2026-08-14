@@ -9,10 +9,30 @@ from urllib.parse import ParseResult, urlparse
 
 COUPANG_HOSTS = frozenset({"coupang.com", "coupa.ng"})
 COUPANG_PARTNER_LINK_HOSTS = frozenset({"link.coupang.com", "link.coupa.ng"})
+_URL_EDGE_FORMAT_CHARS = "\ufeff\u200b\u200c\u200d\u2060"
+
+
+def _normalized_url_input(url: str) -> str:
+    """Normalize clipboard-only edge characters without rewriting the URL.
+
+    KakaoTalk, web mail and rich-text editors can place a BOM or zero-width
+    formatting character before a copied URL.  Those characters are invisible
+    in ``QLineEdit`` but make ``urlparse`` miss the HTTPS scheme.  Only boundary
+    format characters are removed.  Embedded whitespace is rejected so several
+    pasted links can never be misread as one valid URL.
+    """
+    text = str(url or "")
+    previous = None
+    while text != previous:
+        previous = text
+        text = text.strip().strip(_URL_EDGE_FORMAT_CHARS)
+    if any(char.isspace() for char in text):
+        return ""
+    return text
 
 
 def _normalized_host(url: str) -> tuple[object, str]:
-    parsed = urlparse(str(url or "").strip())
+    parsed = urlparse(_normalized_url_input(url))
     try:
         host = (parsed.hostname or "").encode("idna").decode("ascii").lower().rstrip(".")
     except UnicodeError:
@@ -70,6 +90,12 @@ def is_coupang_partner_link(url: str) -> bool:
         return bool(path)
     except (TypeError, ValueError):
         return False
+
+
+def normalize_coupang_partner_link(url: str) -> str:
+    """Return one canonical clipboard-safe partner link, or an empty string."""
+    normalized = _normalized_url_input(url)
+    return normalized if normalized and is_coupang_partner_link(normalized) else ""
 
 
 def is_public_http_url(
