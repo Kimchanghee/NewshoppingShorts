@@ -6,6 +6,7 @@ from utils.url_security import (
     is_official_coupang_url,
     is_public_http_url,
     is_trusted_service_url,
+    normalize_coupang_partner_link,
 )
 
 
@@ -25,6 +26,30 @@ def test_coupang_partner_link_validator_rejects_normal_product_urls():
     assert not is_coupang_partner_link("https://link.coupang.com/")
     assert not is_coupang_partner_link("https://link.coupang.com.evil.example/a/x")
     assert not is_coupang_partner_link("http://link.coupang.com/a/example")
+
+
+def test_real_coupang_partner_links_are_normalized_and_accepted():
+    urls = [
+        "https://link.coupang.com/a/f8i3PuVSqi",
+        "https://link.coupang.com/a/f8i6WhHkK4",
+        "https://link.coupang.com/a/f8jcQoPoke",
+        "https://link.coupang.com/a/f8jex1jVcG",
+        "https://link.coupang.com/a/f8jkHwLWaO",
+    ]
+
+    for url in urls:
+        assert normalize_coupang_partner_link(f"\ufeff\u200b  {url}  \u200b") == url
+        assert is_coupang_partner_link(f"\ufeff\u200b{url}")
+
+
+def test_coupang_partner_link_rejects_multiple_urls_in_single_input():
+    combined = (
+        "https://link.coupang.com/a/f8i3PuVSqi\n"
+        "https://link.coupang.com/a/f8i6WhHkK4"
+    )
+
+    assert normalize_coupang_partner_link(combined) == ""
+    assert not is_coupang_partner_link(combined)
 
 
 def test_public_url_validator_rejects_private_network_targets():

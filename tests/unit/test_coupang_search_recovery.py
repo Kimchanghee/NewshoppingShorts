@@ -71,6 +71,24 @@ def test_platform_start_stops_before_work_for_normal_coupang_url():
     assert "일반 쿠팡 상품 링크는 사용할 수 없습니다" in panel.results_label.text()
 
 
+def test_platform_start_normalizes_invisible_clipboard_prefix_before_validation():
+    from ui.panels.sourcing_panel import SourcingPanel
+
+    panel = SimpleNamespace(
+        url_input=QLineEdit(),
+        results_label=QLabel(),
+        _partner_link_error_message=SourcingPanel._partner_link_error_message,
+        _running=True,
+    )
+    expected = "https://link.coupang.com/a/f8i3PuVSqi"
+    panel.url_input.setText(f"\ufeff\u200b {expected}")
+
+    SourcingPanel._on_start_platform_video(panel)
+
+    assert panel.url_input.text() == expected
+    assert panel.results_label.text() == ""
+
+
 def test_recovery_actions_retry_same_or_select_next_product():
     from ui.panels.sourcing_panel import SourcingPanel
 
@@ -116,11 +134,14 @@ def test_structured_failure_shows_cause_solution_and_recovery_controls():
         {
             "error": "상품 영상 검색에 실패했어요.",
             "failure": {"cause": "검색 서버 시간초과", "action": "다시 검색해 주세요."},
+            "report_path": r"C:\Users\tester\.ssmaker\output\report_platform_failed.json",
         },
     )
 
     assert "원인: 검색 서버 시간초과" in result_label.text()
     assert "해결: 다시 검색해 주세요" in result_label.text()
+    assert "오류 기록:" in result_label.text()
+    assert "report_platform_failed.json" in result_label.text()
     assert recovery.isHidden() is False
 
 

@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """3플랫폼 소싱 파이프라인(신규 개선분) 유닛 테스트."""
 import asyncio
+import json
 import os
 import sys
 import types
@@ -347,6 +348,190 @@ def test_search_one_platform_shares_attempted_ids_across_query_variants(
     assert len(seen_sets) == 2
     assert seen_sets[0] is seen_sets[1]
     assert "douyin:7351234567890123456" in seen_sets[1]
+
+
+@pytest.mark.parametrize(
+    "page_text",
+    [
+        "请登录后继续查看视频",
+        "登录 / 注册",
+        "Sign in to continue",
+        "Unfortunately, bots use DuckDuckGo too.",
+    ],
+)
+def test_access_challenge_detection_covers_platform_login_and_search_bot_pages(page_text):
+    class Tab:
+        async def evaluate(self, *_args, **_kwargs):
+            return page_text
+
+    from core.sourcing.product_searcher import _page_has_access_challenge
+
+    assert asyncio.run(_page_has_access_challenge(Tab())) is True
+
+
+def test_external_search_skips_blocked_and_empty_providers(monkeypatch, tmp_path):
+    opened = []
+    http_opened = []
+
+    class Tab:
+        def __init__(self, provider):
+            self.provider = provider
+
+        async def close(self):
+            return None
+
+    class Browser:
+        async def get(self, url, **_kwargs):
+            if "duckduckgo" in url:
+                provider = "duckduckgo"
+            elif "bing.com" in url:
+                provider = "bing"
+            else:
+                provider = "unexpected"
+            opened.append(provider)
+            return Tab(provider)
+
+    async def fake_challenge(tab):
+        return tab.provider == "duckduckgo"
+
+    async def fake_extract(tab, *_args, **_kwargs):
+        return []
+
+    def fake_http_search(provider, platform, _url):
+        http_opened.append((provider, platform))
+        return ["https://www.douyin.com/video/7351234567890123456"]
+
+    async def no_sleep(_seconds):
+        return None
+
+    diagnostics = {}
+    monkeypatch.setattr(searcher, "_page_has_access_challenge", fake_challenge)
+    monkeypatch.setattr(searcher, "_extract_video_page_links", fake_extract)
+    monkeypatch.setattr(
+        searcher, "_http_external_search_links", fake_http_search, raising=False
+    )
+    monkeypatch.setattr(searcher.asyncio, "sleep", no_sleep)
+
+    links = asyncio.run(searcher._external_search_links(
+        Browser(), "douyin", "电动奶泡器", str(tmp_path), diagnostics=diagnostics
+    ))
+
+    assert links == ["https://www.douyin.com/video/7351234567890123456"]
+    assert opened == ["duckduckgo", "bing"]
+    assert http_opened == [("brave", "douyin")]
+    assert diagnostics["counts"]["access_challenge"] == 1
+    assert diagnostics["platforms"]["search:duckduckgo"]["access_challenge"] == 1
+    assert diagnostics["platforms"]["search:bing"]["no_results"] == 1
+
+    second_links = asyncio.run(searcher._external_search_links(
+        Browser(), "douyin", "手持奶泡器", str(tmp_path), diagnostics=diagnostics
+    ))
+    assert second_links == links
+    assert opened == ["duckduckgo", "bing", "bing"]
+    assert http_opened == [("brave", "douyin"), ("brave", "douyin")]
+
+
+def test_http_external_search_extracts_direct_platform_links(monkeypatch):
+    calls = []
+
+    class Response:
+        text = """
+        <a href="https://www.douyin.com/video/7351234567890123456">first</a>
+        <a href="https://www.douyin.com/video/7351234567890123456">duplicate</a>
+        """
+
+        def raise_for_status(self):
+            return None
+
+    def fake_get(url, **kwargs):
+        calls.append((url, kwargs))
+        return Response()
+
+    monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=fake_get))
+
+    links = searcher._http_external_search_links(
+        "brave", "douyin", "https://search.brave.com/search?q=test"
+    )
+
+    assert links == ["https://www.douyin.com/video/7351234567890123456"]
+    assert calls[0][1]["timeout"] > 0
+    assert "User-Agent" in calls[0][1]["headers"]
+
+
+def test_external_search_records_http_rate_limit(monkeypatch, tmp_path):
+    class RateLimited(Exception):
+        response = SimpleNamespace(status_code=429)
+
+    def fake_http_search(*_args, **_kwargs):
+        raise RateLimited("too many requests")
+
+    diagnostics = {}
+    monkeypatch.setattr(searcher, "_EXTERNAL_SEARCH_PROVIDERS", ("brave",))
+    monkeypatch.setattr(searcher, "_http_external_search_links", fake_http_search)
+
+    links = asyncio.run(searcher._external_search_links(
+        object(), "douyin", "电动奶泡器", str(tmp_path), diagnostics=diagnostics
+    ))
+
+    assert links == []
+    assert diagnostics["counts"]["rate_limited"] == 1
+    assert diagnostics["events"][-1]["detail"] == "HTTP 429"
+
+
+def test_platform_failure_report_preserves_block_reason_and_skipped_delivery(
+    monkeypatch, tmp_path
+):
+    from core.sourcing import coupang_scraper
+
+    async def fake_scrape(_browser, _url):
+        return {"name": "전동 우유거품기"}
+
+    async def fake_keywords(_product_name, _client):
+        return {"chinese": "电动奶泡器", "english": "electric milk frother"}
+
+    async def fake_search(*_args, **kwargs):
+        diagnostics = kwargs["diagnostics"]
+        searcher._diagnostic_event(
+            diagnostics,
+            "access_challenge",
+            platform="search:duckduckgo",
+            detail="bot verification",
+        )
+        searcher._diagnostic_event(
+            diagnostics,
+            "download_failed",
+            platform="douyin",
+            detail="login required",
+        )
+        return None
+
+    class Registry:
+        def used_source_ids(self):
+            return set()
+
+    monkeypatch.setattr(coupang_scraper, "scrape_product", fake_scrape)
+    monkeypatch.setattr(pp, "_convert_keywords", fake_keywords)
+    monkeypatch.setattr(pp, "_resolve_purchase_link", lambda url: {
+        "purchase_url": url, "deep_link": url, "source": "manual",
+    })
+    monkeypatch.setattr(searcher, "search_platform_shorts", fake_search)
+    monkeypatch.setattr(reg_mod, "get_uploaded_registry", lambda: Registry())
+
+    report = asyncio.run(pp.run_platform_sourcing(
+        "https://link.coupang.com/a/f8i3PuVSqi",
+        output_dir=str(tmp_path),
+        browser=object(),
+    ))
+
+    assert report["ok"] is False
+    assert report["failure"]["code"] == "platform_access_blocked"
+    assert report["blocked_stages"] == ["video_edit", "youtube_upload", "linktree_publish"]
+    assert "DuckDuckGo" in report["error"]
+    assert "YouTube 업로드" in report["error"]
+    report_path = report["report_path"]
+    assert os.path.exists(report_path)
+    persisted = json.loads(open(report_path, encoding="utf-8").read())
+    assert persisted["failure"]["diagnostics"]["events"][0]["code"] == "access_challenge"
 
 
 def test_xiaohongshu_collector_uses_ytdlp(monkeypatch, tmp_path):
