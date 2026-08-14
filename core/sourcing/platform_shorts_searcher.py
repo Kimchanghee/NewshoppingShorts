@@ -76,6 +76,13 @@ def _diagnostic_event(
         platform_counts[code] = int(platform_counts.get(code, 0) or 0) + 1
     if detail:
         diagnostics["last_detail"] = str(detail).strip()[:160]
+    events = diagnostics.setdefault("events", [])
+    events.append({
+        "code": str(code or ""),
+        "platform": str(platform or ""),
+        "detail": str(detail or "").strip()[:160],
+    })
+    del events[:-50]
 
 
 def _normalized_relevance_text(value: str) -> str:
@@ -296,12 +303,79 @@ _EXTERNAL_SITE_FILTER = {
     "xiaohongshu": "xiaohongshu.com/explore",
     "bilibili": "bilibili.com/video",
 }
+_EXTERNAL_SEARCH_PROVIDERS = ("duckduckgo", "bing", "brave")
+
+
+def _external_search_url(provider: str, query: str) -> str:
+    encoded = urllib.parse.quote(query)
+    if provider == "duckduckgo":
+        return f"https://html.duckduckgo.com/html/?q={encoded}"
+    if provider == "bing":
+        return f"https://www.bing.com/search?q={encoded}&setlang=zh-Hans"
+    if provider == "brave":
+        return f"https://search.brave.com/search?q={encoded}&source=web"
+    return ""
+
+
+def _page_links_from_html(platform: str, page_html: str) -> List[str]:
+    """Extract canonical, deduplicated platform video pages from HTML text."""
+    pat = _PAGE_LINK_PATTERNS.get(platform)
+    if pat is None or not isinstance(page_html, str) or not page_html:
+        return []
+    seen: Set[str] = set()
+    links: List[str] = []
+    for match in pat.finditer(page_html):
+        path_part = match.group(1)
+        video_id = match.group(2)
+        if video_id in seen:
+            continue
+        seen.add(video_id)
+        links.append(_PAGE_LINK_BASE[platform] + path_part)
+    template = _ID_LINK_TEMPLATE.get(platform)
+    for id_pattern in _ID_PATTERNS.get(platform, []):
+        for match in id_pattern.finditer(page_html):
+            video_id = match.group(1)
+            if video_id in seen:
+                continue
+            seen.add(video_id)
+            links.append(template.format(id=video_id))
+    return links
+
+
+def _http_external_search_links(
+    provider: str, platform: str, url: str
+) -> List[str]:
+    """Read server-rendered search HTML when an automated browser is challenged."""
+    if provider != "brave" or not url.startswith("https://search.brave.com/"):
+        return []
+    import html as html_module
+    import requests
+
+    response = requests.get(
+        url,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/138.0.0.0 Safari/537.36"
+            ),
+            "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.7",
+        },
+        timeout=15,
+    )
+    response.raise_for_status()
+    page_html = html_module.unescape(str(response.text or ""))[:6_000_000]
+    decoded = urllib.parse.unquote(page_html)
+    if decoded != page_html:
+        page_html += "\n" + decoded
+    return _page_links_from_html(platform, page_html)
 
 
 async def _external_search_links(
-    browser: Any, platform: str, query: str, output_dir: str = ""
+    browser: Any, platform: str, query: str, output_dir: str = "",
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
-    """DuckDuckGo html 검색으로 플랫폼 영상 페이지 링크 수집(비로그인 폴백)."""
+    """Search public indexes in order and skip blocked providers automatically."""
     site = _EXTERNAL_SITE_FILTER.get(platform)
     if not site:
         return []
@@ -309,25 +383,123 @@ async def _external_search_links(
     # Adding the native "video" intent word cuts photo-only notes before the
     # extractor stage; Douyin/Kuaishou URL paths are already video-specific.
     intent_query = f"{query} 视频" if platform == "xiaohongshu" else query
-    q = urllib.parse.quote(f"{intent_query} site:{site}")
-    url = f"https://html.duckduckgo.com/html/?q={q}"
-    try:
-        tab = await asyncio.wait_for(browser.get(url, new_tab=True), timeout=PAGE_OPEN_TIMEOUT)
-    except Exception:
-        return []
-    if tab is None:
-        return []
-    try:
-        await asyncio.sleep(2.5)
-        links = await _extract_video_page_links(tab, platform, output_dir, f"ddg:{query}")
-        if links:
-            logger.info("[PlatformSearch] %s: 외부검색(DDG) 링크 %d개", platform, len(links))
-        return links
-    finally:
+    search_query = f"{intent_query} site:{site}"
+    blocked_providers = set(
+        str(value)
+        for value in ((diagnostics or {}).get("blocked_search_providers") or [])
+    )
+
+    def block_provider(provider_name: str) -> None:
+        blocked_providers.add(provider_name)
+        if diagnostics is not None:
+            stored = diagnostics.setdefault("blocked_search_providers", [])
+            if provider_name not in stored:
+                stored.append(provider_name)
+
+    for provider in _EXTERNAL_SEARCH_PROVIDERS:
+        if provider in blocked_providers:
+            continue
+        url = _external_search_url(provider, search_query)
+        if not url:
+            continue
+        diagnostic_platform = f"search:{provider}"
+        if provider == "brave":
+            try:
+                links = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        _http_external_search_links, provider, platform, url
+                    ),
+                    timeout=PAGE_OPEN_TIMEOUT,
+                )
+            except asyncio.TimeoutError:
+                _diagnostic_event(
+                    diagnostics, "page_open_timeout", platform=diagnostic_platform
+                )
+                continue
+            except Exception as exc:
+                status_code = getattr(
+                    getattr(exc, "response", None), "status_code", None
+                )
+                code = "rate_limited" if status_code == 429 else "page_open_error"
+                detail = f"HTTP {status_code}" if status_code else type(exc).__name__
+                if code == "rate_limited":
+                    block_provider(provider)
+                _diagnostic_event(
+                    diagnostics,
+                    code,
+                    platform=diagnostic_platform,
+                    detail=detail,
+                )
+                continue
+            if links:
+                logger.info(
+                    "[PlatformSearch] %s: 외부검색(%s HTTP) 링크 %d개",
+                    platform,
+                    provider,
+                    len(links),
+                )
+                return links
+            _diagnostic_event(
+                diagnostics, "no_results", platform=diagnostic_platform
+            )
+            continue
         try:
-            await asyncio.wait_for(tab.close(), timeout=5)
-        except Exception:
-            pass
+            tab = await asyncio.wait_for(
+                browser.get(url, new_tab=True), timeout=PAGE_OPEN_TIMEOUT
+            )
+        except asyncio.TimeoutError:
+            _diagnostic_event(
+                diagnostics, "page_open_timeout", platform=diagnostic_platform
+            )
+            continue
+        except Exception as exc:
+            _diagnostic_event(
+                diagnostics,
+                "page_open_error",
+                platform=diagnostic_platform,
+                detail=type(exc).__name__,
+            )
+            continue
+        if tab is None:
+            _diagnostic_event(diagnostics, "empty_page", platform=diagnostic_platform)
+            continue
+        try:
+            await asyncio.sleep(2.5)
+            if await asyncio.wait_for(
+                _page_has_access_challenge(tab), timeout=EVAL_TIMEOUT
+            ):
+                logger.info(
+                    "[PlatformSearch] 외부검색 %s 봇 확인 화면 — 다음 검색엔진으로",
+                    provider,
+                )
+                _diagnostic_event(
+                    diagnostics,
+                    "access_challenge",
+                    platform=diagnostic_platform,
+                    detail="bot or login challenge",
+                )
+                block_provider(provider)
+                continue
+            links = await _extract_video_page_links(
+                tab, platform, output_dir, f"{provider}:{query}"
+            )
+            if links:
+                logger.info(
+                    "[PlatformSearch] %s: 외부검색(%s) 링크 %d개",
+                    platform,
+                    provider,
+                    len(links),
+                )
+                return links
+            _diagnostic_event(
+                diagnostics, "no_results", platform=diagnostic_platform
+            )
+        finally:
+            try:
+                await asyncio.wait_for(tab.close(), timeout=5)
+            except Exception:
+                pass
+    return []
 
 _DEBUG_DUMP_ENV = "SSMAKER_PLATFORM_DEBUG_DUMP"
 
@@ -577,24 +749,7 @@ async def _extract_video_page_links(
         except Exception:
             pass
 
-    seen, links = set(), []
-    for m in pat.finditer(html):
-        path_part = m.group(1)
-        vid = m.group(2)
-        if vid in seen:
-            continue
-        seen.add(vid)
-        links.append(_PAGE_LINK_BASE[platform] + path_part)
-    # SSR 스토어 ID 보강
-    tmpl = _ID_LINK_TEMPLATE.get(platform)
-    for idpat in _ID_PATTERNS.get(platform, []):
-        for m in idpat.finditer(html):
-            vid = m.group(1)
-            if vid in seen:
-                continue
-            seen.add(vid)
-            links.append(tmpl.format(id=vid))
-    return links
+    return _page_links_from_html(platform, html)
 
 
 def _ytdlp_download(
@@ -719,7 +874,8 @@ def _mux_streams(video_path: str, audio_path: Optional[str], out_path: str) -> b
 
 
 async def _browser_page_video_download(
-    browser: Any, link: str, platform: str, output_dir: str
+    browser: Any, link: str, platform: str, output_dir: str,
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Optional[Dict[str, Any]]:
     """범용 브라우저 컨텍스트 다운로드 — yt-dlp가 막힐 때(도우인 'Fresh cookies' 등).
 
@@ -734,6 +890,19 @@ async def _browser_page_video_download(
         return None
     try:
         await asyncio.sleep(3.0)
+        try:
+            if await asyncio.wait_for(
+                _page_has_access_challenge(tab), timeout=EVAL_TIMEOUT
+            ):
+                _diagnostic_event(
+                    diagnostics,
+                    "access_challenge",
+                    platform=platform,
+                    detail="video page login or bot challenge",
+                )
+                return None
+        except Exception:
+            pass
         urls: List[str] = []
         for _ in range(3):
             urls = await _extract_platform_videos(tab)
@@ -904,6 +1073,18 @@ async def search_one_platform(
             wtab = await asyncio.wait_for(browser.get(warmup, new_tab=True), timeout=PAGE_OPEN_TIMEOUT)
             await asyncio.sleep(2.5)
             try:
+                if await asyncio.wait_for(
+                    _page_has_access_challenge(wtab), timeout=EVAL_TIMEOUT
+                ):
+                    _diagnostic_event(
+                        diagnostics,
+                        "access_challenge",
+                        platform=platform,
+                        detail="warmup page login or bot challenge",
+                    )
+            except Exception:
+                pass
+            try:
                 await asyncio.wait_for(wtab.close(), timeout=5)
             except Exception:
                 pass
@@ -978,28 +1159,54 @@ async def _search_query_on_tab(
     import time as _time
 
     if True:
+        native_access_blocked = False
         try:
             if await asyncio.wait_for(_page_has_access_challenge(tab), timeout=EVAL_TIMEOUT):
-                logger.info("[PlatformSearch] %s 로그인/차단 화면 — 스킵(프로필 로그인 필요)", platform)
-                _diagnostic_event(diagnostics, "access_challenge", platform=platform)
-                return None
+                logger.info(
+                    "[PlatformSearch] %s 로그인/차단 화면 — 외부 검색으로 전환",
+                    platform,
+                )
+                _diagnostic_event(
+                    diagnostics,
+                    "access_challenge",
+                    platform=platform,
+                    detail="native search login or bot challenge",
+                )
+                native_access_blocked = True
         except Exception:
             pass
         # lazy-load 유도
-        try:
-            await asyncio.sleep(page_wait)
-            for _ in range(3):
-                await asyncio.wait_for(
-                    tab.evaluate("window.scrollBy(0, document.body.scrollHeight/2)", await_promise=False),
-                    timeout=EVAL_TIMEOUT,
-                )
-                await asyncio.sleep(1.2)
-        except Exception:
-            pass
+        if not native_access_blocked:
+            try:
+                await asyncio.sleep(page_wait)
+                for _ in range(3):
+                    await asyncio.wait_for(
+                        tab.evaluate("window.scrollBy(0, document.body.scrollHeight/2)", await_promise=False),
+                        timeout=EVAL_TIMEOUT,
+                    )
+                    await asyncio.sleep(1.2)
+                if await asyncio.wait_for(
+                    _page_has_access_challenge(tab), timeout=EVAL_TIMEOUT
+                ):
+                    logger.info(
+                        "[PlatformSearch] %s 지연 로그인/차단 화면 — 외부 검색으로 전환",
+                        platform,
+                    )
+                    _diagnostic_event(
+                        diagnostics,
+                        "access_challenge",
+                        platform=platform,
+                        detail="challenge appeared after page load",
+                    )
+                    native_access_blocked = True
+            except Exception:
+                pass
 
         # ── 전략 1: 영상 페이지 링크 → yt-dlp(브라우저 쿠키 동봉) ──
         if platform in _YTDLP_PLATFORMS:
-            page_links = await _extract_video_page_links(tab, platform, output_dir, q)
+            page_links = [] if native_access_blocked else await _extract_video_page_links(
+                tab, platform, output_dir, q
+            )
             logger.info("[PlatformSearch] %s: 영상 페이지 링크 %d개", platform, len(page_links))
             # Native result pages frequently expose only one stale/deleted
             # result to a logged-out session.  Merge external indexed results
@@ -1007,7 +1214,7 @@ async def _search_query_on_tab(
             # unusable URL as a complete search.
             if len(page_links) < 4:
                 external_links = await _external_search_links(
-                    browser, platform, q, output_dir
+                    browser, platform, q, output_dir, diagnostics=diagnostics
                 )
                 seen_links = {_normalize_source_id(link) for link in page_links}
                 for link in external_links:
@@ -1026,7 +1233,9 @@ async def _search_query_on_tab(
                     detail=str(len(page_links) - len(fresh_links)),
                 )
             if not page_links:
-                _diagnostic_event(diagnostics, "no_results", platform=platform)
+                _diagnostic_event(
+                    diagnostics, "no_results", platform=platform, detail=q
+                )
             ytdlp_cookies = (
                 await _browser_cookies_for(browser, platform) if fresh_links else {}
             )
@@ -1053,7 +1262,12 @@ async def _search_query_on_tab(
                     )
                 except asyncio.TimeoutError:
                     logger.warning("[PlatformSearch] %s yt-dlp 240s 초과: %s", platform, link[:60])
-                    _diagnostic_event(diagnostics, "download_timeout", platform=platform)
+                    _diagnostic_event(
+                        diagnostics,
+                        "download_timeout",
+                        platform=platform,
+                        detail=_normalize_source_id(link),
+                    )
                     got = None
                 if got and (
                     got.get("relevance_rejected") or got.get("technical_rejected")
@@ -1062,6 +1276,7 @@ async def _search_query_on_tab(
                         diagnostics,
                         "relevance_rejected" if got.get("relevance_rejected") else "technical_rejected",
                         platform=platform,
+                        detail=_normalize_source_id(link),
                     )
                     continue
                 if not got and platform == "bilibili":
@@ -1070,9 +1285,20 @@ async def _search_query_on_tab(
                 elif not got:
                     # 도우인('Fresh cookies')·콰이쇼우 폴백: 영상 페이지는 비로그인
                     # 시청 가능 — 페이지를 열어 mp4를 직접 추출·다운로드.
-                    got = await _browser_page_video_download(browser, link, platform, output_dir)
+                    got = await _browser_page_video_download(
+                        browser,
+                        link,
+                        platform,
+                        output_dir,
+                        diagnostics=diagnostics,
+                    )
                 if not got:
-                    _diagnostic_event(diagnostics, "download_failed", platform=platform)
+                    _diagnostic_event(
+                        diagnostics,
+                        "download_failed",
+                        platform=platform,
+                        detail=_normalize_source_id(link),
+                    )
                     continue
                 ok, why = validate_source_video(got["local_path"])
                 if not ok:
@@ -1083,7 +1309,7 @@ async def _search_query_on_tab(
                         pass
                     _diagnostic_event(
                         diagnostics, "technical_rejected", platform=platform,
-                        detail=why,
+                        detail=f"{_normalize_source_id(link)}: {why}",
                     )
                     continue
                 size_mb = os.path.getsize(got["local_path"]) / (1024 * 1024)
@@ -1105,7 +1331,14 @@ async def _search_query_on_tab(
                         os.remove(got["local_path"])
                     except OSError:
                         pass
-                    _diagnostic_event(diagnostics, "relevance_rejected", platform=platform)
+                    _diagnostic_event(
+                        diagnostics,
+                        "relevance_rejected",
+                        platform=platform,
+                        detail=(
+                            f"{_normalize_source_id(link)}: score={relevance_score}"
+                        ),
+                    )
                     continue
                 logger.info("[PlatformSearch] %s %s 성공 %.1fMB: %s", platform, via, size_mb, link[:60])
                 return {
@@ -1117,11 +1350,15 @@ async def _search_query_on_tab(
                 }
 
         # ── 전략 2(폴백): 직접 mp4 추출 → requests 다운로드 ──
+        if native_access_blocked:
+            return None
         video_urls = await _extract_platform_videos(tab)
         video_urls = [u for u in video_urls if _normalize_source_id(u) not in skip]
         if not video_urls:
             logger.info("[PlatformSearch] %s: 영상 URL 못 찾음", platform)
-            _diagnostic_event(diagnostics, "no_video_url", platform=platform)
+            _diagnostic_event(
+                diagnostics, "no_video_url", platform=platform, detail=q
+            )
             return None
 
         referer = _REFERER.get(platform, url)
@@ -1140,10 +1377,20 @@ async def _search_query_on_tab(
                     timeout=180,
                 )
             except asyncio.TimeoutError:
-                _diagnostic_event(diagnostics, "download_timeout", platform=platform)
+                _diagnostic_event(
+                    diagnostics,
+                    "download_timeout",
+                    platform=platform,
+                    detail=_normalize_source_id(vurl),
+                )
                 size = None
             if not size:
-                _diagnostic_event(diagnostics, "download_failed", platform=platform)
+                _diagnostic_event(
+                    diagnostics,
+                    "download_failed",
+                    platform=platform,
+                    detail=_normalize_source_id(vurl),
+                )
                 continue
             ok, why = validate_source_video(filepath)
             if not ok:
@@ -1165,7 +1412,12 @@ async def _search_query_on_tab(
                 os.remove(filepath)
             except OSError:
                 pass
-            _diagnostic_event(diagnostics, "missing_candidate_metadata", platform=platform)
+            _diagnostic_event(
+                diagnostics,
+                "missing_candidate_metadata",
+                platform=platform,
+                detail=_normalize_source_id(vurl),
+            )
             continue
     return None
 

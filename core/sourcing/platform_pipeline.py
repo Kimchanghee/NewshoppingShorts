@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import math
 import os
 import re
@@ -61,6 +62,8 @@ DEFAULT_REEDIT_OPTIONS = {"speed": 1.03, "mirror": False, "mute": False, "bgm_pa
 
 # 산출물 보존 기간(일) — 지난 파일은 다음 실행 때 정리.
 OUTPUT_RETENTION_DAYS = 7
+FAILURE_REPORT_RETENTION_DAYS = 30
+_BLOCKED_DELIVERY_STAGES = ["video_edit", "youtube_upload", "linktree_publish"]
 
 
 def default_output_dir() -> str:
@@ -84,7 +87,11 @@ def cleanup_old_outputs(output_dir: str, retention_days: int = OUTPUT_RETENTION_
         for name in os.listdir(output_dir):
             path = os.path.join(output_dir, name)
             try:
-                if os.path.isfile(path) and os.path.getmtime(path) < cutoff:
+                report_cutoff = time.time() - FAILURE_REPORT_RETENTION_DAYS * 86400
+                effective_cutoff = (
+                    report_cutoff if name.startswith("report_platform_") else cutoff
+                )
+                if os.path.isfile(path) and os.path.getmtime(path) < effective_cutoff:
                     os.remove(path)
                     removed += 1
             except OSError:
@@ -190,7 +197,81 @@ def _failure(
         "retriable": bool(retriable),
         "can_choose_other_product": True,
         "diagnostics": dict(diagnostics or {}),
+        "blocked_stages": list(_BLOCKED_DELIVERY_STAGES),
     }
+
+
+_DIAGNOSTIC_PLATFORM_LABELS = {
+    "douyin": "Douyin",
+    "xiaohongshu": "Xiaohongshu",
+    "kuaishou": "Kuaishou",
+    "search:duckduckgo": "DuckDuckGo",
+    "search:bing": "Bing",
+    "search:brave": "Brave Search",
+}
+_DIAGNOSTIC_REASON_LABELS = {
+    "access_challenge": "로그인/봇 차단",
+    "page_open_timeout": "페이지 시간초과",
+    "page_open_error": "페이지 열기 실패",
+    "rate_limited": "요청 제한",
+    "query_error": "검색 처리 오류",
+    "no_results": "검색 결과 없음",
+    "no_video_url": "재생 URL 없음",
+    "download_timeout": "다운로드 시간초과",
+    "download_failed": "다운로드 실패",
+    "technical_rejected": "재생 조건 미달",
+    "relevance_rejected": "상품 연관성 미달",
+    "missing_candidate_metadata": "상품 확인 정보 없음",
+    "duplicate_source": "이미 사용한 영상",
+    "time_budget_exceeded": "검색 시간 예산 초과",
+}
+
+
+def _diagnostic_summary(diagnostics: Optional[Dict[str, Any]]) -> str:
+    diagnostics = dict(diagnostics or {})
+    per_platform = dict(diagnostics.get("platforms") or {})
+    requested = [str(value) for value in diagnostics.get("requested_platforms") or []]
+    ordered = list(dict.fromkeys(requested + sorted(per_platform)))
+    parts: List[str] = []
+    for platform in ordered:
+        platform_counts = dict(per_platform.get(platform) or {})
+        reasons = []
+        for code, label in _DIAGNOSTIC_REASON_LABELS.items():
+            count = int(platform_counts.get(code, 0) or 0)
+            if count:
+                reasons.append(f"{label} {count}회")
+        if reasons:
+            platform_label = _DIAGNOSTIC_PLATFORM_LABELS.get(platform, platform)
+            parts.append(f"{platform_label}: {', '.join(reasons[:4])}")
+    return " / ".join(parts[:6])
+
+
+def _persist_platform_run_report(output_dir: str, report: Dict[str, Any]) -> str:
+    """Persist both successful and failed attempts for queue/recovery audits."""
+    try:
+        os.makedirs(output_dir, exist_ok=True)
+        report.setdefault("finished_at", time.strftime("%Y-%m-%dT%H:%M:%S%z"))
+        report.setdefault("status", "succeeded" if report.get("ok") else "failed")
+        if not report.get("ok"):
+            failure = dict(report.get("failure") or {})
+            report.setdefault(
+                "blocked_stages",
+                list(failure.get("blocked_stages") or _BLOCKED_DELIVERY_STAGES),
+            )
+        filename = (
+            f"report_platform_{time.strftime('%Y%m%d_%H%M%S')}_"
+            f"{uuid.uuid4().hex[:8]}.json"
+        )
+        path = os.path.join(output_dir, filename)
+        report["report_path"] = path
+        temporary = f"{path}.tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(report, handle, ensure_ascii=False, indent=2, default=str)
+        os.replace(temporary, path)
+        return path
+    except Exception as exc:
+        logger.warning("[PlatformPipeline] 실행 리포트 저장 실패: %s", exc)
+        return ""
 
 
 def describe_platform_search_failure(diagnostics: Optional[Dict[str, Any]]) -> Dict[str, Any]:
@@ -204,7 +285,10 @@ def describe_platform_search_failure(diagnostics: Optional[Dict[str, Any]]) -> D
             "열린 Chrome에서 해당 사이트에 로그인한 뒤 같은 상품을 다시 검색해 주세요.",
             diagnostics=diagnostics,
         )
-    if any(counts.get(key) for key in ("page_open_timeout", "page_open_error", "query_error", "time_budget_exceeded")):
+    if any(counts.get(key) for key in (
+        "page_open_timeout", "page_open_error", "rate_limited",
+        "query_error", "time_budget_exceeded",
+    )):
         return _failure(
             "platform_search_unavailable",
             "검색 사이트 응답이 없거나 네트워크 시간 제한을 넘었습니다.",
@@ -243,11 +327,20 @@ def describe_platform_search_failure(diagnostics: Optional[Dict[str, Any]]) -> D
 
 
 def format_failure_message(title: str, failure: Dict[str, Any]) -> str:
-    return (
+    message = (
         f"{title}\n"
         f"원인: {failure.get('cause') or '확인되지 않은 오류'}\n"
         f"해결: {failure.get('action') or '다시 시도해 주세요.'}"
     )
+    summary = _diagnostic_summary(failure.get("diagnostics"))
+    if summary:
+        message += f"\n검색 내역: {summary}"
+    if failure.get("blocked_stages"):
+        message += (
+            "\n후속 단계: 영상을 확보하지 못해 편집, YouTube 업로드, "
+            "Linktree 등록을 시작하지 않았습니다."
+        )
+    return message
 
 
 async def run_platform_sourcing(
@@ -283,7 +376,7 @@ async def run_platform_sourcing(
         "product_info": {}, "deep_link": "", "keywords": {},
         "queries": [], "hit": None, "final_video": "",
         "render_integrity": {"ok": False, "source": "platform_video"},
-        "failure": None,
+        "failure": None, "blocked_stages": [],
     }
 
     own_browser = False
@@ -298,7 +391,9 @@ async def run_platform_sourcing(
                 "열려 있는 자동화 Chrome 창을 모두 닫고 다시 검색해 주세요.",
             )
             report["error"] = format_failure_message("상품 검색을 시작하지 못했어요.", report["failure"])
+            report["blocked_stages"] = list(report["failure"]["blocked_stages"])
             _emit(progress, "product_analysis", report["error"], 0.0)
+            _persist_platform_run_report(out_dir, report)
             return report
 
     try:
@@ -328,6 +423,7 @@ async def run_platform_sourcing(
                 "파트너스 링크가 현재 열리는지 확인한 뒤 다시 검색하거나 다른 상품을 선택해 주세요.",
             )
             report["error"] = format_failure_message("쿠팡 상품 확인에 실패했어요.", report["failure"])
+            report["blocked_stages"] = list(report["failure"]["blocked_stages"])
             _emit(progress, "product_analysis", report["error"], 0.0)
             return report
         report["product_info"] = product
@@ -392,9 +488,11 @@ async def run_platform_sourcing(
             prefer_best=False,
             diagnostics=search_diagnostics,
         )
+        report["search_diagnostics"] = search_diagnostics
         if not hit:
             report["failure"] = describe_platform_search_failure(search_diagnostics)
             report["error"] = format_failure_message("상품 영상 검색에 실패했어요.", report["failure"])
+            report["blocked_stages"] = list(report["failure"]["blocked_stages"])
             _emit(progress, "overseas_search", report["error"], 0.0)
             return report
         report["hit"] = hit
@@ -458,8 +556,10 @@ async def run_platform_sourcing(
             pass
 
         report["ok"] = True
+        report["blocked_stages"] = []
         return report
     finally:
+        _persist_platform_run_report(out_dir, report)
         if own_browser:
             try:
                 await browser.stop()

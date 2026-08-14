@@ -603,7 +603,10 @@ for _profile in _EXTRA_SUMMER_INTENT_PROFILES:
 _ACCESS_CHALLENGE_PATTERNS = (
     "captcha", "verify", "robot", "security", "challenge", "punish",
     "unusual traffic", "access denied", "_____tmd_____", "login.taobao.com",
-    "passport.1688.com", "滑块", "验证", "验证码",
+    "passport.1688.com", "sign in to continue", "log in to continue",
+    "login required", "please log in", "bots use duckduckgo", "bot verification",
+    "滑块", "验证", "验证码", "请登录", "登录后", "立即登录", "扫码登录",
+    "登录 / 注册", "登录/注册", "__ssmaker_visible_access_blocker__",
 )
 _ACCESS_CHALLENGE_EVENTS: List[Dict[str, str]] = []
 
@@ -635,6 +638,22 @@ async def _page_has_access_challenge(tab: Any) -> bool:
                     location.href || '',
                     document.body?.innerText?.slice(0, 8000) || ''
                 ];
+                const visible = (element) => {
+                    if (!element) return false;
+                    const style = window.getComputedStyle(element);
+                    const rect = element.getBoundingClientRect();
+                    return style.display !== 'none' && style.visibility !== 'hidden' &&
+                        Number(style.opacity || 1) > 0 && rect.width > 20 && rect.height > 20;
+                };
+                const blockerSelectors = [
+                    '[class*="captcha" i]', '[id*="captcha" i]', 'iframe[src*="captcha" i]',
+                    '[class*="login-modal" i]', '[class*="loginmask" i]',
+                    '[class*="login-mask" i]', '[class*="passport-login" i]',
+                    '[class*="verify" i]', '[id*="verify" i]'
+                ];
+                if (blockerSelectors.some(selector =>
+                    Array.from(document.querySelectorAll(selector)).some(visible)
+                )) parts.push('__ssmaker_visible_access_blocker__');
                 return parts.join('\\n').toLowerCase();
             })()
             """
