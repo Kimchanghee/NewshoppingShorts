@@ -32,4 +32,4 @@ def test_showcase_has_accessible_controls_and_responsive_assets():
     assert 'aria-pressed="true">나란히' in html
     assert 'src="/static/ocr_showcase.js" defer' in html
     assert 'href="/static/ocr_showcase.css"' in html
-
+    assert html.count('type="video/mp4"') == 10
