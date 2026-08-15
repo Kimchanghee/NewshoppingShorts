@@ -1,0 +1,11 @@
+# Windows Python 3.11 release dependency input.
+# Compile from a Python 3.11 Windows environment so markers and wheel hashes
+# match the release runner:
+#   py -3.11 -m piptools compile --generate-hashes --allow-unsafe \
+#     --resolver=backtracking \
+#     --output-file=requirements-release.lock requirements-release.in
+
+-r requirements.txt
+-r backend/requirements.txt
+
+PyInstaller==6.19.0
