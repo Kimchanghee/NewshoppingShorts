@@ -18,11 +18,17 @@ import subprocess
 from pathlib import Path
 from typing import Optional, Dict, Any, Callable, Tuple
 
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 import requests
 from utils.logging_config import get_logger
 from utils.windows_package import is_msix_package
+from utils.authenticode import (
+    configured_transition_bridge_version,
+    expected_public_signer_thumbprints,
+    is_legacy_bridge_version,
+    verify_authenticode,
+)
 
 logger = get_logger(__name__)
 
@@ -54,64 +60,68 @@ _ALLOWED_DOWNLOAD_DOMAINS: frozenset[str] = frozenset({
     "newshopping-shorts-auth.vercel.app",
     "ssmaker-auth-api-1049571775048.us-central1.run.app",
 })
-
-_PINNED_UPDATE_SIGNER_THUMBPRINTS: frozenset[str] = frozenset({
-    "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
-})
+MAX_UPDATE_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
 
-def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tuple[bool, str]:
-    """Verify Windows Authenticode signature status and optional thumbprint allowlist."""
+def _is_allowed_update_download_url(download_url: str) -> bool:
+    try:
+        parsed = urlparse(str(download_url or "").strip())
+        port = parsed.port
+    except ValueError:
+        return False
+    return (
+        parsed.scheme == "https"
+        and bool(parsed.hostname)
+        and parsed.hostname.lower() in _ALLOWED_DOWNLOAD_DOMAINS
+        and not parsed.username
+        and not parsed.password
+        and port in (None, 443)
+    )
+
+
+def _validate_update_redirect_chain(response: requests.Response) -> bool:
+    """Require the initial response and every redirect destination to stay trusted."""
+    visited = [getattr(item, "url", "") for item in getattr(response, "history", ())]
+    visited.append(getattr(response, "url", ""))
+    return bool(visited) and all(_is_allowed_update_download_url(url) for url in visited)
+
+
+def _safe_update_filename(download_url: str) -> str | None:
+    """Return a simple installer filename, rejecting encoded traversal and separators."""
+    raw_name = urlparse(download_url).path.rsplit("/", 1)[-1]
+    filename = unquote(raw_name)
+    if (
+        not filename
+        or filename in {".", ".."}
+        or "/" in filename
+        or "\\" in filename
+        or not re.fullmatch(r"[A-Za-z0-9._-]{1,180}", filename)
+        or Path(filename).suffix.lower() not in {".exe", ".zip", ".msi"}
+    ):
+        return None
+    return filename
+
+def _verify_authenticode_signature(
+    file_path: str,
+    thumbprints: str,
+    *,
+    artifact_version: str | None = None,
+    allow_legacy_integrity_bridge: bool = False,
+) -> tuple[bool, str]:
+    """Apply the central Authenticode policy to a downloaded installer."""
     if sys.platform != "win32":
         return True, "signature check skipped on non-windows"
     if not file_path or not os.path.exists(file_path):
         return False, "file not found"
 
-    allowlist = set(_PINNED_UPDATE_SIGNER_THUMBPRINTS)
-    allowlist.update({
-        t.strip().upper().replace(" ", "")
-        for t in str(thumbprints_env or "").split(",")
-        if t.strip()
-    })
-
-    ps_script = (
-        "$ErrorActionPreference='Stop'; "
-        f"$sig=Get-AuthenticodeSignature -FilePath '{file_path}'; "
-        "$thumb=''; if ($sig.SignerCertificate) { $thumb=$sig.SignerCertificate.Thumbprint }; "
-        "[PSCustomObject]@{Status=[string]$sig.Status; StatusMessage=[string]$sig.StatusMessage; "
-        "Thumbprint=[string]$thumb} | ConvertTo-Json -Compress"
+    verification = verify_authenticode(
+        file_path,
+        expected_thumbprints=expected_public_signer_thumbprints(thumbprints),
+        artifact_version=artifact_version,
+        allow_legacy_integrity_bridge=allow_legacy_integrity_bridge,
+        transition_bridge_version=configured_transition_bridge_version(),
     )
-    proc = subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-        capture_output=True,
-        text=True,
-        timeout=20,
-        check=False,
-        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-    )
-    if proc.returncode != 0:
-        err = (proc.stderr or proc.stdout or "").strip()
-        return False, f"signature check failed: {err[:180]}"
-
-    try:
-        info = json.loads(proc.stdout.strip() or "{}")
-    except Exception:
-        return False, "invalid signature verification output"
-
-    status = str(info.get("Status") or "").strip()
-    status_message = str(info.get("StatusMessage") or "").strip()
-    thumbprint = str(info.get("Thumbprint") or "").strip().upper().replace(" ", "")
-    if not thumbprint:
-        return False, "missing signer thumbprint"
-    if thumbprint not in allowlist:
-        return False, "signer certificate is not allowlisted"
-    if status == "Valid":
-        return True, "ok"
-    # Windows localizes StatusMessage. UnknownError is accepted only after the
-    # exact signer pin matched; tampered files report HashMismatch instead.
-    if status == "UnknownError":
-        return True, "signature verified with pinned private-root signer"
-    return False, f"invalid signature status: {status or 'unknown'} {status_message}".strip()
+    return verification.accepted_for_update, verification.reason
 
 
 def get_current_version() -> str:
@@ -411,13 +421,12 @@ class UpdateChecker:
             logger.error("Download URL is empty")
             return None
 
-        # Security: validate download URL domain against allowlist
-        parsed_url = urlparse(download_url)
-        if parsed_url.scheme != "https":
-            logger.error(f"[Security] Rejecting non-HTTPS download URL: {parsed_url.scheme}")
+        if not _is_allowed_update_download_url(download_url):
+            logger.error("[Security] Rejecting untrusted update URL: %s", download_url)
             return None
-        if parsed_url.hostname not in _ALLOWED_DOWNLOAD_DOMAINS:
-            logger.error(f"[Security] Rejecting download from untrusted domain: {parsed_url.hostname}")
+        filename = _safe_update_filename(download_url)
+        if filename is None:
+            logger.error("[Security] Rejecting unsafe update filename from URL: %s", download_url)
             return None
 
         try:
@@ -428,31 +437,39 @@ class UpdateChecker:
             temp_dir.mkdir(parents=True, exist_ok=True)
             
             # Determine target filename.
-            filename = download_url.split("/")[-1].split("?")[0]
-            if not filename.endswith((".exe", ".zip", ".msi")):
-                filename = "ssmaker_update.exe"
-            
-            download_path = temp_dir / filename
+            download_path = (temp_dir / filename).resolve()
+            if download_path.parent != temp_dir.resolve():
+                raise ValueError("Update download destination escapes temporary directory")
             
             # Stream download for stable memory usage.
-            response = requests.get(
+            with requests.get(
                 download_url,
                 stream=True,
                 timeout=60,
-                headers={"User-Agent": f"SSMaker/{self.current_version}"}
-            )
-            response.raise_for_status()
-            
-            total_size = int(response.headers.get("content-length", 0))
-            downloaded_size = 0
-            
-            with open(download_path, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded_size += len(chunk)
-                        if progress_callback and total_size > 0:
-                            progress_callback(downloaded_size, total_size)
+                headers={"User-Agent": f"SSMaker/{self.current_version}"},
+            ) as response:
+                response.raise_for_status()
+                if not _validate_update_redirect_chain(response):
+                    raise ValueError("Update redirect chain contains an untrusted URL")
+
+                raw_length = response.headers.get("content-length")
+                try:
+                    total_size = int(raw_length) if raw_length is not None else 0
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Invalid update Content-Length") from exc
+                if total_size < 0 or total_size > MAX_UPDATE_DOWNLOAD_BYTES:
+                    raise ValueError("Update Content-Length exceeds download limit")
+                downloaded_size = 0
+
+                with open(download_path, "wb") as f:
+                    for chunk in response.iter_content(chunk_size=8192):
+                        if chunk:
+                            downloaded_size += len(chunk)
+                            if downloaded_size > MAX_UPDATE_DOWNLOAD_BYTES:
+                                raise ValueError("Update download exceeds byte limit")
+                            f.write(chunk)
+                            if progress_callback and total_size > 0:
+                                progress_callback(downloaded_size, total_size)
             
             logger.info(f"Download complete: {download_path}")
 
@@ -475,9 +492,17 @@ class UpdateChecker:
                 return None
 
             if sys.platform == "win32":
+                artifact_version = str(
+                    (self._update_info or {}).get("latest_version") or ""
+                ).strip().lstrip("vV")
                 ok, reason = _verify_authenticode_signature(
                     str(download_path),
                     os.getenv("UPDATE_SIGNER_THUMBPRINTS", ""),
+                    artifact_version=artifact_version,
+                    allow_legacy_integrity_bridge=is_legacy_bridge_version(
+                        artifact_version,
+                        transition_bridge_version=configured_transition_bridge_version(),
+                    ),
                 )
                 if not ok:
                     logger.error("Installer signature verification failed: %s", reason)
@@ -489,6 +514,8 @@ class UpdateChecker:
             
         except Exception as e:
             logger.exception(f"Download failed: {e}")
+            if "download_path" in locals():
+                download_path.unlink(missing_ok=True)
             return None
     
     def install_update(self, installer_path: Path) -> bool:

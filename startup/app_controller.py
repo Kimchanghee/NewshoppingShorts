@@ -12,12 +12,20 @@ import os
 import json
 import re
 import subprocess
+from pathlib import Path
 from urllib.parse import urlparse
 from PyQt6 import QtCore
 from PyQt6.QtWidgets import QMessageBox
 from utils.logging_config import get_logger
 from utils.windows_package import get_package_full_name, is_msix_package
 from utils.auto_updater import compare_versions
+from utils.authenticode import (
+    AuthenticodeTrust,
+    configured_transition_bridge_version,
+    expected_public_signer_thumbprints,
+    is_legacy_bridge_version,
+    verify_authenticode,
+)
 from user_facing_errors import sanitize_user_message
 from .initializer import Initializer
 
@@ -98,23 +106,38 @@ _ALLOWED_UPDATE_DOWNLOAD_DOMAINS = frozenset({
     "newshopping-shorts-auth.vercel.app",
     "ssmaker-auth-api-1049571775048.us-central1.run.app",
 })
-
-# The release certificate is intentionally pinned because the current signing
-# certificate is private/self-issued rather than chained to a public Windows
-# root. Authenticode still verifies the file signature; only the chain-trust
-# result is relaxed for this exact signer.
-_PINNED_UPDATE_SIGNER_THUMBPRINTS = frozenset({
-    "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
-})
-
+MAX_UPDATE_DOWNLOAD_BYTES = 512 * 1024 * 1024
 
 def _is_allowed_update_download_url(download_url: str) -> bool:
-    parsed = urlparse(str(download_url or "").strip())
+    try:
+        parsed = urlparse(str(download_url or "").strip())
+        port = parsed.port
+    except ValueError:
+        return False
     return (
         parsed.scheme == "https"
         and bool(parsed.hostname)
         and parsed.hostname.lower() in _ALLOWED_UPDATE_DOWNLOAD_DOMAINS
+        and not parsed.username
+        and not parsed.password
+        and port in (None, 443)
     )
+
+
+def _validate_update_redirect_chain(response) -> bool:
+    visited = [getattr(item, "url", "") for item in getattr(response, "history", ())]
+    visited.append(getattr(response, "url", ""))
+    return bool(visited) and all(_is_allowed_update_download_url(url) for url in visited)
+
+
+def _safe_temporary_update_destination(dest_path: str) -> Path:
+    import tempfile
+
+    temp_root = Path(tempfile.gettempdir()).resolve()
+    destination = Path(dest_path).resolve()
+    if destination.parent != temp_root or destination.name in {"", ".", ".."}:
+        raise ValueError("Update destination must be a direct child of the temporary directory")
+    return destination
 
 def _env_truthy(name: str, default: bool = False) -> bool:
     raw = os.getenv(name)
@@ -127,7 +150,6 @@ def _is_unreliable_signature_failure(reason: str) -> bool:
     """True when signature check failed due to tooling/environment issues."""
     lowered = str(reason or "").lower()
     unreliable_tokens = (
-        "unknownerror",
         "invocation failed",
         "timed out",
         "powershell",
@@ -135,74 +157,32 @@ def _is_unreliable_signature_failure(reason: str) -> bool:
     return any(token in lowered for token in unreliable_tokens)
 
 
-def _verify_authenticode_signature(file_path: str, thumbprints_env: str) -> tuple[bool, str]:
-    """
-    Verify Windows Authenticode signature for a file.
-
-    - Requires signature Status == Valid
-    - If `<thumbprints_env>` is configured, signer thumbprint must match allowlist.
-    """
+def _verify_authenticode_signature(
+    file_path: str,
+    thumbprints_env: str,
+    *,
+    artifact_version: str | None = None,
+    allow_legacy_integrity_bridge: bool = False,
+    require_public_trust: bool = False,
+) -> tuple[bool, str]:
+    """Apply the central Authenticode policy to an executable or installer."""
     if not file_path or not os.path.exists(file_path):
         return False, "File not found"
     if sys.platform != "win32":
         return True, "Signature check skipped (non-Windows)"
 
-    escaped_path = file_path.replace("'", "''")
-    ps_script = (
-        f"$sig = Get-AuthenticodeSignature -FilePath '{escaped_path}'; "
-        "if ($null -eq $sig) { Write-Output '{}'; exit 0 }; "
-        "$thumb=''; if ($sig.SignerCertificate) { $thumb=$sig.SignerCertificate.Thumbprint }; "
-        "[PSCustomObject]@{Status=[string]$sig.Status; StatusMessage=[string]$sig.StatusMessage; "
-        "Thumbprint=[string]$thumb} | ConvertTo-Json -Compress"
+    verification = verify_authenticode(
+        file_path,
+        expected_thumbprints=expected_public_signer_thumbprints(
+            os.getenv(thumbprints_env, "")
+        ),
+        artifact_version=artifact_version,
+        allow_legacy_integrity_bridge=allow_legacy_integrity_bridge,
+        transition_bridge_version=configured_transition_bridge_version(),
     )
-    try:
-        creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        result = subprocess.run(
-            ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps_script],
-            capture_output=True,
-            text=True,
-            timeout=20,
-            check=False,
-            creationflags=creation_flags,
-        )
-    except Exception as e:
-        return False, f"Signature check invocation failed: {e}"
-
-    try:
-        info = json.loads((result.stdout or "").strip() or "{}")
-    except json.JSONDecodeError:
-        return False, "Invalid signature verification output"
-
-    status = str(info.get("Status") or "").strip().lower()
-    status_message = str(info.get("StatusMessage") or "").strip()
-    thumb = str(info.get("Thumbprint") or "").replace(" ", "").strip().upper()
-    allow_raw = (os.getenv(thumbprints_env, "") or "").strip()
-    allowed = set(_PINNED_UPDATE_SIGNER_THUMBPRINTS)
-    allowed.update(
-        item.replace(" ", "").strip().upper()
-        for item in allow_raw.split(",")
-        if item.strip()
-    )
-
-    if not thumb:
-        return False, "Missing signer thumbprint"
-    if thumb not in allowed:
-        return False, "Signer thumbprint not allowed"
-    if status == "valid":
-        return True, "Signature verified"
-
-    # A copied certificate on a modified executable produces HashMismatch, not
-    # UnknownError. Accept UnknownError only for the pinned signer and the
-    # specific private-root trust failure emitted by Windows.
-    # StatusMessage is localized by Windows, so the stable signal is
-    # UnknownError plus the exact pinned certificate. Invalid/tampered PE files
-    # are reported as HashMismatch and remain blocked above.
-    if status == "unknownerror":
-        return True, "Signature verified with pinned private-root signer"
-
-    stderr = (result.stderr or "").strip()
-    detail = status_message or stderr
-    return False, f"Invalid signature status: {status or 'unknown'} {detail}".strip()
+    if require_public_trust and verification.trust is not AuthenticodeTrust.PUBLIC_TRUSTED:
+        return False, verification.reason
+    return verification.accepted_for_update, verification.reason
 
 
 class UpdateCheckWorker(QtCore.QThread):
@@ -558,17 +538,32 @@ class AppController:
             signature_required = _env_truthy("APP_SIGNATURE_REQUIRED", default=False)
             signature_strict = _env_truthy("APP_SIGNATURE_STRICT", default=False)
             signer_thumbprints = (os.getenv("APP_SIGNER_THUMBPRINTS", "") or "").strip()
-            should_verify_signature = signature_required or bool(signer_thumbprints)
+            running_version = self.get_current_version().strip().lstrip("vV")
+            transition_version = configured_transition_bridge_version()
+            running_bridge_allowed = is_legacy_bridge_version(
+                running_version,
+                transition_bridge_version=transition_version,
+            )
+            should_verify_signature = (
+                signature_required
+                or bool(expected_public_signer_thumbprints(signer_thumbprints))
+                or running_bridge_allowed
+            )
 
             if should_verify_signature:
                 ok, reason = _verify_authenticode_signature(
                     sys.executable,
                     "APP_SIGNER_THUMBPRINTS",
+                    artifact_version=running_version,
+                    allow_legacy_integrity_bridge=running_bridge_allowed,
+                    require_public_trust=not running_bridge_allowed,
                 )
                 if not ok:
                     self._close_splash()
                     unreliable_failure = _is_unreliable_signature_failure(reason)
-                    must_block = signature_required and (signature_strict or not unreliable_failure)
+                    must_block = should_verify_signature and (
+                        signature_strict or not unreliable_failure
+                    )
 
                     if must_block:
                         logger.error("Executable signature verification failed: %s", reason)
@@ -1506,7 +1501,12 @@ class AppController:
         )
         self.update_progress_dialog.show()
 
-        self.download_worker = DownloadWorker(download_url, installer_path, file_hash)
+        self.download_worker = DownloadWorker(
+            download_url,
+            installer_path,
+            file_hash,
+            artifact_version=self._latest_version,
+        )
         self.download_worker.progress.connect(self.update_progress_dialog.set_progress)
 
         def on_download_finished(success: bool, result: str):
@@ -1610,11 +1610,18 @@ class DownloadWorker(QtCore.QThread):
     progress = QtCore.pyqtSignal(int)
     finished = QtCore.pyqtSignal(bool, str)  # success, file_path_or_error
 
-    def __init__(self, url: str, dest_path: str, expected_hash: str):
+    def __init__(
+        self,
+        url: str,
+        dest_path: str,
+        expected_hash: str,
+        artifact_version: str = "",
+    ):
         super().__init__()
         self.url = url
         self.dest_path = dest_path
         self.expected_hash = expected_hash
+        self.artifact_version = str(artifact_version or "").strip().lstrip("vV")
 
     def run(self):
         import requests
@@ -1622,20 +1629,31 @@ class DownloadWorker(QtCore.QThread):
         try:
             if not self.expected_hash:
                 raise ValueError("Missing expected hash for update package")
+            if not _is_allowed_update_download_url(self.url):
+                raise ValueError(f"Untrusted initial download URL: {self.url}")
+            destination = _safe_temporary_update_destination(self.dest_path)
 
             sha256 = hashlib.sha256()
             with requests.get(self.url, stream=True, timeout=(10, 120)) as r:
                 r.raise_for_status()
-                if not _is_allowed_update_download_url(r.url):
-                    raise ValueError(f"Untrusted final download URL: {r.url}")
-                total_size = int(r.headers.get("content-length", 0))
+                if not _validate_update_redirect_chain(r):
+                    raise ValueError("Update redirect chain contains an untrusted URL")
+                raw_length = r.headers.get("content-length")
+                try:
+                    total_size = int(raw_length) if raw_length is not None else 0
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("Invalid update Content-Length") from exc
+                if total_size < 0 or total_size > MAX_UPDATE_DOWNLOAD_BYTES:
+                    raise ValueError("Update Content-Length exceeds download limit")
                 downloaded = 0
-                with open(self.dest_path, "wb") as f:
+                with destination.open("wb") as f:
                     for chunk in r.iter_content(chunk_size=8192):
                         if chunk:
+                            downloaded += len(chunk)
+                            if downloaded > MAX_UPDATE_DOWNLOAD_BYTES:
+                                raise ValueError("Update download exceeds byte limit")
                             f.write(chunk)
                             sha256.update(chunk)
-                            downloaded += len(chunk)
                             if total_size > 0:
                                 prog = int((downloaded / total_size) * 100)
                                 self.progress.emit(prog)
@@ -1650,10 +1668,20 @@ class DownloadWorker(QtCore.QThread):
             ok, reason = _verify_authenticode_signature(
                 self.dest_path,
                 "UPDATE_SIGNER_THUMBPRINTS",
+                artifact_version=self.artifact_version,
+                allow_legacy_integrity_bridge=is_legacy_bridge_version(
+                    self.artifact_version,
+                    transition_bridge_version=configured_transition_bridge_version(),
+                ),
             )
             if not ok:
                 raise ValueError(f"Installer signature verification failed: {reason}")
                 
             self.finished.emit(True, self.dest_path)
         except Exception as e:
+            try:
+                if "destination" in locals():
+                    destination.unlink(missing_ok=True)
+            except OSError:
+                logger.warning("Could not remove failed update download", exc_info=True)
             self.finished.emit(False, str(e))
