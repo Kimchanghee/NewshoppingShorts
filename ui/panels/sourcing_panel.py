@@ -1477,6 +1477,31 @@ class SourcingPanel(QWidget):
             work_finalized = True
             work_reserved = False
 
+            publish_safe = (
+                report.get("auto_publish_safe") is True
+                and report.get("requires_review") is False
+            )
+            review_only = not publish_safe
+            if review_only:
+                fallback = str(
+                    report.get("fallback_reason")
+                    or report.get("sourcing_route")
+                    or "review_required"
+                ).strip()
+                progress(
+                    "review_only",
+                    "검토용 영상 파일 완료 · 자동 게시 건너뜀",
+                    1.0,
+                )
+                work_reservation.complete_delivery()
+                self._safe_set_results(
+                    "검토용 영상 파일을 만들었습니다. YouTube 업로드와 Linktree 등록은 "
+                    "안전 확인을 위해 자동으로 건너뛰었습니다.\n"
+                    f"파일: {edited}\n"
+                    f"검토 사유: {fallback}"
+                )
+                return
+
             # ── 링크트리 발행(체크 시) — 기존 coupang 흐름과 동일 정책 ──
             linktree_url = ""
             if linktree_enabled:
@@ -1797,7 +1822,8 @@ class SourcingPanel(QWidget):
         if self._is_upload_mode():
             safe_items = [
                 item for item in source_items
-                if bool(item.get("auto_publish_safe", item.get("source") != "coupang_image"))
+                if item.get("auto_publish_safe") is True
+                and item.get("requires_review") is False
             ]
             if not safe_items:
                 logger.warning("[SourcingPanel] Auto-upload blocked: only image fallback videos were sourced")

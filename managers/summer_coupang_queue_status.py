@@ -19,8 +19,11 @@ DEFAULT_QUEUE_LOCK_PATH = Path.home() / ".ssmaker" / "summer_coupang_queue_once.
 
 SUCCESS_STATUSES = {"completed"}
 LINKTREE_RETRY_STATUSES = {"completed_linktree_blocked", "linktree_retry_pending"}
+SOURCING_RETRY_STATUSES = {"retry_pending_sourcing"}
+REVIEW_ONLY_STATUSES = {"completed_review_only"}
 AFFILIATE_LINK_BLOCKED_STATUS = "blocked_affiliate_link_missing"
 SKIPPED_STATUSES = {
+    *REVIEW_ONLY_STATUSES,
     "skipped_low_similarity",
     "skipped_quality_gate",
     "skipped_duplicate_product",
@@ -52,6 +55,8 @@ STATUS_LABELS = {
     "skipped_invalid_queue_item": "건너뜀",
     "skipped": "건너뜀",
     "failed": "실패",
+    "retry_pending_sourcing": "소싱 재시도 대기",
+    "completed_review_only": "검토용 완료",
 }
 STATUS_LABELS[AFFILIATE_LINK_BLOCKED_STATUS] = "제휴 링크 필요"
 
@@ -247,6 +252,8 @@ def _status_bucket(status: str) -> str:
         return "completed"
     if normalized in LINKTREE_RETRY_STATUSES:
         return "waiting"
+    if normalized in SOURCING_RETRY_STATUSES:
+        return "waiting"
     if normalized in SKIPPED_STATUSES:
         return "skipped"
     if normalized in {"failed", "error"}:
@@ -290,6 +297,8 @@ def _fallback_reason_for_status(status: str) -> str:
         "failed_linktree_publish": "Linktree 자동 등록 상태를 확인해 주세요.",
         "linktree_retry_pending": "Linktree 자동 등록을 다시 확인하는 중이에요.",
         "completed_linktree_blocked": "Linktree 자동 등록을 다시 확인하는 중이에요.",
+        "retry_pending_sourcing": "브라우저를 다시 사용할 수 있을 때 소싱을 자동 재시도해요.",
+        "completed_review_only": "자동 게시하지 않은 검토용 영상 파일이 준비됐어요.",
     }.get(status, "작업 상태를 확인해 주세요.")
 
 
@@ -330,6 +339,10 @@ def _row_for_item(item: Dict[str, Any]) -> Dict[str, str]:
         upload_text = "제휴 링크 필요"
     elif youtube_url:
         upload_text = f"YouTube 완료: {youtube_url}"
+    elif status in SOURCING_RETRY_STATUSES:
+        upload_text = "소싱 재시도 대기"
+    elif status in REVIEW_ONLY_STATUSES:
+        upload_text = "검토용 파일 완료"
     elif retriable_system_skip:
         upload_text = "재시도 대기"
     elif status == "pending":

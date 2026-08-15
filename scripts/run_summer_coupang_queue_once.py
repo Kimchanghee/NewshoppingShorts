@@ -74,6 +74,8 @@ QUEUE_DUE_GRACE_SECONDS_ENV = "SSMAKER_QUEUE_DUE_GRACE_SECONDS"
 DEFAULT_QUEUE_DUE_GRACE_SECONDS = 180
 AFFILIATE_LINK_REQUIRED_ENV = "SSMAKER_REQUIRE_COUPANG_PARTNER_LINK"
 AFFILIATE_LINK_BLOCKED_STATUS = "blocked_affiliate_link_missing"
+SOURCING_RETRY_STATUS = "retry_pending_sourcing"
+REVIEW_ONLY_STATUS = "completed_review_only"
 COUPANG_PARTNER_LINK_HOST = "link.coupang.com"
 SUCCESS_FINAL_STATUSES = {
     "completed",
@@ -83,6 +85,7 @@ LINKTREE_RETRY_STATUSES = {
     LINKTREE_RETRY_STATUS,
 }
 SKIP_STATUSES = {
+    REVIEW_ONLY_STATUS,
     "skipped_low_similarity",
     "skipped_quality_gate",
     "skipped_duplicate_product",
@@ -351,7 +354,7 @@ def is_linktree_retry_item(item: Dict[str, Any]) -> bool:
 def is_processable_queue_item(item: Dict[str, Any]) -> bool:
     status = str(item.get("status") or "").strip().lower()
     return (
-        status == "pending"
+        status in {"pending", SOURCING_RETRY_STATUS}
         or is_linktree_retry_item(item)
         or is_retriable_system_skip(item)
         or is_affiliate_link_blocked_item(item)
@@ -1421,11 +1424,30 @@ def platform_rendered_result(report: Dict[str, Any], run_dir: Path, product_name
     return result
 
 
-def is_platform_system_blocker(reason: str) -> bool:
-    """숏폼 플랫폼 소싱 실패가 시스템 원인(브라우저/환경)인지 판별."""
-    markers = ("브라우저", "chrome", "zendriver", "traceback", "browser")
-    low = str(reason or "").lower()
-    return any(m in low for m in markers)
+def platform_system_failure(report: Dict[str, Any]) -> Dict[str, Any]:
+    """Return a typed browser failure, including one preserved by a fallback."""
+    if not isinstance(report, dict):
+        return {}
+    for key in ("failure", "fallback_failure"):
+        failure = report.get(key)
+        if not isinstance(failure, dict):
+            continue
+        if str(failure.get("code") or "").strip() in {
+            "browser_start_failed",
+            "browser_session_failed",
+        }:
+            return dict(failure)
+    return {}
+
+
+def is_platform_system_blocker(report: Dict[str, Any]) -> bool:
+    """Return whether a structured platform failure should open the run circuit.
+
+    Free-form error text is deliberately ignored because provider diagnostics
+    can legitimately contain words such as ``browser`` or ``chrome``. Only the
+    platform pipeline's explicit failure contract can defer other queue items.
+    """
+    return bool(platform_system_failure(report))
 
 
 def determine_purchase_url(item: Dict[str, Any], report: Dict[str, Any]) -> str:
@@ -2081,6 +2103,8 @@ async def process_pending_items(
         max_candidates = max(1, max_candidates)
     candidate_items = pending[first_due_index : first_due_index + max_candidates]
     skipped_items: List[Dict[str, Any]] = []
+    deferred_items: List[Dict[str, Any]] = []
+    platform_circuit: Optional[Dict[str, Any]] = None
 
     resolved_linktree_items: List[Dict[str, Any]] = []
 
@@ -2263,11 +2287,40 @@ async def process_pending_items(
                 "run_now": bool(run_now),
             }
 
+        platform_mode = get_sourcing_method() == "platform_video"
+        if platform_mode and platform_circuit is not None:
+            reason = str(platform_circuit.get("reason") or "Platform browser is unavailable.")
+            failure = dict(platform_circuit.get("failure") or {})
+            attach_result(
+                item,
+                status="pending",
+                blocking_reason=reason,
+                extra={
+                    "sourcing_method": "platform_video",
+                    "blocking_type": "sourcing_system_blocker",
+                    "outcome_code": "source_unavailable",
+                    "failure": failure,
+                    "deferred_by_circuit": True,
+                    "deferred_from_planned_number": platform_circuit.get(
+                        "planned_number", ""
+                    ),
+                },
+            )
+            save_queue(queue_payload)
+            deferred_items.append(
+                {
+                    "planned_number": item.get("planned_number"),
+                    "status": "pending",
+                    "reason": reason,
+                    "deferred_by_circuit": True,
+                }
+            )
+            continue
+
         update_item_attempt(item)
         save_queue(queue_payload)
 
         run_dir = build_run_dir(item)
-        platform_mode = get_sourcing_method() == "platform_video"
         if platform_mode:
             report = await run_platform_sourcing_for_queue(item, run_dir, min_similarity)
             safe_item = None
@@ -2284,6 +2337,20 @@ async def process_pending_items(
                     or ""
                 )
         product_name = str((report.get("product_info") or {}).get("name") or item.get("product_name") or "").strip()
+
+        if platform_mode:
+            system_failure = platform_system_failure(report)
+            if system_failure:
+                circuit_reason = str(
+                    report.get("error")
+                    or system_failure.get("cause")
+                    or "Platform browser is unavailable."
+                )
+                platform_circuit = {
+                    "planned_number": item.get("planned_number"),
+                    "reason": circuit_reason,
+                    "failure": system_failure,
+                }
 
         duplicate_reason = duplicate_upload_reason(item, queue_payload, product_name=product_name)
         if duplicate_reason:
@@ -2312,32 +2379,37 @@ async def process_pending_items(
 
         if platform_mode and (not report.get("ok") or not report.get("final_video")):
             reason = str(report.get("error") or "3플랫폼에서 사용 가능한 영상을 찾지 못했습니다.")
-            if is_platform_system_blocker(reason):
+            if is_platform_system_blocker(report):
+                failure = platform_system_failure(report)
                 attach_result(
                     item,
-                    status="failed",
+                    status=SOURCING_RETRY_STATUS,
                     blocking_reason=reason,
                     extra={
                         "sourcing_method": "platform_video",
                         "report_path": report.get("_report_path", ""),
                         "purchase_url": determine_purchase_url(item, report),
                         "run_dir": str(run_dir),
+                        "failure": failure,
+                        "blocking_type": "sourcing_system_blocker",
+                        "outcome_code": "source_unavailable",
                     },
                 )
                 save_queue(queue_payload)
-                summary = {
-                    "processed": True,
-                    "status": "failed",
+                platform_circuit = {
                     "planned_number": item.get("planned_number"),
-                    "error": reason,
-                    "blocking_type": "sourcing_system_blocker",
+                    "reason": reason,
+                    "failure": failure,
                 }
-                if skipped_items:
-                    summary["skipped_before"] = skipped_items
-                    summary["skip_count"] = len(skipped_items)
-                if run_now:
-                    summary["run_now"] = True
-                return summary
+                deferred_items.append(
+                    {
+                        "planned_number": item.get("planned_number"),
+                        "status": SOURCING_RETRY_STATUS,
+                        "reason": reason,
+                        "deferred_by_circuit": False,
+                    }
+                )
+                continue
             attach_result(
                 item,
                 status="skipped_low_similarity",
@@ -2404,6 +2476,56 @@ async def process_pending_items(
                     "planned_number": item.get("planned_number"),
                     "status": "skipped_low_similarity",
                     "reason": reason,
+                }
+            )
+            continue
+
+        safety_source = report if platform_mode else (safe_item or {})
+        publish_safe = (
+            safety_source.get("auto_publish_safe") is True
+            and safety_source.get("requires_review") is False
+        )
+        review_only = not publish_safe
+        if review_only:
+            review_video = str(
+                report.get("final_video")
+                or ((safe_item or {}).get("video_file") if isinstance(safe_item, dict) else "")
+                or ""
+            ).strip()
+            fallback = str(
+                report.get("fallback_reason")
+                or ((safe_item or {}).get("fallback_reason") if isinstance(safe_item, dict) else "")
+                or report.get("sourcing_route")
+                or "review_required"
+            ).strip()
+            reason = (
+                "자동 게시 안전 조건을 통과하지 않아 로컬 검토용 파일로만 완료했습니다."
+            )
+            attach_result(
+                item,
+                status=REVIEW_ONLY_STATUS,
+                similarity=similarity,
+                render_path=review_video,
+                blocking_reason=reason,
+                extra={
+                    "sourcing_method": "platform_video" if platform_mode else "marketplace",
+                    "report_path": report.get("_report_path", ""),
+                    "final_video": review_video,
+                    "fallback": fallback,
+                    "fallback_reason": fallback,
+                    "auto_publish_safe": report.get("auto_publish_safe"),
+                    "requires_review": bool(report.get("requires_review")),
+                    "fallback_failure": report.get("fallback_failure") or {},
+                    "run_dir": str(run_dir),
+                },
+            )
+            save_queue(queue_payload)
+            skipped_items.append(
+                {
+                    "planned_number": item.get("planned_number"),
+                    "status": REVIEW_ONLY_STATUS,
+                    "reason": reason,
+                    "final_video": review_video,
                 }
             )
             continue
@@ -2583,6 +2705,25 @@ async def process_pending_items(
                 **({"run_now": True} if run_now else {}),
             }
 
+    if deferred_items:
+        summary = {
+            "processed": True,
+            "status": SOURCING_RETRY_STATUS,
+            "reason": "platform_sourcing_circuit_open",
+            "planned_number": (platform_circuit or {}).get("planned_number", ""),
+            "blocking_type": "sourcing_system_blocker",
+            "blocking_reason": str((platform_circuit or {}).get("reason") or ""),
+            "outcome_code": "source_unavailable",
+            "deferred_count": len(deferred_items),
+            "deferred_items": deferred_items,
+        }
+        if skipped_items:
+            summary["skipped_before"] = skipped_items
+            summary["skip_count"] = len(skipped_items)
+        if run_now:
+            summary["run_now"] = True
+        return summary
+
     if skipped_items:
         skipped_statuses = {
             str(item.get("status") or "skipped_low_similarity")
@@ -2591,7 +2732,11 @@ async def process_pending_items(
         final_skip_status = (
             "skipped_duplicate_product"
             if skipped_statuses == {"skipped_duplicate_product"}
-            else "skipped_low_similarity"
+            else (
+                REVIEW_ONLY_STATUS
+                if skipped_statuses == {REVIEW_ONLY_STATUS}
+                else "skipped_low_similarity"
+            )
         )
         return {
             "processed": True,
@@ -2802,6 +2947,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     if summary.get("status") in SUCCESS_FINAL_STATUSES:
         return 0
     if summary.get("status") == LINKTREE_RETRY_STATUS:
+        return 0
+    if summary.get("status") == SOURCING_RETRY_STATUS:
         return 0
     if summary.get("status") in SKIP_STATUSES:
         return 0
