@@ -495,6 +495,7 @@ class AppController:
         self._release_notes: str = ""
         self._main_launched: bool = False
         self._main_launching: bool = False
+        self._logout_in_progress: bool = False
         self._loading_started: bool = False
         self._offline_mode: bool = False
         self._safe_mode: bool = False
@@ -908,6 +909,7 @@ class AppController:
                 offline_mode=self._offline_mode,
                 safe_mode=self._safe_mode,
             )
+            self.main_gui.controller = self
             logger.info("VideoAnalyzerGUI created successfully")
             self.main_gui.show()
             self._main_launched = True
@@ -946,6 +948,75 @@ class AppController:
                 retry_callback=self._retry_main_launch,
                 allow_offline=True,
             )
+
+    def return_to_login(self, main_window: Optional[Any] = None) -> None:
+        """Close the authenticated workspace and reveal the login window."""
+        if self._logout_in_progress:
+            return
+
+        self._logout_in_progress = True
+        self._suspend_auto_quit()
+        try:
+            for timer_name in ("runtime_update_timer", "runtime_update_defer_timer"):
+                timer = getattr(self, timer_name, None)
+                if timer is not None:
+                    try:
+                        timer.stop()
+                    except Exception:
+                        pass
+                setattr(self, timer_name, None)
+
+            update_dialog = getattr(self, "runtime_update_dialog", None)
+            if update_dialog is not None:
+                try:
+                    update_dialog.close()
+                except Exception:
+                    pass
+                self.runtime_update_dialog = None
+            self._deferred_runtime_update = None
+
+            active_main = main_window or getattr(self, "main_gui", None)
+            if active_main is not None:
+                active_main._closing = True
+                try:
+                    active_main.hide()
+                    active_main.close()
+                except Exception:
+                    logger.debug("Failed to close the logged-out main window", exc_info=True)
+
+            self.main_gui = None
+            self.login_data = None
+            self._offline_mode = False
+            self._safe_mode = False
+            self._loading_started = False
+            self._main_launched = False
+            self._main_launching = False
+
+            try:
+                self.app.login_data = None
+            except Exception:
+                pass
+
+            login_window = self.login_window
+            try:
+                if login_window is None:
+                    self._show_login()
+                else:
+                    prepare = getattr(login_window, "prepare_for_reauthentication", None)
+                    if callable(prepare):
+                        prepare()
+                    login_window.show()
+                    login_window.raise_()
+                    login_window.activateWindow()
+            except RuntimeError:
+                # The original Qt object may already have been deleted.
+                self.login_window = None
+                self._show_login()
+
+            logger.info("Logout complete; login window shown")
+        finally:
+            self._restore_auto_quit()
+            self._logout_in_progress = False
 
     def _retry_main_launch(self) -> None:
         self._main_launched = False

@@ -12,14 +12,14 @@ import json
 from pathlib import Path
 from typing import Optional, Any, Dict
 
-from PyQt6 import QtCore, QtWidgets, QtGui
+from PyQt6 import QtCore, QtGui
 from PyQt6.QtCore import Qt, QPoint, pyqtSignal
 from PyQt6.QtWidgets import QMainWindow, QApplication
 from PyQt6.QtGui import QIcon
 
 from caller import rest, ui_controller
 from ui.login_ui_modern import ModernLoginUi as Ui_LoginWindow
-from ui.components.custom_dialog import show_info, show_warning, show_error, show_question
+from ui.components.custom_dialog import show_warning, show_question
 from utils.logging_config import get_logger
 from startup.constants import DEFAULT_PROCESS_PORT
 
@@ -416,6 +416,13 @@ class Login(QMainWindow, Ui_LoginWindow):
         else:
             logger.warning("No controller found, closing login window")
             self.close()
+
+    def prepare_for_reauthentication(self) -> None:
+        """Reset transient login state before showing this window again."""
+        self.pwEdit.clear()
+        self.loginButton.setEnabled(True)
+        self.loginButton.setText("로그인")
+        self.pwEdit.setFocus()
 
     def _openRegistrationDialog(self):
         from ui.login_ui_modern import RegistrationRequestDialog

@@ -5,13 +5,12 @@ This module handles application exit, cleanup, and session management.
 Extracted from main.py for better code organization.
 """
 
-import threading
 from typing import TYPE_CHECKING
 
 from PyQt6.QtCore import QTimer
 from PyQt6.QtWidgets import QApplication
 from caller import rest
-from ui.components.custom_dialog import show_question, show_error
+from ui.components.custom_dialog import show_question
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -40,7 +39,7 @@ class ExitHandler:
             token = str(data_part.get("token") or "").strip()
         return user_id, token
 
-    def process_before_exit_program(self):
+    def process_before_exit_program(self, *, quit_app: bool = True):
         """
         Logout from server before app exit (safe for both Qt/Tk).
         서버 로그아웃 후 앱 종료 (Qt/Tk 모두 안전하게 시도).
@@ -73,8 +72,9 @@ class ExitHandler:
         except Exception as e:
             logger.exception(f"Unexpected logout error (ignored): {e}")
 
-        # Qt 앱이 살아있다면 먼저 종료 시도
-        self._quit_qt_app()
+        finally:
+            if quit_app:
+                self._quit_qt_app()
 
     def _quit_qt_app(self):
         """Qt 앱 종료 시도"""
@@ -86,7 +86,7 @@ class ExitHandler:
         except Exception:
             pass
 
-    def safe_exit(self):
+    def safe_exit(self, *, quit_app: bool = True):
         """안전한 종료 처리"""
         try:
             # 배치 처리 중지
@@ -107,10 +107,46 @@ class ExitHandler:
             self.app.cleanup_temp_files()
 
             # 로그아웃
-            self.process_before_exit_program()
+            self.process_before_exit_program(quit_app=quit_app)
 
         except Exception as e:
             logger.error(f"[종료] 종료 전 처리 실패: {e}")
+
+    def logout_to_login(self):
+        """End the authenticated session and return to the login window."""
+        if self.app.batch_processing:
+            try:
+                if not show_question(
+                    self.app,
+                    "로그아웃 확인",
+                    "배치 처리가 진행 중입니다.\n\n"
+                    "로그아웃하면 현재 작업이 중단됩니다. 계속할까요?",
+                ):
+                    return
+            except Exception as exc:
+                logger.warning("Logout confirmation failed: %s", exc)
+
+        self.app.batch_processing = False
+        self.app.dynamic_processing = False
+        self.app._login_watch_stop = True
+
+        subscription_manager = getattr(self.app, "subscription_manager", None)
+        if subscription_manager is not None:
+            try:
+                subscription_manager.stop()
+            except Exception as exc:
+                logger.debug("Failed to stop subscription timers: %s", exc)
+
+        self.process_before_exit_program(quit_app=False)
+
+        controller = getattr(self.app, "controller", None)
+        return_to_login = getattr(controller, "return_to_login", None)
+        if callable(return_to_login):
+            return_to_login(self.app)
+            return
+
+        logger.error("Logout transition controller is unavailable; closing application")
+        self._quit_qt_app()
 
     def on_close_request(self):
         """윈도우 닫기 요청 처리"""

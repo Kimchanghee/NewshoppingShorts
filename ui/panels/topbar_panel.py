@@ -208,6 +208,27 @@ class TopBarPanel(QFrame):
         self.gui.subscribe_btn.hide()
         layout.addWidget(self.gui.subscribe_btn)
 
+        self.gui.logout_button = QPushButton("로그아웃")
+        self.gui.logout_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.gui.logout_button.setFont(
+            QFont(d.typography.font_family_body, d.typography.size_2xs, QFont.Weight.Bold)
+        )
+        self.gui.logout_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: transparent;
+                color: {c.text_secondary};
+                padding: 6px 10px;
+                border-radius: {d.radius.base}px;
+                border: 1px solid {c.border_light};
+            }}
+            QPushButton:hover {{
+                color: {c.text_primary};
+                background-color: {c.bg_hover};
+            }}
+        """)
+        self.gui.logout_button.clicked.connect(self.request_logout)
+        layout.addWidget(self.gui.logout_button)
+
     def set_compact_mode(self, compact: bool) -> None:
         """Keep primary account actions visible on narrow windows."""
         self.brand_group.setVisible(not compact)
@@ -239,6 +260,15 @@ class TopBarPanel(QFrame):
         panel = getattr(self.gui, "subscription_panel", None)
         if panel is not None and hasattr(panel, "refresh_from_server"):
             QTimer.singleShot(0, panel.refresh_from_server)
+
+    def request_logout(self) -> None:
+        """Delegate logout so the controller can return to the login window."""
+        exit_handler = getattr(self.gui, "exit_handler", None)
+        logout_to_login = getattr(exit_handler, "logout_to_login", None)
+        if callable(logout_to_login):
+            logout_to_login()
+            return
+        logger.error("Logout handler is unavailable")
 
     def refresh_user_status(self):
         """Update user subscription status, credits, and user info from server."""
