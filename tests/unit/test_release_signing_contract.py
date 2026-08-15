@@ -481,16 +481,47 @@ def test_all_repo_importing_embedded_python_steps_are_under_isolated_test():
 
 
 def test_workflow_installs_package_and_directly_verifies_signed_uninstaller():
-    workflow = (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
+    workflow_text = (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
         encoding="utf-8"
     )
+    workflow = yaml.safe_load(workflow_text)
+    step = next(
+        step
+        for step in workflow["jobs"]["build"]["steps"]
+        if step.get("name")
+        == "Verify app, installer, and installed uninstaller signing gates"
+    )
+    package_gate = step["run"].split("# Exercise the exact shipped Setup", 1)[1]
     installer = (ROOT / "installer.iss").read_text(encoding="utf-8-sig")
 
-    assert '"/VERYSILENT"' in workflow
-    assert '"/VERIFYPACKAGE"' in workflow
-    assert 'Filter "unins*.exe"' in workflow
-    assert 'Assert-SigningGate $uninstaller "installed Inno uninstaller"' in workflow
-    assert "& $signtool verify /pa /all /v $Path" in workflow
+    for required_arg in (
+        '"/DIR=`"$installRoot`""',
+        '"/VERYSILENT"',
+        '"/SUPPRESSMSGBOXES"',
+        '"/NORESTART"',
+        '"/SP-"',
+        '"/VERIFYPACKAGE"',
+    ):
+        assert required_arg in package_gate
+    assert (
+        "Start-Process -FilePath $installer -ArgumentList $installArgs -Wait -PassThru"
+        in package_gate
+    )
+    assert "$installProcess.ExitCode -ne 0" in package_gate
+    assert "& $installer" not in package_gate
+    assert "$LASTEXITCODE" not in package_gate
+    installed_app = package_gate.index('$installedApp = Join-Path $installRoot "ssmaker.exe"')
+    uninstaller = package_gate.index('Filter "unins*.exe"')
+    check_exit = package_gate.index("$installProcess.ExitCode -ne 0")
+    app_signature = package_gate.index(
+        'Assert-SigningGate $installedApp "installed application"'
+    )
+    uninstaller_signature = package_gate.index(
+        'Assert-SigningGate $uninstaller "installed Inno uninstaller"'
+    )
+    assert check_exit < installed_app < app_signature
+    assert check_exit < uninstaller < uninstaller_signature
+    assert "& $signtool verify /pa /all /v $Path" in step["run"]
     assert "ShouldLaunchInstalledApp" in installer
     assert "ParamStr(I)" in installer
 
