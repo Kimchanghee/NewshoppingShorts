@@ -2,6 +2,8 @@ import inspect
 import os
 from types import SimpleNamespace
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
@@ -134,6 +136,63 @@ def test_file_only_still_starts_final_batch_render(monkeypatch, tmp_path):
     assert not any(call == ("step", "voice") for call in calls)
 
 
+def test_upload_mode_accepts_real_flagless_marketplace_shape_after_match_gate(
+    monkeypatch, tmp_path
+):
+    from core.sourcing.pipeline import SourcingPipeline
+
+    panel = _build_panel(monkeypatch, _Settings(youtube_connected=True))
+    video = tmp_path / "marketplace.mp4"
+    video.write_bytes(b"video")
+    calls = []
+    panel.gui.queue_manager = SimpleNamespace(
+        add_url_to_queue=lambda url: calls.append(("queue", url)) or True
+    )
+    panel.gui._on_step_selected = lambda step: calls.append(("step", step))
+    panel.gui.start_batch_processing = lambda: calls.append(("batch", True))
+    monkeypatch.setattr(panel, "_is_upload_mode", lambda: True)
+    monkeypatch.setattr(panel, "_is_linktree_requested", lambda: False)
+    monkeypatch.setattr(
+        panel,
+        "_set_youtube_auto_upload_for_pipeline",
+        lambda enabled: calls.append(("upload", enabled)),
+    )
+    monkeypatch.setattr(
+        "ui.panels.sourcing_panel.QTimer.singleShot",
+        lambda _delay, callback: callback(),
+    )
+
+    pipeline = SourcingPipeline(
+        coupang_url="https://www.coupang.com/vp/products/1",
+        output_dir=str(tmp_path),
+        min_similarity_score=0.9,
+    )
+    pipeline.product_info = {"name": "상품"}
+    pipeline.sourced_products = [
+        {
+            "source": "aliexpress",
+            "product": {
+                "title": "Matching marketplace item",
+                "url": "https://www.aliexpress.com/item/1005000000000001.html",
+                "score": 0.95,
+            },
+            "video_url": "https://example.com/product-video.mp4",
+            "video_file": str(video),
+            "size_mb": 1.0,
+        }
+    ]
+
+    assert pipeline.evaluate_similarity_threshold() is True
+    panel._enqueue_sourced_videos(pipeline)
+
+    item = pipeline.sourced_products[0]
+    assert item["auto_publish_safe"] is True
+    assert item["requires_review"] is False
+    assert ("queue", f"local://{video}") in calls
+    assert ("upload", True) in calls
+    assert ("batch", True) in calls
+
+
 def test_linktree_failure_is_warning_not_delivery_block():
     from core.video.batch import processor
     from ui.panels.sourcing_panel import SourcingPanel
@@ -189,6 +248,8 @@ def test_direct_platform_upload_continues_when_optional_linktree_is_disconnected
             "product_info": {"name": "상품"},
             "hit": {"platform": "douyin"},
             "final_video": str(video),
+            "auto_publish_safe": True,
+            "requires_review": False,
             "deep_link": "",
             "purchase_url": "https://www.coupang.com/vp/products/1",
             "render_integrity": {"ok": True},
@@ -223,3 +284,107 @@ def test_direct_platform_upload_continues_when_optional_linktree_is_disconnected
 
     assert "youtube" in events
     assert "complete" in events
+
+
+@pytest.mark.parametrize(
+    "safety_fields",
+    [
+        {"auto_publish_safe": False, "requires_review": True},
+        {},
+        {"auto_publish_safe": None, "requires_review": False},
+        {"auto_publish_safe": "true", "requires_review": False},
+        {"auto_publish_safe": 0, "requires_review": False},
+        {"auto_publish_safe": True, "requires_review": None},
+    ],
+    ids=["review", "missing", "none", "string", "zero", "review-missing"],
+)
+def test_direct_platform_review_only_result_completes_without_publish_or_upload(
+    monkeypatch, tmp_path, safety_fields
+):
+    from ui.panels.sourcing_panel import SourcingPanel
+
+    video = tmp_path / "review-only.mp4"
+    video.write_bytes(b"video")
+    events = []
+
+    class _Reservation:
+        finalized = False
+
+        def mark_pending_finalize(self):
+            events.append("pending-finalize")
+
+        def finalize(self):
+            self.finalized = True
+            events.append("finalize")
+            return {"success": True, "reservation_status": "completed"}
+
+        def complete_delivery(self):
+            events.append("complete")
+
+        def can_release(self):
+            return False
+
+    monkeypatch.setattr(
+        "ui.panels.sourcing_panel.DurableWorkReservation.begin",
+        lambda *_args, **_kwargs: (
+            _Reservation(),
+            {"success": True, "reservation_status": "reserved"},
+        ),
+    )
+
+    async def _pipeline(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "product_info": {"name": "review product"},
+            "hit": {"platform": "coupang_image"},
+            "final_video": str(video),
+            "fallback_reason": "product_image_fallback",
+            "deep_link": "",
+            "purchase_url": "https://www.coupang.com/vp/products/1",
+            "render_integrity": {"ok": True},
+            **safety_fields,
+        }
+
+    monkeypatch.setattr("core.sourcing.platform_pipeline.run_platform_sourcing", _pipeline)
+
+    class _UnexpectedLinktree:
+        def is_connected(self):
+            raise AssertionError("review-only result must not publish to Linktree")
+
+    monkeypatch.setattr(
+        "managers.linktree_manager.get_linktree_manager",
+        lambda: _UnexpectedLinktree(),
+    )
+
+    panel = SimpleNamespace(
+        _on_pipeline_progress=lambda *args: events.append(("progress", args)),
+        _safe_set_results=lambda message: events.append(("result", message)),
+        _reset_start_button=lambda: events.append("reset"),
+    )
+    youtube = SimpleNamespace(
+        add_to_upload_queue=lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("review-only result must not upload to YouTube")
+        )
+    )
+
+    SourcingPanel._run_platform_pipeline(
+        panel,
+        "https://www.coupang.com/vp/products/1",
+        0.9,
+        True,
+        True,
+        None,
+        youtube,
+        "42",
+        "platform:https://www.coupang.com/vp/products/1",
+    )
+
+    messages = [
+        event[1]
+        for event in events
+        if isinstance(event, tuple) and event[0] == "result"
+    ]
+    assert "complete" in events
+    assert messages
+    assert str(video) in messages[-1]
+    assert "검토" in messages[-1]

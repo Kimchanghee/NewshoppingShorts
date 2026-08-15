@@ -337,6 +337,8 @@ def test_direct_platform_upload_forwards_selected_source(monkeypatch, tmp_path):
             "hit": {"platform": "douyin", "video_url": source_url},
             "selected_source_url": source_url,
             "final_video": str(video),
+            "auto_publish_safe": True,
+            "requires_review": False,
             "deep_link": "",
             "purchase_url": "https://www.coupang.com/vp/products/1",
             "render_integrity": {"ok": True},

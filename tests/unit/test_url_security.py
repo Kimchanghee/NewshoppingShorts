@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Network boundary validation tests."""
 
+import pytest
+
 from utils.url_security import (
     is_coupang_partner_link,
     is_official_coupang_url,
@@ -211,3 +213,52 @@ def test_validated_download_rejects_redirect_before_private_connection(monkeypat
         raise AssertionError("private redirect was followed")
 
     assert connections == [("v.douyin.com", "93.184.216.34", 443)]
+
+
+def test_validated_download_rejects_https_downgrade_for_custom_allowlist(
+    monkeypatch,
+):
+    from urllib.parse import urlparse
+    from utils import Tool
+
+    connections = []
+
+    class RedirectResponse:
+        status = 302
+        headers = {"Location": "http://thumbnail.coupangcdn.com/image.jpg"}
+
+        @staticmethod
+        def close():
+            return None
+
+    class FakeConnection:
+        def __init__(self, hostname, pinned_ip, *, port, timeout):
+            connections.append((hostname, pinned_ip, port))
+
+        def request(self, method, path, headers):
+            return None
+
+        @staticmethod
+        def getresponse():
+            return RedirectResponse()
+
+        @staticmethod
+        def close():
+            return None
+
+    monkeypatch.setattr(
+        Tool,
+        "resolve_public_http_url",
+        lambda url, **_kwargs: (urlparse(url), ("93.184.216.34",)),
+    )
+    monkeypatch.setattr(Tool, "is_public_http_url", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(Tool, "_PinnedHTTPSConnection", FakeConnection)
+
+    with pytest.raises(ValueError, match="downgrade"):
+        Tool.open_validated_url(
+            "https://thumbnail.coupangcdn.com/image.jpg",
+            allowed_domains={"coupangcdn.com"},
+            require_https=True,
+        )
+
+    assert connections == [("thumbnail.coupangcdn.com", "93.184.216.34", 443)]

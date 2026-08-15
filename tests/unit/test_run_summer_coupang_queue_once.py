@@ -618,6 +618,8 @@ def test_process_pending_items_continues_after_product_not_found_skip(monkeypatc
             "title": "matching video",
             "product": {"title": "matching product"},
             "url": "https://1688.example/item",
+            "auto_publish_safe": True,
+            "requires_review": False,
         },
     )
     monkeypatch.setattr(
@@ -1995,3 +1997,289 @@ def test_main_returns_success_for_policy_skip(monkeypatch, capsys):
     assert queue_runner.main() == 0
     output = json.loads(capsys.readouterr().out)
     assert output["status"] == "skipped_low_similarity"
+
+
+def _platform_queue_payload(*numbers):
+    return {
+        "automation_policy": {
+            "min_similarity_score": 0.9,
+            "youtube_privacy": "unlisted",
+        },
+        "items": [
+            {
+                "planned_number": number,
+                "status": "pending",
+                "attempts": 0,
+                "scheduled_at": "2026-08-15T00:00:00+00:00",
+                "coupang_url": f"https://www.coupang.com/vp/products/{index}",
+                "product_name": f"product {index}",
+                "result": {},
+            }
+            for index, number in enumerate(numbers, start=201)
+        ],
+    }
+
+
+def _prepare_platform_queue_test(monkeypatch, tmp_path):
+    monkeypatch.setattr(queue_runner, "get_sourcing_method", lambda: "platform_video")
+    monkeypatch.setattr(
+        queue_runner,
+        "now_datetime",
+        lambda: datetime(2026, 8, 15, 1, 0, 0, tzinfo=timezone.utc),
+    )
+    monkeypatch.setattr(queue_runner, "save_queue", lambda _payload: None)
+    monkeypatch.setattr(
+        queue_runner,
+        "build_run_dir",
+        lambda item: tmp_path / str(item.get("planned_number")).strip("[]"),
+    )
+
+
+def test_platform_system_blocker_requires_structured_browser_failure_code():
+    assert queue_runner.is_platform_system_blocker(
+        {"failure": {"code": "browser_start_failed"}}
+    )
+    assert queue_runner.is_platform_system_blocker(
+        {"failure": {"code": "browser_session_failed"}}
+    )
+    assert queue_runner.is_platform_system_blocker(
+        {"fallback_failure": {"code": "browser_session_failed"}}
+    )
+    assert not queue_runner.is_platform_system_blocker(
+        {
+            "error": "browser chrome zendriver traceback",
+            "failure": {"code": "no_matching_video"},
+        }
+    )
+    assert not queue_runner.is_platform_system_blocker(
+        {"error": "browser_start_failed"}
+    )
+
+
+def test_platform_browser_failure_opens_per_run_circuit_without_burning_later_attempts(
+    monkeypatch, tmp_path
+):
+    payload = _platform_queue_payload("[201]", "[202]")
+    _prepare_platform_queue_test(monkeypatch, tmp_path)
+    calls = []
+
+    async def browser_failure(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "ok": False,
+            "final_video": "",
+            "error": "The browser could not start.",
+            "failure": {
+                "code": "browser_start_failed",
+                "cause": "Chrome launch failed",
+                "retriable": True,
+            },
+            "_report_path": str(tmp_path / "report.json"),
+            "product_info": {"name": item["product_name"]},
+        }
+
+    monkeypatch.setattr(
+        queue_runner, "run_platform_sourcing_for_queue", browser_failure
+    )
+
+    summary = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[201]"]
+    assert summary["status"] == "retry_pending_sourcing"
+    assert summary["blocking_type"] == "sourcing_system_blocker"
+    assert summary["outcome_code"] == "source_unavailable"
+    first, second = payload["items"]
+    assert first["status"] == "retry_pending_sourcing"
+    assert first["attempts"] == 1
+    assert first["result"]["failure"]["code"] == "browser_start_failed"
+    assert first["result"]["outcome_code"] == "source_unavailable"
+    assert second["status"] == "pending"
+    assert second["attempts"] == 0
+    assert second["result"]["deferred_by_circuit"] is True
+    assert second["result"]["blocking_reason"] == "The browser could not start."
+    assert second["result"]["outcome_code"] == "source_unavailable"
+
+
+def test_platform_circuit_resets_for_each_process_call(monkeypatch, tmp_path):
+    payload = _platform_queue_payload("[211]")
+    _prepare_platform_queue_test(monkeypatch, tmp_path)
+
+    async def browser_failure(item, *_args, **_kwargs):
+        return {
+            "ok": False,
+            "final_video": "",
+            "error": "Browser session ended.",
+            "failure": {"code": "browser_session_failed"},
+            "_report_path": str(tmp_path / "failure.json"),
+            "product_info": {"name": item["product_name"]},
+        }
+
+    monkeypatch.setattr(
+        queue_runner, "run_platform_sourcing_for_queue", browser_failure
+    )
+    queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    retry_calls = []
+
+    async def ordinary_no_result(item, *_args, **_kwargs):
+        retry_calls.append(item["planned_number"])
+        return {
+            "ok": False,
+            "final_video": "",
+            "error": "No matching video was found.",
+            "failure": {"code": "no_matching_video"},
+            "_report_path": str(tmp_path / "retry.json"),
+            "product_info": {"name": item["product_name"]},
+        }
+
+    monkeypatch.setattr(
+        queue_runner, "run_platform_sourcing_for_queue", ordinary_no_result
+    )
+    summary = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert retry_calls == ["[211]"]
+    assert payload["items"][0]["attempts"] == 2
+    assert payload["items"][0]["status"] == "skipped_low_similarity"
+    assert summary["status"] == "skipped_low_similarity"
+
+
+def test_platform_no_result_does_not_open_circuit(monkeypatch, tmp_path):
+    payload = _platform_queue_payload("[221]", "[222]")
+    _prepare_platform_queue_test(monkeypatch, tmp_path)
+    calls = []
+
+    async def ordinary_no_result(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "ok": False,
+            "final_video": "",
+            "error": "No matching video was found in enabled providers.",
+            "failure": {"code": "no_matching_video"},
+            "_report_path": str(tmp_path / f"{item['planned_number']}.json"),
+            "product_info": {"name": item["product_name"]},
+        }
+
+    monkeypatch.setattr(
+        queue_runner, "run_platform_sourcing_for_queue", ordinary_no_result
+    )
+
+    queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[221]", "[222]"]
+    assert [item["attempts"] for item in payload["items"]] == [1, 1]
+    assert [item["status"] for item in payload["items"]] == [
+        "skipped_low_similarity",
+        "skipped_low_similarity",
+    ]
+
+
+@pytest.mark.parametrize(
+    "safety_fields",
+    [
+        {"auto_publish_safe": False, "requires_review": True},
+        {},
+        {"auto_publish_safe": None, "requires_review": False},
+        {"auto_publish_safe": "true", "requires_review": False},
+        {"auto_publish_safe": 0, "requires_review": False},
+        {"auto_publish_safe": True, "requires_review": None},
+    ],
+    ids=["review", "missing", "none", "string", "zero", "review-missing"],
+)
+def test_review_only_platform_result_completes_locally_without_delivery(
+    monkeypatch, tmp_path, safety_fields
+):
+    payload = _platform_queue_payload("[231]")
+    _prepare_platform_queue_test(monkeypatch, tmp_path)
+    video_path = tmp_path / "review-only.mp4"
+    report_path = tmp_path / "report.json"
+
+    async def review_only_result(item, *_args, **_kwargs):
+        return {
+            "ok": True,
+            "final_video": str(video_path),
+            "fallback_reason": "product_image_fallback",
+            "_report_path": str(report_path),
+            "product_info": {"name": item["product_name"]},
+            **safety_fields,
+        }
+
+    def unexpected(*_args, **_kwargs):
+        raise AssertionError("review-only result must not enter delivery")
+
+    monkeypatch.setattr(
+        queue_runner, "run_platform_sourcing_for_queue", review_only_result
+    )
+    monkeypatch.setattr(queue_runner, "validate_purchase_url_for_upload", unexpected)
+    monkeypatch.setattr(queue_runner, "platform_rendered_result", unexpected)
+    monkeypatch.setattr(queue_runner, "upload_verified_render", unexpected)
+    monkeypatch.setattr(queue_runner, "publish_linktree_if_possible", unexpected)
+
+    summary = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    item = payload["items"][0]
+    assert summary["status"] == "completed_review_only"
+    assert item["status"] == "completed_review_only"
+    assert item["attempts"] == 1
+    assert item["result"]["render_path"] == str(video_path)
+    assert item["result"]["final_video"] == str(video_path)
+    assert item["result"]["report_path"] == str(report_path)
+    assert item["result"]["fallback"] == "product_image_fallback"
+
+
+def test_review_fallback_browser_failure_opens_circuit_for_later_items(
+    monkeypatch, tmp_path
+):
+    payload = _platform_queue_payload("[241]", "[242]")
+    _prepare_platform_queue_test(monkeypatch, tmp_path)
+    calls = []
+
+    async def review_fallback(item, *_args, **_kwargs):
+        calls.append(item["planned_number"])
+        return {
+            "ok": True,
+            "final_video": str(tmp_path / "review-only.mp4"),
+            "fallback_reason": "product_image_fallback",
+            "fallback_failure": {
+                "code": "browser_session_failed",
+                "cause": "Browser session ended.",
+                "retriable": True,
+            },
+            "failure": None,
+            "error": "",
+            "auto_publish_safe": False,
+            "requires_review": True,
+            "_report_path": str(tmp_path / "report.json"),
+            "product_info": {"name": item["product_name"]},
+        }
+
+    monkeypatch.setattr(
+        queue_runner, "run_platform_sourcing_for_queue", review_fallback
+    )
+
+    summary = queue_runner.asyncio.run(queue_runner.process_pending_items(payload))
+
+    assert calls == ["[241]"]
+    assert summary["status"] == "retry_pending_sourcing"
+    first, second = payload["items"]
+    assert first["status"] == "completed_review_only"
+    assert first["attempts"] == 1
+    assert first["result"]["fallback_failure"]["code"] == (
+        "browser_session_failed"
+    )
+    assert second["status"] == "pending"
+    assert second["attempts"] == 0
+    assert second["result"]["deferred_by_circuit"] is True
+    assert second["result"]["failure"]["code"] == "browser_session_failed"
+
+
+def test_new_queue_statuses_are_retryable_or_terminal_as_intended():
+    from managers import summer_coupang_queue_status as queue_status
+
+    assert queue_runner.is_processable_queue_item(
+        {"status": "retry_pending_sourcing"}
+    )
+    assert not queue_runner.is_processable_queue_item(
+        {"status": "completed_review_only"}
+    )
+    assert queue_status._status_bucket("retry_pending_sourcing") == "waiting"
+    assert queue_status._status_bucket("completed_review_only") == "skipped"

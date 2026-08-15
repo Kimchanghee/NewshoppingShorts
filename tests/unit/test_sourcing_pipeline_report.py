@@ -28,6 +28,8 @@ def test_get_report_includes_legacy_and_new_result_keys():
 
     assert report["sourced_products"] == report["sourcing_results"]
     assert report["sourcing_results"][0]["title"] == "Test Product"
+    assert report["sourcing_results"][0]["auto_publish_safe"] is False
+    assert report["sourcing_results"][0]["requires_review"] is True
     assert report["match_threshold"] == 0.9
 
 
@@ -90,6 +92,33 @@ def test_similarity_gate_marks_below_threshold_review_only():
     assert item["fallback_reason"] == "below_similarity_threshold"
     assert item["auto_publish_safe"] is False
     assert item["requires_review"] is True
+
+
+def test_similarity_gate_stamps_flagless_marketplace_items_for_delivery():
+    pipeline = SourcingPipeline(
+        coupang_url="https://www.coupang.com/vp/products/12345",
+        output_dir=".",
+        min_similarity_score=0.9,
+    )
+    pipeline.sourced_products = [
+        {
+            "source": "aliexpress",
+            "product": {
+                "title": "Matching marketplace product",
+                "url": "https://www.aliexpress.com/item/1005000000000001.html",
+                "score": 0.95,
+            },
+            "video_url": "https://example.com/product-video.mp4",
+            "video_file": "sample.mp4",
+            "size_mb": 12.3,
+        }
+    ]
+
+    assert pipeline.evaluate_similarity_threshold() is True
+
+    item = pipeline.sourced_products[0]
+    assert item["auto_publish_safe"] is True
+    assert item["requires_review"] is False
 
 
 def test_similarity_gate_ignores_coupang_image_fallback_as_match():

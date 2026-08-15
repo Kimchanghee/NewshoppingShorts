@@ -314,6 +314,58 @@ def test_search_platform_shorts_filters_non_commerce_platforms(monkeypatch, tmp_
     assert called == ["xiaohongshu", "douyin", "kuaishou"]
 
 
+def test_search_platform_shorts_stops_on_typed_browser_session_failure(tmp_path):
+    diagnostics = {}
+
+    class ClosedBrowser:
+        def __init__(self):
+            self.calls = 0
+
+        async def get(self, *_args, **_kwargs):
+            self.calls += 1
+            raise ConnectionError("closed transport")
+
+    browser = ClosedBrowser()
+    hit = asyncio.run(
+        searcher.search_platform_shorts(
+            browser,
+            ["电动奶泡器"],
+            str(tmp_path),
+            platforms=["douyin", "xiaohongshu"],
+            diagnostics=diagnostics,
+        )
+    )
+
+    assert hit is None
+    assert browser.calls == 1
+    assert diagnostics["counts"]["browser_session_failed"] == 1
+    assert pp.describe_platform_search_failure(diagnostics)["code"] == (
+        "browser_session_failed"
+    )
+
+
+def test_page_link_evaluation_propagates_typed_browser_session_failure():
+    diagnostics = {}
+
+    class ClosedTab:
+        async def evaluate(self, *_args, **_kwargs):
+            raise ConnectionError("closed transport")
+
+    with pytest.raises(ConnectionError):
+        asyncio.run(
+            searcher._extract_video_page_links(
+                ClosedTab(),
+                "douyin",
+                diagnostics=diagnostics,
+            )
+        )
+
+    assert diagnostics["counts"]["browser_session_failed"] == 1
+    assert pp.describe_platform_search_failure(diagnostics)["code"] == (
+        "browser_session_failed"
+    )
+
+
 def test_search_one_platform_shares_attempted_ids_across_query_variants(
     monkeypatch, tmp_path
 ):
@@ -777,9 +829,21 @@ def test_cleanup_old_outputs(tmp_path):
 def test_queue_platform_helpers(tmp_path, monkeypatch):
     from scripts import run_summer_coupang_queue_once as queue_runner
 
-    assert queue_runner.is_platform_system_blocker("브라우저를 시작할 수 없습니다: x")
-    assert queue_runner.is_platform_system_blocker("zendriver launch failed")
-    assert not queue_runner.is_platform_system_blocker("세 채널 모두에서 영상을 찾지 못했어요")
+    assert queue_runner.is_platform_system_blocker(
+        {"failure": {"code": "browser_start_failed"}}
+    )
+    assert queue_runner.is_platform_system_blocker(
+        {"failure": {"code": "browser_session_failed"}}
+    )
+    assert not queue_runner.is_platform_system_blocker(
+        {
+            "failure": {"code": "no_search_results"},
+            "error": "browser라는 단어가 있어도 구조화 코드가 우선입니다.",
+        }
+    )
+    assert not queue_runner.is_platform_system_blocker(
+        "zendriver launch failed"
+    )
 
     # final_video 없음 → render_ok False + 품질 게이트 사유 포함
     report = {"final_video": "", "render_integrity": {"ok": False}}
@@ -879,6 +943,158 @@ def test_platform_source_is_deferred_until_successful_upload(
     assert report["final_video"]
     assert os.path.exists(report["final_video"])
     assert store.state("platform:recovery", "42") == "completed_pending_delivery"
+
+
+def test_safe_cached_video_bypasses_coupang_and_platform_browsers(
+    monkeypatch, tmp_path
+):
+    from core.sourcing import coupang_scraper, pipeline as sourcing_pipeline
+    from core.sourcing import report_cache
+
+    cached_source = tmp_path / "cached-source.mp4"
+    cached_source.write_bytes(b"cached source")
+
+    monkeypatch.setattr(
+        report_cache,
+        "find_cached_product_info",
+        lambda _url: None,
+    )
+    monkeypatch.setattr(
+        sourcing_pipeline,
+        "find_cached_publish_safe_video",
+        lambda **_kwargs: {
+            "source": "aliexpress",
+            "platform": "aliexpress",
+            "product": {"title": "무선 전동 청소솔", "score": 0.98},
+            "video_url": "https://example.com/source/123",
+            "video_file": str(cached_source),
+            "size_mb": 1.2,
+            "fallback_reason": "cached_marketplace_video",
+            "auto_publish_safe": True,
+            "requires_review": False,
+            "cached_from_report": str(tmp_path / "old-report.json"),
+        },
+    )
+
+    async def fail_scrape(*_args, **_kwargs):
+        pytest.fail("cached product metadata must bypass the Coupang page")
+
+    async def fail_browser():
+        pytest.fail("a publish-safe cached video must bypass Chrome")
+
+    async def fail_search(*_args, **_kwargs):
+        pytest.fail("a publish-safe cached video must bypass live search")
+
+    async def fake_keywords(_name, _client):
+        return {"chinese": "无线电动清洁刷", "english": "cordless cleaning brush"}
+
+    def fake_reedit(_source_path, output_path, **_kwargs):
+        with open(output_path, "wb") as handle:
+            handle.write(b"edited cached video")
+        return True
+
+    class Registry:
+        def used_source_ids(self):
+            return set()
+
+    monkeypatch.setattr(coupang_scraper, "scrape_product", fail_scrape)
+    monkeypatch.setattr(searcher, "start_browser", fail_browser)
+    monkeypatch.setattr(searcher, "search_platform_shorts", fail_search)
+    monkeypatch.setattr(pp, "_convert_keywords", fake_keywords)
+    monkeypatch.setattr(pp, "_resolve_purchase_link", lambda url: {
+        "purchase_url": url, "deep_link": url, "source": "manual",
+    })
+    monkeypatch.setattr(reeditor, "reedit", fake_reedit)
+    monkeypatch.setattr(reg_mod, "get_uploaded_registry", lambda: Registry())
+
+    report = asyncio.run(pp.run_platform_sourcing(
+        "https://link.coupang.com/a/test",
+        output_dir=str(tmp_path / "output"),
+    ))
+
+    assert report["ok"] is True
+    assert report["source_kind"] == "cached_marketplace_video"
+    assert report["auto_publish_safe"] is True
+    assert report["requires_review"] is False
+    assert report["product_info"]["source"] == "publish_safe_video_cache"
+    assert os.path.exists(report["final_video"])
+    assert cached_source.exists(), "shared cached input must not be deleted"
+
+
+def test_browser_failure_creates_review_only_image_video(monkeypatch, tmp_path):
+    from core.sourcing import pipeline as sourcing_pipeline
+    from core.sourcing import report_cache
+
+    fallback_video = tmp_path / "review-only.mp4"
+    fallback_video.write_bytes(b"review-only video")
+    committed = []
+
+    monkeypatch.setattr(
+        report_cache,
+        "find_cached_product_info",
+        lambda _url: {
+            "name": "전동 우유거품기",
+            "image": "https://example.com/frother.jpg",
+            "url": "https://link.coupang.com/a/f8i3PuVSqi",
+            "source": "cached_report",
+        },
+    )
+    monkeypatch.setattr(
+        sourcing_pipeline,
+        "find_cached_publish_safe_video",
+        lambda **_kwargs: None,
+    )
+
+    async def fake_image_fallback(**_kwargs):
+        return {
+            "source": "coupang_image",
+            "platform": "coupang_image",
+            "product": {"title": "전동 우유거품기", "score": 1.0},
+            "video_url": "https://example.com/frother.jpg",
+            "video_file": str(fallback_video),
+            "size_mb": 1.0,
+            "fallback_reason": "no_marketplace_video",
+            "auto_publish_safe": False,
+            "requires_review": True,
+        }
+
+    async def fail_browser():
+        raise RuntimeError("Chrome unavailable")
+
+    async def fake_keywords(_name, _client):
+        return {"chinese": "电动奶泡器", "english": "electric milk frother"}
+
+    class Registry:
+        def used_source_ids(self):
+            return set()
+
+    monkeypatch.setattr(
+        sourcing_pipeline,
+        "create_product_image_video_fallback",
+        fake_image_fallback,
+    )
+    monkeypatch.setattr(searcher, "start_browser", fail_browser)
+    monkeypatch.setattr(pp, "_convert_keywords", fake_keywords)
+    monkeypatch.setattr(pp, "_resolve_purchase_link", lambda url: {
+        "purchase_url": url, "deep_link": url, "source": "manual",
+    })
+    monkeypatch.setattr(reg_mod, "get_uploaded_registry", lambda: Registry())
+
+    report = asyncio.run(pp.run_platform_sourcing(
+        "https://link.coupang.com/a/f8i3PuVSqi",
+        output_dir=str(tmp_path / "output"),
+        before_commit=committed.append,
+    ))
+
+    assert report["ok"] is True
+    assert report["source_kind"] == "coupang_image"
+    assert report["auto_publish_safe"] is False
+    assert report["requires_review"] is True
+    assert report["fallback_reason"] == "no_marketplace_video"
+    assert report["final_video"] == str(fallback_video)
+    assert report["blocked_stages"] == ["youtube_upload", "linktree_publish"]
+    assert report["fallback_failure"]["code"] == "browser_start_failed"
+    assert committed == [str(fallback_video)]
 
 
 def test_download_only_stops_before_reedit_and_keeps_source(monkeypatch, tmp_path):
