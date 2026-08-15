@@ -9,6 +9,7 @@ import asyncio
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from uuid import uuid4
 from fastapi import FastAPI, Request, Header, HTTPException, Query
@@ -503,6 +504,40 @@ APP_VERSION_INFO = {
 }
 
 _APP_VERSION_INFO_SETTING_KEY = "app_version_info_v1"
+_APP_VERSION_INFO_FIELDS = (
+    "version",
+    "min_required_version",
+    "download_url",
+    "release_notes",
+    "is_mandatory",
+    "update_channel",
+    "file_hash",
+)
+
+
+def _decode_app_version_info(raw_value: object, default_info: Mapping) -> dict:
+    """Normalize persisted version metadata without mutating either input."""
+    merged = dict(default_info)
+
+    try:
+        if isinstance(raw_value, Mapping):
+            loaded = raw_value
+        elif isinstance(raw_value, (bytes, bytearray)):
+            loaded = json.loads(bytes(raw_value).decode("utf-8"))
+        elif isinstance(raw_value, str):
+            loaded = json.loads(raw_value)
+        else:
+            return merged
+    except (UnicodeDecodeError, json.JSONDecodeError, TypeError, ValueError):
+        return merged
+
+    if not isinstance(loaded, Mapping):
+        return merged
+
+    for key in _APP_VERSION_INFO_FIELDS:
+        if key in loaded:
+            merged[key] = loaded[key]
+    return merged
 
 
 def _load_app_version_info_from_db(default_info: dict) -> dict:
@@ -516,29 +551,10 @@ def _load_app_version_info_from_db(default_info: dict) -> dict:
                 ),
                 {"setting_key": _APP_VERSION_INFO_SETTING_KEY},
             ).scalar_one_or_none()
-        if not raw_value:
-            return default_info
-
-        loaded = json.loads(raw_value)
-        if not isinstance(loaded, dict):
-            return default_info
-
-        merged = dict(default_info)
-        for key in (
-            "version",
-            "min_required_version",
-            "download_url",
-            "release_notes",
-            "is_mandatory",
-            "update_channel",
-            "file_hash",
-        ):
-            if key in loaded:
-                merged[key] = loaded[key]
-        return merged
+        return _decode_app_version_info(raw_value, default_info)
     except Exception as e:
         logger.warning("Failed loading APP_VERSION_INFO from DB: %s", e)
-        return default_info
+        return dict(default_info)
 
 
 def _persist_app_version_info_to_db(version_info: dict) -> bool:
