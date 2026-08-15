@@ -11,7 +11,6 @@ import sys
 import os
 import json
 import re
-import subprocess
 from pathlib import Path
 from urllib.parse import urlparse
 from PyQt6 import QtCore

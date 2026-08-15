@@ -157,7 +157,7 @@ def test_historical_v1564_signer_is_update_bridge_not_public_trust(monkeypatch, 
         "Thumbprint": "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
     }
     monkeypatch.setattr(
-        "startup.app_controller.subprocess.run",
+        "utils.authenticode.subprocess.run",
         lambda *_args, **_kwargs: SimpleNamespace(
             stdout=json.dumps(response), stderr="", returncode=0
         ),
@@ -185,7 +185,7 @@ def test_historical_signer_is_rejected_for_unapproved_next_version(monkeypatch, 
     }
     monkeypatch.delenv("SSMAKER_TRANSITION_BRIDGE_VERSION", raising=False)
     monkeypatch.setattr(
-        "startup.app_controller.subprocess.run",
+        "utils.authenticode.subprocess.run",
         lambda *_args, **_kwargs: SimpleNamespace(
             stdout=json.dumps(response), stderr="", returncode=0
         ),
@@ -211,7 +211,7 @@ def test_pinned_release_signer_rejects_hash_mismatch(monkeypatch, tmp_path):
         "Thumbprint": "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
     }
     monkeypatch.setattr(
-        "startup.app_controller.subprocess.run",
+        "utils.authenticode.subprocess.run",
         lambda *_args, **_kwargs: SimpleNamespace(
             stdout=json.dumps(response), stderr="", returncode=0
         ),

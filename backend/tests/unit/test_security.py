@@ -15,7 +15,6 @@ Covers:
 
 import os
 import sys
-import importlib
 import hashlib
 import hmac
 import json
