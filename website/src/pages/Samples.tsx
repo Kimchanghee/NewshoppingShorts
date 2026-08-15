@@ -80,7 +80,7 @@ function VideoPanel({
         <span className={`text-sm font-semibold ${isBefore ? "text-white/70" : "text-red-300"}`}>{label}</span>
         <span className="text-[11px] uppercase tracking-[0.18em] text-white/35">MP4</span>
       </div>
-      <div className="relative mx-auto aspect-[9/16] max-h-[680px] bg-[#080808]">
+      <div className="relative mx-auto aspect-[9/16] max-h-[620px] bg-[#080808] sm:max-h-[680px] md:max-h-[600px] lg:max-h-[680px]">
         <video
           ref={videoRef}
           className="h-full w-full object-contain"
@@ -140,7 +140,7 @@ function SampleCard({ sample }: { sample: VideoSample }) {
       data-testid="sample-card"
       className="scroll-mt-24 overflow-hidden rounded-[28px] border border-white/10 bg-white/[0.035] shadow-2xl shadow-black/20"
     >
-      <div className="flex flex-col gap-5 border-b border-white/10 px-5 py-6 sm:px-7 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex flex-col gap-5 border-b border-white/10 px-5 py-6 sm:px-7 md:flex-row md:items-center md:justify-between">
         <div className="flex min-w-0 items-start gap-4">
           <span className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border border-red-400/25 bg-red-500/10 text-sm font-bold text-red-300">
             {String(sample.id).padStart(2, "0")}
@@ -163,7 +163,7 @@ function SampleCard({ sample }: { sample: VideoSample }) {
         <Button
           type="button"
           variant="outline"
-          className="shrink-0 border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white"
+          className="min-h-11 w-full shrink-0 border-white/15 bg-white/5 text-white hover:bg-white/10 hover:text-white md:w-auto"
           onClick={togglePair}
           aria-label={`${sample.title} Before/After ${isPlaying ? "동시에 일시정지" : "동시에 재생"}`}
         >
@@ -172,7 +172,7 @@ function SampleCard({ sample }: { sample: VideoSample }) {
         </Button>
       </div>
 
-      <div className="grid gap-px bg-white/10 p-px lg:grid-cols-2">
+      <div className="grid gap-px bg-white/10 p-px md:grid-cols-2">
         <VideoPanel sample={sample} kind="before" videoRef={beforeRef} />
         <div onEnded={stopPair}>
           <VideoPanel sample={sample} kind="after" videoRef={afterRef} />
@@ -198,14 +198,14 @@ export default function Samples() {
       />
       <Navigation />
 
-      <section className="relative border-b border-white/10 pb-20 pt-32 sm:pb-24 sm:pt-40">
+      <section className="relative border-b border-white/10 pb-16 pt-28 sm:pb-20 sm:pt-36 lg:pb-24 lg:pt-40">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(220,38,38,0.18),transparent_46%)]" />
-        <div className="container relative mx-auto px-6 text-center">
+        <div className="container relative mx-auto px-4 text-center sm:px-6">
           <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-200">
             <Sparkles className="h-4 w-4" />
             실제 프로그램 처리 결과
           </div>
-          <h1 className="text-balance text-4xl font-extrabold tracking-[-0.04em] text-white sm:text-6xl lg:text-7xl">
+          <h1 className="text-balance text-[2.35rem] font-extrabold leading-[1.08] tracking-[-0.04em] text-white sm:text-5xl md:text-6xl lg:text-7xl">
             원본과 제작본을
             <br />
             <span className="text-gradient">직접 비교해 보세요</span>
@@ -246,7 +246,7 @@ export default function Samples() {
                 type="button"
                 onClick={() => setFilter(item.value)}
                 aria-pressed={filter === item.value}
-                className={`rounded-full border px-4 py-2 text-sm transition-colors ${
+                className={`min-h-11 rounded-full border px-4 py-2 text-sm transition-colors ${
                   filter === item.value
                     ? "border-red-400/40 bg-red-500/15 text-red-200"
                     : "border-white/10 bg-white/[0.03] text-white/50 hover:border-white/20 hover:text-white"
@@ -265,11 +265,11 @@ export default function Samples() {
         </div>
       </section>
 
-      <section className="border-t border-white/10 py-20">
-        <div className="container mx-auto px-6 text-center">
+      <section className="border-t border-white/10 py-16 sm:py-20">
+        <div className="container mx-auto px-4 text-center sm:px-6">
           <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">내 상품 영상도 같은 흐름으로</h2>
           <p className="mx-auto mt-4 max-w-2xl text-white/50">SSMaker를 설치하고 상품 링크 또는 원본 영상으로 직접 결과를 만들어 보세요.</p>
-          <Button variant="hero" size="lg" asChild className="mt-8">
+          <Button variant="hero" size="lg" asChild className="mt-8 min-h-12 w-full max-w-sm sm:w-auto">
             <a href={DOWNLOAD_URL} rel="noopener noreferrer" onClick={() => gaEvent("download_click", { placement: "samples_bottom" })}>
               <Download className="mr-2 h-5 w-5" />
               Microsoft Store에서 받기

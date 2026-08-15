@@ -26,15 +26,15 @@ export default function ROICalculator() {
     }, [videosPerDay, timePerVideo, hourlyRate]);
 
     return (
-        <div className="mt-16 w-full max-w-4xl mx-auto">
+        <div className="mx-auto mt-10 w-full max-w-4xl sm:mt-12 lg:mt-16">
             <FadeIn delay={0.3}>
-                <div className="glass-card rounded-2xl p-8 md:p-12 border border-primary/20 bg-background/50 backdrop-blur-md">
-                    <div className="text-center mb-10">
+                <div className="glass-card rounded-2xl border border-primary/20 bg-background/50 p-5 backdrop-blur-md sm:p-8 md:p-10 lg:p-12">
+                    <div className="mb-8 text-center sm:mb-10">
                         <h3 className="text-2xl font-bold text-foreground">예상 작업 시간 계산하기</h3>
                         <p className="text-muted-foreground mt-2">현재 작업 시간과 비교해 자동 처리 기준의 예상 차이를 확인해보세요</p>
                     </div>
 
-                    <div className="grid gap-12 md:grid-cols-2">
+                    <div className="grid gap-8 md:grid-cols-2 md:gap-10 lg:gap-12">
 
                         {/* Inputs */}
                         <div className="space-y-8">
@@ -85,10 +85,10 @@ export default function ROICalculator() {
                         </div>
 
                         {/* Results */}
-                        <div className="flex flex-col justify-center gap-6 bg-secondary/30 rounded-xl p-6 border border-white/5">
+                        <div className="flex flex-col justify-center gap-6 rounded-xl border border-white/5 bg-secondary/30 p-5 sm:p-6">
                             <div className="text-center">
                                 <p className="text-sm font-medium text-muted-foreground mb-1">월 예상 단축 시간</p>
-                                <div className="text-4xl font-extrabold text-gradient">
+                                <div className="text-3xl font-extrabold text-gradient sm:text-4xl">
                                     {savedTime}시간
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-1">자동 처리 3분 기준의 단순 계산값입니다</p>
@@ -98,7 +98,7 @@ export default function ROICalculator() {
 
                             <div className="text-center">
                                 <p className="text-sm font-medium text-muted-foreground mb-1">월 예상 인건비 환산</p>
-                                <div className="text-4xl font-extrabold text-gradient">
+                                <div className="text-3xl font-extrabold text-gradient sm:text-4xl">
                                     {savedMoney.toLocaleString()}원
                                 </div>
                                 <p className="text-xs text-muted-foreground mt-1">사용자가 입력한 시간당 가치 기준입니다</p>

@@ -49,9 +49,9 @@ const features = [
 
 export default function Features() {
   return (
-    <section id="features" className="relative py-24 md:py-32">
+    <section id="features" className="relative py-16 sm:py-20 lg:py-28">
       <div className="section-glow absolute inset-0" />
-      <div className="container relative mx-auto px-6">
+      <div className="container relative mx-auto px-4 sm:px-6">
         <FadeIn>
           <div className="text-center">
             <p className="mb-3 text-sm font-medium uppercase tracking-widest text-primary">
@@ -66,10 +66,10 @@ export default function Features() {
           </div>
         </FadeIn>
 
-        <div className="mx-auto mt-16 grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mx-auto mt-10 grid max-w-5xl gap-4 sm:mt-12 sm:grid-cols-2 lg:mt-16 lg:grid-cols-3">
           {features.map((feature, i) => (
             <FadeIn key={i} delay={i * 0.08}>
-              <div className="glass-card group h-full rounded-xl p-6 transition-all duration-300 hover:border-primary/20 hover:shadow-glow-sm">
+              <div className="glass-card group h-full rounded-xl p-5 transition-all duration-300 hover:border-primary/20 hover:shadow-glow-sm sm:p-6">
                 <div className="mb-4 flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 transition-colors group-hover:bg-primary/15">
                   <feature.icon className="h-5 w-5 text-primary" />
                 </div>

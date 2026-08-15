@@ -7,10 +7,10 @@ import { gaEvent } from "@/lib/ga4";
 export default function FinalCTA() {
   const downloadUrl = DOWNLOAD_URL;
   return (
-    <section className="relative overflow-hidden py-24 md:py-32">
-      <div className="container relative mx-auto px-6 text-center">
+    <section className="relative overflow-hidden py-16 sm:py-20 lg:py-28">
+      <div className="container relative mx-auto px-4 text-center sm:px-6">
         <FadeIn>
-          <h2 className="mx-auto max-w-2xl text-4xl font-extrabold tracking-tight text-foreground md:text-5xl">
+          <h2 className="mx-auto max-w-2xl text-3xl font-extrabold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
             지금 바로 <span className="text-gradient">시작하세요</span>
           </h2>
           <p className="mx-auto mt-6 max-w-lg text-lg text-muted-foreground">
@@ -18,7 +18,7 @@ export default function FinalCTA() {
           </p>
 
           <div className="mt-10">
-            <Button variant="hero" size="xl" asChild>
+            <Button variant="hero" size="xl" asChild className="min-h-12 w-full max-w-sm px-5 sm:w-auto sm:px-10">
               <a
                 href={downloadUrl}
                 className="gap-2"

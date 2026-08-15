@@ -24,7 +24,6 @@
     --muted: 0 0% 12%;
     --muted-foreground: 0 0% 50%;
 
-    --accent: 190 95% 50%;
     --accent-foreground: 0 0% 100%;
     --accent: 0 84% 60%;
     --destructive: 0 72% 51%;
@@ -57,6 +56,8 @@
 
   body {
     @apply bg-background text-foreground antialiased;
+    min-width: 320px;
+    overflow-x: hidden;
     font-family:
       "Outfit",
       system-ui,
@@ -66,6 +67,17 @@
 
   html {
     scroll-behavior: smooth;
+    scroll-padding-top: 5rem;
+  }
+
+  img,
+  video {
+    max-inline-size: 100%;
+  }
+
+  button,
+  a {
+    -webkit-tap-highlight-color: transparent;
   }
 }
 
@@ -128,5 +140,20 @@
 
   .text-balance {
     text-wrap: balance;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
   }
 }

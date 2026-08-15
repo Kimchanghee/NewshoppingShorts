@@ -18,11 +18,11 @@ const setupNoticeLinks = [
  */
 export default function SetupGuide() {
   return (
-    <section id="setup-guide" className="relative py-20 md:py-28">
+    <section id="setup-guide" className="relative py-16 sm:py-20 lg:py-28">
       <div className="section-glow absolute inset-0" />
-      <div className="container relative mx-auto px-6">
+      <div className="container relative mx-auto px-4 sm:px-6">
         <FadeIn>
-          <div className="mx-auto max-w-3xl rounded-2xl border border-border/60 bg-secondary/30 p-8 md:p-10 text-center">
+          <div className="mx-auto max-w-3xl rounded-2xl border border-border/60 bg-secondary/30 p-5 text-center sm:p-8 md:p-10">
             <span className="inline-flex items-center gap-2 rounded-full border border-border/60 bg-background/50 px-3 py-1 text-[11px] text-muted-foreground">
               <BookOpen className="h-3.5 w-3.5" />
               초기 세팅 매뉴얼
@@ -43,7 +43,7 @@ export default function SetupGuide() {
                   key={link.to}
                   to={link.to}
                   onClick={() => gaEvent("guide_click", { placement: "setup_guide", guide: link.to })}
-                  className="inline-flex items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/45 px-4 py-3 text-sm font-semibold text-foreground transition-colors hover:border-primary/50 hover:text-primary"
+                  className="inline-flex min-h-12 items-center justify-between gap-3 rounded-lg border border-border/70 bg-background/45 px-4 py-3 text-left text-sm font-semibold text-foreground transition-colors hover:border-primary/50 hover:text-primary"
                 >
                   {link.label}
                   <ArrowRight className="h-4 w-4 shrink-0" />

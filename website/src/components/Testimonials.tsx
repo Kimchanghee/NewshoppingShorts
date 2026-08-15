@@ -59,7 +59,7 @@ const duplicated = [...testimonials, ...testimonials];
 
 function TestimonialCard({ item }: { item: Testimonial }) {
   return (
-    <div className="glass-card relative flex h-full min-h-[260px] w-[340px] shrink-0 flex-col rounded-2xl p-8 sm:w-[380px]">
+    <div className="glass-card relative flex h-full min-h-[240px] w-[min(340px,calc(100vw-2rem))] shrink-0 flex-col rounded-2xl p-6 sm:min-h-[260px] sm:w-[380px] sm:p-8">
       <Quote className="absolute right-8 top-8 h-8 w-8 text-primary/10" />
 
       <p className="mb-6 flex-1 leading-relaxed text-foreground/90">{item.content}</p>
@@ -105,11 +105,11 @@ export default function Testimonials() {
   return (
     <section
       id="testimonials"
-      className="relative overflow-hidden py-24 md:py-32 bg-secondary/20"
+      className="relative overflow-hidden bg-secondary/20 py-16 sm:py-20 lg:py-28"
     >
-      <div className="container mx-auto px-6">
+      <div className="container mx-auto px-4 sm:px-6">
         <FadeIn>
-          <div className="mb-16 text-center">
+          <div className="mb-10 text-center sm:mb-12 lg:mb-16">
             <p className="mb-3 text-sm font-medium uppercase tracking-widest text-primary">
               Use Cases
             </p>
@@ -130,12 +130,12 @@ export default function Testimonials() {
         onMouseLeave={() => setPaused(false)}
       >
         {/* Fade edges */}
-        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-24 bg-gradient-to-r from-background to-transparent md:w-40" />
-        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-24 bg-gradient-to-l from-background to-transparent md:w-40" />
+        <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-8 bg-gradient-to-r from-background to-transparent sm:w-24 md:w-40" />
+        <div className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-background to-transparent sm:w-24 md:w-40" />
 
         <div
           ref={trackRef}
-          className="flex gap-6 px-6"
+          className="flex gap-4 px-4 sm:gap-6 sm:px-6"
           style={{ willChange: "transform" }}
         >
           {duplicated.map((item, i) => (

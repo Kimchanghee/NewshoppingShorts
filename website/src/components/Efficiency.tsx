@@ -19,7 +19,7 @@ function StatCard({
 
   return (
     <FadeIn delay={delay}>
-      <div ref={ref} className="glass-card rounded-xl p-8 text-center">
+      <div ref={ref} className="glass-card rounded-xl p-6 text-center sm:p-8">
         <div className="text-4xl font-extrabold text-gradient md:text-5xl">
           {count}
           {suffix}
@@ -60,8 +60,8 @@ const stats = [
 
 export default function Efficiency() {
   return (
-    <section id="efficiency" className="relative py-24 md:py-32">
-      <div className="container mx-auto px-6">
+    <section id="efficiency" className="relative py-16 sm:py-20 lg:py-28">
+      <div className="container mx-auto px-4 sm:px-6">
         <FadeIn>
           <div className="text-center">
             <p className="mb-3 text-sm font-medium uppercase tracking-widest text-primary">
@@ -76,7 +76,7 @@ export default function Efficiency() {
           </div>
         </FadeIn>
 
-        <div className="mx-auto mt-16 grid max-w-5xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mx-auto mt-10 grid max-w-5xl gap-4 sm:mt-12 sm:grid-cols-2 lg:mt-16 lg:grid-cols-4">
           {stats.map((stat, i) => (
             <StatCard key={i} {...stat} delay={i * 0.1} />
           ))}

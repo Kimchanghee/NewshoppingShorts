@@ -43,9 +43,9 @@ const plans = [
 export default function Pricing() {
   const downloadUrl = DOWNLOAD_URL;
   return (
-    <section id="pricing" className="relative py-24 md:py-32">
+    <section id="pricing" className="relative py-16 sm:py-20 lg:py-28">
       <div className="section-glow absolute inset-0" />
-      <div className="container relative mx-auto px-6">
+      <div className="container relative mx-auto px-4 sm:px-6">
         <FadeIn>
           <div className="text-center">
             <p className="mb-3 text-sm font-medium uppercase tracking-widest text-primary">Pricing</p>
@@ -54,11 +54,11 @@ export default function Pricing() {
           </div>
         </FadeIn>
 
-        <div className="mx-auto mt-16 grid max-w-4xl gap-8 md:grid-cols-2">
+        <div className="mx-auto mt-10 grid max-w-4xl gap-6 sm:mt-12 md:grid-cols-2 lg:mt-16 lg:gap-8">
           {plans.map((plan, i) => (
             <FadeIn key={i} delay={i * 0.15}>
               <div
-                className={`glass-card relative flex h-full flex-col rounded-2xl p-8 transition-all duration-300 ${
+                className={`glass-card relative flex h-full flex-col rounded-2xl p-6 transition-all duration-300 sm:p-8 ${
                   plan.popular ? "border-primary/30 shadow-glow" : "hover:border-primary/20"
                 }`}
               >

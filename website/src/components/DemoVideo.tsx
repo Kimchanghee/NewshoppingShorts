@@ -85,10 +85,10 @@ export default function DemoVideo() {
     };
 
     return (
-        <section id="demo-video" className="relative py-24 md:py-32 bg-secondary/20">
-            <div className="container mx-auto px-6">
+        <section id="demo-video" className="relative bg-secondary/20 py-16 sm:py-20 lg:py-28">
+            <div className="container mx-auto px-4 sm:px-6">
                 <FadeIn>
-                    <div className="text-center mb-12">
+                    <div className="mb-10 text-center sm:mb-12">
                         <p className="mb-3 text-sm font-medium uppercase tracking-widest text-primary">
                             Demo Video
                         </p>
@@ -134,8 +134,8 @@ export default function DemoVideo() {
                                         onClick={togglePlay}
                                     >
                                         <div className="flex flex-col items-center gap-3 px-6">
-                                            <div className="flex h-20 w-20 items-center justify-center rounded-full bg-primary/90 backdrop-blur-sm transition-transform hover:scale-110">
-                                                <Play className="h-10 w-10 text-primary-foreground ml-1" />
+                                            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/90 backdrop-blur-sm transition-transform hover:scale-110 sm:h-20 sm:w-20">
+                                                <Play className="ml-1 h-8 w-8 text-primary-foreground sm:h-10 sm:w-10" />
                                             </div>
                                             {loadError && (
                                                 <p className="text-center text-sm text-white/90 max-w-[420px]">
@@ -148,7 +148,7 @@ export default function DemoVideo() {
                             </div>
 
                             {/* Controls */}
-                            <div className="bg-background/95 backdrop-blur-sm p-4 space-y-3">
+                            <div className="space-y-3 bg-background/95 p-3 backdrop-blur-sm sm:p-4">
                                 {/* Progress Bar */}
                                 <div className="flex items-center gap-3">
                                     <span className="text-xs text-muted-foreground min-w-[40px]">
@@ -172,7 +172,8 @@ export default function DemoVideo() {
                                     <div className="flex items-center gap-2">
                                         <button
                                             onClick={togglePlay}
-                                            className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20"
+                                            aria-label={isPlaying ? "영상 일시정지" : "영상 재생"}
+                                            className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20"
                                         >
                                             {isPlaying ? (
                                                 <Pause className="h-4 w-4" />
@@ -183,7 +184,8 @@ export default function DemoVideo() {
 
                                         <button
                                             onClick={toggleMute}
-                                            className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20"
+                                            aria-label={isMuted ? "소리 켜기" : "음소거"}
+                                            className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20"
                                         >
                                             {isMuted ? (
                                                 <VolumeX className="h-4 w-4" />
@@ -195,7 +197,8 @@ export default function DemoVideo() {
 
                                     <button
                                         onClick={toggleFullscreen}
-                                        className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20"
+                                        aria-label="전체 화면"
+                                        className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary transition-colors hover:bg-primary/20"
                                     >
                                         <Maximize className="h-4 w-4" />
                                     </button>

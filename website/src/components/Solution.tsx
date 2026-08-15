@@ -17,8 +17,8 @@ const afterSteps = ["영상 선택", "클릭 한 번", "완성"];
 
 export default function Solution() {
   return (
-    <section className="relative py-24 md:py-32">
-      <div className="container mx-auto px-6">
+    <section className="relative py-16 sm:py-20 lg:py-28">
+      <div className="container mx-auto px-4 sm:px-6">
         <FadeIn>
           <div className="text-center">
             <h2 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
@@ -33,10 +33,10 @@ export default function Solution() {
           </div>
         </FadeIn>
 
-        <div className="mx-auto mt-16 grid max-w-5xl gap-8 md:grid-cols-[1fr,auto,1fr]">
+        <div className="mx-auto mt-10 grid max-w-5xl gap-6 sm:mt-12 md:grid-cols-[1fr,auto,1fr] lg:mt-16 lg:gap-8">
           {/* Before */}
           <FadeIn delay={0.1}>
-            <div className="glass-card rounded-2xl p-8">
+            <div className="glass-card rounded-2xl p-5 sm:p-7 lg:p-8">
               <div className="mb-6 flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-destructive/10">
                   <X className="h-4 w-4 text-destructive" />
@@ -82,7 +82,7 @@ export default function Solution() {
 
           {/* After */}
           <FadeIn delay={0.3}>
-            <div className="glass-card rounded-2xl border-primary/20 p-8 shadow-glow-sm">
+            <div className="glass-card rounded-2xl border-primary/20 p-5 shadow-glow-sm sm:p-7 lg:p-8">
               <div className="mb-6 flex items-center gap-2">
                 <div className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/10">
                   <Check className="h-4 w-4 text-primary" />
