@@ -1,0 +1,41 @@
+# SSMaker
+
+SSMaker is a Windows desktop AI video automation tool for Korean ecommerce operators. It converts Chinese shopping source videos into Korean short-form sales videos and connects the workflow to Coupang Partners links, YouTube Shorts upload, and Linktree product-link verification.
+
+## Canonical
+- Website: https://shoppingshorts.store/
+- Product name: SSMaker
+- Korean name: 쇼핑 숏폼 메이커
+- Category: AI video editing automation / ecommerce marketing software
+- Platform: Windows desktop
+- Language: Korean
+- Region: South Korea
+
+## Core Answers
+- What is SSMaker? A Windows AI program that detects Chinese shopping-video subtitles, blurs existing captions, creates Korean sales scripts, synthesizes Korean TTS, and exports shopping Shorts.
+- Is a Coupang API key required? No. If the user already has a Coupang Partners short link such as https://link.coupang.com/a/..., they can paste that link into SSMaker. Coupang API keys are optional for converting original coupang.com URLs into affiliate deep links.
+- How does Linktree automation work? Basic setup only needs the public Linktree profile URL. Fully automatic Linktree card creation requires a user-provided webhook endpoint such as Make, Zapier, n8n, or Cloudflare Worker.
+- What is needed for YouTube upload? Google Cloud YouTube Data API v3 must be enabled and a desktop-app OAuth client JSON must be connected. A simple API key or service account is not enough for normal YouTube channel upload.
+- Pricing? Free trial is 0 KRW with 5 monthly runs. The only paid plan is the Pro monthly subscription at 149,000 KRW per month. There are no annual or multi-month plans.
+- Who is it for? Korean cross-border commerce sellers, Smart Store operators, Coupang Partners creators, and YouTube Shorts shopping-channel operators.
+
+## Important Pages
+- Home: https://shoppingshorts.store/
+- Notice: https://shoppingshorts.store/notice/index.html
+- Coupang Partners channel setup: https://shoppingshorts.store/notice/coupang-partners-channel-setup/index.html
+- Linktree signup and link setup: https://shoppingshorts.store/notice/linktree-signup-link-setup/index.html
+- Coupang product link guide: https://shoppingshorts.store/notice/coupang-partners-product-link/index.html
+- YouTube OAuth client setup: https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html
+- Google Cloud OAuth screenshots: https://shoppingshorts.store/notice/youtube-google-cloud-oauth-screenshots/index.html
+- YouTube and Linktree upload check: https://shoppingshorts.store/notice/youtube-linktree-upload-check/index.html
+- Contact: https://shoppingshorts.store/contact/index.html
+
+## Feeds
+- RSS: https://shoppingshorts.store/feed.xml
+- Atom: https://shoppingshorts.store/atom.xml
+- JSON Feed: https://shoppingshorts.store/feed.json
+
+## Support
+- Email: support@ssmaker.co.kr
+- Kakao Open Chat: https://open.kakao.com/o/sVkZPsfi
+- GitHub: https://github.com/Kimchanghee/NewshoppingShorts
