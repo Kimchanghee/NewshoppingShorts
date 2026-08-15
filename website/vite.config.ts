@@ -1,16 +1,16 @@
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react-swc";
+import react from "@vitejs/plugin-react";
 import path from "path";
 import fs from "fs";
 
 function collectHtmlInputs() {
   const inputs: Record<string, string> = {
-    main: path.resolve(__dirname, "index.html"),
+    main: path.resolve(import.meta.dirname, "index.html"),
   };
 
   const routeRoots = ["notice", "contact"];
   for (const routeRoot of routeRoots) {
-    const rootPath = path.resolve(__dirname, routeRoot);
+    const rootPath = path.resolve(import.meta.dirname, routeRoot);
     if (!fs.existsSync(rootPath)) continue;
 
     const rootIndex = path.join(rootPath, "index.html");
@@ -33,7 +33,7 @@ function collectHtmlInputs() {
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
   server: {
-    host: "::",
+    host: process.env.VITE_EXPOSE_DEV === "1" ? "::" : "127.0.0.1",
     port: 8080,
     hmr: {
       overlay: false,
@@ -43,12 +43,14 @@ export default defineConfig(() => ({
     // Multi-page entries ensure each route has real, static meta tags for bots/share crawlers.
     rollupOptions: {
       input: collectHtmlInputs(),
+      // Dozens of intentional HTML entries make Vite's timing heuristic noisy; bundle size is enforced separately.
+      checks: { pluginTimings: false },
     },
   },
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 }));

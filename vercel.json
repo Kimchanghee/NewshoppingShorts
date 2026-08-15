@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "cd backend && uv run --python 3.14 --with-requirements requirements.txt python -m alembic upgrade head && cd ../website && npm ci --no-audit --no-fund && npm run build",
+  "buildCommand": "cd backend && uv run --python 3.14 --with-requirements requirements.txt python -m alembic upgrade head && cd ../website && npm ci --no-audit --no-fund && npm audit --audit-level=low && npm run check && npm run build",
   "outputDirectory": "website/dist",
   "functions": {
     "api/index.py": {

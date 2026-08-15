@@ -27,9 +27,15 @@ def test_vercel_build_fails_closed_on_migration_error():
     )
 
     assert build_command.startswith(f"{migration} && ")
-    assert build_command.index("alembic upgrade head") < build_command.index(
-        "npm run build"
+    ordered_steps = (
+        "alembic upgrade head",
+        "npm ci --no-audit --no-fund",
+        "npm audit --audit-level=low",
+        "npm run check",
+        "npm run build",
     )
+    positions = [build_command.index(step) for step in ordered_steps]
+    assert positions == sorted(positions)
 
 
 def test_vercel_custom_build_preserves_declared_output_directory():
@@ -40,6 +46,20 @@ def test_vercel_custom_build_preserves_declared_output_directory():
     package = json.loads((website_root / "package.json").read_text(encoding="utf-8"))
     assert website_root.is_dir()
     assert package["scripts"]["build"]
+    assert package["scripts"]["check"] == (
+        "npm run lint && tsc --noEmit -p tsconfig.app.json && "
+        "tsc --noEmit -p tsconfig.node.json && vitest run"
+    )
+    assert package["scripts"]["verify:bundle"] == (
+        "node scripts/verify-bundle-size.mjs"
+    )
+    assert package["engines"]["node"] == "^20.19.0 || >=22.12.0"
+
+
+def test_vite_development_server_is_loopback_by_default():
+    config = (ROOT / "website/vite.config.ts").read_text(encoding="utf-8")
+
+    assert 'process.env.VITE_EXPOSE_DEV === "1" ? "::" : "127.0.0.1"' in config
 
 
 def test_vercel_function_requirements_match_backend_requirements():
