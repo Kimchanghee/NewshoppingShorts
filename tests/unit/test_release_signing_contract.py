@@ -1,10 +1,12 @@
 """Security contracts for Authenticode classification and release publication."""
 
+import ast
 import os
 from pathlib import Path
 import subprocess
 import sys
 
+import pytest
 import yaml
 
 from utils import authenticode
@@ -244,7 +246,13 @@ def test_workflow_forces_tag_publication_policy_and_blocks_bridge_publication():
     assert "steps.version" not in workflow
 
 
-def test_baked_release_authorization_imports_only_from_validated_workspace(tmp_path):
+@pytest.mark.parametrize(
+    "step_name",
+    ["Read baked release authorization", "Validate committed version contract"],
+)
+def test_repo_importing_python_steps_use_validated_workspace_under_isolation(
+    tmp_path, step_name
+):
     workflow = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
             encoding="utf-8"
@@ -253,7 +261,7 @@ def test_baked_release_authorization_imports_only_from_validated_workspace(tmp_p
     step = next(
         step
         for step in workflow["jobs"]["build"]["steps"]
-        if step.get("name") == "Read baked release authorization"
+        if step.get("name") == step_name
     )
     script = step["run"]
 
@@ -273,13 +281,16 @@ def test_baked_release_authorization_imports_only_from_validated_workspace(tmp_p
         assert contract in script
     assert script.index(workspace_check) < script.index(path_insert) < script.index(module_import)
 
-    temp_script = tmp_path / "baked_release.py"
+    temp_script = tmp_path / "workflow-step.py"
     github_output = tmp_path / "github-output.txt"
     temp_script.write_text(script, encoding="utf-8")
     env = os.environ.copy()
     env.pop("PYTHONPATH", None)
     env["GITHUB_WORKSPACE"] = str(ROOT)
     env["GITHUB_OUTPUT"] = str(github_output)
+    env["VERSION"] = "1.5.64"
+    env["SIGNING_MODE"] = "integrity-bridge"
+    env["SIGN_CERT_THUMBPRINT"] = LEGACY_THUMBPRINT
     completed = subprocess.run(
         [sys.executable, "-I", str(temp_script)],
         cwd=ROOT,
@@ -290,9 +301,12 @@ def test_baked_release_authorization_imports_only_from_validated_workspace(tmp_p
     )
 
     assert completed.returncode == 0, completed.stderr
-    outputs = github_output.read_text(encoding="utf-8").splitlines()
-    assert any(line.startswith("transition_bridge_version=") for line in outputs)
-    assert any(line.startswith("has_public_signer_pins=") for line in outputs)
+    if step_name == "Read baked release authorization":
+        outputs = github_output.read_text(encoding="utf-8").splitlines()
+        assert any(line.startswith("transition_bridge_version=") for line in outputs)
+        assert any(line.startswith("has_public_signer_pins=") for line in outputs)
+    else:
+        assert "Committed version contract verified: 1.5.64" in completed.stdout
 
     mismatched_cwd = subprocess.run(
         [sys.executable, "-I", str(temp_script)],
@@ -304,6 +318,41 @@ def test_baked_release_authorization_imports_only_from_validated_workspace(tmp_p
     )
     assert mismatched_cwd.returncode != 0
     assert "GITHUB_WORKSPACE does not match" in mismatched_cwd.stderr
+
+
+def test_all_repo_importing_embedded_python_steps_are_under_isolated_test():
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    repo_roots = {
+        path.name
+        for path in ROOT.iterdir()
+        if path.is_dir() and not path.name.startswith(".")
+    }
+    repo_roots.update(path.stem for path in ROOT.glob("*.py"))
+    importing_steps = set()
+    for job in workflow["jobs"].values():
+        for step in job.get("steps", []):
+            if step.get("shell") != "python":
+                continue
+            tree = ast.parse(step["run"])
+            imported_roots = set()
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    imported_roots.update(
+                        alias.name.split(".", 1)[0] for alias in node.names
+                    )
+                elif isinstance(node, ast.ImportFrom) and node.module:
+                    imported_roots.add(node.module.split(".", 1)[0])
+            if imported_roots & repo_roots:
+                importing_steps.add(step["name"])
+
+    assert importing_steps == {
+        "Read baked release authorization",
+        "Validate committed version contract",
+    }
 
 
 def test_workflow_installs_package_and_directly_verifies_signed_uninstaller():
