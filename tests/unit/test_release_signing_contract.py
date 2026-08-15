@@ -566,9 +566,12 @@ def test_release_workflow_pins_actions_tools_and_never_interpolates_signing_secr
         "actions/setup-python@v",
         "actions/cache@v",
         "actions/upload-artifact@v",
+        "actions/download-artifact@v",
         "softprops/action-gh-release@v",
     ):
         assert mutable_ref not in workflow
+    assert "actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6" in workflow
+    assert "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7" in workflow
     assert "--disable-pip-version-check --require-hashes -r requirements-release.lock" in workflow
     assert "PyInstaller.__version__ == '6.19.0'" in workflow
     assert "python-version: '3.11.9'" in workflow
@@ -659,7 +662,7 @@ def test_publish_credentials_are_isolated_from_untrusted_build_steps():
     assert "permissions:\n      contents: read" in build_section
     assert "persist-credentials: false" in build_section
     assert "permissions:\n      contents: write" in publish_section
-    assert "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" in publish_section
+    assert "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131" in publish_section
     assert "SIGN_CERT_PFX_BASE64" not in publish_section
 
 
