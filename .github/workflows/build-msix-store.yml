@@ -55,10 +55,17 @@ jobs:
     - name: Install Tesseract OCR
       shell: pwsh
       run: |
-        choco install tesseract --no-progress -y
         $candidate = Get-Command tesseract -ErrorAction SilentlyContinue
-        if (-not $candidate) {
-          $candidate = Get-ChildItem -Path "C:\ProgramData\chocolatey" -Recurse -Filter "tesseract.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+        for ($attempt = 1; -not $candidate -and $attempt -le 3; $attempt++) {
+          Write-Host "Installing Tesseract (attempt $attempt of 3)..."
+          choco install tesseract --no-progress -y
+          $candidate = Get-Command tesseract -ErrorAction SilentlyContinue
+          if (-not $candidate) {
+            $candidate = Get-ChildItem -Path "C:\ProgramData\chocolatey" -Recurse -Filter "tesseract.exe" -ErrorAction SilentlyContinue | Select-Object -First 1
+          }
+          if (-not $candidate -and $attempt -lt 3) {
+            Start-Sleep -Seconds (15 * $attempt)
+          }
         }
         if (-not $candidate) {
           throw "Tesseract executable was not found after installation."
