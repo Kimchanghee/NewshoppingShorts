@@ -1,7 +1,10 @@
 import json
+import hashlib
 from types import SimpleNamespace
 
 from startup.app_controller import (
+    DownloadWorker,
+    MAX_UPDATE_DOWNLOAD_BYTES,
     UpdateCheckWorker,
     _is_allowed_update_download_url,
     _verify_authenticode_signature,
@@ -21,7 +24,128 @@ def test_github_release_asset_redirect_is_trusted():
     assert "release-assets.githubusercontent.com" in auto_updater._ALLOWED_DOWNLOAD_DOMAINS
 
 
-def test_pinned_release_signer_accepts_private_root_chain(monkeypatch, tmp_path):
+def test_update_download_urls_reject_nonstandard_and_invalid_ports():
+    from utils import auto_updater
+
+    assert not _is_allowed_update_download_url("https://github.com:444/release.exe")
+    assert not _is_allowed_update_download_url("https://github.com:invalid/release.exe")
+    assert not auto_updater._is_allowed_update_download_url("https://github.com:444/release.exe")
+
+
+def test_auto_updater_rejects_url_filename_backslash_traversal(monkeypatch, tmp_path):
+    from utils import auto_updater
+
+    monkeypatch.setattr(auto_updater, "is_msix_package", lambda: False)
+    monkeypatch.setattr(auto_updater.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(
+        auto_updater.requests,
+        "get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("must reject before network")),
+    )
+    checker = auto_updater.UpdateChecker("https://api.example.com/app/version")
+
+    assert checker.download_update("https://github.com/releases/%2e%2e%5cevil.exe") is None
+
+
+def test_auto_updater_rejects_untrusted_intermediate_redirect(monkeypatch, tmp_path):
+    from utils import auto_updater
+
+    class FakeResponse:
+        url = "https://release-assets.githubusercontent.com/final.exe"
+        history = [SimpleNamespace(url="https://evil.example/intermediate")]
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size):
+            yield b"payload"
+
+    monkeypatch.setattr(auto_updater, "is_msix_package", lambda: False)
+    monkeypatch.setattr(auto_updater.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(auto_updater.requests, "get", lambda *_args, **_kwargs: FakeResponse())
+    checker = auto_updater.UpdateChecker("https://api.example.com/app/version")
+    checker._update_info = {"file_hash": hashlib.sha256(b"payload").hexdigest()}
+
+    assert checker.download_update("https://github.com/release.exe") is None
+    assert not (tmp_path / "ssmaker_update" / "release.exe").exists()
+
+
+def test_auto_updater_rejects_declared_oversize(monkeypatch, tmp_path):
+    from utils import auto_updater
+
+    class FakeResponse:
+        url = "https://github.com/release.exe"
+        history = []
+        headers = {"content-length": str(auto_updater.MAX_UPDATE_DOWNLOAD_BYTES + 1)}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size):
+            yield b"payload"
+
+    monkeypatch.setattr(auto_updater, "is_msix_package", lambda: False)
+    monkeypatch.setattr(auto_updater.tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(auto_updater.requests, "get", lambda *_args, **_kwargs: FakeResponse())
+    checker = auto_updater.UpdateChecker("https://api.example.com/app/version")
+
+    assert checker.download_update("https://github.com/release.exe") is None
+    assert not (tmp_path / "ssmaker_update" / "release.exe").exists()
+
+
+def test_download_worker_rejects_declared_oversize_and_removes_partial(monkeypatch, tmp_path):
+    import requests
+    import tempfile
+
+    class FakeResponse:
+        url = "https://github.com/release.exe"
+        history = []
+        headers = {"content-length": str(MAX_UPDATE_DOWNLOAD_BYTES + 1)}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_content(self, chunk_size):
+            yield b"payload"
+
+    monkeypatch.setattr(tempfile, "gettempdir", lambda: str(tmp_path))
+    monkeypatch.setattr(requests, "get", lambda *_args, **_kwargs: FakeResponse())
+    destination = tmp_path / "update.exe"
+    results = []
+    worker = DownloadWorker(
+        "https://github.com/release.exe",
+        str(destination),
+        hashlib.sha256(b"payload").hexdigest(),
+    )
+    worker.finished.connect(lambda success, detail: results.append((success, detail)))
+
+    worker.run()
+
+    assert results and results[0][0] is False
+    assert "download limit" in results[0][1]
+    assert not destination.exists()
+
+
+def test_historical_v1564_signer_is_update_bridge_not_public_trust(monkeypatch, tmp_path):
     installer = tmp_path / "SSMaker_Setup.exe"
     installer.write_bytes(b"signed-installer-placeholder")
     response = {
@@ -39,10 +163,43 @@ def test_pinned_release_signer_accepts_private_root_chain(monkeypatch, tmp_path)
         ),
     )
 
-    ok, reason = _verify_authenticode_signature(str(installer), "UPDATE_SIGNER_THUMBPRINTS")
+    ok, reason = _verify_authenticode_signature(
+        str(installer),
+        "UPDATE_SIGNER_THUMBPRINTS",
+        artifact_version="1.5.64",
+        allow_legacy_integrity_bridge=True,
+    )
 
     assert ok is True
-    assert "pinned" in reason.lower()
+    assert "legacy-integrity-bridge" in reason.lower()
+    assert "not public trust" in reason.lower()
+
+
+def test_historical_signer_is_rejected_for_unapproved_next_version(monkeypatch, tmp_path):
+    installer = tmp_path / "SSMaker_Setup.exe"
+    installer.write_bytes(b"signed-installer-placeholder")
+    response = {
+        "Status": "UnknownError",
+        "StatusMessage": "Untrusted private root",
+        "Thumbprint": "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
+    }
+    monkeypatch.delenv("SSMAKER_TRANSITION_BRIDGE_VERSION", raising=False)
+    monkeypatch.setattr(
+        "startup.app_controller.subprocess.run",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            stdout=json.dumps(response), stderr="", returncode=0
+        ),
+    )
+
+    ok, reason = _verify_authenticode_signature(
+        str(installer),
+        "UPDATE_SIGNER_THUMBPRINTS",
+        artifact_version="1.5.65",
+        allow_legacy_integrity_bridge=True,
+    )
+
+    assert ok is False
+    assert "explicitly configured" in reason.lower()
 
 
 def test_pinned_release_signer_rejects_hash_mismatch(monkeypatch, tmp_path):
@@ -60,7 +217,12 @@ def test_pinned_release_signer_rejects_hash_mismatch(monkeypatch, tmp_path):
         ),
     )
 
-    ok, reason = _verify_authenticode_signature(str(installer), "UPDATE_SIGNER_THUMBPRINTS")
+    ok, reason = _verify_authenticode_signature(
+        str(installer),
+        "UPDATE_SIGNER_THUMBPRINTS",
+        artifact_version="1.5.64",
+        allow_legacy_integrity_bridge=True,
+    )
 
     assert ok is False
     assert "hashmismatch" in reason.lower()
@@ -307,3 +469,65 @@ def test_store_package_controller_skips_post_login_installer_update(monkeypatch)
     controller.on_login_success({"id": "store-user"})
 
     assert calls == ["loading"]
+
+
+def test_historical_v1564_app_can_start_via_integrity_bridge(monkeypatch):
+    import startup.app_controller as app_controller
+
+    controller = app_controller.AppController(object())
+    verification_calls = []
+    flow = []
+    monkeypatch.setenv("APP_SIGNATURE_REQUIRED", "1")
+    monkeypatch.delenv("SSMAKER_TRANSITION_BRIDGE_VERSION", raising=False)
+    monkeypatch.setattr(app_controller, "is_msix_package", lambda: False)
+    monkeypatch.setattr(app_controller.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(app_controller.sys, "platform", "win32")
+    monkeypatch.setattr(controller, "get_current_version", lambda: "1.5.64")
+    monkeypatch.setattr(controller, "_check_update_before_login", lambda: flow.append("update"))
+
+    def fake_verify(_path, _env_name, **kwargs):
+        verification_calls.append(kwargs)
+        return True, "legacy-integrity-bridge: historical v1.5.64; not public trust"
+
+    monkeypatch.setattr(app_controller, "_verify_authenticode_signature", fake_verify)
+
+    controller.start()
+
+    assert flow == ["update"]
+    assert verification_calls == [
+        {
+            "artifact_version": "1.5.64",
+            "allow_legacy_integrity_bridge": True,
+            "require_public_trust": False,
+        }
+    ]
+
+
+def test_unconfigured_next_app_requires_public_trust_at_startup(monkeypatch):
+    import startup.app_controller as app_controller
+
+    controller = app_controller.AppController(object())
+    verification_calls = []
+    monkeypatch.setenv("APP_SIGNATURE_REQUIRED", "1")
+    monkeypatch.delenv("SSMAKER_TRANSITION_BRIDGE_VERSION", raising=False)
+    monkeypatch.setattr(app_controller, "is_msix_package", lambda: False)
+    monkeypatch.setattr(app_controller.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(app_controller.sys, "platform", "win32")
+    monkeypatch.setattr(controller, "get_current_version", lambda: "1.5.65")
+    monkeypatch.setattr(controller, "_check_update_before_login", lambda: None)
+
+    def fake_verify(_path, _env_name, **kwargs):
+        verification_calls.append(kwargs)
+        return True, "public-trusted"
+
+    monkeypatch.setattr(app_controller, "_verify_authenticode_signature", fake_verify)
+
+    controller.start()
+
+    assert verification_calls == [
+        {
+            "artifact_version": "1.5.65",
+            "allow_legacy_integrity_bridge": False,
+            "require_public_trust": True,
+        }
+    ]
