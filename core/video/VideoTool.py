@@ -4,6 +4,12 @@ import wave
 import sys
 from pydub import AudioSegment
 from caller import ui_controller
+from config.font_catalog import (
+    DEFAULT_FONT_ID,
+    DEFAULT_WATERMARK_FONT_ID,
+    font_candidate_paths,
+    normalize_font_id,
+)
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -149,8 +155,9 @@ def _create_single_line_subtitle(
         base_font_size = 78
         font_size = max(40, int(base_font_size * (video_height / base_height)))
 
-        # 선택된 폰트 가져오기 (기본값: seoul_hangang)
-        selected_font_id = getattr(app, "selected_font_id", "seoul_hangang")
+        selected_font_id = normalize_font_id(
+            getattr(app, "selected_font_id", DEFAULT_FONT_ID), DEFAULT_FONT_ID
+        )
 
         # Use cached font if available
         cache_key = (selected_font_id, font_size)
@@ -163,41 +170,12 @@ def _create_single_line_subtitle(
                 f"[SubtitleFont] 폰트 로드 시작: {selected_font_id} ({font_size}px), dir={project_fonts_dir}"
             )
 
-            # 폰트 ID별 경로 매핑
-            font_map = {
-                "seoul_hangang": [
-                    os.path.join(project_fonts_dir, "SeoulHangangB.ttf"),
-                    os.path.join(project_fonts_dir, "SeoulHangangEB.ttf"),
-                    os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
-                    os.path.join(project_fonts_dir, "SeoulHangangL.ttf"),
-                ],
-                "unpeople_gothic": [
-                    os.path.join(project_fonts_dir, "UnPeople.ttf"),
-                ],
-                "pretendard": [
-                    os.path.join(project_fonts_dir, "Pretendard-ExtraBold.ttf"),
-                    os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
-                    os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
-                ],
-                "noto_sans_kr": [
-                    os.path.join(project_fonts_dir, "NotoSansKR-Variable.ttf"),
-                ],
-                "suit": [
-                    os.path.join(project_fonts_dir, "SUIT-Heavy.ttf"),
-                ],
-                "paperlogy": [
-                    os.path.join(project_fonts_dir, "Paperlogy-9Black.ttf"),
-                    os.path.join(project_fonts_dir, "Paperlogy-8ExtraBold.ttf"),
-                    os.path.join(project_fonts_dir, "Paperlogy-7Bold.ttf"),
-                ],
-                "gmarketsans": [
-                    os.path.join(project_fonts_dir, "GmarketSansTTFBold.ttf"),
-                    os.path.join(project_fonts_dir, "GmarketSansTTFMedium.ttf"),
-                    os.path.join(project_fonts_dir, "GmarketSansTTFLight.ttf"),
-                ],
-            }
-
-            korean_fonts = font_map.get(selected_font_id, font_map["seoul_hangang"]).copy()
+            korean_fonts = font_candidate_paths(
+                selected_font_id,
+                project_fonts_dir,
+                include_fallbacks=True,
+                fallback=DEFAULT_FONT_ID,
+            )
 
             font = None
             for font_path in korean_fonts:
@@ -471,45 +449,13 @@ def _create_watermark_clip(
         # 프로젝트 폰트 폴더 경로
         project_fonts_dir = _resource_path("fonts")
 
-        # 폰트 ID → 파일 매핑
-        font_id_map = {
-            "pretendard": [
-                os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
-                os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
-            ],
-            "noto_sans_kr": [
-                os.path.join(project_fonts_dir, "NotoSansKR-Variable.ttf"),
-            ],
-            "suit": [
-                os.path.join(project_fonts_dir, "SUIT-Heavy.ttf"),
-            ],
-            "seoul_hangang": [
-                os.path.join(project_fonts_dir, "SeoulHangangB.ttf"),
-                os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
-            ],
-            "gmarketsans": [
-                os.path.join(project_fonts_dir, "GmarketSansTTFMedium.ttf"),
-                os.path.join(project_fonts_dir, "GmarketSansTTFBold.ttf"),
-            ],
-            "paperlogy": [
-                os.path.join(project_fonts_dir, "Paperlogy-9Black.ttf"),
-            ],
-            "unpeople_gothic": [
-                os.path.join(project_fonts_dir, "UnPeople.ttf"),
-            ],
-        }
-
-        # 선택된 폰트 후보 + 폴백
-        selected_fonts = font_id_map.get(font_id, [])
-        fallback_fonts = [
-            os.path.join(project_fonts_dir, "Pretendard-SemiBold.ttf"),
-            os.path.join(project_fonts_dir, "Pretendard-Bold.ttf"),
-            os.path.join(project_fonts_dir, "NotoSansKR-Variable.ttf"),
-            os.path.join(project_fonts_dir, "SUIT-Heavy.ttf"),
-            os.path.join(project_fonts_dir, "SeoulHangangM.ttf"),
-            os.path.join(project_fonts_dir, "GmarketSansTTFMedium.ttf"),
-        ]
-        font_candidates = selected_fonts + [f for f in fallback_fonts if f not in selected_fonts]
+        font_id = normalize_font_id(font_id, DEFAULT_WATERMARK_FONT_ID)
+        font_candidates = font_candidate_paths(
+            font_id,
+            project_fonts_dir,
+            include_fallbacks=True,
+            fallback=DEFAULT_WATERMARK_FONT_ID,
+        )
 
         # 시스템 폴백 폰트
         if sys.platform == "win32":

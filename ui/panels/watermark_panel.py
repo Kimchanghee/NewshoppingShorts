@@ -1,30 +1,29 @@
 """
 Watermark Settings Panel for PyQt6
 """
-import os
 import logging
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame,
     QScrollArea, QWidget, QLineEdit, QGridLayout,
-    QPushButton, QComboBox
+    QPushButton
 )
 from PyQt6.QtCore import Qt, pyqtSignal
-from PyQt6.QtGui import QFont, QFontDatabase, QPainter, QColor, QPen
+from PyQt6.QtGui import QFont, QPainter, QColor, QPen
+from config.font_catalog import (
+    DEFAULT_WATERMARK_FONT_ID,
+    normalize_font_id,
+    ui_font_options,
+)
 from ui.components.base_widget import ThemedMixin
 from managers.settings_manager import get_settings_manager
 from ui.design_system_v2 import get_design_system, get_color
 
 logger = logging.getLogger(__name__)
 
-# Font options matching font_panel.py
+# Font options come from the same catalog as subtitle selection and rendering.
 WATERMARK_FONT_OPTIONS = [
-    {"name": "프리텐다드", "id": "pretendard", "description": "세련된 현대적 고딕체"},
-    {"name": "서울 한강체", "id": "seoul_hangang", "description": "모던하고 깔끔한 서울시 공식 폰트"},
-    {"name": "Noto Sans KR", "id": "noto_sans_kr", "description": "상업 이용 가능한 구글 Noto 한글 폰트"},
-    {"name": "SUIT", "id": "suit", "description": "요즘 서비스 UI에 잘 맞는 모던 고딕체"},
-    {"name": "G마켓 산스", "id": "gmarketsans", "description": "인기 있는 고품질 무료 폰트"},
-    {"name": "페이퍼로지", "id": "paperlogy", "description": "부드러운 곡선이 매력적인 폰트"},
-    {"name": "유앤피플", "id": "unpeople_gothic", "description": "부드럽고 가독성 좋은 고딕체"},
+    {"name": option["name"], "id": option["id"], "description": option["description"]}
+    for option in ui_font_options()
 ]
 
 SIZE_OPTIONS = [
@@ -357,7 +356,10 @@ class WatermarkPanel(QFrame, ThemedMixin):
         enabled = settings.get("enabled", False)
         channel_name = settings.get("channel_name", "")
         position = settings.get("position", "bottom_right")
-        font_id = settings.get("font_id", "pretendard")
+        font_id = normalize_font_id(
+            settings.get("font_id", DEFAULT_WATERMARK_FONT_ID),
+            DEFAULT_WATERMARK_FONT_ID,
+        )
         font_size = settings.get("font_size", "medium")
 
         self.enable_btn.setChecked(enabled)
@@ -492,6 +494,7 @@ class WatermarkPanel(QFrame, ThemedMixin):
                 """)
 
     def _on_font_selected(self, font_id):
+        font_id = normalize_font_id(font_id, DEFAULT_WATERMARK_FONT_ID)
         self._update_font_selection(font_id)
         self.gui.watermark_font_id = font_id
         get_settings_manager().set_watermark_font_id(font_id)

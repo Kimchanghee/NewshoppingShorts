@@ -13,6 +13,11 @@ from copy import deepcopy
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+from config.font_catalog import (
+    DEFAULT_FONT_ID,
+    DEFAULT_WATERMARK_FONT_ID,
+    normalize_font_id,
+)
 from utils.logging_config import get_logger
 from utils.secrets_manager import get_secrets_manager
 
@@ -131,7 +136,7 @@ class SettingsManager:
     DEFAULT_SETTINGS = {
         "settings_schema_version": CURRENT_SETTINGS_SCHEMA_VERSION,
         "cta_id": "default",
-        "font_id": "seoul_hangang",
+        "font_id": DEFAULT_FONT_ID,
         "selected_voices": [],  # List of selected voice IDs
         "gender_filter": "all",
         "output_folder": "",  # 저장 폴더 경로 (빈 문자열이면 바탕화면)
@@ -142,7 +147,7 @@ class SettingsManager:
         "watermark_enabled": False,  # 워터마크 활성화 여부
         "watermark_channel_name": "",  # 채널 이름
         "watermark_position": "bottom_right",  # 위치: top_left, top_right, bottom_left, bottom_right
-        "watermark_font_id": "pretendard",  # 워터마크 폰트 ID
+        "watermark_font_id": DEFAULT_WATERMARK_FONT_ID,  # 워터마크 폰트 ID
         "watermark_font_size": "medium",  # 워터마크 크기: small, medium, large
         # 워터마크가 사용자가 직접 설정한 값인지 (기본값/테스트값 자동 초기화에 사용)
         "watermark_user_configured": False,
@@ -364,7 +369,11 @@ class SettingsManager:
                 continue
             value = loaded.get(key, deepcopy(default))
 
-            if key == "youtube_upload_interval":
+            if key == "font_id":
+                normalized[key] = normalize_font_id(value, DEFAULT_FONT_ID)
+            elif key == "watermark_font_id":
+                normalized[key] = normalize_font_id(value, DEFAULT_WATERMARK_FONT_ID)
+            elif key == "youtube_upload_interval":
                 if isinstance(value, str):
                     try:
                         value = int(value.strip())
@@ -854,7 +863,7 @@ class SettingsManager:
 
     def get_font_id(self) -> str:
         """Get the saved font selection ID"""
-        return self._settings.get("font_id", "seoul_hangang")
+        return normalize_font_id(self._settings.get("font_id"), DEFAULT_FONT_ID)
 
     def set_font_id(self, font_id: str) -> bool:
         """
@@ -866,7 +875,7 @@ class SettingsManager:
         Returns:
             True if save was successful
         """
-        self._settings["font_id"] = font_id
+        self._settings["font_id"] = normalize_font_id(font_id, DEFAULT_FONT_ID)
         return self._save_settings()
 
     # ============ Voice Settings ============
@@ -1083,30 +1092,21 @@ class SettingsManager:
 
     def get_watermark_font_id(self) -> str:
         """Get the watermark font ID"""
-        return self._settings.get("watermark_font_id", "pretendard")
+        return normalize_font_id(
+            self._settings.get("watermark_font_id"), DEFAULT_WATERMARK_FONT_ID
+        )
 
     def set_watermark_font_id(self, font_id: str) -> bool:
         """
         Save the watermark font ID.
 
         Args:
-            font_id: One of 'seoul_hangang', 'pretendard', 'noto_sans_kr', 'suit',
-                'gmarketsans', 'paperlogy', 'unpeople_gothic'
+            font_id: A font ID from ``config.font_catalog``.
 
         Returns:
             True if save was successful
         """
-        valid_fonts = (
-            "seoul_hangang",
-            "pretendard",
-            "noto_sans_kr",
-            "suit",
-            "gmarketsans",
-            "paperlogy",
-            "unpeople_gothic",
-        )
-        if font_id not in valid_fonts:
-            font_id = "pretendard"
+        font_id = normalize_font_id(font_id, DEFAULT_WATERMARK_FONT_ID)
         with self._lock:
             self._settings["watermark_font_id"] = font_id
             self._settings["watermark_user_configured"] = True

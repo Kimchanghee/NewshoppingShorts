@@ -2,12 +2,14 @@ from pathlib import Path
 
 from PyQt6.QtWidgets import QApplication
 
+from config.font_catalog import FONT_IDS, ui_font_options
 from config.voice_profiles import VOICE_PROFILES
 from ui.components.step_nav import StepNav
 from ui.panels.cta_panel import CTA_OPTIONS, get_selected_cta_lines
 from ui.panels.cta_panel import CTAPanel
 from ui.panels.mode_selection_panel import ModeSelectionPanel
 from ui.panels.voice_panel import VoicePanel
+from ui.panels.watermark_panel import WATERMARK_FONT_OPTIONS
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -50,26 +52,20 @@ def test_voice_profiles_include_ten_female_and_ten_male_gemini_voices():
         assert sample_path.stat().st_size > 100_000
 
 
-def test_new_commercial_font_files_are_bundled_and_mapped():
-    for rel_path in (
-        "fonts/NotoSansKR-Variable.ttf",
-        "fonts/SUIT-Heavy.ttf",
-        "fonts/LICENSE-NotoSansKR.txt",
-        "fonts/LICENSE-SUIT.txt",
-    ):
-        font_path = ROOT / rel_path
-        assert font_path.exists()
-        assert font_path.stat().st_size > 1_000
+def test_font_choices_share_one_catalog_across_ui_and_renderer():
+    assert tuple(option["id"] for option in ui_font_options()) == FONT_IDS
+    assert tuple(option["id"] for option in WATERMARK_FONT_OPTIONS) == FONT_IDS
 
+    font_panel_source = (ROOT / "ui/panels/font_panel.py").read_text(encoding="utf-8")
+    style_tab_source = (ROOT / "ui/panels/style_tab.py").read_text(encoding="utf-8")
     video_tool_source = (ROOT / "core/video/VideoTool.py").read_text(encoding="utf-8")
-    build_script_source = (ROOT / "scripts/build_exe.ps1").read_text(encoding="utf-8")
+    settings_source = (ROOT / "managers/settings_manager.py").read_text(encoding="utf-8")
 
-    assert "noto_sans_kr" in video_tool_source
-    assert "suit" in video_tool_source
-    assert "fonts\\NotoSansKR-Variable.ttf" in build_script_source
-    assert "fonts\\SUIT-Heavy.ttf" in build_script_source
-    assert "fonts\\LICENSE-NotoSansKR.txt" in build_script_source
-    assert "fonts\\LICENSE-SUIT.txt" in build_script_source
+    assert "ui_font_options" in font_panel_source
+    assert "ui_font_options" in style_tab_source
+    assert "font_candidate_paths" in video_tool_source
+    assert "normalize_font_id" in settings_source
+    assert "font_id_map" not in video_tool_source
 
 
 def test_selection_panels_adapt_without_icon_text_overlap():
