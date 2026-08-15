@@ -16,6 +16,7 @@ vi.mock("./pages/Index", () => ({
 }));
 vi.mock("./pages/Notice", () => ({ default: () => <div>notice route</div> }));
 vi.mock("./pages/Contact", () => ({ default: () => <div>contact route</div> }));
+vi.mock("./pages/Samples", () => ({ default: () => <div>samples route</div> }));
 vi.mock("./pages/NotFound", () => ({ default: () => <div>not found route</div> }));
 vi.mock("@/components/Analytics", () => ({ default: () => null }));
 
@@ -47,6 +48,7 @@ describe.each([
   ["/notice/index.html", "notice route"],
   ["/notice/release-v1.5.64/index.html", "notice route"],
   ["/contact/index.html", "contact route"],
+  ["/samples/index.html", "samples route"],
   ["/missing", "not found route"],
 ])("lazy route %s", (path, expectedText) => {
   it(`renders ${expectedText}`, async () => {

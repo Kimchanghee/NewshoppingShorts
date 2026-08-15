@@ -39,6 +39,9 @@ export default function Footer() {
               <Link to="/#setup-guide" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
                 초기 세팅 가이드
               </Link>
+              <Link to="/samples/index.html" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                영상 샘플
+              </Link>
               <Link to="/notice/index.html" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
                 공지사항
               </Link>

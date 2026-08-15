@@ -21,6 +21,17 @@ const KEYWORDS = [
 
 const staticRoutes = [
   {
+    path: "/samples",
+    title: "영상 샘플 10개 Before / After | SSMaker",
+    description: "SSMaker 실제 프로그램으로 처리한 원본 10개와 제작본 10개를 나란히 재생하고 비교하는 샘플 페이지입니다.",
+    type: "website",
+    h1: "SSMaker Before / After 영상 샘플 10개",
+    paragraphs: [
+      "중국어 자막 위치와 노출 시간을 감지해 블러한 OCR 샘플 5건과 쿠팡 상품 소스 매칭, 세로 편집, 한국어 음성·자막까지 완료한 풀자동 제작 샘플 5건을 공개합니다.",
+      "각 샘플은 원본 Before 영상과 SSMaker 제작 After 영상을 함께 제공하며 총 20개의 실제 MP4 영상을 직접 재생할 수 있습니다.",
+    ],
+  },
+  {
     path: "/notice",
     title: "공지사항 | SSMaker",
     description: "SSMaker 업데이트, 초기 세팅 매뉴얼, 쿠팡 파트너스, Linktree, YouTube OAuth 설정 가이드를 확인하세요.",

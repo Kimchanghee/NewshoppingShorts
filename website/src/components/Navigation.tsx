@@ -7,6 +7,7 @@ import { gaEvent } from "@/lib/ga4";
 
 const navLinks = [
   { label: "기능", href: "#features" },
+  { label: "샘플", href: "/samples/index.html" },
   { label: "효율성", href: "#efficiency" },
   { label: "요금제", href: "#pricing" },
   { label: "가이드", href: "#setup-guide" },
@@ -38,7 +39,7 @@ export default function Navigation() {
         </Link>
 
         {/* Desktop */}
-        <div className="hidden items-center gap-8 md:flex">
+        <div className="hidden items-center gap-4 lg:flex xl:gap-6">
           {navLinks.map((link) => {
             const to = link.href.startsWith("#") ? `/${link.href}` : link.href;
             return (
@@ -57,7 +58,7 @@ export default function Navigation() {
 
         {/* Mobile toggle */}
         <button
-          className="text-foreground md:hidden"
+          className="text-foreground lg:hidden"
           onClick={() => setMobileOpen(!mobileOpen)}
           aria-label="Toggle menu"
         >
@@ -67,7 +68,7 @@ export default function Navigation() {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="glass border-t border-border/50 md:hidden">
+        <div className="glass border-t border-border/50 lg:hidden">
           <div className="container mx-auto flex flex-col gap-4 px-6 py-6">
             {navLinks.map((link) => {
               const to = link.href.startsWith("#") ? `/${link.href}` : link.href;

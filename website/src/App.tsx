@@ -9,6 +9,7 @@ import Analytics from "@/components/Analytics";
 const Index = lazy(() => import("./pages/Index"));
 const Notice = lazy(() => import("./pages/Notice"));
 const Contact = lazy(() => import("./pages/Contact"));
+const Samples = lazy(() => import("./pages/Samples"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -29,6 +30,8 @@ const App = () => (
               <Route path="/notice/:slug/index.html" element={<Notice />} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/contact/index.html" element={<Contact />} />
+              <Route path="/samples" element={<Samples />} />
+              <Route path="/samples/index.html" element={<Samples />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

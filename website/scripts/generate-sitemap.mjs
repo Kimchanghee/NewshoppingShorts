@@ -28,6 +28,7 @@ const NOTICE_SLUGS = [
 const baseRoutes = [
   { loc: "/", changefreq: "daily", priority: "1.0" },
   { loc: "/notice/index.html", changefreq: "weekly", priority: "0.8" },
+  { loc: "/samples/index.html", changefreq: "weekly", priority: "0.9" },
   { loc: "/contact/index.html", changefreq: "monthly", priority: "0.6" },
 ];
 
