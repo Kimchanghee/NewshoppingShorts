@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <defs>
+    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#e11d2e"/>
+      <stop offset="100%" stop-color="#7a0d18"/>
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="14" fill="url(#g)"/>
+  <!-- shopping bag -->
+  <path d="M18 24h28l-3 26a4 4 0 0 1-4 3.6H25a4 4 0 0 1-4-3.6L18 24z"
+        fill="none" stroke="#ffffff" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M25 24v-3a7 7 0 0 1 14 0v3"
+        fill="none" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>
+  <!-- play triangle inside -->
+  <path d="M29 33l10 6-10 6z" fill="#ffffff"/>
+</svg>

@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <id>https://shoppingshorts.store/notice/index.html</id>
+  <title>SSMaker 공지사항과 업데이트</title>
+  <subtitle>SSMaker 업데이트, 초기 세팅 매뉴얼, 쿠팡 파트너스, Linktree, YouTube OAuth, Google Cloud 설정 가이드 모음</subtitle>
+  <link href="https://shoppingshorts.store/notice/index.html" />
+  <link href="https://shoppingshorts.store/atom.xml" rel="self" type="application/atom+xml" />
+  <updated>2026-04-30T00:00:00.000Z</updated>
+  <author>
+    <name>SSMaker</name>
+  </author>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-ocr-showcase-20260815/index.html</id>
+    <title>SSmaker OCR Showcase Media (2026-08-15)</title>
+    <link href="https://shoppingshorts.store/notice/release-ocr-showcase-20260815/index.html" />
+    <updated>2026-08-15T05:18:26.000Z</updated>
+    <summary>Public before and after media assets for the SSmaker OCR subtitle blur showcase. These assets are separate from desktop application releases.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.64/index.html</id>
+    <title>Release v1.5.64</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.64/index.html" />
+    <updated>2026-08-15T04:31:44.000Z</updated>
+    <summary>SSMaker v1.5.64 SSMaker v1.5.64: return to login after logout 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 58922e56f636d4e73a0b68c1f2756393fa9d6409…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.63/index.html</id>
+    <title>Release v1.5.63</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.63/index.html" />
+    <updated>2026-08-15T04:16:17.000Z</updated>
+    <summary>SSMaker v1.5.63 SSMaker v1.5.63 Improve full auto sourcing recovery 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 a36a55c1ad258b6875eee31e561a469dd9…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.62/index.html</id>
+    <title>Release v1.5.62</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.62/index.html" />
+    <updated>2026-08-15T03:40:33.000Z</updated>
+    <summary>SSMaker v1.5.62 월 149,000원 단일 정액제 적용 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 08998f6d0b36458e19c28997bab5e6f46c100d2b6b266215208efc3fc403dbd3 …</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.61/index.html</id>
+    <title>Release v1.5.61</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.61/index.html" />
+    <updated>2026-08-14T08:31:15.000Z</updated>
+    <summary>SSMaker v1.5.61 SSMaker v1.5.61 Recover blocked product video searches 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 21ad15d2bf50046c48e92e64ac1a1ea…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.60/index.html</id>
+    <title>Release v1.5.60</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.60/index.html" />
+    <updated>2026-08-12T17:46:54.000Z</updated>
+    <summary>SSMaker v1.5.60 SSMaker v1.5.60 Frame accurate OCR subtitle blur 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 e7cab0a44cfc09e282f24a9efc8ba15f77772…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.59/index.html</id>
+    <title>Release v1.5.59</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.59/index.html" />
+    <updated>2026-08-12T16:54:28.000Z</updated>
+    <summary>SSMaker v1.5.59 SSMaker v1.5.59 Startup recovery and diagnostics 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 b50abd55f858e756d0cd231e1af180b167995…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.58/index.html</id>
+    <title>Release v1.5.58</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.58/index.html" />
+    <updated>2026-08-12T16:36:58.000Z</updated>
+    <summary>SSMaker v1.5.58 Fix queue deletion and clarify service responsibility 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 379d427cd7e94c0e2ab576118a5f8b56…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.57/index.html</id>
+    <title>Release v1.5.57</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.57/index.html" />
+    <updated>2026-08-12T15:50:21.000Z</updated>
+    <summary>SSMaker v1.5.57 SSMaker v1.5.57 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 0cf704001d3e033cb518899a5800f2315ae09751ea8a65b9da2ba7832c42acee Full …</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.56/index.html</id>
+    <title>Release v1.5.56</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.56/index.html" />
+    <updated>2026-08-11T06:39:25.000Z</updated>
+    <summary>SSMaker v1.5.56 Rename header and show installed release metadata 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 5982db8bad92cced5eb8aa65fa0591b749bd…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.55/index.html</id>
+    <title>Release v1.5.55</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.55/index.html" />
+    <updated>2026-08-11T05:45:10.000Z</updated>
+    <summary>SSMaker v1.5.55 Verify updater and release metadata end to end 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 a0b720429089fb9d43fbe1611fc8865593d51bb…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.54/index.html</id>
+    <title>Release v1.5.54</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.54/index.html" />
+    <updated>2026-08-11T05:13:48.000Z</updated>
+    <summary>SSMaker v1.5.54 Verify automatic updater end to end 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 ac2b304cb7d364c27391e8e8265ced2d6b291b7acd5c1eaf46…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.53/index.html</id>
+    <title>Release v1.5.53</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.53/index.html" />
+    <updated>2026-08-11T04:38:04.000Z</updated>
+    <summary>SSMaker v1.5.53 Fix GitHub release asset redirect validation 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 f059b108b8ae92d5de11f1c838cfb21b6957be5de…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.52/index.html</id>
+    <title>Release v1.5.52</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.52/index.html" />
+    <updated>2026-08-11T02:54:24.000Z</updated>
+    <summary>SSMaker v1.5.52 풀자동 제작 범위 분리 및 선택 연동 개선 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 c17fa9f0abf5e161bee6b01dc0590326e2cc2734424193fb924ac8af702a94…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.51/index.html</id>
+    <title>Release v1.5.51</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.51/index.html" />
+    <updated>2026-08-11T02:07:43.000Z</updated>
+    <summary>SSMaker v1.5.51 중국 숏폼 상품영상 검색 정확도 및 풀자동화 안정성 개선 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 3e6c5ad399b8d2235a883c538291a70d25904f093966e3e15c6b35…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.50/index.html</id>
+    <title>Release v1.5.50</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.50/index.html" />
+    <updated>2026-08-08T05:51:33.000Z</updated>
+    <summary>SSMaker v1.5.50 SSMaker v1.5.50 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 d80096ab659aeeb5ae20b398e1d12f668f07c5862bea1b6bbbfcf8f293379d02 Full …</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.49/index.html</id>
+    <title>Release v1.5.49</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.49/index.html" />
+    <updated>2026-08-06T09:08:05.000Z</updated>
+    <summary>SSMaker v1.5.49 YouTube OAuth packaging, recovery, and secure token lifecycle 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 2e26c693e58af67edc46dd84…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.48/index.html</id>
+    <title>Release v1.5.48</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.48/index.html" />
+    <updated>2026-08-06T07:41:22.000Z</updated>
+    <summary>SSMaker v1.5.48 Fix YouTube OAuth dependencies in packaged Windows builds 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 6e2ab822a593f4994a51dac5fb0c…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.47/index.html</id>
+    <title>Release v1.5.47</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.47/index.html" />
+    <updated>2026-08-06T01:07:36.000Z</updated>
+    <summary>SSMaker v1.5.47 Microsoft Store MSIX 배포 및 패키지 안정성 개선 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 41386a40efe01b17afa3b213d08567ef270693c45c663121c…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-v1.5.46/index.html</id>
+    <title>Release v1.5.46</title>
+    <link href="https://shoppingshorts.store/notice/release-v1.5.46/index.html" />
+    <updated>2026-08-05T08:29:06.000Z</updated>
+    <summary>SSMaker v1.5.46 SSMaker v1.5.46 Production hardening and recovery 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 8e79e662d79e3016840505f5140325dec3d2…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/spring-2026-new-subscriber-extra-month/index.html</id>
+    <title>신규 구독 1개월 추가 제공 이벤트</title>
+    <link href="https://shoppingshorts.store/notice/spring-2026-new-subscriber-extra-month/index.html" />
+    <updated>2026-04-30T00:00:00.000Z</updated>
+    <summary>2026년 4월 30일부터 2026년 5월 14일까지 신규 가입 후 구독 확정 시 1개월을 추가 제공하는 SSMaker 2주 한정 이벤트입니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/coupang-partners-channel-setup/index.html</id>
+    <title>쿠팡 파트너스 초기 채널 등록 매뉴얼</title>
+    <link href="https://shoppingshorts.store/notice/coupang-partners-channel-setup/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>쿠팡 파트너스에 YouTube 채널 또는 Linktree 공개 프로필을 등록하고 승인 증빙 캡쳐를 준비하는 방법입니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/linktree-signup-link-setup/index.html</id>
+    <title>Linktree 처음 가입 및 상품 링크 세팅 매뉴얼</title>
+    <link href="https://shoppingshorts.store/notice/linktree-signup-link-setup/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>Linktree 가입, 관리자 Links 화면, 상품 링크 추가, 공개 프로필 상품 버튼 확인 방법입니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/coupang-partners-product-link/index.html</id>
+    <title>쿠팡 파트너스 상품 링크 가져오기 매뉴얼</title>
+    <link href="https://shoppingshorts.store/notice/coupang-partners-product-link/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>쿠팡 파트너스에서 link.coupang.com/a/... 단축 링크를 만들고 SSMaker 풀자동 입력에 사용하는 방법입니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html</id>
+    <title>YouTube 채널 연결용 Google Cloud OAuth 설정 가이드</title>
+    <link href="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/youtube-google-cloud-oauth-screenshots/index.html</id>
+    <title>Google Cloud 실제 화면 캡쳐로 보는 YouTube OAuth 설정</title>
+    <link href="https://shoppingshorts.store/notice/youtube-google-cloud-oauth-screenshots/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>Google Cloud Console 실제 화면 기준으로 YouTube Data API v3, Google 인증 플랫폼, 데스크톱 OAuth 클라이언트 생성 단계를 확인합니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/youtube-linktree-upload-check/index.html</id>
+    <title>업로드 후 YouTube·댓글·Linktree 검수 매뉴얼</title>
+    <link href="https://shoppingshorts.store/notice/youtube-linktree-upload-check/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>YouTube Shorts 업로드 후 상품명, 댓글, 구매 링크, Linktree 번호 링크가 제대로 반영됐는지 검수하는 방법입니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/ssmaker-launch/index.html</id>
+    <title>SSMaker 정식 출시 안내</title>
+    <link href="https://shoppingshorts.store/notice/ssmaker-launch/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>중국 쇼핑 숏폼 영상을 한국어 쇼핑 콘텐츠로 자동 변환하는 SSMaker 정식 출시 안내입니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/free-voucher/index.html</id>
+    <title>무료 이용권 안내</title>
+    <link href="https://shoppingshorts.store/notice/free-voucher/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>SSMaker 무료 체험 이용권과 기본 무료 사용 안내입니다.</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/gemini-api-guide/index.html</id>
+    <title>구글 제미나이 API 키 발급 방법</title>
+    <link href="https://shoppingshorts.store/notice/gemini-api-guide/index.html" />
+    <updated>2026-04-29T00:00:00.000Z</updated>
+    <summary>SSMaker AI 스크립트 생성에 사용할 Google Gemini API 키 발급과 설정 방법입니다.</summary>
+  </entry>
+</feed>

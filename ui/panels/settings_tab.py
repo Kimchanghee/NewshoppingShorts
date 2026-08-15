@@ -467,7 +467,10 @@ class SettingsTab(QWidget, ThemedMixin):
         self.api_section = SettingsSection("API 키 설정 (최대 8개)")
 
         # API KEY 발급 안내 링크 (타이틀 바로 아래)
-        api_guide_link = QLabel('<a href="https://ssmaker.lovable.app/notice" style="color: #3B82F6; text-decoration: none;">API KEY 발급 안내 →</a>')
+        api_guide_link = QLabel(
+            f'<a href="{SETUP_NOTICE_BASE_URL}" style="color: #3B82F6; text-decoration: none;">'
+            "API KEY 발급 안내 →</a>"
+        )
         api_guide_link.setOpenExternalLinks(True)
         api_guide_link.setStyleSheet("border: none; background: transparent; font-size: 12px;")
         self.api_section.content_layout.addWidget(api_guide_link)

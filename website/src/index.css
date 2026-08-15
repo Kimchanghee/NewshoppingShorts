@@ -1,0 +1,132 @@
+@import url("https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 4%;
+    --foreground: 0 0% 93%;
+
+    --card: 0 0% 7%;
+    --card-foreground: 0 0% 93%;
+
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 93%;
+
+    --primary: 0 72% 51%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 0 0% 10%;
+    --secondary-foreground: 0 0% 80%;
+
+    --muted: 0 0% 12%;
+    --muted-foreground: 0 0% 50%;
+
+    --accent: 190 95% 50%;
+    --accent-foreground: 0 0% 100%;
+    --accent: 0 84% 60%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 0 0% 14%;
+    --input: 0 0% 14%;
+    --ring: 0 72% 51%;
+
+    --radius: 0.75rem;
+
+    --warning: 30 95% 55%;
+    --warning-foreground: 0 0% 100%;
+
+    --sidebar-background: 0 0% 6%;
+    --sidebar-foreground: 0 0% 93%;
+    --sidebar-primary: 0 72% 51%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 0 0% 10%;
+    --sidebar-accent-foreground: 0 0% 93%;
+    --sidebar-border: 0 0% 14%;
+    --sidebar-ring: 0 72% 51%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-family:
+      "Outfit",
+      system-ui,
+      -apple-system,
+      sans-serif;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+@layer utilities {
+  .text-gradient {
+    background: linear-gradient(135deg, hsl(0 72% 51%), hsl(0 84% 60%));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+
+  .bg-gradient-primary {
+    background: linear-gradient(135deg, hsl(0 72% 51%), hsl(0 84% 60%));
+  }
+
+  .bg-gradient-primary-hover {
+    background: linear-gradient(135deg, hsl(0 72% 55%), hsl(0 84% 65%));
+  }
+
+  .shadow-glow {
+    box-shadow: 0 0 30px hsl(0 72% 51% / 0.25);
+  }
+
+  .shadow-glow-lg {
+    box-shadow: 0 0 50px hsl(0 72% 51% / 0.35);
+  }
+
+  .shadow-glow-sm {
+    box-shadow: 0 0 15px hsl(0 72% 51% / 0.15);
+  }
+
+  .border-glow {
+    border-color: hsl(0 72% 51% / 0.3);
+  }
+
+  .glass {
+    background: hsl(0 0% 100% / 0.03);
+    backdrop-filter: blur(12px);
+    border: 1px solid hsl(0 0% 100% / 0.06);
+  }
+
+  .glass-card {
+    background: hsl(0 0% 100% / 0.04);
+    backdrop-filter: blur(16px);
+    border: 1px solid hsl(0 0% 100% / 0.08);
+  }
+
+  .hero-glow {
+    background: radial-gradient(
+      ellipse 80% 60% at 50% 40%,
+      hsl(0 72% 51% / 0.12) 0%,
+      hsl(0 84% 60% / 0.05) 40%,
+      transparent 70%
+    );
+  }
+
+  .section-glow {
+    background: radial-gradient(ellipse 60% 40% at 50% 0%, hsl(0 72% 51% / 0.06) 0%, transparent 60%);
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+}
