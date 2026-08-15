@@ -1,6 +1,9 @@
 """Security contracts for Authenticode classification and release publication."""
 
+import os
 from pathlib import Path
+import subprocess
+import sys
 
 import yaml
 
@@ -239,6 +242,68 @@ def test_workflow_forces_tag_publication_policy_and_blocks_bridge_publication():
     assert "validate_build_signing_configuration" in workflow
     assert "if: needs.build.outputs.publish == 'true'" in workflow
     assert "steps.version" not in workflow
+
+
+def test_baked_release_authorization_imports_only_from_validated_workspace(tmp_path):
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    step = next(
+        step
+        for step in workflow["jobs"]["build"]["steps"]
+        if step.get("name") == "Read baked release authorization"
+    )
+    script = step["run"]
+
+    workspace_check = 'workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve(strict=True)'
+    cwd_check = "Path.cwd().resolve(strict=True) != workspace"
+    module_check = 'auth_module = (workspace / "utils" / "authenticode.py").resolve(strict=True)'
+    containment_check = "auth_module.is_relative_to(workspace)"
+    path_insert = "sys.path.insert(0, str(workspace))"
+    module_import = "from utils.authenticode import"
+    for contract in (
+        workspace_check,
+        cwd_check,
+        module_check,
+        containment_check,
+        path_insert,
+    ):
+        assert contract in script
+    assert script.index(workspace_check) < script.index(path_insert) < script.index(module_import)
+
+    temp_script = tmp_path / "baked_release.py"
+    github_output = tmp_path / "github-output.txt"
+    temp_script.write_text(script, encoding="utf-8")
+    env = os.environ.copy()
+    env.pop("PYTHONPATH", None)
+    env["GITHUB_WORKSPACE"] = str(ROOT)
+    env["GITHUB_OUTPUT"] = str(github_output)
+    completed = subprocess.run(
+        [sys.executable, "-I", str(temp_script)],
+        cwd=ROOT,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    outputs = github_output.read_text(encoding="utf-8").splitlines()
+    assert any(line.startswith("transition_bridge_version=") for line in outputs)
+    assert any(line.startswith("has_public_signer_pins=") for line in outputs)
+
+    mismatched_cwd = subprocess.run(
+        [sys.executable, "-I", str(temp_script)],
+        cwd=tmp_path,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert mismatched_cwd.returncode != 0
+    assert "GITHUB_WORKSPACE does not match" in mismatched_cwd.stderr
 
 
 def test_workflow_installs_package_and_directly_verifies_signed_uninstaller():

@@ -242,6 +242,17 @@ jobs:
       shell: python
       run: |
         import os
+        import sys
+        from pathlib import Path
+
+        workspace = Path(os.environ["GITHUB_WORKSPACE"]).resolve(strict=True)
+        if Path.cwd().resolve(strict=True) != workspace:
+            raise SystemExit("GITHUB_WORKSPACE does not match the workflow working directory")
+        auth_module = (workspace / "utils" / "authenticode.py").resolve(strict=True)
+        if not auth_module.is_file() or not auth_module.is_relative_to(workspace):
+            raise SystemExit("Trusted utils/authenticode.py was not found inside GITHUB_WORKSPACE")
+        sys.path.insert(0, str(workspace))
+
         from utils.authenticode import PUBLIC_RELEASE_SIGNER_THUMBPRINTS, TRANSITION_BRIDGE_VERSION
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write(f"transition_bridge_version={TRANSITION_BRIDGE_VERSION.strip().lstrip('vV')}\n")
