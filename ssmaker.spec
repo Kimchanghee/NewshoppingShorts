@@ -2,6 +2,12 @@
 import sys
 import os
 from PyInstaller.utils.hooks import collect_all, copy_metadata, collect_submodules, collect_data_files
+from config.font_catalog import (
+    DEFAULT_FONTS_DIR,
+    DEFAULT_LICENSES_DIR,
+    FONT_CHOICES,
+    LICENSE_NOTICES,
+)
 
 block_cipher = None
 project_root = os.path.abspath('.')
@@ -100,11 +106,17 @@ if os.path.exists(_secure_config):
     datas.append((_secure_config, '.'))
     print("[spec] Including .secure_config.enc for encrypted API keys")
 
-_fonts_dir = os.path.join(project_root, 'fonts')
-if os.path.isdir(_fonts_dir):
-    datas.append((_fonts_dir, 'fonts'))
-else:
-    print(f"[spec] WARNING: fonts directory not found: {_fonts_dir}")
+for _font_choice in FONT_CHOICES:
+    _font_path = DEFAULT_FONTS_DIR / _font_choice.asset.filename
+    if not _font_path.is_file():
+        raise SystemExit(f"[spec] ERROR: catalog font is missing: {_font_path}")
+    datas.append((str(_font_path), 'fonts'))
+
+for _license_notice in LICENSE_NOTICES.values():
+    _license_path = DEFAULT_LICENSES_DIR / _license_notice.filename
+    if not _license_path.is_file():
+        raise SystemExit(f"[spec] ERROR: catalog font notice is missing: {_license_path}")
+    datas.append((str(_license_path), 'licenses'))
 
 # Bundle Tesseract runtime (exe + DLLs + tessdata) for end-user machines.
 _tesseract_bundle = os.path.join(project_root, 'build_staging', 'tesseract')

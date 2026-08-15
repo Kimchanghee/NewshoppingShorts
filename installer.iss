@@ -69,10 +69,10 @@ UninstallDisplayName={#MyAppName}
 ; To enable: install a code signing certificate and configure signtool path below.
 ; Usage:  iscc /DMyAppVersion=1.3.33 /DSignToolAvailable installer.iss
 ;
-; SignTool expects signtool.exe in PATH (Windows SDK) or set SIGNTOOL_PATH env var.
-; Certificate can be specified via SIGN_CERT_THUMBPRINT env var.
+; build_exe.ps1 supplies the named tool with ISCC /Sssmaker=... and enables
+; this block with /DSignToolAvailable. Inno signs both Setup and its uninstaller.
 #ifdef SignToolAvailable
-SignTool=signtool sign /fd sha256 /tr https://timestamp.digicert.com /td sha256 /sha1 {#GetEnv("SIGN_CERT_THUMBPRINT")} $f
+SignTool=ssmaker
 SignedUninstaller=yes
 #endif
 
@@ -99,9 +99,9 @@ Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; Tasks: de
 
 [Run]
 ; Interactive install: user chooses whether to launch via checkbox
-Filename: "{app}\{#MyAppExeName}"; Description: "Launch SSMaker"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\{#MyAppExeName}"; Description: "Launch SSMaker"; Flags: nowait postinstall skipifsilent; Check: ShouldLaunchInstalledApp
 ; Silent install (auto-update): always restart the app after files are replaced
-Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent
+Filename: "{app}\{#MyAppExeName}"; Flags: nowait skipifnotsilent; Check: ShouldLaunchInstalledApp
 
 [InstallDelete]
 ; Remove stale binary-extension residues before copying new files.
@@ -153,6 +153,26 @@ var
   ExistingUninstallCmd: string;
   ExistingQuietUninstallCmd: string;
   InstallModePage: TInputOptionWizardPage;
+
+function IsPackageVerificationRun(): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+  begin
+    if Uppercase(ParamStr(I)) = '/VERIFYPACKAGE' then
+    begin
+      Result := True;
+      exit;
+    end;
+  end;
+end;
+
+function ShouldLaunchInstalledApp(): Boolean;
+begin
+  Result := not IsPackageVerificationRun();
+end;
 
 function ReadUninstallRegValue(const ValueName: string; var Value: string): Boolean;
 begin

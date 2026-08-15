@@ -37,6 +37,61 @@ function Invoke-Native {
   }
 }
 
+function Assert-AuthenticodeArtifact {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [Parameter(Mandatory = $true)][string]$ExpectedThumbprint,
+    [Parameter(Mandatory = $true)][ValidateSet("public", "integrity-bridge")][string]$SigningMode,
+    [Parameter(Mandatory = $true)][string]$SignToolPath,
+    [Parameter(Mandatory = $true)][string]$Label
+  )
+
+  $expectedThumb = ($ExpectedThumbprint -replace '\s', '').ToUpperInvariant()
+  $signature = Get-AuthenticodeSignature -LiteralPath $Path
+  $actualThumb = ""
+  if ($signature.SignerCertificate -and $signature.SignerCertificate.Thumbprint) {
+    $actualThumb = ($signature.SignerCertificate.Thumbprint -replace '\s', '').ToUpperInvariant()
+  }
+  if ($actualThumb -ne $expectedThumb) {
+    throw "$Label signer mismatch (expected $expectedThumb, got $actualThumb)."
+  }
+
+  $codeSigningEku = "1.3.6.1.5.5.7.3.3"
+  $ekuOids = @(
+    $signature.SignerCertificate.EnhancedKeyUsageList |
+      ForEach-Object { [string]$_.ObjectId.Value }
+  )
+  if ($codeSigningEku -notin $ekuOids) {
+    throw "$Label signer certificate is missing the Code Signing EKU ($codeSigningEku)."
+  }
+  if ($null -eq $signature.TimeStamperCertificate) {
+    throw "$Label signature is missing its trusted RFC 3161 timestamp."
+  }
+
+  if ($SigningMode -eq "public") {
+    $legacyBridgeThumb = "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0"
+    if ($actualThumb -eq $legacyBridgeThumb) {
+      throw "$Label uses the v1.5.64 legacy integrity-bridge signer, which is never public trust."
+    }
+    if ($signature.SignerCertificate.Subject -eq $signature.SignerCertificate.Issuer) {
+      throw "$Label uses a self-issued signer; public releases require a public certificate chain."
+    }
+    if ([string]$signature.Status -ne "Valid") {
+      throw "$Label public signature requires Authenticode Status Valid; got $($signature.Status). UnknownError is not accepted in public mode."
+    }
+    Invoke-Native "$Label public Authenticode verification (/pa /all)..." $SignToolPath @(
+      "verify", "/pa", "/all", "/v", $Path
+    )
+    Write-Host "OK: $Label is public-trusted (expected signer, Code Signing EKU, timestamp, and /pa /all verification)."
+    return
+  }
+
+  if ([string]$signature.Status -notin @("Valid", "UnknownError")) {
+    throw "$Label integrity-bridge signature is invalid: $($signature.Status)."
+  }
+  Write-Warning "$Label is an integrity-bridge candidate only; it is not public trust and must not be published."
+}
+
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path
 
 $Python = ""
@@ -87,12 +142,43 @@ if ($PackageTarget -notin @("installer", "msix")) {
 }
 $StorePackageBuild = $PackageTarget -eq "msix"
 
+$SigningMode = "public"
+if (-not [string]::IsNullOrWhiteSpace($env:SSMAKER_SIGNING_MODE)) {
+  $SigningMode = $env:SSMAKER_SIGNING_MODE.Trim().ToLowerInvariant()
+}
+if ($SigningMode -notin @("public", "integrity-bridge")) {
+  throw "Unsupported SSMAKER_SIGNING_MODE: $SigningMode (expected public or integrity-bridge)."
+}
+
+$signThumb = ""
+if (-not $StorePackageBuild) {
+  if ($null -ne $env:SIGN_CERT_THUMBPRINT) {
+    $signThumb = ($env:SIGN_CERT_THUMBPRINT -replace '\s', '').Trim().ToUpperInvariant()
+  }
+  if ([string]::IsNullOrWhiteSpace($signThumb)) {
+    throw "SIGN_CERT_THUMBPRINT is required for direct-download release builds."
+  }
+}
+
 try {
   Write-Host "Project root: $Root"
   Write-Host "Python: $Python"
   Write-Host "App version: $AppVersion"
   Write-Host "Package target: $PackageTarget"
+  if (-not $StorePackageBuild) {
+    Write-Host "Signing mode: $SigningMode"
+  }
   Push-Location $Root
+
+  if (-not $StorePackageBuild) {
+    Invoke-Native "[0.2/5] Validating baked signing identity policy..." $Python @(
+      "-c",
+      "import sys; from utils.authenticode import validate_build_signing_configuration as validate; ok, reason = validate(sys.argv[1], sys.argv[2], sys.argv[3]); print(reason); raise SystemExit(0 if ok else 1)",
+      $SigningMode,
+      $AppVersion,
+      $signThumb
+    )
+  }
 
   # Validate the exact build interpreter before deleting a known-good dist.
   # This catches stale local venvs and missing YouTube discovery data that
@@ -158,23 +244,28 @@ try {
     }
   }
 
-  $tessdataFastBase = "https://github.com/tesseract-ocr/tessdata_fast/raw/main"
-  $expectedTessFastHashes = @{
-    "eng" = "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2"
-    "kor" = "6b85e11d9bbf07863b97b3523b1b112844c43e713df8b66418a081fd1060b3b2"
-    "chi_sim" = "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730"
+  $tessdataFastCommit = "87416418657359cb625c412a48b6e1d6d41c29bd"
+  $tessdataFastBase = "https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/$tessdataFastCommit"
+  $expectedTessFast = @{
+    "eng" = @{ Size = 4113088; Hash = "7d4322bd2a7749724879683fc3912cb542f19906c83bcc1a52132556427170b2" }
+    "kor" = @{ Size = 1677415; Hash = "6b85e11d9bbf07863b97b3523b1b112844c43e713df8b66418a081fd1060b3b2" }
+    "chi_sim" = @{ Size = 2469156; Hash = "a5fcb6f0db1e1d6d8522f39db4e848f05984669172e584e8d76b6b3141e1f730" }
   }
   foreach ($lang in @("eng", "kor", "chi_sim")) {
     $dst = Join-Path $stageTessdata ("$lang.traineddata")
-    if (-not (Test-Path $dst)) {
+    $candidate = "$dst.download"
+    try {
       Write-Host "Downloading tessdata_fast: $lang.traineddata"
-      Invoke-WebRequest -Uri ("$tessdataFastBase/$lang.traineddata") -OutFile $dst -UseBasicParsing
-      $actualHash = (Get-FileHash -Path $dst -Algorithm SHA256).Hash.ToLower()
-      $expectedHash = $expectedTessFastHashes[$lang]
-      if ($actualHash -ne $expectedHash) {
-        Remove-Item -Path $dst -Force -ErrorAction SilentlyContinue
-        throw "tessdata_fast hash mismatch for $lang.traineddata (expected $expectedHash, got $actualHash)"
+      Invoke-WebRequest -Uri ("$tessdataFastBase/$lang.traineddata") -OutFile $candidate -UseBasicParsing
+      $actualSize = (Get-Item -LiteralPath $candidate).Length
+      $actualHash = (Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant()
+      $expected = $expectedTessFast[$lang]
+      if ($actualSize -ne $expected.Size -or $actualHash -ne $expected.Hash) {
+        throw "tessdata_fast integrity mismatch for $lang.traineddata (expected $($expected.Size)/$($expected.Hash), got $actualSize/$actualHash)"
       }
+      Move-Item -LiteralPath $candidate -Destination $dst -Force
+    } finally {
+      Remove-Item -LiteralPath $candidate -Force -ErrorAction SilentlyContinue
     }
   }
 
@@ -185,6 +276,17 @@ try {
     }
   }
   Write-Host "OK: Staged Tesseract to $stageRoot"
+
+  # fonts/ is intentionally not a trusted persistent input. Materialize the
+  # exact pinned catalog before PyInstaller, then verify source assets/notices.
+  Invoke-Native "[1.8/5] Synchronizing pinned font catalog..." $Python @(
+    (Join-Path $Root "scripts\download_all_fonts_final.py")
+  )
+  Invoke-Native "[1.9/5] Verifying source font assets and license notices..." $Python @(
+    (Join-Path $Root "scripts\verify_font_assets.py"),
+    "--fonts-dir", (Join-Path $Root "fonts"),
+    "--licenses-dir", (Join-Path $Root "resources\licenses")
+  )
 
   # ── PyInstaller: onedir build ──────────────────────────────────────────────
   Invoke-Native "[2/5] Building ssmaker (onedir)..." $Python @(
@@ -201,18 +303,17 @@ try {
     throw "Build output missing: ${ssmakerExe}"
   }
 
+  Invoke-Native "[2.2/5] Verifying packaged font assets and license notices..." $Python @(
+    (Join-Path $Root "scripts\verify_font_assets.py"),
+    "--fonts-dir", (Join-Path $distDir "fonts"),
+    "--licenses-dir", (Join-Path $distDir "licenses")
+  )
+
   # Direct-download artifacts need Authenticode here. Microsoft signs Store
   # MSIX packages after Partner Center certification, so those payloads do not
   # require a private PFX in CI.
-  $signThumb = ""
   $signtool = $null
   if (-not $StorePackageBuild) {
-    if ($null -ne $env:SIGN_CERT_THUMBPRINT) {
-      $signThumb = $env:SIGN_CERT_THUMBPRINT.Trim()
-    }
-    if ([string]::IsNullOrWhiteSpace($signThumb)) {
-      throw "SIGN_CERT_THUMBPRINT is required for direct-download release builds."
-    }
     $signtool = (Get-Command signtool -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue)
     if (-not $signtool) {
       $sdkBins = Get-ChildItem -Path "C:\Program Files (x86)\Windows Kits\10\bin" -Directory -ErrorAction SilentlyContinue |
@@ -231,11 +332,19 @@ try {
 
     Invoke-Native "[2.5/5] Code signing ssmaker.exe..." $signtool @(
       "sign",
-      "/fd", "sha256",
-      "/t", "http://timestamp.digicert.com",
+      "/fd", "SHA256",
+      "/tr", "https://timestamp.digicert.com",
+      "/td", "SHA256",
+      "/u", "1.3.6.1.5.5.7.3.3",
       "/sha1", $signThumb,
       $ssmakerExe
     )
+    Assert-AuthenticodeArtifact `
+      -Path $ssmakerExe `
+      -ExpectedThumbprint $signThumb `
+      -SigningMode $SigningMode `
+      -SignToolPath $signtool `
+      -Label "ssmaker.exe"
   } else {
     Write-Host "`n[2.5/5] Store build: package signing is delegated to Microsoft Store."
   }
@@ -256,20 +365,6 @@ try {
 
     # ── Video / FFmpeg ──
     "imageio_ffmpeg",
-
-    # ── Korean Fonts (전체) ──
-    "fonts\Pretendard-ExtraBold.ttf",
-    "fonts\Pretendard-Bold.ttf",
-    "fonts\Pretendard-SemiBold.ttf",
-    "fonts\NotoSansKR-Variable.ttf",
-    "fonts\SUIT-Heavy.ttf",
-    "fonts\LICENSE-NotoSansKR.txt",
-    "fonts\LICENSE-SUIT.txt",
-    "fonts\GmarketSansTTFBold.ttf",
-    "fonts\SpoqaHanSansNeo-Bold.ttf",
-    "fonts\Paperlogy-9Black.ttf",
-    "fonts\SeoulHangangB.ttf",
-    "fonts\IBMPlexSansKR-Bold.ttf",
 
     # ── Tesseract OCR runtime ──
     "tesseract\tesseract.exe",
@@ -338,23 +433,9 @@ try {
     }
   }
 
-  $requiredFontItems = @(
-    "fonts\NotoSansKR-Variable.ttf",
-    "fonts\SUIT-Heavy.ttf",
-    "fonts\LICENSE-NotoSansKR.txt",
-    "fonts\LICENSE-SUIT.txt"
-  )
-
   foreach ($item in $mustContain) {
     $found = $allFiles | Where-Object { $_ -like "*$item*" }
     if (-not $found) {
-      if ($item -like "fonts\*") {
-        if ($requiredFontItems -contains $item) {
-          throw "Missing required bundled font in dist\ssmaker\: ${item}"
-        }
-        Write-Warning "Optional font missing in dist\\ssmaker\\: ${item}"
-        continue
-      }
       throw "Missing required item in dist\ssmaker\: ${item}"
     }
   }
@@ -517,8 +598,14 @@ try {
   }
 
   $issFile = Join-Path $Root "installer.iss"
+  # Inno invokes this named signing tool for both its generated uninstaller and
+  # the final Setup executable. $q and $f are Inno placeholders and therefore
+  # intentionally remain literal here.
+  $innoSignCommand = '$q' + $signtool + '$q sign /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 /u 1.3.6.1.5.5.7.3.3 /sha1 ' + $signThumb + ' $f'
   Invoke-Native "[4/5] Compiling installer..." $iscc @(
     "/DMyAppVersion=$AppVersion",
+    "/DSignToolAvailable",
+    "/Sssmaker=$innoSignCommand",
     $issFile
   )
 
@@ -527,26 +614,12 @@ try {
     throw "Installer output missing: ${installerExe}"
   }
 
-  Invoke-Native "[4.5/5] Code signing installer..." $signtool @(
-    "sign",
-    "/fd", "sha256",
-    "/t", "http://timestamp.digicert.com",
-    "/sha1", $signThumb,
-    $installerExe
-  )
-
-  $installerSig = Get-AuthenticodeSignature -FilePath $installerExe
-  $signedThumb = ""
-  if ($installerSig.SignerCertificate -and $installerSig.SignerCertificate.Thumbprint) {
-    $signedThumb = $installerSig.SignerCertificate.Thumbprint.ToUpper()
-  }
-  if ($installerSig.Status -ne "Valid") {
-    if (($installerSig.Status -eq "UnknownError") -and ($signedThumb -eq $signThumb.ToUpper())) {
-      Write-Warning "Installer signature chain not trusted on this runner, but signer thumbprint matches expected cert."
-    } else {
-      throw "Installer signature invalid: $($installerSig.Status)"
-    }
-  }
+  Assert-AuthenticodeArtifact `
+    -Path $installerExe `
+    -ExpectedThumbprint $signThumb `
+    -SigningMode $SigningMode `
+    -SignToolPath $signtool `
+    -Label "final installer"
 
   # ── Done ───────────────────────────────────────────────────────────────────
   $installerSize = [math]::Round((Get-Item $installerExe).Length / 1MB, 1)

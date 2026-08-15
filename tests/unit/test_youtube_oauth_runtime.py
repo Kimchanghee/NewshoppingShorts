@@ -171,7 +171,9 @@ def test_release_google_runtime_stack_is_pinned_and_actual_module_folders_are_ch
 
     assert "$mustHaveDirectories" in build_script
     directory_check = build_script[
-        build_script.index("$mustHaveDirectories"):build_script.index("$requiredFontItems")
+        build_script.index("$mustHaveDirectories"):build_script.index(
+            "foreach ($item in $mustContain)"
+        )
     ]
     assert '"httpx"' not in directory_check
     assert '"google_auth_httplib2"' not in directory_check
