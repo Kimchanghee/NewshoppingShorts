@@ -6,7 +6,7 @@ import os
 import re
 from pathlib import Path
 from typing import Any, Dict, Iterator, Optional, Tuple
-from urllib.parse import unquote
+from urllib.parse import parse_qs, unquote, urlsplit
 
 
 REPORT_PATTERNS = (
@@ -17,26 +17,91 @@ REPORT_PATTERNS = (
 )
 
 
-def get_default_report_root() -> Path:
+def _deduplicate_resolved_paths(paths: list[Path]) -> list[Path]:
+    resolved_paths: list[Path] = []
+    seen: set[str] = set()
+    for path in paths:
+        try:
+            resolved = path.expanduser().resolve()
+        except OSError:
+            resolved = path.expanduser().absolute()
+        key = str(resolved).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        resolved_paths.append(resolved)
+    return resolved_paths
+
+
+def get_default_report_roots() -> list[Path]:
+    """Return cache roots used by all sourcing modes.
+
+    An explicitly configured root is isolated by design.  Without an override,
+    both the generic sourcing and platform-video output trees are searched so a
+    successful run in either UI path can provide metadata to a later run.
+    """
     configured = os.getenv("SSMAKER_SOURCING_CACHE_ROOT", "").strip()
     if configured:
-        return Path(configured).expanduser()
-    return Path(os.path.expanduser("~/.ssmaker/sourcing_output"))
+        candidates = [Path(configured)]
+    else:
+        ssmaker_root = Path(os.path.expanduser("~/.ssmaker"))
+        candidates = [
+            ssmaker_root / "sourcing_output",
+            ssmaker_root / "platform_video_output",
+        ]
+    return _deduplicate_resolved_paths(candidates)
+
+
+def get_default_report_root() -> Path:
+    """Return the primary cache root for backward-compatible callers."""
+    return get_default_report_roots()[0]
 
 
 def extract_coupang_product_id(url: str) -> str:
-    text = unquote(str(url or ""))
-    match = re.search(r"/products/(\d+)", text)
-    if match:
-        return match.group(1)
-    match = re.search(r"(?:productId|product_id)=(\d+)", text, re.IGNORECASE)
-    return match.group(1) if match else ""
+    try:
+        parsed = urlsplit(str(url or "").strip())
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower().rstrip(".")
+        scheme = parsed.scheme.lower()
+        expected_port = 443 if scheme == "https" else 80
+        if (
+            scheme not in {"http", "https"}
+            or not (host == "coupang.com" or host.endswith(".coupang.com"))
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, expected_port)
+        ):
+            return ""
+        match = re.search(r"(?:^|/)products/(\d+)(?:/|$)", unquote(parsed.path))
+        if match:
+            return match.group(1)
+        query = parse_qs(parsed.query)
+        for key, values in query.items():
+            if key.lower() not in {"productid", "product_id"}:
+                continue
+            value = str(values[0] if values else "")
+            if value.isdigit():
+                return value
+    except (TypeError, ValueError, UnicodeError):
+        return ""
+    return ""
 
 
 def extract_coupang_partner_code(url: str) -> str:
-    text = unquote(str(url or ""))
-    match = re.search(r"link\.coupang\.com/a/([A-Za-z0-9_-]+)", text)
-    return match.group(1) if match else ""
+    try:
+        parsed = urlsplit(str(url or "").strip())
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower().rstrip(".")
+        if (
+            parsed.scheme.lower() != "https"
+            or host not in {"link.coupang.com", "link.coupa.ng"}
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+        ):
+            return ""
+        match = re.fullmatch(r"/a/([A-Za-z0-9_-]+)/?", unquote(parsed.path))
+        return match.group(1) if match else ""
+    except (TypeError, ValueError, UnicodeError):
+        return ""
 
 
 def normalize_image_url(url: str) -> str:
@@ -62,16 +127,40 @@ def iter_report_payloads(
     so a verified source video from a previous run can be reused when live
     marketplace pages are blocked or slow.
     """
-    base = Path(root).expanduser() if root is not None else get_default_report_root()
-    if not base.is_dir():
+    if limit <= 0:
         return
 
-    paths: set[Path] = set()
-    for pattern in REPORT_PATTERNS:
-        paths.update(p for p in base.glob(pattern) if p.is_file() and p.stat().st_size > 0)
+    bases = (
+        _deduplicate_resolved_paths([Path(root)])
+        if root is not None
+        else get_default_report_roots()
+    )
+    paths: Dict[str, Tuple[Path, float]] = {}
+    for base in bases:
+        try:
+            trusted_base = base.resolve(strict=True)
+        except OSError:
+            continue
+        if not trusted_base.is_dir():
+            continue
+        for pattern in REPORT_PATTERNS:
+            for path in trusted_base.glob(pattern):
+                try:
+                    resolved = path.resolve(strict=True)
+                    resolved.relative_to(trusted_base)
+                    stat = resolved.stat()
+                except (OSError, ValueError):
+                    continue
+                if not resolved.is_file() or stat.st_size <= 0:
+                    continue
+                key = str(resolved).casefold()
+                paths[key] = (resolved, stat.st_mtime)
 
-    sorted_paths = sorted(paths, key=lambda p: p.stat().st_mtime, reverse=True)
-    for path in sorted_paths[:limit]:
+    sorted_paths = sorted(
+        paths.values(),
+        key=lambda entry: (-entry[1], str(entry[0]).casefold()),
+    )
+    for path, _ in sorted_paths[:limit]:
         try:
             data = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
@@ -102,6 +191,8 @@ def report_matches_target(
         target_url,
         str(target_product_info.get("url") or ""),
         str(target_product_info.get("product_url") or ""),
+        str(target_product_info.get("affiliate_url") or ""),
+        str(target_product_info.get("purchase_url") or ""),
     ]
     target_ids = {pid for pid in (extract_coupang_product_id(u) for u in target_urls) if pid}
     target_partners = {
@@ -115,8 +206,12 @@ def report_matches_target(
     report_urls = [
         str(report.get("coupang_url") or ""),
         str(report.get("url") or ""),
+        str(report.get("affiliate_url") or ""),
+        str(report.get("purchase_url") or ""),
         str(report_product.get("url") or ""),
         str(report_product.get("product_url") or ""),
+        str(report_product.get("affiliate_url") or ""),
+        str(report_product.get("purchase_url") or ""),
     ]
     report_ids = {pid for pid in (extract_coupang_product_id(u) for u in report_urls) if pid}
     report_partners = {
@@ -171,9 +266,13 @@ def _report_from_summary_result(result: Any) -> Dict[str, Any]:
     )
     return {
         "coupang_url": url,
+        "affiliate_url": result.get("affiliate_url") or "",
+        "purchase_url": result.get("purchase_url") or "",
         "product_info": {
             "name": result.get("product_name") or result.get("name") or "",
             "url": url,
+            "affiliate_url": result.get("affiliate_url") or "",
+            "purchase_url": result.get("purchase_url") or "",
             "image": result.get("image") or "",
             "price": result.get("price"),
         },

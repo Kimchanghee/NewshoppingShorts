@@ -6,10 +6,9 @@ import ipaddress
 import http.client
 import socket
 import ssl
-from urllib.parse import urlparse, urlunparse, unquote, urljoin, parse_qs
-from urllib.request import Request, build_opener, HTTPRedirectHandler
+from urllib.parse import urlparse, urljoin, parse_qs
 import html
-from typing import Dict, List, Optional, Tuple, Iterable, Set, FrozenSet
+from typing import Collection, Dict, Optional, Tuple, FrozenSet
 import random
 
 from utils import DriverConfig
@@ -179,16 +178,25 @@ def open_validated_url(
     headers: Optional[Dict[str, str]] = None,
     timeout: float = 60,
     max_redirects: int = 5,
+    allowed_domains: Optional[Collection[str]] = None,
+    require_https: bool = False,
 ):
     """Open an allowlisted URL with validated redirects and DNS pinning."""
     current_url = str(url or "").strip()
     request_headers = dict(headers or {})
+    approved_domains = frozenset(
+        ALLOWED_DOWNLOAD_DOMAINS if allowed_domains is None else allowed_domains
+    )
+    if not approved_domains:
+        raise ValueError("At least one allowed download domain is required")
 
     for redirect_count in range(max_redirects + 1):
         parsed, approved_ips = resolve_public_http_url(
             current_url,
-            allowed_domains=ALLOWED_DOWNLOAD_DOMAINS,
+            allowed_domains=approved_domains,
         )
+        if require_https and parsed.scheme.lower() != "https":
+            raise ValueError("HTTPS is required for this download")
         if not approved_ips:
             raise ValueError(f"[보안] 공개 IP를 확인할 수 없습니다: {current_url[:120]}")
 
@@ -229,8 +237,10 @@ def open_validated_url(
         if redirect_count >= max_redirects:
             raise ValueError("[보안] 다운로드 리다이렉트가 너무 많습니다.")
         next_url = urljoin(current_url, location)
-        if not validate_download_url(next_url):
+        if not is_public_http_url(next_url, allowed_domains=approved_domains):
             raise ValueError(f"[보안] 허용되지 않은 리다이렉트입니다: {next_url[:120]}")
+        if require_https and urlparse(next_url).scheme.lower() != "https":
+            raise ValueError("HTTPS redirect downgrade rejected")
         current_url = next_url
 
 def _extract_quality_metrics(url: str) -> Tuple[int, int, int]:

@@ -12,6 +12,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlsplit
 
 from utils.logging_config import get_logger
 
@@ -34,6 +35,58 @@ MARKETPLACE_VIDEO_SCAN_TIMEOUT = int(
 PLATFORM_FALLBACK_TIMEOUT = int(
     os.getenv("SSMAKER_PLATFORM_FALLBACK_TIMEOUT", "420")
 )
+COUPANG_IMAGE_DOMAINS = frozenset({"coupangcdn.com"})
+MAX_PRODUCT_IMAGE_BYTES = 12 * 1024 * 1024
+MAX_PRODUCT_IMAGE_PIXELS = 25_000_000
+
+
+def _trusted_coupang_image_url(url: str) -> str:
+    """Return a normalized HTTPS Coupang CDN image URL, or an empty string."""
+    normalized = str(url or "").strip()
+    if normalized.startswith("//"):
+        normalized = "https:" + normalized
+    try:
+        parsed = urlsplit(normalized)
+        host = (parsed.hostname or "").encode("idna").decode("ascii").lower().rstrip(".")
+        if (
+            parsed.scheme.lower() != "https"
+            or not any(
+                host == domain or host.endswith(f".{domain}")
+                for domain in COUPANG_IMAGE_DOMAINS
+            )
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.port not in (None, 443)
+        ):
+            return ""
+    except (TypeError, ValueError, UnicodeError):
+        return ""
+    return normalized
+
+
+def _read_bounded_response(response: Any, max_bytes: int) -> bytes:
+    """Read at most *max_bytes* from an http.client-style response."""
+    declared = str(response.headers.get("Content-Length") or "").strip()
+    if declared:
+        try:
+            declared_size = int(declared)
+        except ValueError:
+            declared_size = 0
+        if declared_size > max_bytes:
+            raise ValueError("product image response is too large")
+
+    body = bytearray()
+    while True:
+        remaining = max_bytes - len(body)
+        chunk = response.read(min(64 * 1024, remaining + 1))
+        if not chunk:
+            break
+        body.extend(chunk)
+        if len(body) > max_bytes:
+            raise ValueError("product image response is too large")
+    if not body:
+        raise ValueError("product image response is empty")
+    return bytes(body)
 
 
 def _safe_print(message: Any) -> None:
@@ -224,6 +277,20 @@ class SourcingPipeline:
         if best >= self.min_similarity_score:
             self.match_status = "matched"
             self.match_error = None
+            for item in marketplace_items:
+                score = self._item_similarity(item)
+                publish_safe = (
+                    score is not None
+                    and score >= self.min_similarity_score
+                    and item.get("auto_publish_safe") is not False
+                    and item.get("requires_review") is not True
+                )
+                item["auto_publish_safe"] = publish_safe
+                item["requires_review"] = not publish_safe
+                if not publish_safe:
+                    item["fallback_reason"] = (
+                        item.get("fallback_reason") or "below_similarity_threshold"
+                    )
             return True
 
         self.match_status = "below_threshold"
@@ -1560,6 +1627,7 @@ class SourcingPipeline:
     def _find_cached_marketplace_video(
         self,
         used_source_ids: Optional[set[str]] = None,
+        require_explicit_auto_publish_safe: bool = False,
     ) -> Optional[Dict[str, Any]]:
         """Find a previous safe marketplace video for the same Coupang target."""
         try:
@@ -1567,7 +1635,7 @@ class SourcingPipeline:
         except Exception:
             _looks_b2b_candidate_title = None
         from core.sourcing.report_cache import (
-            get_default_report_root,
+            get_default_report_roots,
             iter_report_payloads,
             report_matches_target,
         )
@@ -1583,16 +1651,33 @@ class SourcingPipeline:
         }
 
         roots: list[Path] = []
+        seen_roots: set[str] = set()
         output = Path(self.output_dir).expanduser()
         if output.exists():
-            roots.append(output)
-        default_root = get_default_report_root()
-        if default_root.exists() and default_root not in roots:
-            roots.append(default_root)
+            resolved_output = output.resolve()
+            roots.append(resolved_output)
+            seen_roots.add(str(resolved_output).casefold())
+        for default_root in get_default_report_roots():
+            if not default_root.exists():
+                continue
+            resolved_root = default_root.resolve()
+            root_key = str(resolved_root).casefold()
+            if root_key in seen_roots:
+                continue
+            seen_roots.add(root_key)
+            roots.append(resolved_root)
 
         seen_report_keys: set[str] = set()
         for root in roots:
             for report_path, report in iter_report_payloads(root):
+                try:
+                    report_path.resolve(strict=True).relative_to(root)
+                except (OSError, RuntimeError, ValueError):
+                    logger.warning(
+                        "[Pipeline] Skip report that resolves outside cache root: %s",
+                        report_path,
+                    )
+                    continue
                 report_product = report.get("product_info") or {}
                 report_key = (
                     f"{report_path}:"
@@ -1612,10 +1697,12 @@ class SourcingPipeline:
                 cached = self._cached_video_from_report_item(
                     report_path,
                     report,
+                    cache_root=root,
                     current_name=current_name,
                     current_url=current_url,
                     b2b_title_check=_looks_b2b_candidate_title,
                     used_source_ids=canonical_used_source_ids,
+                    require_explicit_auto_publish_safe=require_explicit_auto_publish_safe,
                 )
                 if cached:
                     return cached
@@ -1626,14 +1713,68 @@ class SourcingPipeline:
         report_path: Path,
         report: Dict[str, Any],
         *,
+        cache_root: Path,
         current_name: str,
         current_url: str,
         b2b_title_check: Optional[Callable[[str], bool]],
         used_source_ids: Optional[set[str]] = None,
+        require_explicit_auto_publish_safe: bool = False,
     ) -> Optional[Dict[str, Any]]:
         from managers.uploaded_registry import normalize_source_id
 
-        for item in report.get("sourced_products") or report.get("sourcing_results") or []:
+        items = list(
+            report.get("sourced_products") or report.get("sourcing_results") or []
+        )
+        if (
+            not items
+            and report.get("sourcing_method") == "platform_video"
+            and report.get("ok") is True
+            and report.get("auto_publish_safe") is True
+            and report.get("requires_review") is False
+            and isinstance(report.get("render_integrity"), dict)
+            and report["render_integrity"].get("ok") is True
+            and report.get("final_video")
+            and isinstance(report.get("hit"), dict)
+        ):
+            platform_hit = dict(report["hit"])
+            platform_product = dict(platform_hit.get("product") or {})
+            source_url = str(
+                report.get("selected_source_url")
+                or platform_hit.get("video_url")
+                or platform_hit.get("url")
+                or ""
+            )
+            similarity = platform_hit.get(
+                "relevance_score",
+                platform_product.get("score", report.get("best_similarity")),
+            )
+            items = [
+                {
+                    "source": platform_hit.get("platform")
+                    or report["render_integrity"].get("platform")
+                    or "platform_video",
+                    "title": platform_hit.get("title")
+                    or platform_product.get("title")
+                    or (report.get("product_info") or {}).get("name")
+                    or "",
+                    "url": source_url,
+                    "source_id": report.get("selected_source_id") or "",
+                    "similarity": similarity,
+                    "video_file": report.get("final_video"),
+                    "auto_publish_safe": True,
+                    "requires_review": False,
+                }
+            ]
+
+        trusted_root_text = str(cache_root)
+        if trusted_root_text.startswith(("\\\\", "//")):
+            return None
+        try:
+            trusted_root = cache_root.expanduser().resolve(strict=True)
+        except (OSError, RuntimeError):
+            return None
+
+        for item in items:
             product_meta = item.get("product") or {}
             source = str(item.get("source") or product_meta.get("source") or "").lower()
             video_file = str(item.get("video_file") or "")
@@ -1670,11 +1811,32 @@ class SourcingPipeline:
                 or not video_file
             ):
                 continue
+            if (
+                require_explicit_auto_publish_safe
+                and item.get("auto_publish_safe") is not True
+            ):
+                logger.info(
+                    "[Pipeline] Skip cached marketplace video (safety not explicit): %s",
+                    title[:80],
+                )
+                continue
 
-            video_path = Path(video_file).expanduser()
-            if not video_path.is_absolute():
-                video_path = (report_path.parent / video_path).resolve()
-            if not video_path.exists():
+            raw_video_path = str(video_file).strip()
+            if raw_video_path.startswith(("\\\\", "//")):
+                continue
+            try:
+                candidate_path = Path(raw_video_path).expanduser()
+                if not candidate_path.is_absolute():
+                    candidate_path = report_path.parent / candidate_path
+                video_path = candidate_path.resolve(strict=True)
+                video_path.relative_to(trusted_root)
+            except (OSError, RuntimeError, ValueError):
+                logger.warning(
+                    "[Pipeline] Skip cached marketplace video outside cache root: %s",
+                    raw_video_path[:160],
+                )
+                continue
+            if not video_path.is_file():
                 continue
             try:
                 byte_size = video_path.stat().st_size
@@ -1748,16 +1910,17 @@ class SourcingPipeline:
         """Blocking implementation for the product-image fallback video."""
         import tempfile
         import hashlib
+        import warnings
         from io import BytesIO
 
         import cv2
         import numpy as np
-        import requests
         from PIL import Image, ImageEnhance, ImageFilter, ImageOps
 
         try:
-            if image_url.startswith("//"):
-                image_url = "https:" + image_url
+            image_url = _trusted_coupang_image_url(image_url)
+            if not image_url:
+                raise ValueError("untrusted Coupang product image URL")
             headers = {
                 "User-Agent": (
                     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -1765,9 +1928,38 @@ class SourcingPipeline:
                 ),
                 "Referer": "https://www.coupang.com/",
             }
-            response = requests.get(image_url, headers=headers, timeout=20)
-            response.raise_for_status()
-            image = Image.open(BytesIO(response.content)).convert("RGB")
+            from utils.Tool import open_validated_url
+
+            with open_validated_url(
+                image_url,
+                headers=headers,
+                timeout=20,
+                max_redirects=3,
+                allowed_domains=COUPANG_IMAGE_DOMAINS,
+                require_https=True,
+            ) as response:
+                if not 200 <= int(response.status) < 300:
+                    raise ValueError(f"product image request failed: HTTP {response.status}")
+                content_type = str(response.headers.get("Content-Type") or "").lower()
+                if content_type and not content_type.startswith("image/"):
+                    raise ValueError("product image response is not an image")
+                image_bytes = _read_bounded_response(
+                    response,
+                    MAX_PRODUCT_IMAGE_BYTES,
+                )
+
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                probe = Image.open(BytesIO(image_bytes))
+                image_width, image_height = probe.size
+                if (
+                    image_width <= 0
+                    or image_height <= 0
+                    or image_width * image_height > MAX_PRODUCT_IMAGE_PIXELS
+                ):
+                    raise ValueError("product image dimensions exceed the safety limit")
+                probe.verify()
+                image = Image.open(BytesIO(image_bytes)).convert("RGB")
 
             width, height = 720, 1280
             fps, duration = 24, 12
@@ -1880,8 +2072,14 @@ class SourcingPipeline:
                 "video_file": p["video_file"],
                 "video_size_mb": p["size_mb"],
                 "fallback_reason": p.get("fallback_reason") or p["product"].get("fallback_reason"),
-                "auto_publish_safe": bool(p.get("auto_publish_safe", p["source"] != "coupang_image")),
-                "requires_review": bool(p.get("requires_review", p["source"] == "coupang_image")),
+                "auto_publish_safe": (
+                    p.get("auto_publish_safe") is True
+                    and p.get("requires_review") is False
+                ),
+                "requires_review": not (
+                    p.get("auto_publish_safe") is True
+                    and p.get("requires_review") is False
+                ),
                 "cached_from_report": p.get("cached_from_report") or p["product"].get("cached_from_report"),
             }
             for p in self.sourced_products
@@ -1905,3 +2103,52 @@ class SourcingPipeline:
             "search_diagnostics": self.search_diagnostics,
             "error": self.error,
         }
+
+
+def find_cached_publish_safe_video(
+    coupang_url: str,
+    product_info: Optional[Dict[str, Any]],
+    output_dir: str | Path,
+    used_source_ids: Optional[set[str]] = None,
+    min_similarity_score: float = MIN_TRUSTED_VIDEO_SCORE,
+) -> Optional[Dict[str, Any]]:
+    """Reuse only cache entries explicitly approved for unattended publishing."""
+    pipeline = SourcingPipeline(
+        coupang_url=coupang_url,
+        output_dir=str(output_dir),
+        min_similarity_score=min_similarity_score,
+        enforce_min_similarity=True,
+        allow_product_image_fallback=False,
+    )
+    pipeline.product_info = dict(product_info or {})
+    return pipeline._find_cached_marketplace_video(
+        used_source_ids=used_source_ids,
+        require_explicit_auto_publish_safe=True,
+    )
+
+
+async def create_product_image_video_fallback(
+    coupang_url: str,
+    product_info: Optional[Dict[str, Any]],
+    output_dir: str | Path,
+) -> Optional[Dict[str, Any]]:
+    """Create the existing review-required product-image fallback via a public API."""
+    normalized_product_info = dict(product_info or {})
+    image_url = _trusted_coupang_image_url(str(
+        normalized_product_info.get("image")
+        or normalized_product_info.get("image_url")
+        or ""
+    ).strip())
+    if not image_url:
+        return None
+    normalized_product_info["image"] = image_url
+
+    pipeline = SourcingPipeline(
+        coupang_url=coupang_url,
+        output_dir=str(output_dir),
+        min_similarity_score=MIN_TRUSTED_VIDEO_SCORE,
+        enforce_min_similarity=True,
+        allow_product_image_fallback=True,
+    )
+    pipeline.product_info = normalized_product_info
+    return await pipeline._create_product_image_video(image_url)
