@@ -13,13 +13,15 @@
 | 역할 | Vercel 프로젝트 | 프로젝트 ID | 소스 경로 |
 | --- | --- | --- | --- |
 | 운영 API | `newshopping-shorts-auth` | `prj_cXggAHaOeD3jld6iKz3tNDsOTA56` | `project-user-dashboard/backend` |
-| 관리자 UI | `ssmaker-program-admin` | `prj_AtVXsplGDdiZbZwnINYD5G9e4wX8` | `NewshoppingShorts-1/program-admin-dashboard` |
+| 관리자 UI | `ssmaker-program-admin-dashboard` | `prj_0Ggbf0uhy4lRXIt4z20tEvYlIT1l` | `program-admin-dashboard/` |
 
 관리자 UI의 `AUTH_API_BASE_URL`은 반드시 Vercel 환경변수로 명시하며 production 코드에 기본 운영 URL을 두지 않는다.
 
+현재 관리자 UI production 주소는 `https://ssmaker-program-admin-dashboard-esk931103.vercel.app`이다.
+
 ## 인증·프록시 계약
 
-- `/api/auth/login`, `/api/auth/verify`, `/api/auth/logout`은 짧은 TTL의 폐기 가능한 관리자 세션을 사용한다.
+- `/api/session/login`, `/api/session/verify`, `/api/session/logout`은 짧은 TTL의 폐기 가능한 관리자 세션을 사용한다.
 - UI의 `/api/admin/*` BFF는 사용자 조회·통계·허용된 구독 및 상태 변경만 전달한다.
 - 변경 요청은 운영자와 request ID를 전달하며 운영 API는 변경 전후 값을 감사 로그에 저장한다.
 - IP 주소는 관리자 API 응답에서 기본 마스킹한다.
