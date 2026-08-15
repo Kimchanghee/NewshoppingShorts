@@ -1,13 +1,19 @@
-"""
-Font Selection Panel for PyQt6
-"""
-import os
+"""Font selection panel for PyQt6."""
+
+from pathlib import Path
+
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
     QScrollArea, QWidget, QRadioButton, QButtonGroup
 )
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase
+from config.font_catalog import (
+    DEFAULT_FONT_ID,
+    normalize_font_id,
+    runtime_fonts_dir,
+    ui_font_options,
+)
 from ui.components.base_widget import ThemedMixin
 from managers.settings_manager import get_settings_manager
 from ui.design_system_v2 import get_design_system, get_color
@@ -55,7 +61,7 @@ class FontCard(QFrame, ThemedMixin):
         # Attempt to load font for preview
         font_id = -1
         for fp in self.option.get("font_paths", []):
-            if os.path.exists(fp):
+            if Path(fp).is_file():
                 font_id = QFontDatabase.addApplicationFont(fp)
                 if font_id != -1:
                     family = QFontDatabase.applicationFontFamilies(font_id)[0]
@@ -175,20 +181,10 @@ class FontPanel(QFrame, ThemedMixin):
             self.scroll_layout.itemAt(i).widget().setParent(None)
             
         self.cards = {}
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        fonts_dir = os.path.join(project_root, "fonts")
-        
-        font_options = [
-            {"name": "서울 한강체", "id": "seoul_hangang", "preview": "쇼핑 숏폼 자막", "description": "모던하고 깔끔한 서울시 공식 폰트", "font_paths": [os.path.join(fonts_dir, "SeoulHangangB.ttf")]},
-            {"name": "프리텐다드", "id": "pretendard", "preview": "쇼핑 숏폼 자막", "description": "세련된 현대적 고딕체", "font_paths": [os.path.join(fonts_dir, "Pretendard-ExtraBold.ttf")]},
-            {"name": "Noto Sans KR", "id": "noto_sans_kr", "preview": "쇼핑 숏폼 자막", "description": "상업 이용 가능한 구글 Noto 한글 폰트", "font_paths": [os.path.join(fonts_dir, "NotoSansKR-Variable.ttf")]},
-            {"name": "SUIT", "id": "suit", "preview": "쇼핑 숏폼 자막", "description": "요즘 서비스 UI에 잘 맞는 모던 고딕체", "font_paths": [os.path.join(fonts_dir, "SUIT-Heavy.ttf")]},
-            {"name": "G마켓 산스", "id": "gmarketsans", "preview": "쇼핑 숏폼 자막", "description": "인기 있는 고품질 무료 폰트", "font_paths": [os.path.join(fonts_dir, "GmarketSansTTFBold.ttf")]},
-            {"name": "페이퍼로지", "id": "paperlogy", "preview": "쇼핑 숏폼 자막", "description": "부드러운 곡선이 매력적인 폰트", "font_paths": [os.path.join(fonts_dir, "Paperlogy-9Black.ttf")]},
-            {"name": "유앤피플", "id": "unpeople_gothic", "preview": "쇼핑 숏폼 자막", "description": "부드럽고 가독성 좋은 고딕체", "font_paths": [os.path.join(fonts_dir, "UnPeople.ttf")]}
-        ]
-        
-        selected_id = getattr(self.gui, 'selected_font_id', 'seoul_hangang')
+        font_options = ui_font_options(runtime_fonts_dir())
+        selected_id = normalize_font_id(
+            getattr(self.gui, "selected_font_id", DEFAULT_FONT_ID)
+        )
         
         for option in font_options:
             is_selected = option["id"] == selected_id
@@ -200,6 +196,7 @@ class FontPanel(QFrame, ThemedMixin):
         self.scroll_layout.addStretch()
 
     def _on_card_clicked(self, font_id):
+        font_id = normalize_font_id(font_id)
         self.gui.selected_font_id = font_id
         get_settings_manager().set_font_id(font_id)
         

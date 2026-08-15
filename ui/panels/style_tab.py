@@ -6,6 +6,7 @@ from PyQt6.QtWidgets import (
     QFrame, QSplitter
 )
 from PyQt6.QtCore import Qt
+from config.font_catalog import DEFAULT_FONT_ID, normalize_font_id, ui_font_options
 from ui.panels.font_panel import FontPanel
 from ui.panels.cta_panel import CTAPanel
 from ui.panels.voice_panel import VoicePanel
@@ -135,22 +136,17 @@ class CompactFontPanel(QFrame):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(ds.spacing.space_3)
         
-        # Font options data
-        import os
-        project_root = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
-        fonts_dir = os.path.join(project_root, "fonts")
-        
         font_options = [
-            {"name": "서울 한강체", "id": "seoul_hangang", "description": "모던하고 깔끔한"},
-            {"name": "프리텐다드", "id": "pretendard", "description": "세련된 현대적"},
-            {"name": "Noto Sans KR", "id": "noto_sans_kr", "description": "깔끔한 범용"},
-            {"name": "SUIT", "id": "suit", "description": "요즘 UI 감성"},
-            {"name": "G마켓 산스", "id": "gmarketsans", "description": "인기 있는 고품질"},
-            {"name": "페이퍼로지", "id": "paperlogy", "description": "부드러운 곡선"},
-            {"name": "유앤피플", "id": "unpeople_gothic", "description": "부드럽고 가독성"},
+            {
+                "name": option["name"],
+                "id": option["id"],
+                "description": option["compact_description"],
+            }
+            for option in ui_font_options()
         ]
-        
-        selected_id = getattr(self.gui, 'selected_font_id', 'seoul_hangang')
+        selected_id = normalize_font_id(
+            getattr(self.gui, "selected_font_id", DEFAULT_FONT_ID)
+        )
         
         for option in font_options:
             card = CompactFontCard(option, is_selected=(option["id"] == selected_id))
@@ -162,7 +158,8 @@ class CompactFontPanel(QFrame):
     def _on_font_selected(self, font_id):
         """Handle font selection."""
         from managers.settings_manager import get_settings_manager
-        
+
+        font_id = normalize_font_id(font_id)
         self.gui.selected_font_id = font_id
         get_settings_manager().set_font_id(font_id)
         
