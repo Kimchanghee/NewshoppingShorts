@@ -5,45 +5,75 @@ on:
     tags:
       - 'v*'  # v1.0.2, v1.1.0 등 버전 태그 푸시 시 실행
   workflow_dispatch:
+    inputs:
+      version:
+        description: Candidate version already committed in version.json and auto_updater.py
+        required: true
+        type: string
+      publish:
+        description: Publish a GitHub release and update the version API (public signing only)
+        required: true
+        default: false
+        type: boolean
+      signing_mode:
+        description: Public PKI release or nonpublished legacy-signer transition candidate
+        required: true
+        default: public
+        type: choice
+        options:
+          - public
+          - integrity-bridge
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: signed-release-publication
+  cancel-in-progress: false
+
 jobs:
   build:
     runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.release_policy.outputs.version }}
+      publish: ${{ steps.release_policy.outputs.publish }}
+      signing_mode: ${{ steps.release_policy.outputs.signing_mode }}
+      file_hash: ${{ steps.hash.outputs.FILE_HASH }}
 
     steps:
     - name: Checkout code
-      uses: actions/checkout@v5
+      uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      with:
+        persist-credentials: false
 
     - name: Set up Python 3.11 (release runtime)
-      uses: actions/setup-python@v6
+      uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
       with:
-        python-version: '3.11'
+        python-version: '3.11.9'
 
     - name: Cache pip packages
-      uses: actions/cache@v5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
       with:
         path: ~\AppData\Local\pip\Cache
-        key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt', 'backend/requirements.txt') }}
+        key: ${{ runner.os }}-pip-${{ hashFiles('requirements-release.lock') }}
         restore-keys: |
           ${{ runner.os }}-pip-
 
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        python -m pip install -r requirements.txt
-        python -m pip install -r backend/requirements.txt
-        python -m pip install pyinstaller
-        python -c "import sys; import PyInstaller; print('python=', sys.executable); print('pyinstaller=', PyInstaller.__version__)"
+        python -m pip install --disable-pip-version-check --require-hashes -r requirements-release.lock
+        python -m pip check
+        python -c "import sys; import PyInstaller; assert PyInstaller.__version__ == '6.19.0', PyInstaller.__version__; print('python=', sys.executable); print('pyinstaller=', PyInstaller.__version__)"
 
     - name: Install Inno Setup
-      run: choco install innosetup --no-progress -y
+      run: choco install innosetup --version=6.4.3 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --no-progress -y
 
     - name: Install Tesseract OCR
       shell: pwsh
       run: |
-        choco install tesseract --no-progress -y
+        choco install tesseract --version=5.5.0.20241111 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --no-progress -y
 
         $candidates = @()
         $cmd = Get-Command tesseract -ErrorAction SilentlyContinue
@@ -139,38 +169,136 @@ jobs:
       continue-on-error: true
       timeout-minutes: 10
 
-    - name: Extract version from tag
-      id: version
-      shell: bash
-      run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+    - name: Read baked release authorization
+      id: baked_release
+      shell: python
+      run: |
+        import os
+        from utils.authenticode import PUBLIC_RELEASE_SIGNER_THUMBPRINTS, TRANSITION_BRIDGE_VERSION
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+            output.write(f"transition_bridge_version={TRANSITION_BRIDGE_VERSION.strip().lstrip('vV')}\n")
+            output.write(f"has_public_signer_pins={'true' if PUBLIC_RELEASE_SIGNER_THUMBPRINTS else 'false'}\n")
 
-    - name: Resolve release notes from tag message
+    - name: Resolve immutable release policy
+      id: release_policy
+      shell: pwsh
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        REF_TYPE: ${{ github.ref_type }}
+        REF_NAME: ${{ github.ref_name }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_PUBLISH: ${{ inputs.publish }}
+        INPUT_SIGNING_MODE: ${{ inputs.signing_mode }}
+        BAKED_TRANSITION_BRIDGE_VERSION: ${{ steps.baked_release.outputs.transition_bridge_version }}
+        HAS_BAKED_PUBLIC_SIGNER_PINS: ${{ steps.baked_release.outputs.has_public_signer_pins }}
+      run: |
+        if ($env:EVENT_NAME -eq "push" -and $env:REF_TYPE -eq "tag") {
+          if ($env:REF_NAME -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
+            throw "Release tags must use exact vMAJOR.MINOR.PATCH format."
+          }
+          $version = $Matches.version
+          $publish = "true"
+          $bakedBridge = ($env:BAKED_TRANSITION_BRIDGE_VERSION ?? "").Trim().TrimStart("v")
+          $hasPublicPins = ($env:HAS_BAKED_PUBLIC_SIGNER_PINS ?? "").Trim().ToLowerInvariant() -eq "true"
+          if ($bakedBridge -and $version -eq $bakedBridge -and $hasPublicPins) {
+            $signingMode = "integrity-bridge"
+          } else {
+            $signingMode = "public"
+          }
+          $isTag = "true"
+        } else {
+          $version = ($env:INPUT_VERSION ?? "").Trim().TrimStart("v")
+          $publish = if (($env:INPUT_PUBLISH ?? "").Trim().ToLowerInvariant() -eq "true") { "true" } else { "false" }
+          $signingMode = ($env:INPUT_SIGNING_MODE ?? "").Trim().ToLowerInvariant()
+          $isTag = "false"
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') {
+            throw "workflow_dispatch version must use MAJOR.MINOR.PATCH format."
+          }
+          if ($signingMode -notin @("public", "integrity-bridge")) {
+            throw "Unsupported signing_mode: $signingMode"
+          }
+          if ($publish -eq "true") {
+            throw "workflow_dispatch is candidate-only; only an existing pushed tag may publish."
+          }
+          if ($signingMode -eq "integrity-bridge") {
+            Write-Host "Explicit integrity-bridge candidate selected; publication remains disabled."
+          }
+        }
+
+        "version=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "publish=$publish" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "signing_mode=$signingMode" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "is_tag=$isTag" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        Write-Host "Resolved version=$version publish=$publish signing_mode=$signingMode tag=$isTag"
+
+    - name: Validate committed version contract
+      shell: python
+      env:
+        VERSION: ${{ steps.release_policy.outputs.version }}
+        SIGNING_MODE: ${{ steps.release_policy.outputs.signing_mode }}
+        SIGN_CERT_THUMBPRINT: ${{ secrets.SIGN_CERT_THUMBPRINT }}
+      run: |
+        import json
+        import os
+        import re
+        from pathlib import Path
+        from utils.authenticode import validate_build_signing_configuration
+
+        expected = os.environ["VERSION"].strip()
+        committed = str(json.loads(Path("version.json").read_text(encoding="utf-8"))["version"]).strip()
+        updater_text = Path("utils/auto_updater.py").read_text(encoding="utf-8")
+        match = re.search(r'^CURRENT_VERSION\s*=\s*["\x27]([^"\x27]+)["\x27]', updater_text, re.MULTILINE)
+        embedded = match.group(1).strip() if match else ""
+        if expected != committed or expected != embedded:
+            raise SystemExit(
+                f"Release version must already be committed consistently: "
+                f"requested={expected} version.json={committed} updater={embedded}"
+            )
+        signing_ok, signing_reason = validate_build_signing_configuration(
+            os.environ["SIGNING_MODE"],
+            expected,
+            os.environ.get("SIGN_CERT_THUMBPRINT", ""),
+        )
+        if not signing_ok:
+            raise SystemExit(f"Baked signing identity policy rejected the build: {signing_reason}")
+        print(f"Committed version contract verified: {expected}")
+        print(f"Baked signing identity contract verified: {signing_reason}")
+
+    - name: Resolve release notes
       id: notes
       shell: bash
+      env:
+        VERSION: ${{ steps.release_policy.outputs.version }}
+        IS_TAG: ${{ steps.release_policy.outputs.is_tag }}
       run: |
-        VERSION="${GITHUB_REF#refs/tags/v}"
-        # actions/checkout peels annotated tags to commits, which made this
-        # step return the commit subject instead of the tag message. Re-fetch
-        # the real tag object from origin before reading it.
-        git fetch origin "+refs/tags/v${VERSION}:refs/tags/v${VERSION}" --force 2>/dev/null || true
-        SUMMARY="$(git tag -l --format='%(contents:subject)' "v${VERSION}" 2>/dev/null | head -n1)"
-        HEAD_SUBJECT="$(git log -1 --format='%s' 2>/dev/null | head -n1)"
-        if [ -z "$(printf '%s' "$SUMMARY" | tr -d '[:space:]')" ] || [ "$SUMMARY" = "$HEAD_SUBJECT" ]; then
-          SUMMARY="SSMaker v${VERSION} 업데이트"
+        SUMMARY=""
+        if [ "$IS_TAG" = "true" ]; then
+          git fetch origin "+refs/tags/v${VERSION}:refs/tags/v${VERSION}" --force 2>/dev/null || true
+          SUMMARY="$(git tag -l --format='%(contents:subject)' "v${VERSION}" 2>/dev/null | head -n1)"
+          HEAD_SUBJECT="$(git log -1 --format='%s' 2>/dev/null | head -n1)"
+          if [ "$SUMMARY" = "$HEAD_SUBJECT" ]; then SUMMARY=""; fi
+        fi
+        if [ -z "$(printf '%s' "$SUMMARY" | tr -d '[:space:]')" ]; then
+          SUMMARY="SSMaker v${VERSION}"
         fi
         echo "SUMMARY=${SUMMARY}" >> "$GITHUB_OUTPUT"
         echo "Resolved release notes: ${SUMMARY}"
 
     - name: Import Code Signing Certificate
       shell: pwsh
+      env:
+        SIGNING_MODE: ${{ steps.release_policy.outputs.signing_mode }}
+        SIGN_CERT_THUMBPRINT: ${{ secrets.SIGN_CERT_THUMBPRINT }}
+        SIGN_CERT_PFX_BASE64: ${{ secrets.SIGN_CERT_PFX_BASE64 }}
+        SIGN_CERT_PASSWORD: ${{ secrets.SIGN_CERT_PASSWORD }}
       run: |
-        $thumb = "${{ secrets.SIGN_CERT_THUMBPRINT }}".Trim().ToUpper()
+        $thumb = (($env:SIGN_CERT_THUMBPRINT ?? "") -replace '\s', '').Trim().ToUpperInvariant()
         if ([string]::IsNullOrWhiteSpace($thumb)) {
-          throw "SIGN_CERT_THUMBPRINT secret is required for release signing."
+          throw "A nonempty SIGN_CERT_THUMBPRINT is required as the expected signer for every build."
         }
 
-        $pfxBase64 = "${{ secrets.SIGN_CERT_PFX_BASE64 }}"
-        $pfxPassword = "${{ secrets.SIGN_CERT_PASSWORD }}"
+        $pfxBase64 = $env:SIGN_CERT_PFX_BASE64 ?? ""
+        $pfxPassword = $env:SIGN_CERT_PASSWORD ?? ""
         if (-not [string]::IsNullOrWhiteSpace($pfxBase64)) {
           if ([string]::IsNullOrWhiteSpace($pfxPassword)) {
             throw "SIGN_CERT_PASSWORD secret is required when SIGN_CERT_PFX_BASE64 is provided."
@@ -187,55 +315,218 @@ jobs:
           throw "Code signing cert with thumbprint $thumb not found in Cert:\\CurrentUser\\My"
         }
 
-        "SIGN_CERT_THUMBPRINT=$thumb" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        $codeSigningEku = "1.3.6.1.5.5.7.3.3"
+        $ekuOids = @($installed.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId.Value })
+        if ($codeSigningEku -notin $ekuOids) {
+          throw "Expected signer does not contain the Code Signing EKU ($codeSigningEku)."
+        }
+        if ($env:SIGNING_MODE -eq "public" -and $installed.Subject -eq $installed.Issuer) {
+          throw "Public signing mode rejects self-issued certificates."
+        }
 
-    - name: Update version.json
-      shell: python
-      run: |
-        import json
-        from datetime import date
-        from pathlib import Path
-        version = "${{ steps.version.outputs.VERSION }}"
-        p = Path("version.json")
-        data = {}
-        if p.exists():
-            try:
-                data = json.loads(p.read_text(encoding="utf-8"))
-            except Exception:
-                data = {}
-        data["version"] = version
-        data.setdefault("min_required_version", "1.0.0")
-        data.setdefault("update_channel", "stable")
-        data.setdefault("build_date", date.today().isoformat())
-        data["updated_at"] = date.today().isoformat()
-        p.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-        print(f"Updated version.json to {version}")
+        "SIGN_CERT_THUMBPRINT=$thumb" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
     - name: Build Installer
       shell: pwsh
+      env:
+        SSMAKER_SIGNING_MODE: ${{ steps.release_policy.outputs.signing_mode }}
       run: |
         ./scripts/build_exe.ps1
+
+    - name: Verify app, installer, and installed uninstaller signing gates
+      shell: pwsh
+      env:
+        VERSION: ${{ steps.release_policy.outputs.version }}
+        SIGNING_MODE: ${{ steps.release_policy.outputs.signing_mode }}
+        EXPECTED_SIGNER_THUMBPRINT: ${{ secrets.SIGN_CERT_THUMBPRINT }}
+      run: |
+        $expectedThumb = (($env:EXPECTED_SIGNER_THUMBPRINT ?? "") -replace '\s', '').ToUpperInvariant()
+        if ([string]::IsNullOrWhiteSpace($expectedThumb)) {
+          throw "Release gate requires a nonempty expected signer thumbprint."
+        }
+
+        $signtool = Get-Command signtool -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue
+        if (-not $signtool) {
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter signtool.exe -Recurse -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -match '\\x64\\signtool\.exe$' } |
+            Sort-Object FullName -Descending |
+            Select-Object -ExpandProperty FullName -First 1
+        }
+        if (-not $signtool) { throw "signtool.exe was not found for the release verification gate." }
+
+        function Assert-SigningGate([string]$Path, [string]$Label) {
+          if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { throw "$Label is missing: $Path" }
+          $sig = Get-AuthenticodeSignature -LiteralPath $Path
+          $actualThumb = ""
+          if ($sig.SignerCertificate) {
+            $actualThumb = (($sig.SignerCertificate.Thumbprint ?? "") -replace '\s', '').ToUpperInvariant()
+          }
+          if ($actualThumb -ne $expectedThumb) {
+            throw "$Label signer mismatch (expected $expectedThumb, got $actualThumb)."
+          }
+          $ekuOids = @($sig.SignerCertificate.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId.Value })
+          if ("1.3.6.1.5.5.7.3.3" -notin $ekuOids) {
+            throw "$Label signer is missing the Code Signing EKU."
+          }
+          if ($null -eq $sig.TimeStamperCertificate) {
+            throw "$Label is missing a trusted timestamp."
+          }
+
+          if ($env:SIGNING_MODE -eq "public") {
+            if ($actualThumb -eq "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0") {
+              throw "$Label uses the historical v1.5.64 signer, which is never public trust."
+            }
+            if ($sig.SignerCertificate.Subject -eq $sig.SignerCertificate.Issuer) {
+              throw "$Label uses a self-issued signer in public mode."
+            }
+            if ([string]$sig.Status -ne "Valid") {
+              throw "$Label requires Authenticode Status Valid in public mode; got $($sig.Status). UnknownError is rejected."
+            }
+            & $signtool verify /pa /all /v $Path
+            if ($LASTEXITCODE -ne 0) { throw "$Label failed signtool verify /pa /all." }
+          } elseif ([string]$sig.Status -notin @("Valid", "UnknownError")) {
+            throw "$Label integrity-bridge signature is invalid: $($sig.Status)."
+          }
+        }
+
+        $installer = Join-Path $PWD "dist\SSMaker_Setup_v$($env:VERSION).exe"
+        $appExe = Join-Path $PWD "dist\ssmaker\ssmaker.exe"
+        Assert-SigningGate $appExe "built application"
+        Assert-SigningGate $installer "final installer"
+
+        # Exercise the exact shipped Setup and directly validate the embedded,
+        # installed Inno uninstaller instead of trusting SignedUninstaller=yes.
+        $installRoot = Join-Path $env:RUNNER_TEMP "ssmaker-package-verification"
+        if (Test-Path -LiteralPath $installRoot) {
+          Remove-Item -LiteralPath $installRoot -Recurse -Force
+        }
+        & $installer "/DIR=$installRoot" "/VERYSILENT" "/SUPPRESSMSGBOXES" "/NORESTART" "/SP-" "/VERIFYPACKAGE"
+        if ($LASTEXITCODE -ne 0) { throw "Silent installer verification failed with exit code $LASTEXITCODE." }
+
+        $installedApp = Join-Path $installRoot "ssmaker.exe"
+        $uninstaller = Get-ChildItem -LiteralPath $installRoot -Filter "unins*.exe" -File |
+          Select-Object -ExpandProperty FullName -First 1
+        if (-not $uninstaller) { throw "Silent install did not produce an Inno uninstaller." }
+        Assert-SigningGate $installedApp "installed application"
+        Assert-SigningGate $uninstaller "installed Inno uninstaller"
+        Write-Host "All signing gates passed for mode $($env:SIGNING_MODE)."
 
     - name: Compute installer SHA256
       id: hash
       shell: pwsh
+      env:
+        VERSION: ${{ steps.release_policy.outputs.version }}
       run: |
-        $version = "${{ steps.version.outputs.VERSION }}"
+        $version = $env:VERSION
         $installer = "dist/SSMaker_Setup_v${version}.exe"
         $hash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLower()
         Write-Host "SHA256: $hash"
-        echo "FILE_HASH=$hash" >> $env:GITHUB_OUTPUT
+        "FILE_HASH=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "$hash  SSMaker_Setup_v${version}.exe" | Set-Content -Path "dist/SSMaker_Setup_v${version}.exe.sha256" -Encoding ascii
 
-    - name: Create Release
-      uses: softprops/action-gh-release@v3
+    - name: Verify candidate asset hash before any publication
+      shell: pwsh
+      env:
+        VERSION: ${{ steps.release_policy.outputs.version }}
+        EXPECTED_HASH: ${{ steps.hash.outputs.FILE_HASH }}
+      run: |
+        if ($env:EXPECTED_HASH -notmatch '^[a-f0-9]{64}$') { throw "Computed SHA256 output is malformed." }
+        $installer = "dist/SSMaker_Setup_v$($env:VERSION).exe"
+        $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $env:EXPECTED_HASH) {
+          throw "Candidate asset changed after signing (expected $($env:EXPECTED_HASH), got $actual)."
+        }
+        Write-Host "Pre-publication asset hash verified: $actual"
+
+    - name: Upload verified candidate artifact
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
       with:
-        files: dist/SSMaker_Setup_v${{ steps.version.outputs.VERSION }}.exe
-        name: Release v${{ steps.version.outputs.VERSION }}
+        name: SSMaker-${{ steps.release_policy.outputs.version }}-${{ steps.release_policy.outputs.signing_mode }}-candidate
+        path: |
+          dist/SSMaker_Setup_v${{ steps.release_policy.outputs.version }}.exe
+          dist/SSMaker_Setup_v${{ steps.release_policy.outputs.version }}.exe.sha256
+        if-no-files-found: error
+        retention-days: 14
+
+  publish:
+    needs: build
+    if: needs.build.outputs.publish == 'true'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+    - name: Download verified candidate artifact
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      with:
+        name: SSMaker-${{ needs.build.outputs.version }}-${{ needs.build.outputs.signing_mode }}-candidate
+        path: dist
+
+    - name: Recompute candidate hash across trust boundary
+      shell: pwsh
+      env:
+        VERSION: ${{ needs.build.outputs.version }}
+        EXPECTED_HASH: ${{ needs.build.outputs.file_hash }}
+      run: |
+        if ($env:VERSION -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "Build output version is malformed." }
+        if ($env:EXPECTED_HASH -notmatch '^[a-f0-9]{64}$') { throw "Build output hash is malformed." }
+        $installer = "dist/SSMaker_Setup_v$($env:VERSION).exe"
+        $actual = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $env:EXPECTED_HASH) {
+          throw "Downloaded candidate hash mismatch (expected $($env:EXPECTED_HASH), got $actual)."
+        }
+        Write-Host "Publish-job candidate hash verified: $actual"
+
+    - name: Reject non-monotonic release publication
+      shell: python
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VERSION: ${{ needs.build.outputs.version }}
+        REPOSITORY: ${{ github.repository }}
+      run: |
+        import json
+        import os
+        import re
+        import urllib.error
+        import urllib.request
+
+        candidate = os.environ["VERSION"]
+        request = urllib.request.Request(
+            f"https://api.github.com/repos/{os.environ['REPOSITORY']}/releases/latest",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+                "User-Agent": "SSMaker-Release-Monotonicity-Gate",
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=30) as response:
+                latest = str(json.load(response).get("tag_name", "")).lstrip("vV")
+        except urllib.error.HTTPError as exc:
+            if exc.code != 404:
+                raise
+            latest = ""
+        semver = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
+        if latest and not semver.fullmatch(latest):
+            raise SystemExit(f"Latest release has unsupported version tag: {latest}")
+        parse = lambda value: tuple(int(part) for part in value.split("."))
+        if latest and parse(candidate) < parse(latest):
+            raise SystemExit(f"Refusing to publish version {candidate} behind latest {latest}")
+        print(f"Monotonic release gate passed: candidate={candidate} latest={latest or 'none'}")
+
+    - name: Create draft Release with verified local assets
+      uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3
+      with:
+        tag_name: v${{ needs.build.outputs.version }}
+        draft: true
+        files: |
+          dist/SSMaker_Setup_v${{ needs.build.outputs.version }}.exe
+          dist/SSMaker_Setup_v${{ needs.build.outputs.version }}.exe.sha256
+        name: Release v${{ needs.build.outputs.version }}
         generate_release_notes: true
         body: |
-          ## SSMaker v${{ steps.version.outputs.VERSION }}
+          ## SSMaker v${{ needs.build.outputs.version }}
 
-          ${{ steps.notes.outputs.SUMMARY }}
+          SSMaker v${{ needs.build.outputs.version }}
 
           ### 설치 방법
           1. 설치 파일을 실행하면 기존 설치를 감지합니다.
@@ -243,17 +534,44 @@ jobs:
           3. 시작 오류를 겪은 경우에는 `재설치(Reinstall)`를 선택하세요.
 
           ### SHA256
-          `${{ steps.hash.outputs.FILE_HASH }}`
+          `${{ needs.build.outputs.file_hash }}`
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Verify draft GitHub release asset hash
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VERSION: ${{ needs.build.outputs.version }}
+        EXPECTED_HASH: ${{ needs.build.outputs.file_hash }}
+      run: |
+        $downloadDir = Join-Path $env:RUNNER_TEMP "published-release-asset"
+        New-Item -ItemType Directory -Path $downloadDir -Force | Out-Null
+        gh release download "v$($env:VERSION)" --repo "${{ github.repository }}" --pattern "SSMaker_Setup_v$($env:VERSION).exe" --dir $downloadDir --clobber
+        if ($LASTEXITCODE -ne 0) { throw "Could not download the published release asset for verification." }
+        $downloaded = Join-Path $downloadDir "SSMaker_Setup_v$($env:VERSION).exe"
+        $actual = (Get-FileHash -LiteralPath $downloaded -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($actual -ne $env:EXPECTED_HASH) {
+          throw "Draft release asset hash mismatch (expected $($env:EXPECTED_HASH), got $actual)."
+        }
+        Write-Host "Draft release asset hash verified: $actual"
+
+    - name: Publish verified GitHub release
+      shell: pwsh
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        VERSION: ${{ needs.build.outputs.version }}
+      run: |
+        gh release edit "v$($env:VERSION)" --repo "${{ github.repository }}" --draft=false --latest --verify-tag
+        if ($LASTEXITCODE -ne 0) { throw "Verified draft release could not be published." }
 
     - name: Update server version API
       shell: python
       env:
-        VERSION: ${{ steps.version.outputs.VERSION }}
-        FILE_HASH: ${{ steps.hash.outputs.FILE_HASH }}
+        VERSION: ${{ needs.build.outputs.version }}
+        FILE_HASH: ${{ needs.build.outputs.file_hash }}
         REPOSITORY: ${{ github.repository }}
-        RELEASE_NOTES_SUMMARY: ${{ steps.notes.outputs.SUMMARY }}
+        RELEASE_NOTES_SUMMARY: SSMaker v${{ needs.build.outputs.version }}
         APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
         APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}
         APP_VERSION_UPDATE_HMAC_KEY: ${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}
@@ -295,16 +613,15 @@ jobs:
         if not token:
             raise SystemExit("APP_VERSION_UPDATE_API_KEY is required")
         signing_key = clean_secret("APP_VERSION_UPDATE_HMAC_KEY")
-        signature = ""
-        if signing_key:
-            signature = hmac.new(signing_key.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        if not signing_key:
+            raise SystemExit("APP_VERSION_UPDATE_HMAC_KEY is required")
+        signature = hmac.new(signing_key.encode("utf-8"), body, hashlib.sha256).hexdigest()
 
         headers = {
             "Content-Type": "application/json",
             "Authorization": f"Bearer {token}",
         }
-        if signature:
-            headers["X-Update-Signature"] = signature
+        headers["X-Update-Signature"] = signature
         request = urllib.request.Request(
             f"{api_base_url}/app/version/update",
             data=body,
@@ -327,23 +644,56 @@ jobs:
                 print(f"Version update attempt {attempt} returned HTTP {exc.code}; retrying")
                 time.sleep(3)
 
-        verified = None
+        expected_contract = {
+            "version": version,
+            "download_url": payload["download_url"],
+            "release_notes": payload["release_notes"],
+            "file_hash": payload["file_hash"],
+        }
+        verified_contracts = None
         for attempt in range(1, 9):
-            verify_request = urllib.request.Request(
-                f"{api_base_url}/app/version?verify={time.time_ns()}",
-                headers={"Cache-Control": "no-cache", "User-Agent": "SSMaker-Release-Verification"},
-            )
-            with urllib.request.urlopen(verify_request, timeout=30) as response:
-                verified = json.loads(response.read().decode("utf-8"))
-            if verified.get("version") == version and verified.get("file_hash") == payload["file_hash"]:
+            nonce = time.time_ns()
+            endpoint_urls = {
+                "version": f"{api_base_url}/app/version?verify={nonce}",
+                "check": f"{api_base_url}/app/version/check?current_version=0.0.0&verify={nonce}",
+                "legacy": f"{api_base_url}/free/lately/?item=1&verify={nonce}",
+            }
+            raw_contracts = {}
+            for name, endpoint_url in endpoint_urls.items():
+                verify_request = urllib.request.Request(
+                    endpoint_url,
+                    headers={"Cache-Control": "no-cache", "User-Agent": "SSMaker-Release-Verification"},
+                )
+                with urllib.request.urlopen(verify_request, timeout=30) as response:
+                    raw_contracts[name] = json.loads(response.read().decode("utf-8"))
+
+            verified_contracts = {
+                "version": {
+                    key: raw_contracts["version"].get(key)
+                    for key in expected_contract
+                },
+                "check": {
+                    "version": raw_contracts["check"].get("latest_version"),
+                    **{
+                        key: raw_contracts["check"].get(key)
+                        for key in ("download_url", "release_notes", "file_hash")
+                    },
+                },
+                "legacy": {
+                    key: raw_contracts["legacy"].get(key)
+                    for key in expected_contract
+                },
+            }
+            if all(contract == expected_contract for contract in verified_contracts.values()):
                 break
             print(
-                f"Version API verification attempt {attempt} returned "
-                f"{verified.get('version')}; retrying"
+                f"Public version contract verification attempt {attempt} did not converge; retrying: "
+                f"{verified_contracts!r}"
             )
             time.sleep(2)
         else:
             raise SystemExit(
-                f"Version API verification failed: expected {version}, got {verified.get('version')}"
+                "Public version endpoints disagree after update: "
+                f"expected={expected_contract!r} actual={verified_contracts!r}"
             )
-        print(f"Server version verified: {verified['version']}")
+        print(f"All public version contracts verified: {expected_contract!r}")
