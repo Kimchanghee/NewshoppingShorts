@@ -15,7 +15,7 @@ from uuid import uuid4
 from fastapi import FastAPI, Request, Header, HTTPException, Query
 from fastapi.exceptions import RequestValidationError
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -590,6 +590,60 @@ def _persist_app_version_info_to_db(version_info: dict) -> bool:
         return False
 
 
+def _persist_app_version_info_monotonic(version_info: dict) -> tuple[str, dict]:
+    """Lock, compare, and update release metadata in one transaction."""
+    try:
+        payload = json.dumps(version_info, ensure_ascii=False)
+        with SessionLocal() as db:
+            dialect = db.get_bind().dialect.name
+            params = {
+                "setting_key": _APP_VERSION_INFO_SETTING_KEY,
+                "setting_value": payload,
+            }
+            if dialect in {"postgresql", "sqlite"}:
+                ensure_row = text(
+                    "INSERT INTO system_settings (setting_key, setting_value) "
+                    "VALUES (:setting_key, :setting_value) "
+                    "ON CONFLICT (setting_key) DO NOTHING"
+                )
+            elif dialect in {"mysql", "mariadb"}:
+                ensure_row = text(
+                    "INSERT IGNORE INTO system_settings (setting_key, setting_value) "
+                    "VALUES (:setting_key, :setting_value)"
+                )
+            else:
+                raise RuntimeError(f"Unsupported settings database dialect: {dialect}")
+            db.execute(ensure_row, params)
+
+            lock_suffix = " FOR UPDATE" if dialect in {"postgresql", "mysql", "mariadb"} else ""
+            raw_value = db.execute(
+                text(
+                    "SELECT setting_value FROM system_settings "
+                    "WHERE setting_key = :setting_key" + lock_suffix
+                ),
+                {"setting_key": _APP_VERSION_INFO_SETTING_KEY},
+            ).scalar_one()
+            current_info = _decode_app_version_info(raw_value, APP_VERSION_INFO)
+            if _parse_version_tuple(str(version_info.get("version", ""))) < _parse_version_tuple(
+                str(current_info.get("version", "0.0.0"))
+            ):
+                db.rollback()
+                return "downgrade", current_info
+
+            db.execute(
+                text(
+                    "UPDATE system_settings SET setting_value = :setting_value "
+                    "WHERE setting_key = :setting_key"
+                ),
+                params,
+            )
+            db.commit()
+        return "updated", dict(version_info)
+    except Exception as e:
+        logger.warning("Failed atomically persisting APP_VERSION_INFO: %s", e)
+        return "error", dict(APP_VERSION_INFO)
+
+
 APP_VERSION_INFO = _load_app_version_info_from_db(APP_VERSION_INFO)
 _GITHUB_RELEASE_API_URL = os.getenv(
     "APP_VERSION_GITHUB_RELEASE_API_URL",
@@ -717,7 +771,7 @@ def _get_effective_app_version_info() -> dict:
 
 class VersionUpdateRequest(BaseModel):
     """Request model for version update"""
-    version: str
+    version: str = Field(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")
     download_url: str
     release_notes: Optional[str] = None
     is_mandatory: bool = False
@@ -792,6 +846,9 @@ async def update_app_version(
 
     # Optional payload HMAC verification for stronger CI/CD integrity.
     signing_key = (settings.APP_VERSION_UPDATE_HMAC_KEY or "").strip()
+    if settings.ENVIRONMENT == "production" and not signing_key:
+        logger.error("APP_VERSION_UPDATE_HMAC_KEY is not configured in production")
+        raise HTTPException(status_code=500, detail="Update HMAC key not configured")
     if signing_key:
         if not x_update_signature:
             raise HTTPException(status_code=401, detail="Missing X-Update-Signature")
@@ -819,9 +876,17 @@ async def update_app_version(
     new_info["is_mandatory"] = request.is_mandatory
     if request.file_hash:
         new_info["file_hash"] = request.file_hash
-    if not _persist_app_version_info_to_db(new_info):
+    persist_status, committed_info = _persist_app_version_info_monotonic(new_info)
+    if persist_status == "downgrade":
+        logger.warning(
+            "Rejected app version downgrade from %s to %s",
+            committed_info.get("version", "unknown"),
+            request.version,
+        )
+        raise HTTPException(status_code=409, detail="Version downgrade rejected")
+    if persist_status != "updated":
         raise HTTPException(status_code=503, detail="Version metadata persistence failed")
-    APP_VERSION_INFO = new_info
+    APP_VERSION_INFO = committed_info
 
     logger.info(f"App version updated to {request.version} by CI/CD")
 
