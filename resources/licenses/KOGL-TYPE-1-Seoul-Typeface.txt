@@ -1,0 +1,19 @@
+SEOUL TYPEFACE ATTRIBUTION NOTICE
+
+Work: Seoul Typeface / Seoul Hangang Bold (SeoulHangangB.ttf)
+Source and rights holder: Seoul Metropolitan Government
+Official page: https://www.seoul.go.kr/seoul/font.do
+
+Attribution:
+출처: 서울특별시, 서울서체(서울한강체)
+
+The official Seoul Typeface page identifies this work as licensed under the
+Korea Open Government License (KOGL), Type 1: Attribution. KOGL Type 1 permits
+commercial and non-commercial use and modification when the source is
+credited. This distribution includes the official, unmodified font bytes and
+the attribution above.
+
+KOGL license information:
+https://www.kogl.or.kr/info/licenseType1.do
+
+No endorsement by the Seoul Metropolitan Government is implied.
