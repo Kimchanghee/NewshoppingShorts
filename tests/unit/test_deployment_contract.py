@@ -19,15 +19,27 @@ def test_cloud_run_deploy_migrates_before_traffic_switch():
 
 
 def test_vercel_build_fails_closed_on_migration_error():
-    text = (ROOT / "vercel.json").read_text(encoding="utf-8")
-    assert '"buildCommand": "cd backend && uv run --python 3.14 --with-requirements requirements.txt python -m alembic upgrade head"' in text
+    config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
+    build_command = config["buildCommand"]
+    migration = (
+        "cd backend && uv run --python 3.14 "
+        "--with-requirements requirements.txt python -m alembic upgrade head"
+    )
+
+    assert build_command.startswith(f"{migration} && ")
+    assert build_command.index("alembic upgrade head") < build_command.index(
+        "npm run build"
+    )
 
 
 def test_vercel_custom_build_preserves_declared_output_directory():
     config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
     output_directory = config["outputDirectory"]
-    assert output_directory == "public"
-    assert (ROOT / output_directory).is_dir()
+    assert output_directory == "website/dist"
+    website_root = ROOT / "website"
+    package = json.loads((website_root / "package.json").read_text(encoding="utf-8"))
+    assert website_root.is_dir()
+    assert package["scripts"]["build"]
 
 
 def test_vercel_function_requirements_match_backend_requirements():
