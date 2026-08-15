@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import yaml
+
 from utils import authenticode
 from utils.authenticode import (
     AuthenticodeTrust,
@@ -305,6 +307,35 @@ def test_release_workflow_pins_actions_tools_and_never_interpolates_signing_secr
     assert '"${{ secrets.SIGN_CERT_' not in workflow
     assert "$env:SIGN_CERT_PFX_BASE64" in workflow
     assert 'raise SystemExit("APP_VERSION_UPDATE_HMAC_KEY is required")' in workflow
+
+
+def test_release_workflow_exact_tool_installs_allow_runner_downgrades_fail_closed():
+    workflow = yaml.safe_load(
+        (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
+            encoding="utf-8"
+        )
+    )
+    steps = workflow["jobs"]["build"]["steps"]
+
+    for step_name, package, version in (
+        ("Install Inno Setup", "innosetup", "6.4.3"),
+        ("Install Tesseract OCR", "tesseract", "5.5.0.20241111"),
+    ):
+        step = next(step for step in steps if step.get("name") == step_name)
+        commands = [
+            line.strip()
+            for line in step["run"].splitlines()
+            if line.strip().startswith("choco install ")
+        ]
+
+        assert len(commands) == 1
+        tokens = commands[0].split()
+        assert tokens[:3] == ["choco", "install", package]
+        assert f"--version={version}" in tokens
+        assert "--source=https://community.chocolatey.org/api/v2/" in tokens
+        assert "--require-checksums" in tokens
+        assert "--fail-on-unfound" in tokens
+        assert "--allow-downgrade" in tokens
 
 
 def test_publish_credentials_are_isolated_from_untrusted_build_steps():

@@ -69,12 +69,12 @@ jobs:
         python -c "import sys; import PyInstaller; assert PyInstaller.__version__ == '6.19.0', PyInstaller.__version__; print('python=', sys.executable); print('pyinstaller=', PyInstaller.__version__)"
 
     - name: Install Inno Setup
-      run: choco install innosetup --version=6.4.3 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --no-progress -y
+      run: choco install innosetup --version=6.4.3 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --allow-downgrade --no-progress -y
 
     - name: Install Tesseract OCR
       shell: pwsh
       run: |
-        choco install tesseract --version=5.5.0.20241111 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --no-progress -y
+        choco install tesseract --version=5.5.0.20241111 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --allow-downgrade --no-progress -y
 
         $candidates = @()
         $cmd = Get-Command tesseract -ErrorAction SilentlyContinue
