@@ -1,194 +1,305 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+"""Synchronize the exact font assets declared in ``config.font_catalog``."""
+
+from __future__ import annotations
+
+import argparse
+import hashlib
+import logging
 import os
 import sys
-import logging
-import requests
+import tempfile
+import urllib.request
+from urllib.parse import urljoin, urlparse
 import zipfile
-from urllib.parse import urlparse
-from io import BytesIO
+import zlib
+from pathlib import Path
 
-logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from config.font_catalog import (  # noqa: E402
+    BROWSER_USER_AGENT,
+    DEFAULT_FONTS_DIR,
+    DEFAULT_LICENSES_DIR,
+    FONT_CHOICES,
+    FontAsset,
+)
+from scripts.verify_font_assets import (  # noqa: E402
+    verify_font_directory,
+    verify_font_file,
+)
+
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
-# Windows console UTF-8
-if sys.platform == 'win32':
-    import io
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
-
-FONTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "fonts")
-os.makedirs(FONTS_DIR, exist_ok=True)
-
-HEADERS = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-}
-
-FONT_SOURCES = [
-    {
-        "id": "seoul_hangang",
-        "name": "SeoulHangangB.ttf",
-        "urls": [
-            "https://cdn.jsdelivr.net/gh/webfontworld/seoul/SeoulHangangB.ttf"
-        ]
-    },
-    {
-        "id": "pretendard",
-        "name": "Pretendard-ExtraBold.ttf",
-        "is_zip": True,
-        "urls": ["https://github.com/orioncactus/pretendard/releases/download/v1.3.9/Pretendard-1.3.9.zip"],
-        "extract_files": ["Pretendard-ExtraBold.ttf", "Pretendard-Bold.ttf", "Pretendard-SemiBold.ttf"]
-    },
-    {
-        "id": "gmarketsans",
-        "name": "GmarketSansTTFBold.ttf",
-        "urls": [
-            "https://raw.githubusercontent.com/fonts-archive/GmarketSans/main/GmarketSansBold.ttf",
-            "https://cdn.jsdelivr.net/gh/fonts-archive/GmarketSans/GmarketSansBold.ttf"
-        ]
-    },
-    {
-        "id": "noto_sans_kr",
-        "name": "NotoSansKR-Variable.ttf",
-        "urls": ["https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/NotoSansKR%5Bwght%5D.ttf"]
-    },
-    {
-        "id": "suit",
-        "name": "SUIT-Heavy.ttf",
-        "urls": ["https://raw.githubusercontent.com/sun-typeface/SUIT/main/fonts/static/ttf/SUIT-Heavy.ttf"]
-    },
-    {
-        "id": "noto_sans_kr_license",
-        "name": "LICENSE-NotoSansKR.txt",
-        "urls": ["https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt"]
-    },
-    {
-        "id": "suit_license",
-        "name": "LICENSE-SUIT.txt",
-        "urls": ["https://raw.githubusercontent.com/sun-typeface/SUIT/main/LICENSE"]
-    },
-    {
-        "id": "ibm_plex",
-        "name": "IBMPlexSansKR-Bold.ttf",
-        "urls": ["https://github.com/google/fonts/raw/main/ofl/ibmplexsanskr/IBMPlexSansKR-Bold.ttf"]
-    },
-    {
-        "id": "spoqa_han_sans",
-        "name": "SpoqaHanSansNeo-Bold.ttf",
-        "is_zip": True,
-        "urls": ["https://github.com/spoqa/spoqa-han-sans/releases/download/v3.0.0/SpoqaHanSansNeo_all.zip"],
-        "extract_files": ["SpoqaHanSansNeo-Bold.ttf"]
-    },
-    {
-        "id": "cafe24_surround",
-        "name": "Cafe24Ssurround.ttf",
-        "urls": [
-            "https://fonts.cafe24.com/Ssurround/Cafe24Ssurround.ttf",
-            "https://cdn.jsdelivr.net/gh/webfontworld/cafe24/Cafe24Ssurround.ttf"
-        ]
-    },
-    {
-        "id": "nanum_square",
-        "name": "NanumSquareEB.ttf",
-        "urls": [
-            "https://cdn.jsdelivr.net/gh/moonspam/NanumSquare@master/nanumsquareeb.ttf",
-            "https://github.com/naver/nanumfont/raw/gh-pages/NanumSquare/NanumSquareEB.ttf"
-        ]
-    },
-    {
-        "id": "paperlogy",
-        "name": "Paperlogy-9Black.ttf",
-        "urls": ["https://raw.githubusercontent.com/fonts-archive/Paperlogy/main/Paperlogy-9Black.ttf"]
-    },
-    {
-        "id": "kopub_batang",
-        "name": "KoPubBatangBold.ttf",
-        "urls": ["https://raw.githubusercontent.com/fonts-archive/KoPub-Batang/main/KoPubBatangBold.ttf"]
-    },
-    {
-        "id": "unpeople_gothic",
-        "name": "UnPeople.ttf",
-        "urls": ["https://cdn.jsdelivr.net/gh/fonts-archive/UnPeople/UnPeople.ttf"]
-    }
-]
-
-_ALLOWED_FONT_HOSTS = {
-    "cdn.jsdelivr.net",
-    "github.com",
-    "raw.githubusercontent.com",
-    "fonts.cafe24.com",
-    "www.seoul.go.kr",
+_FONT_REDIRECT_HOSTS = {
+    "github.com": frozenset({
+        "github.com",
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+    }),
+    "gongu.copyright.or.kr": frozenset({
+        "gongu.copyright.or.kr",
+        "www.copyright.or.kr",
+    }),
 }
 
 
-def _is_trusted_font_url(url: str) -> bool:
+def _approved_download_hosts(url: str) -> frozenset[str]:
     parsed = urlparse(url)
-    return parsed.scheme == "https" and bool(parsed.hostname) and parsed.hostname in _ALLOWED_FONT_HOSTS
+    host = (parsed.hostname or "").lower()
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"font source has an invalid port: {url}") from exc
+    if (
+        parsed.scheme != "https"
+        or not host
+        or parsed.username
+        or parsed.password
+        or port not in (None, 443)
+    ):
+        raise ValueError(f"font source must be an absolute HTTPS URL: {url}")
+    return _FONT_REDIRECT_HOSTS.get(host, frozenset({host}))
 
 
-def _safe_extract_member(zf: zipfile.ZipFile, member_name: str, output_path: str) -> bool:
-    """Extract one file from zip with traversal guard."""
-    for zip_info in zf.infolist():
-        if not zip_info.filename.endswith(member_name):
-            continue
-        candidate = os.path.abspath(os.path.join(FONTS_DIR, output_path))
-        if not candidate.startswith(os.path.abspath(FONTS_DIR) + os.sep):
-            logger.warning("    [BLOCKED] Unsafe zip extraction path: %s", output_path)
-            return False
-        with zf.open(zip_info.filename) as src, open(candidate, "wb") as dst:
-            dst.write(src.read())
-        logger.info(f"    - Extracted {output_path}")
-        return True
-    return False
+def _validate_download_url(url: str, approved_hosts: frozenset[str]) -> None:
+    parsed = urlparse(url)
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError(f"font redirect destination has an invalid port: {url}") from exc
+    if (
+        parsed.scheme != "https"
+        or not parsed.hostname
+        or parsed.hostname.lower() not in approved_hosts
+        or parsed.username
+        or parsed.password
+        or port not in (None, 443)
+    ):
+        raise ValueError(f"font redirect destination is not approved: {url}")
 
-def download_font(source):
-    target_name = source["name"]
-    target_path = os.path.join(FONTS_DIR, target_name)
-    
-    if os.path.exists(target_path) and os.path.getsize(target_path) > 1000:
-        logger.info(f"  [ALREADY EXISTS] {target_name}")
-        return True
 
-    for url in source["urls"]:
-        if not _is_trusted_font_url(url):
-            logger.warning(f"    [BLOCKED] Untrusted font source: {url}")
-            continue
+class _ApprovedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def __init__(self, approved_hosts: frozenset[str]):
+        self._approved_hosts = approved_hosts
+        super().__init__()
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        destination = urljoin(req.full_url, newurl)
+        _validate_download_url(destination, self._approved_hosts)
+        return super().redirect_request(req, fp, code, msg, headers, destination)
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _assert_download(path: Path, size: int, sha256: str, label: str) -> None:
+    actual_size = path.stat().st_size
+    if actual_size != size:
+        raise ValueError(f"{label}: size {actual_size} != {size}")
+    actual_hash = _sha256(path)
+    if actual_hash != sha256:
+        raise ValueError(f"{label}: sha256 {actual_hash} != {sha256}")
+
+
+def _download(
+    url: str,
+    directory: Path,
+    *,
+    browser_user_agent: bool,
+    max_bytes: int,
+) -> Path:
+    approved_hosts = _approved_download_hosts(url)
+    _validate_download_url(url, approved_hosts)
+    fd, raw_path = tempfile.mkstemp(prefix=".font-download-", dir=directory)
+    os.close(fd)
+    path = Path(raw_path)
+    headers = {
+        "User-Agent": BROWSER_USER_AGENT if browser_user_agent else "SSMaker-Font-Sync/1.0",
+        "Accept": "*/*",
+    }
+    request = urllib.request.Request(url, headers=headers)
+    try:
+        opener = urllib.request.build_opener(_ApprovedRedirectHandler(approved_hosts))
+        with opener.open(request, timeout=90) as response, path.open("wb") as target:
+            _validate_download_url(response.geturl(), approved_hosts)
+            status = getattr(response, "status", 200)
+            if status != 200:
+                raise OSError(f"HTTP {status} for {url}")
+            wire_limit = max_bytes + max(65_536, max_bytes // 100)
+            content_length = response.headers.get("Content-Length")
+            if content_length:
+                try:
+                    declared_length = int(content_length)
+                except ValueError:
+                    declared_length = None
+                if declared_length is not None and declared_length > wire_limit:
+                    raise ValueError(
+                        f"response Content-Length {declared_length} exceeds {wire_limit}"
+                    )
+
+            encoding = response.headers.get("Content-Encoding", "").lower().strip()
+            decoder = zlib.decompressobj(16 + zlib.MAX_WBITS) if encoding == "gzip" else None
+            wire_size = 0
+            decoded_size = 0
+            for chunk in iter(lambda: response.read(1024 * 1024), b""):
+                wire_size += len(chunk)
+                if wire_size > wire_limit:
+                    raise ValueError(f"wire response exceeds {wire_limit} bytes")
+                payload = (
+                    decoder.decompress(chunk, max_bytes - decoded_size + 1)
+                    if decoder is not None
+                    else chunk
+                )
+                decoded_size += len(payload)
+                if decoded_size > max_bytes or (
+                    decoder is not None and decoder.unconsumed_tail
+                ):
+                    raise ValueError(f"decoded response exceeds {max_bytes} bytes")
+                target.write(payload)
+            if decoder is not None:
+                payload = decoder.flush(max_bytes - decoded_size + 1)
+                decoded_size += len(payload)
+                if decoded_size > max_bytes:
+                    raise ValueError(f"decoded response exceeds {max_bytes} bytes")
+                target.write(payload)
+                if not decoder.eof:
+                    raise ValueError("incomplete gzip response")
+            target.flush()
+            os.fsync(target.fileno())
+        return path
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
+
+
+def _decoded_bytes(asset: FontAsset, fonts_dir: Path) -> bytes:
+    if asset.archive is None:
+        assert asset.url is not None
+        download = _download(
+            asset.url,
+            fonts_dir,
+            browser_user_agent=asset.browser_user_agent,
+            max_bytes=asset.size,
+        )
         try:
-            logger.info(f"  [TRYING] {target_name} from {url}")
-            resp = requests.get(url, timeout=30, headers=HEADERS)
-            if resp.status_code == 200:
-                if source.get("is_zip"):
-                    with zipfile.ZipFile(BytesIO(resp.content)) as zf:
-                        extracted = False
-                        for file_to_extract in source["extract_files"]:
-                            final_name = source.get("rename", {}).get(file_to_extract, file_to_extract)
-                            if _safe_extract_member(zf, file_to_extract, final_name):
-                                extracted = True
-                        if extracted: return True
-                else:
-                    with open(target_path, 'wb') as f:
-                        f.write(resp.content)
-                    logger.info(f"    [OK] Downloaded {target_name}")
-                    return True
-            else:
-                logger.warning(f"    [FAIL] Status {resp.status_code}")
-        except Exception as e:
-            logger.warning(f"    [ERROR] {e}")
-    
-    return False
+            return download.read_bytes()
+        finally:
+            download.unlink(missing_ok=True)
 
-def main():
-    logger.info("=" * 60)
-    logger.info("Syncing All Fonts for Shopping Shorts Maker")
-    logger.info("=" * 60)
-    
-    for source in FONT_SOURCES:
-        download_font(source)
-    
-    logger.info("\nChecking final fonts directory:")
-    fonts = [f for f in os.listdir(FONTS_DIR) if f.endswith('.ttf')]
-    for f in sorted(fonts):
-        logger.info(f" - {f} ({os.path.getsize(os.path.join(FONTS_DIR, f)) // 1024} KB)")
+    archive = asset.archive
+    download = _download(
+        archive.url,
+        fonts_dir,
+        browser_user_agent=False,
+        max_bytes=archive.size,
+    )
+    try:
+        _assert_download(download, archive.size, archive.sha256, archive.url)
+        with zipfile.ZipFile(download) as bundle:
+            try:
+                member = bundle.getinfo(archive.member)
+            except KeyError as exc:
+                raise ValueError(
+                    f"{asset.filename}: archive member missing: {archive.member}"
+                ) from exc
+            if member.is_dir():
+                raise ValueError(f"{asset.filename}: archive member is a directory")
+            if member.file_size != asset.size:
+                raise ValueError(
+                    f"{asset.filename}: archive member size {member.file_size} != {asset.size}"
+                )
+            extracted = bytearray()
+            with bundle.open(member, "r") as source:
+                while True:
+                    chunk = source.read(min(1024 * 1024, asset.size - len(extracted) + 1))
+                    if not chunk:
+                        break
+                    extracted.extend(chunk)
+                    if len(extracted) > asset.size:
+                        raise ValueError(
+                            f"{asset.filename}: extracted archive member exceeds {asset.size} bytes"
+                        )
+            if len(extracted) != asset.size:
+                raise ValueError(
+                    f"{asset.filename}: extracted size {len(extracted)} != {asset.size}"
+                )
+            return bytes(extracted)
+    finally:
+        download.unlink(missing_ok=True)
+
+
+def _atomic_install(asset: FontAsset, data: bytes, fonts_dir: Path) -> None:
+    fd, raw_path = tempfile.mkstemp(
+        prefix=f".{asset.filename}.", suffix=".tmp", dir=fonts_dir
+    )
+    candidate = Path(raw_path)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            handle.flush()
+            os.fsync(handle.fileno())
+        errors = verify_font_file(candidate, asset)
+        if errors:
+            raise ValueError("; ".join(errors))
+        os.replace(candidate, fonts_dir / asset.filename)
+    finally:
+        candidate.unlink(missing_ok=True)
+
+
+def sync_font(asset: FontAsset, fonts_dir: Path) -> bool:
+    """Validate an existing file; download and atomically replace only if needed."""
+    target = fonts_dir / asset.filename
+    errors = verify_font_file(target, asset)
+    if not errors:
+        logger.info("[VERIFIED] %s", asset.filename)
+        return True
+
+    logger.info("[SYNC] %s (%s)", asset.filename, "; ".join(errors))
+    try:
+        _atomic_install(asset, _decoded_bytes(asset, fonts_dir), fonts_dir)
+    except Exception as exc:
+        logger.error("[FAILED] %s: %s", asset.filename, exc)
+        return False
+    logger.info("[INSTALLED] %s", asset.filename)
+    return True
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--fonts-dir", type=Path, default=DEFAULT_FONTS_DIR)
+    parser.add_argument("--licenses-dir", type=Path, default=DEFAULT_LICENSES_DIR)
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="validate only; do not download or replace files",
+    )
+    args = parser.parse_args(argv)
+    args.fonts_dir.mkdir(parents=True, exist_ok=True)
+
+    sync_ok = True
+    if not args.check:
+        for choice in FONT_CHOICES:
+            sync_ok = sync_font(choice.asset, args.fonts_dir) and sync_ok
+
+    errors = verify_font_directory(args.fonts_dir, args.licenses_dir)
+    for error in errors:
+        logger.error("[VERIFY] %s", error)
+    if not sync_ok or errors:
+        return 1
+    logger.info("Verified all %d catalog fonts and required notices", len(FONT_CHOICES))
+    return 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
