@@ -1,5 +1,6 @@
 import json
 import os
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -59,4 +60,21 @@ def test_topbar_displays_product_name_version_and_update_date(monkeypatch):
 
     panel.set_compact_mode(True)
     assert panel.brand_group.isHidden()
+    panel.close()
+
+
+def test_topbar_logout_returns_to_login():
+    calls = []
+
+    class Gui:
+        login_data = None
+        exit_handler = SimpleNamespace(
+            logout_to_login=lambda: calls.append("logout")
+        )
+
+    panel = TopBarPanel(Gui(), DesignSystem())
+
+    panel.gui.logout_button.click()
+
+    assert calls == ["logout"]
     panel.close()

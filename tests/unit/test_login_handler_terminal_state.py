@@ -14,13 +14,15 @@ def _handler():
 def test_session_expiry_warning_and_exit_are_one_shot(monkeypatch):
     handler = _handler()
     calls = []
+    handler.app.exit_handler = SimpleNamespace(
+        logout_to_login=lambda: calls.append("login")
+    )
     monkeypatch.setattr(login_handler, "show_warning", lambda *_args: calls.append("warning"))
-    monkeypatch.setattr(handler, "_safe_exit", lambda: calls.append("exit"))
 
     handler._on_auth_required()
     handler._on_auth_required()
 
-    assert calls == ["warning", "exit"]
+    assert calls == ["warning", "login"]
     assert handler.app._login_watch_stop is True
 
 
