@@ -534,7 +534,7 @@ class TestSensitiveFieldSet:
 
 
 class TestPayAppContract:
-    def test_test_payment_plan_is_configured(self):
+    def test_only_monthly_subscription_is_sellable(self):
         from app.routers.payment import (
             PLAN_DAYS,
             PLAN_NAMES,
@@ -543,17 +543,19 @@ class TestPayAppContract:
             get_sellable_plan_price,
         )
 
-        assert PLAN_PRICES["test_3days"] == 5000
         assert PLAN_DAYS["test_3days"] == 3
         assert PLAN_NAMES["test_3days"] == "테스트 3일"
-        assert PLAN_PRICES["test_7days"] == 49000
         assert PLAN_DAYS["test_7days"] == 7
         assert PLAN_NAMES["test_7days"] == "1주 테스트 상품"
         assert PLAN_PRICES["pro_1month"] == 149000
+        assert set(PLAN_PRICES) == {"trial", "pro_1month"}
         assert "test_3days" in PROMOTION_EXCLUDED_PLAN_IDS
         assert "test_7days" in PROMOTION_EXCLUDED_PLAN_IDS
         assert get_sellable_plan_price("test_3days") is None
-        assert get_sellable_plan_price("test_7days") == 49000
+        assert get_sellable_plan_price("test_7days") is None
+        assert get_sellable_plan_price("pro_1month") == 149000
+        assert get_sellable_plan_price("pro_6months") is None
+        assert get_sellable_plan_price("pro_12months") is None
 
     def test_payment_base_url_falls_back_to_public_api_in_production(self, monkeypatch):
         from types import SimpleNamespace

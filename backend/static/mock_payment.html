@@ -170,16 +170,12 @@
 
         // Plan information
         const plans = {
-            'trial': { name: '체험판', price: '무료' },
-            'test_7days': { name: '1주 테스트 상품', price: '49,000원' },
-            'pro_1month': { name: '프로 구독 (1개월)', price: '149,000원' },
-            'pro_6months': { name: '프로 구독 (6개월)', price: '759,900원' },
-            'pro_12months': { name: '프로 구독 (12개월)', price: '1,251,600원' }
+            'pro_1month': { name: '프로 월 정액', price: '149,000원 / 월' }
         };
 
         // Update UI
         document.getElementById('payment-id').textContent = paymentId || '-';
-        const plan = plans[planId] || { name: planId, price: '-' };
+        const plan = plans[planId] || plans.pro_1month;
         document.getElementById('plan-name').textContent = plan.name;
         document.getElementById('amount').textContent = plan.price;
 

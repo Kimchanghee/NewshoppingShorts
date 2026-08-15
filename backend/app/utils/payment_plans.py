@@ -4,11 +4,7 @@ from __future__ import annotations
 
 PLAN_PRICES = {
     "trial": 0,
-    "test_3days": 5000,
-    "test_7days": 49000,
     "pro_1month": 149000,
-    "pro_6months": 759900,
-    "pro_12months": 1251600,
 }
 
 PLAN_DAYS = {
@@ -29,7 +25,10 @@ PLAN_NAMES = {
 
 FIXED_TEST_PLAN_IDS = {"test_3days", "test_7days"}
 PROMOTION_EXCLUDED_PLAN_IDS = set(FIXED_TEST_PLAN_IDS)
-SELLABLE_PLAN_IDS = {"test_7days", "pro_1month", "pro_6months", "pro_12months"}
+# New purchases use one public subscription price everywhere. Legacy/test plan
+# metadata remains above so existing payment history and entitlements can still
+# be displayed and repaired safely, but those plans can no longer be purchased.
+SELLABLE_PLAN_IDS = {"pro_1month"}
 
 
 def get_plan_name(plan_id: str | None) -> str | None:

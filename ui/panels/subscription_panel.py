@@ -156,48 +156,6 @@ PLANS = {
         "color": "#9A9A9A",
         "popular": False,
     },
-    "test_3days": {
-        "id": "test_3days",
-        "name": "테스트 3일",
-        "price": 5000,
-        "price_text": format_price_korean(5000),
-        "period": "3일",
-        "months": 0,
-        "description": "실결제 흐름 확인용 3일 테스트 플랜",
-        "features": [
-            "3일간 무제한 영상 생성",
-            "모든 음성 프로필 사용",
-            "AI 콘텐츠 분석",
-            "커스텀 자막 스타일",
-            "1080p 해상도",
-            "실제 PayApp 결제 테스트",
-        ],
-        "not_included": [],
-        "color": "#1B8A5A",
-        "popular": True,
-        "badge": "결제 테스트",
-    },
-    "test_7days": {
-        "id": "test_7days",
-        "name": "1주 테스트 상품",
-        "price": 49000,
-        "price_text": format_price_korean(49000),
-        "period": "7일",
-        "months": 0,
-        "description": "일주일 동안 모든 기능을 확인하는 테스트 상품",
-        "features": [
-            "7일간 무제한 영상 생성",
-            "모든 음성 프로필 사용",
-            "AI 콘텐츠 분석",
-            "커스텀 자막 스타일",
-            "1080p 해상도",
-            "실제 PayApp 결제 테스트",
-        ],
-        "not_included": [],
-        "color": "#1B8A5A",
-        "popular": True,
-        "badge": "1주 테스트",
-    },
     "pro": {
         "id": "pro",
         "name": "구독중",
@@ -221,12 +179,12 @@ PLANS = {
     },
     "pro_1month": {
         "id": "pro_1month",
-        "name": "프로 1개월",
+        "name": "프로 월 정액",
         "price": 149000,
         "price_text": format_price_korean(149000),
         "period": "월",
         "months": 1,
-        "description": "무제한 영상 생성 + 모든 기능 해제",
+        "description": "월 149,000원으로 모든 기능 이용",
         "features": [
             "무제한 영상 생성",
             "모든 음성 프로필 사용",
@@ -238,58 +196,7 @@ PLANS = {
         "not_included": [],
         "color": "#E31639",
         "popular": False,
-        "badge": "정기 결제",
-    },
-    "pro_6months": {
-        "id": "pro_6months",
-        "price": 759900,
-        "name": "프로 6개월",
-        "price_text": format_price_korean(126650),  # Show per-month price
-        "price_per_month": 126650,
-        "original_price_per_month": 149000,
-        "original_price": 894000,
-        "discount_percent": 15,
-        "period": "6개월",
-        "months": 6,
-        "description": "15% 할인 혜택",
-        "features": [
-            "무제한 영상 생성",
-            "모든 음성 프로필 사용",
-            "AI 콘텐츠 분석",
-            "커스텀 자막 스타일",
-            "1080p 해상도",
-            "우선 처리",
-        ],
-        "not_included": [],
-        "color": "#E31639",
-        "popular": True,
-        "badge": "인기",
-    },
-    "pro_12months": {
-        "id": "pro_12months",
-        "name": "프로 12개월",
-        "price": 1251600,
-        "price_text": format_price_korean(104300),  # Show per-month price
-        "price_per_month": 104300,
-        "original_price_per_month": 149000,
-        "original_price": 1788000,
-        "discount_percent": 30,
-        "period": "12개월",
-        "months": 12,
-        "description": "30% 할인 혜택",
-        "features": [
-            "무제한 영상 생성",
-            "모든 음성 프로필 사용",
-            "AI 콘텐츠 분석",
-            "커스텀 자막 스타일",
-            "1080p 해상도",
-            "우선 처리",
-            "최대 절약 플랜!",
-        ],
-        "not_included": [],
-        "color": "#E31639",
-        "popular": False,
-        "badge": "최고 할인",
+        "badge": "월 정액",
     },
 }
 
@@ -734,7 +641,7 @@ class CurrentPlanCard(QFrame):
         """Update current plan display
 
         Args:
-            plan_id: Plan identifier (e.g., "pro_1month", "pro_6months", "trial")
+            plan_id: Plan identifier (e.g., "pro_1month" or "trial")
             used: Number of works used
             total: Total work count (-1 for unlimited)
             expires_at_str: ISO format expiry date string for remaining-time display
@@ -1331,7 +1238,7 @@ class SubscriptionPanel(QWidget):
         self.timer = QTimer(self)
         self.timer.timeout.connect(self._poll_status)
         self.selected_plan = None
-        self._default_plan_id = "test_7days"
+        self._default_plan_id = "pro_1month"
         self.ds = get_design_system()
         
         self._build_ui()
@@ -1400,7 +1307,7 @@ class SubscriptionPanel(QWidget):
         plans_layout.setContentsMargins(0, 0, 0, 0)
         plans_layout.setSpacing(ds.spacing.space_4)
         
-        plans_title = QLabel("플랜 선택")
+        plans_title = QLabel("월 정액 구독")
         plans_title.setObjectName("section_title")
         plans_layout.addWidget(plans_title)
         
@@ -1408,9 +1315,9 @@ class SubscriptionPanel(QWidget):
         plans_row = QHBoxLayout()
         plans_row.setSpacing(ds.spacing.space_4)
         
-        # Create plan cards for all pro tiers
+        # Public subscription pricing is fixed to one monthly plan.
         self.plan_cards = []
-        pro_plan_ids = ["test_7days", "pro_1month", "pro_6months", "pro_12months"]
+        pro_plan_ids = ["pro_1month"]
         for plan_id in pro_plan_ids:
             if plan_id in PLANS:
                 plan_data = PLANS[plan_id]
