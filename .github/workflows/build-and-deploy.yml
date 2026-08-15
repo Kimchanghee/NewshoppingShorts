@@ -69,12 +69,76 @@ jobs:
         python -c "import sys; import PyInstaller; assert PyInstaller.__version__ == '6.19.0', PyInstaller.__version__; print('python=', sys.executable); print('pyinstaller=', PyInstaller.__version__)"
 
     - name: Install Inno Setup
-      run: choco install innosetup --version=6.4.3 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --allow-downgrade --no-progress -y
+      shell: pwsh
+      run: |
+        $installer = Join-Path $env:RUNNER_TEMP "innosetup-6.4.3.exe"
+        $url = "https://github.com/jrsoftware/issrc/releases/download/is-6_4_3/innosetup-6.4.3.exe"
+        curl.exe --fail --silent --show-error --location --max-redirs 3 --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 180 --retry 3 --retry-delay 2 --retry-max-time 120 --retry-all-errors --max-filesize 6454616 --output $installer $url
+        $curlExit = $LASTEXITCODE
+        if ($curlExit -ne 0) {
+          throw "Inno Setup download failed with exit code $curlExit."
+        }
+
+        $download = Get-Item -LiteralPath $installer
+        $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+        if ($download.Length -ne 6454616 -or $actualHash -ne "F3C42116542C4CC57263C5BA6C4FEABFC49FE771F2F98A79D2F7628B8762723B") {
+          throw "Inno Setup download failed pinned size/SHA256 verification."
+        }
+        $signature = Get-AuthenticodeSignature -LiteralPath $installer
+        $expectedSubject = "CN=Pyrsys B.V., O=Pyrsys B.V., S=Noord-Holland, C=NL"
+        if ($signature.Status -ne "Valid" -or $signature.SignerCertificate.Subject -ne $expectedSubject) {
+          throw "Inno Setup download failed Authenticode publisher verification."
+        }
+
+        $innoRoot = Join-Path $env:RUNNER_TEMP "InnoSetup-6.4.3"
+        $install = Start-Process -FilePath $installer -ArgumentList "/PORTABLE=1", "/CURRENTUSER", "/SILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/SP-", "/DIR=$innoRoot" -Wait -PassThru
+        if ($install.ExitCode -ne 0) {
+          throw "Inno Setup installation failed with exit code $($install.ExitCode)."
+        }
+        $isccExe = Join-Path $innoRoot "ISCC.exe"
+        if (-not (Test-Path -LiteralPath $isccExe)) {
+          throw "ISCC.exe was not found after installing Inno Setup."
+        }
+        $isccFile = Get-Item -LiteralPath $isccExe
+        if ($isccFile.PSIsContainer -or $isccFile.Length -le 0) {
+          throw "Installed ISCC.exe is not a nonempty regular file."
+        }
+        $compilerDll = Join-Path $innoRoot "ISCmplr.dll"
+        if (-not (Test-Path -LiteralPath $compilerDll)) {
+          throw "ISCmplr.dll was not found after installing Inno Setup."
+        }
+        $compilerFile = Get-Item -LiteralPath $compilerDll
+        if ($compilerFile.PSIsContainer -or $compilerFile.Length -le 0) {
+          throw "Installed ISCmplr.dll is not a nonempty regular file."
+        }
+        $isccHash = (Get-FileHash -LiteralPath $isccExe -Algorithm SHA256).Hash
+        $compilerHash = (Get-FileHash -LiteralPath $compilerDll -Algorithm SHA256).Hash
+        if ($isccHash -ne "8A430B74FD1ECEF5651F514A62B5341B0C65E1A53FFE5BA33CC26CF57E67029F" -or $compilerHash -ne "2C230C3E99BC42215221B2C847356FBBE9EAE33A15A842BE429E94FD26E7C436") {
+          throw "Installed Inno Setup compiler does not match pinned version 6.4.3."
+        }
+        "INNO_SETUP_ISCC=$isccExe" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+        $innoRoot | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
 
     - name: Install Tesseract OCR
       shell: pwsh
       run: |
-        choco install tesseract --version=5.5.0.20241111 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --allow-downgrade --no-progress -y
+        $installer = Join-Path $env:RUNNER_TEMP "tesseract-ocr-w64-setup-5.5.0.20241111.exe"
+        $url = "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe"
+        curl.exe --fail --silent --show-error --location --max-redirs 3 --proto '=https' --proto-redir '=https' --tlsv1.2 --connect-timeout 15 --max-time 300 --retry 3 --retry-delay 2 --retry-max-time 180 --retry-all-errors --max-filesize 21381872 --output $installer $url
+        $curlExit = $LASTEXITCODE
+        if ($curlExit -ne 0) {
+          throw "Tesseract download failed with exit code $curlExit."
+        }
+
+        $download = Get-Item -LiteralPath $installer
+        $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+        if ($download.Length -ne 21381872 -or $actualHash -ne "F3FC4236425B690C8BE756F35793F77394EE004BE0A6460A440C754D892F68BC") {
+          throw "Tesseract download failed pinned size/SHA256 verification."
+        }
+        $install = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
+        if ($install.ExitCode -ne 0) {
+          throw "Tesseract installation failed with exit code $($install.ExitCode)."
+        }
 
         $candidates = @()
         $cmd = Get-Command tesseract -ErrorAction SilentlyContinue
@@ -114,7 +178,11 @@ jobs:
         if ($tessdata) {
           Write-Host "Tessdata directory: $tessdata"
         }
-        & $tesseractExe --version
+        $tesseractVersion = (& $tesseractExe --version 2>&1 | Select-Object -First 1).ToString().Trim()
+        $versionExit = $LASTEXITCODE
+        if ($versionExit -ne 0 -or $tesseractVersion -notmatch '^tesseract v5\.5\.0\.20241111$') {
+          throw "Expected Tesseract 5.5.0.20241111, found '$tesseractVersion' (exit $versionExit)."
+        }
 
     - name: Download fonts
       run: python scripts/download_all_fonts_final.py

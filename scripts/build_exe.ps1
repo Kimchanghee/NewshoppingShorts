@@ -586,6 +586,7 @@ try {
   # Find ISCC.exe (Inno Setup Compiler)
   $iscc = $null
   $isccCandidates = @(
+    $env:INNO_SETUP_ISCC,
     (Get-Command iscc -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue),
     "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
     "C:\Program Files\Inno Setup 6\ISCC.exe",

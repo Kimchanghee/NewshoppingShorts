@@ -175,6 +175,8 @@ def test_build_uses_rfc3161_and_inno_named_sign_tool_contract():
     assert "/fd SHA256 /tr https://timestamp.digicert.com /td SHA256" in build
     assert '"/DSignToolAvailable"' in build
     assert '"/Sssmaker=$innoSignCommand"' in build
+    assert "$env:INNO_SETUP_ISCC," in build
+    assert build.index("$env:INNO_SETUP_ISCC,") < build.index("Get-Command iscc")
     assert "SignTool=ssmaker" in installer
     assert "SignedUninstaller=yes" in installer
     assert '"/t", "http://timestamp' not in build.lower()
@@ -301,15 +303,14 @@ def test_release_workflow_pins_actions_tools_and_never_interpolates_signing_secr
     assert "PyInstaller.__version__ == '6.19.0'" in workflow
     assert "python-version: '3.11.9'" in workflow
     assert "hashFiles('requirements-release.lock')" in workflow
-    assert "choco install innosetup --version=" in workflow
-    assert "choco install tesseract --version=" in workflow
-    assert workflow.count("--require-checksums --fail-on-unfound") == 2
+    assert "choco install innosetup" not in workflow
+    assert "choco install tesseract" not in workflow
     assert '"${{ secrets.SIGN_CERT_' not in workflow
     assert "$env:SIGN_CERT_PFX_BASE64" in workflow
     assert 'raise SystemExit("APP_VERSION_UPDATE_HMAC_KEY is required")' in workflow
 
 
-def test_release_workflow_exact_tool_installs_allow_runner_downgrades_fail_closed():
+def test_release_workflow_exact_tool_downloads_are_pinned_and_fail_closed():
     workflow = yaml.safe_load(
         (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
             encoding="utf-8"
@@ -317,25 +318,65 @@ def test_release_workflow_exact_tool_installs_allow_runner_downgrades_fail_close
     )
     steps = workflow["jobs"]["build"]["steps"]
 
-    for step_name, package, version in (
-        ("Install Inno Setup", "innosetup", "6.4.3"),
-        ("Install Tesseract OCR", "tesseract", "5.5.0.20241111"),
+    for step_name, url, size, digest, version_check in (
+        (
+            "Install Inno Setup",
+            "https://github.com/jrsoftware/issrc/releases/download/is-6_4_3/innosetup-6.4.3.exe",
+            "6454616",
+            "F3C42116542C4CC57263C5BA6C4FEABFC49FE771F2F98A79D2F7628B8762723B",
+            '$isccHash -ne "8A430B74FD1ECEF5651F514A62B5341B0C65E1A53FFE5BA33CC26CF57E67029F"',
+        ),
+        (
+            "Install Tesseract OCR",
+            "https://github.com/tesseract-ocr/tesseract/releases/download/5.5.0/tesseract-ocr-w64-setup-5.5.0.20241111.exe",
+            "21381872",
+            "F3FC4236425B690C8BE756F35793F77394EE004BE0A6460A440C754D892F68BC",
+            "^tesseract v5\\.5\\.0\\.20241111$",
+        ),
     ):
         step = next(step for step in steps if step.get("name") == step_name)
-        commands = [
-            line.strip()
-            for line in step["run"].splitlines()
-            if line.strip().startswith("choco install ")
-        ]
+        script = step["run"]
 
-        assert len(commands) == 1
-        tokens = commands[0].split()
-        assert tokens[:3] == ["choco", "install", package]
-        assert f"--version={version}" in tokens
-        assert "--source=https://community.chocolatey.org/api/v2/" in tokens
-        assert "--require-checksums" in tokens
-        assert "--fail-on-unfound" in tokens
-        assert "--allow-downgrade" in tokens
+        assert url in script
+        assert f"--max-filesize {size}" in script
+        assert f"$download.Length -ne {size}" in script
+        assert digest in script
+        assert "--fail --silent --show-error --location --max-redirs 3" in script
+        assert "--proto '=https' --proto-redir '=https' --tlsv1.2" in script
+        assert "--connect-timeout" in script
+        assert "--max-time" in script
+        assert "--retry 3" in script
+        assert "$curlExit = $LASTEXITCODE" in script
+        assert "if ($curlExit -ne 0)" in script
+        assert "if ($install.ExitCode -ne 0)" in script
+        assert version_check in script
+        assert "choco " not in script.lower()
+
+    inno_script = next(
+        step for step in steps if step.get("name") == "Install Inno Setup"
+    )["run"]
+    assert "Get-AuthenticodeSignature" in inno_script
+    assert '$signature.Status -ne "Valid"' in inno_script
+    assert "CN=Pyrsys B.V., O=Pyrsys B.V., S=Noord-Holland, C=NL" in inno_script
+    assert 'Join-Path $env:RUNNER_TEMP "InnoSetup-6.4.3"' in inno_script
+    assert '"/PORTABLE=1", "/CURRENTUSER"' in inno_script
+    assert '"/DIR=$innoRoot"' in inno_script
+    assert '$isccExe = Join-Path $innoRoot "ISCC.exe"' in inno_script
+    assert "$isccFile.PSIsContainer -or $isccFile.Length -le 0" in inno_script
+    assert '$compilerDll = Join-Path $innoRoot "ISCmplr.dll"' in inno_script
+    assert "$compilerFile.PSIsContainer -or $compilerFile.Length -le 0" in inno_script
+    assert "8A430B74FD1ECEF5651F514A62B5341B0C65E1A53FFE5BA33CC26CF57E67029F" in inno_script
+    assert "2C230C3E99BC42215221B2C847356FBBE9EAE33A15A842BE429E94FD26E7C436" in inno_script
+    assert "pinned version 6.4.3" in inno_script
+    assert '"INNO_SETUP_ISCC=$isccExe"' in inno_script
+    assert "$env:GITHUB_ENV" in inno_script
+    assert "$innoRoot | Out-File -FilePath $env:GITHUB_PATH" in inno_script
+
+    tesseract_script = next(
+        step for step in steps if step.get("name") == "Install Tesseract OCR"
+    )["run"]
+    assert "Get-AuthenticodeSignature" not in tesseract_script
+    assert "$versionExit = $LASTEXITCODE" in tesseract_script
 
 
 def test_publish_credentials_are_isolated_from_untrusted_build_steps():
