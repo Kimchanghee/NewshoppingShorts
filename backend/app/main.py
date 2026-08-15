@@ -31,6 +31,7 @@ from app.utils.billing_crypto import validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
 from app.scheduler.computer_use_worker import run_computer_use_worker_loop
 from app.public_pages import render_privacy_policy, render_terms_of_service
+from app.showcase_page import render_ocr_showcase
 
 # 로깅 설정 - 모든 로그를 표준 출력에 기록
 logging.basicConfig(
@@ -321,12 +322,24 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "0"  # Modern: rely on CSP, disable legacy filter
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
-        response.headers["Pragma"] = "no-cache"
-        # Content Security Policy - API-only, deny all content embedding
-        response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-        )
+        is_showcase_page = request.url.path in {"/ocr-showcase", "/showcase"}
+        if is_showcase_page:
+            response.headers["Cache-Control"] = "public, max-age=300"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; style-src 'self'; script-src 'self'; "
+                "img-src 'self' data: https://github.com https://objects.githubusercontent.com "
+                "https://release-assets.githubusercontent.com; "
+                "media-src https://github.com https://objects.githubusercontent.com "
+                "https://release-assets.githubusercontent.com; "
+                "frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+            )
+        else:
+            response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            # API-only responses deny all content embedding.
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
+            )
         # Permissions Policy - disable all browser features
         response.headers["Permissions-Policy"] = (
             "camera=(), microphone=(), geolocation=(), payment=()"
@@ -415,7 +428,18 @@ else:
 
 @app.get("/")
 async def root():
-    return {"status": "ok", "service": "SSMaker Auth API"}
+    return {
+        "status": "ok",
+        "service": "SSMaker Auth API",
+        "ocr_showcase": "/ocr-showcase",
+    }
+
+
+@app.get("/ocr-showcase", response_class=HTMLResponse, include_in_schema=False)
+@app.get("/showcase", response_class=HTMLResponse, include_in_schema=False)
+async def ocr_showcase():
+    """Public before-and-after OCR subtitle blur samples."""
+    return HTMLResponse(content=render_ocr_showcase())
 
 
 @app.get("/favicon.ico", include_in_schema=False, status_code=204)

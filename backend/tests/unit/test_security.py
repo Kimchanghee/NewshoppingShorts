@@ -171,6 +171,26 @@ class TestSecurityHeaders:
         assert "default-src 'none'" in csp
         assert "frame-ancestors 'none'" in csp
 
+    def test_showcase_uses_media_aware_content_security_policy(self, client):
+        response = client.get("/ocr-showcase")
+        csp = response.headers.get("content-security-policy", "")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert "media-src https://github.com" in csp
+        assert "img-src 'self' data: https://github.com" in csp
+        assert "style-src 'self'" in csp
+        assert response.headers["cache-control"] == "public, max-age=300"
+
+    def test_api_routes_keep_strict_api_content_security_policy(self, client):
+        response = client.get("/health")
+        csp = response.headers.get("content-security-policy", "")
+
+        assert response.status_code == 200
+        assert csp.startswith("default-src 'none'")
+        assert "media-src" not in csp
+        assert "no-store" in response.headers["cache-control"]
+
     def test_permissions_policy(self, client):
         response = client.get("/health")
         pp = response.headers.get("permissions-policy", "")
