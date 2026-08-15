@@ -322,7 +322,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "0"  # Modern: rely on CSP, disable legacy filter
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
-        is_showcase_page = request.url.path in {"/ocr-showcase", "/showcase"}
+        is_showcase_page = request.url.path in {"/", "/ocr-showcase", "/showcase"}
         if is_showcase_page:
             response.headers["Cache-Control"] = "public, max-age=300"
             response.headers["Content-Security-Policy"] = (
@@ -426,13 +426,10 @@ if os.path.isdir(static_dir):
 else:
     logger.info("Static directory is not bundled; skipping /static mount")
 
-@app.get("/")
+@app.get("/", response_class=HTMLResponse, include_in_schema=False)
 async def root():
-    return {
-        "status": "ok",
-        "service": "SSMaker Auth API",
-        "ocr_showcase": "/ocr-showcase",
-    }
+    """Public landing page with the OCR before-and-after showcase."""
+    return HTMLResponse(content=render_ocr_showcase())
 
 
 @app.get("/ocr-showcase", response_class=HTMLResponse, include_in_schema=False)

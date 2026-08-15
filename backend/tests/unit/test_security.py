@@ -182,6 +182,15 @@ class TestSecurityHeaders:
         assert "style-src 'self'" in csp
         assert response.headers["cache-control"] == "public, max-age=300"
 
+    def test_root_exposes_showcase_as_the_public_landing_page(self, client):
+        response = client.get("/")
+
+        assert response.status_code == 200
+        assert response.headers["content-type"].startswith("text/html")
+        assert "OCR Blur Showcase | SSmaker" in response.text
+        assert response.text.count("<video controls") == 10
+        assert "media-src https://github.com" in response.headers["content-security-policy"]
+
     def test_api_routes_keep_strict_api_content_security_policy(self, client):
         response = client.get("/health")
         csp = response.headers.get("content-security-policy", "")
@@ -220,8 +229,8 @@ class TestErrorExposure:
     def test_root_endpoint_works(self, client):
         response = client.get("/")
         assert response.status_code == 200
-        body = response.json()
-        assert body.get("status") == "ok"
+        assert response.headers["content-type"].startswith("text/html")
+        assert "OCR Blur Showcase | SSmaker" in response.text
 
     @pytest.mark.parametrize("path", ["/favicon.ico", "/favicon.png"])
     def test_favicon_probes_do_not_create_404_logs(self, client, path):
