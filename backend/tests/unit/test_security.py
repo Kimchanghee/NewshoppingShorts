@@ -478,6 +478,40 @@ class TestAuthentication:
         assert response.status_code == 409
         assert response.json()["detail"] == "Version downgrade rejected"
 
+    def test_version_update_rejects_same_version_metadata_replacement(
+        self, client, monkeypatch
+    ):
+        from app import main
+
+        current_info = {**main.APP_VERSION_INFO, "version": "9.9.9"}
+        monkeypatch.setattr(main, "APP_VERSION_INFO", current_info)
+        monkeypatch.setattr(
+            main,
+            "_persist_app_version_info_monotonic",
+            lambda _info: ("conflict", current_info),
+        )
+        payload = {
+            "version": "9.9.9",
+            "download_url": "https://github.com/example/replaced.exe",
+            "is_mandatory": False,
+            "file_hash": "c" * 64,
+        }
+        signature_body = json.dumps(payload, separators=(",", ":")).encode()
+        signature = hmac.new(b"h" * 64, signature_body, hashlib.sha256).hexdigest()
+
+        response = client.post(
+            "/app/version/update",
+            content=signature_body,
+            headers={
+                "Authorization": "Bearer " + "d" * 64,
+                "Content-Type": "application/json",
+                "X-Update-Signature": signature,
+            },
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Existing version metadata is immutable"
+
     def test_monotonic_persistence_uses_database_row_lock_contract(self):
         source = Path(app_main.__file__).read_text(encoding="utf-8")
 
@@ -486,6 +520,69 @@ class TestAuthentication:
         assert source.index("SELECT setting_value FROM system_settings") < source.index(
             "UPDATE system_settings SET setting_value"
         )
+
+    def test_monotonic_persistence_allows_only_identical_same_version_metadata(
+        self, monkeypatch
+    ):
+        from app import main
+
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE system_settings ("
+                    "setting_key VARCHAR(128) PRIMARY KEY, "
+                    "setting_value TEXT NOT NULL)"
+                )
+            )
+        monkeypatch.setattr(main, "SessionLocal", sessionmaker(bind=engine))
+        existing = {
+            **main.APP_VERSION_INFO,
+            "version": "9.9.9",
+            "download_url": "https://github.com/example/original.exe",
+            "file_hash": "a" * 64,
+        }
+        assert main._persist_app_version_info_to_db(existing) is True
+
+        status, committed = main._persist_app_version_info_monotonic(dict(existing))
+        assert status == "unchanged"
+        assert committed == existing
+
+        replacement = {
+            **existing,
+            "download_url": "https://github.com/example/replaced.exe",
+            "file_hash": "b" * 64,
+        }
+        status, committed = main._persist_app_version_info_monotonic(replacement)
+        assert status == "conflict"
+        assert committed == existing
+        assert main._load_app_version_info_from_db({}) == existing
+
+    def test_monotonic_persistence_commits_first_metadata_write(self, monkeypatch):
+        from app import main
+
+        engine = create_engine("sqlite://")
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "CREATE TABLE system_settings ("
+                    "setting_key VARCHAR(128) PRIMARY KEY, "
+                    "setting_value TEXT NOT NULL)"
+                )
+            )
+        monkeypatch.setattr(main, "SessionLocal", sessionmaker(bind=engine))
+        first_release = {
+            **main.APP_VERSION_INFO,
+            "version": "9.9.9",
+            "download_url": "https://github.com/example/first.exe",
+            "file_hash": "f" * 64,
+        }
+
+        status, committed = main._persist_app_version_info_monotonic(first_release)
+
+        assert status == "updated"
+        assert committed == first_release
+        assert main._load_app_version_info_from_db({}) == first_release
 
     def test_version_metadata_round_trips_on_legacy_two_column_table(self, monkeypatch):
         """Release metadata must not depend on optional legacy schema columns."""

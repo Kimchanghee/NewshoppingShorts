@@ -41,6 +41,7 @@ jobs:
       publish: ${{ steps.release_policy.outputs.publish }}
       signing_mode: ${{ steps.release_policy.outputs.signing_mode }}
       file_hash: ${{ steps.hash.outputs.FILE_HASH }}
+      file_size: ${{ steps.hash.outputs.FILE_SIZE }}
 
     steps:
     - name: Checkout code
@@ -166,7 +167,6 @@ jobs:
 
     - name: Download Whisper models
       run: python scripts/download_whisper_models.py
-      continue-on-error: true
       timeout-minutes: 10
 
     - name: Read baked release authorization
@@ -420,8 +420,10 @@ jobs:
         $version = $env:VERSION
         $installer = "dist/SSMaker_Setup_v${version}.exe"
         $hash = (Get-FileHash -Path $installer -Algorithm SHA256).Hash.ToLower()
-        Write-Host "SHA256: $hash"
+        $size = (Get-Item -LiteralPath $installer).Length
+        Write-Host "SHA256: $hash ($size bytes)"
         "FILE_HASH=$hash" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "FILE_SIZE=$size" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
         "$hash  SSMaker_Setup_v${version}.exe" | Set-Content -Path "dist/SSMaker_Setup_v${version}.exe.sha256" -Encoding ascii
 
     - name: Verify candidate asset hash before any publication
@@ -481,37 +483,124 @@ jobs:
       env:
         GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         VERSION: ${{ needs.build.outputs.version }}
+        EXPECTED_HASH: ${{ needs.build.outputs.file_hash }}
+        EXPECTED_SIZE: ${{ needs.build.outputs.file_size }}
         REPOSITORY: ${{ github.repository }}
       run: |
+        import hashlib
         import json
         import os
         import re
-        import urllib.error
         import urllib.request
 
         candidate = os.environ["VERSION"]
-        request = urllib.request.Request(
-            f"https://api.github.com/repos/{os.environ['REPOSITORY']}/releases/latest",
-            headers={
-                "Accept": "application/vnd.github+json",
-                "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
-                "User-Agent": "SSMaker-Release-Monotonicity-Gate",
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                latest = str(json.load(response).get("tag_name", "")).lstrip("vV")
-        except urllib.error.HTTPError as exc:
-            if exc.code != 404:
-                raise
-            latest = ""
+        expected_hash = os.environ["EXPECTED_HASH"]
+        expected_size = int(os.environ["EXPECTED_SIZE"])
+        if expected_size <= 0:
+            raise SystemExit("Candidate installer size must be positive")
+        api_root = f"https://api.github.com/repos/{os.environ['REPOSITORY']}"
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "Authorization": f"Bearer {os.environ['GH_TOKEN']}",
+            "User-Agent": "SSMaker-Release-Monotonicity-Gate",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
         semver = re.compile(r"^[0-9]+\.[0-9]+\.[0-9]+$")
-        if latest and not semver.fullmatch(latest):
-            raise SystemExit(f"Latest release has unsupported version tag: {latest}")
         parse = lambda value: tuple(int(part) for part in value.split("."))
-        if latest and parse(candidate) < parse(latest):
-            raise SystemExit(f"Refusing to publish version {candidate} behind latest {latest}")
-        print(f"Monotonic release gate passed: candidate={candidate} latest={latest or 'none'}")
+
+        def api_json(path):
+            request = urllib.request.Request(f"{api_root}{path}", headers=headers)
+            with urllib.request.urlopen(request, timeout=30) as response:
+                return json.load(response)
+
+        def paginated(path):
+            page = 1
+            while True:
+                separator = "&" if "?" in path else "?"
+                items = api_json(f"{path}{separator}per_page=100&page={page}")
+                if not isinstance(items, list):
+                    raise SystemExit(f"GitHub API returned a non-list for {path}")
+                yield from items
+                if len(items) < 100:
+                    return
+                page += 1
+
+        candidate_tuple = parse(candidate)
+        candidate_draft = None
+        published_versions = []
+        for release in paginated("/releases"):
+            version = str(release.get("tag_name") or "").lstrip("vV")
+            if not semver.fullmatch(version):
+                continue
+            version_tuple = parse(version)
+            if version_tuple > candidate_tuple:
+                raise SystemExit(
+                    f"Refusing version {candidate}: release v{version} already exists"
+                )
+            if version_tuple == candidate_tuple:
+                if not release.get("draft"):
+                    raise SystemExit(
+                        f"Published release v{candidate} is immutable and cannot be replaced"
+                    )
+                if candidate_draft is not None:
+                    raise SystemExit(f"Multiple drafts exist for v{candidate}")
+                candidate_draft = release
+            elif not release.get("draft"):
+                published_versions.append(version_tuple)
+
+        for tag in paginated("/tags"):
+            version = str(tag.get("name") or "").lstrip("vV")
+            if semver.fullmatch(version) and parse(version) > candidate_tuple:
+                raise SystemExit(
+                    f"Refusing version {candidate}: higher tag v{version} already exists"
+                )
+
+        if published_versions and candidate_tuple <= max(published_versions):
+            raise SystemExit(
+                f"Release v{candidate} must be newer than every published semantic version"
+            )
+
+        if candidate_draft is not None:
+            installer_name = f"SSMaker_Setup_v{candidate}.exe"
+            matching_assets = [
+                asset
+                for asset in candidate_draft.get("assets", [])
+                if asset.get("name") == installer_name
+            ]
+            if len(matching_assets) > 1:
+                raise SystemExit(f"Draft v{candidate} has duplicate installer assets")
+            if matching_assets:
+                asset = matching_assets[0]
+                if int(asset.get("size") or -1) != expected_size:
+                    raise SystemExit(
+                        f"Draft v{candidate} installer size differs from this candidate"
+                    )
+                digest = str(asset.get("digest") or "").lower()
+                if not digest:
+                    asset_headers = {**headers, "Accept": "application/octet-stream"}
+                    request = urllib.request.Request(asset["url"], headers=asset_headers)
+                    sha256 = hashlib.sha256()
+                    downloaded = 0
+                    with urllib.request.urlopen(request, timeout=120) as response:
+                        for chunk in iter(lambda: response.read(1024 * 1024), b""):
+                            downloaded += len(chunk)
+                            if downloaded > expected_size:
+                                raise SystemExit(
+                                    f"Draft v{candidate} installer exceeded expected size"
+                                )
+                            sha256.update(chunk)
+                    if downloaded != expected_size:
+                        raise SystemExit(
+                            f"Draft v{candidate} installer download was truncated"
+                        )
+                    digest = f"sha256:{sha256.hexdigest()}"
+                if digest != f"sha256:{expected_hash}":
+                    raise SystemExit(
+                        f"Draft v{candidate} installer digest differs from this candidate"
+                    )
+            print(f"Resuming hash-identical draft v{candidate}")
+        else:
+            print(f"Strict monotonic release gate passed for new version v{candidate}")
 
     - name: Create draft Release with verified local assets
       uses: softprops/action-gh-release@c12583777ecdfd3be55c69cf75464299dc01057e # v3

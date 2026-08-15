@@ -326,7 +326,14 @@ def test_release_workflow_global_monotonic_gate_and_exact_baked_bridge_contract(
 
     assert "group: signed-release-publication" in workflow
     assert "Reject non-monotonic release publication" in workflow
-    assert "Refusing to publish version" in workflow
+    assert 'for release in paginated("/releases")' in workflow
+    assert 'for tag in paginated("/tags")' in workflow
+    assert "Published release v{candidate} is immutable and cannot be replaced" in workflow
+    assert "candidate_tuple <= max(published_versions)" in workflow
+    assert "Resuming hash-identical draft v{candidate}" in workflow
+    assert 'int(asset.get("size") or -1) != expected_size' in workflow
+    assert "downloaded > expected_size" in workflow
+    assert "digest != f\"sha256:{expected_hash}\"" in workflow
     assert "TRANSITION_BRIDGE_VERSION" in workflow
     assert "PUBLIC_RELEASE_SIGNER_THUMBPRINTS" in workflow
     assert "$bakedBridge -and $version -eq $bakedBridge -and $hasPublicPins" in workflow

@@ -1,12 +1,17 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 import os
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, copy_metadata, collect_submodules, collect_data_files
 from config.font_catalog import (
     DEFAULT_FONTS_DIR,
     DEFAULT_LICENSES_DIR,
     FONT_CHOICES,
     LICENSE_NOTICES,
+)
+from config.whisper_model_catalog import (
+    WHISPER_MODEL_CATALOG,
+    validate_materialized_model_files,
 )
 
 block_cipher = None
@@ -254,26 +259,21 @@ for dist_name in (
 # Note: updater.exe is no longer bundled. Updates are handled by
 # downloading and running the Inno Setup installer silently.
 
-if os.path.exists('faster_whisper_models'):
-    # Include only materialized flat files to avoid shipping HF cache symlinks.
-    model_root = os.path.join(project_root, "faster_whisper_models")
-    print(f"[spec] Including faster_whisper_models from: {model_root}")
-    model_files_added = 0
-    for size in os.listdir(model_root):
-        size_dir = os.path.join(model_root, size)
-        if not os.path.isdir(size_dir):
-            continue
-        for fname in ("model.bin", "config.json", "tokenizer.json", "vocabulary.txt"):
-            src = os.path.join(size_dir, fname)
-            if os.path.exists(src):
-                size_mb = os.path.getsize(src) / (1024 * 1024)
-                dst_path = os.path.join("faster_whisper_models", size)
-                print(f"[spec]   Adding: {fname} ({size_mb:.1f}MB) -> {dst_path}")
-                datas.append((src, dst_path))
-                model_files_added += 1
-    print(f"[spec] Total faster_whisper model files added: {model_files_added}")
-else:
-    print("[spec] WARNING: faster_whisper_models directory not found!")
+# Include only the hash-verified flat files declared by the immutable catalog.
+model_root = os.path.join(project_root, "faster_whisper_models")
+print(f"[spec] Including verified faster_whisper_models from: {model_root}")
+model_files_added = 0
+for model_name, model in WHISPER_MODEL_CATALOG.items():
+    size_dir = os.path.join(model_root, model_name)
+    validate_materialized_model_files(model_name, Path(size_dir))
+    for fname in model["files"]:
+        src = os.path.join(size_dir, fname)
+        size_mb = os.path.getsize(src) / (1024 * 1024)
+        dst_path = os.path.join("faster_whisper_models", model_name)
+        print(f"[spec]   Adding: {fname} ({size_mb:.1f}MB) -> {dst_path}")
+        datas.append((src, dst_path))
+        model_files_added += 1
+print(f"[spec] Total verified faster_whisper model files added: {model_files_added}")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 2. Analysis

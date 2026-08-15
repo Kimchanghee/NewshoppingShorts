@@ -604,16 +604,22 @@ def _persist_app_version_info_monotonic(version_info: dict) -> tuple[str, dict]:
                 ensure_row = text(
                     "INSERT INTO system_settings (setting_key, setting_value) "
                     "VALUES (:setting_key, :setting_value) "
-                    "ON CONFLICT (setting_key) DO NOTHING"
+                    "ON CONFLICT (setting_key) DO NOTHING "
+                    "RETURNING setting_value"
                 )
+                inserted = db.execute(ensure_row, params).scalar_one_or_none() is not None
             elif dialect in {"mysql", "mariadb"}:
                 ensure_row = text(
                     "INSERT IGNORE INTO system_settings (setting_key, setting_value) "
                     "VALUES (:setting_key, :setting_value)"
                 )
+                inserted = db.execute(ensure_row, params).rowcount == 1
             else:
                 raise RuntimeError(f"Unsupported settings database dialect: {dialect}")
-            db.execute(ensure_row, params)
+
+            if inserted:
+                db.commit()
+                return "updated", dict(version_info)
 
             lock_suffix = " FOR UPDATE" if dialect in {"postgresql", "mysql", "mariadb"} else ""
             raw_value = db.execute(
@@ -624,11 +630,20 @@ def _persist_app_version_info_monotonic(version_info: dict) -> tuple[str, dict]:
                 {"setting_key": _APP_VERSION_INFO_SETTING_KEY},
             ).scalar_one()
             current_info = _decode_app_version_info(raw_value, APP_VERSION_INFO)
-            if _parse_version_tuple(str(version_info.get("version", ""))) < _parse_version_tuple(
+            incoming_version = _parse_version_tuple(str(version_info.get("version", "")))
+            current_version = _parse_version_tuple(
                 str(current_info.get("version", "0.0.0"))
-            ):
+            )
+            if incoming_version < current_version:
                 db.rollback()
                 return "downgrade", current_info
+            if incoming_version == current_version:
+                same_metadata = all(
+                    version_info.get(field) == current_info.get(field)
+                    for field in _APP_VERSION_INFO_FIELDS
+                )
+                db.rollback()
+                return ("unchanged" if same_metadata else "conflict"), current_info
 
             db.execute(
                 text(
@@ -884,7 +899,10 @@ async def update_app_version(
             request.version,
         )
         raise HTTPException(status_code=409, detail="Version downgrade rejected")
-    if persist_status != "updated":
+    if persist_status == "conflict":
+        logger.warning("Rejected metadata mutation for existing version %s", request.version)
+        raise HTTPException(status_code=409, detail="Existing version metadata is immutable")
+    if persist_status not in {"updated", "unchanged"}:
         raise HTTPException(status_code=503, detail="Version metadata persistence failed")
     APP_VERSION_INFO = committed_info
 

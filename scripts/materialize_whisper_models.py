@@ -1,93 +1,74 @@
-# -*- coding: utf-8 -*-
-"""
-Materialize Faster-Whisper HuggingFace cache into flat files for bundling.
-
-Why:
-  HuggingFace cache uses symlinks under snapshots/ pointing to blobs/.
-  PyInstaller often packages the symlink itself (0-byte/link stub) instead of
-  the target content, causing runtime failures in frozen builds.
-
-What this does:
-  For each model size directory under `faster_whisper_models/<size>/`,
-  copy (dereference) snapshot files into:
-    faster_whisper_models/<size>/{model.bin,config.json,tokenizer.json,vocabulary.txt}
-"""
+"""Materialize only verified, immutable Faster-Whisper snapshot artifacts."""
 
 from __future__ import annotations
 
 import os
 import shutil
+import sys
+import tempfile
 from pathlib import Path
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
-REQUIRED_FILES = ["model.bin", "config.json", "tokenizer.json", "vocabulary.txt"]
+from config.whisper_model_catalog import (  # noqa: E402
+    WHISPER_MODEL_CATALOG,
+    validate_model_directory,
+)
 
 
-def _find_snapshot_dir(size_dir: Path) -> Path | None:
-    # Expected: faster_whisper_models/<size>/models--*/snapshots/*/
-    snapshots = []
-    for model_dir in size_dir.glob("models--*/snapshots/*"):
-        if not model_dir.is_dir():
-            continue
-        if (model_dir / "model.bin").exists():
-            snapshots.append(model_dir)
-    if not snapshots:
-        return None
-    # Prefer most recently modified snapshot.
-    snapshots.sort(key=lambda p: p.stat().st_mtime, reverse=True)
-    return snapshots[0]
+def _snapshot_dir(model_name: str, size_dir: Path) -> Path:
+    model = WHISPER_MODEL_CATALOG[model_name]
+    repo_cache_name = "models--" + str(model["repo_id"]).replace("/", "--")
+    return size_dir / repo_cache_name / "snapshots" / str(model["revision"])
 
 
 def materialize_models(root: Path) -> int:
-    changed = 0
     if not root.is_dir():
-        print(f"[materialize] missing dir: {root}")
-        return changed
+        raise ValueError(f"missing Whisper model root: {root}")
+    actual_models = {path.name for path in root.iterdir() if path.is_dir()}
+    unexpected = actual_models - set(WHISPER_MODEL_CATALOG)
+    if unexpected:
+        raise ValueError(f"unexpected Whisper model directories: {sorted(unexpected)}")
 
-    for size_dir in sorted([p for p in root.iterdir() if p.is_dir()]):
-        snap = _find_snapshot_dir(size_dir)
-        if snap is None:
-            print(f"[materialize] skip (no snapshot): {size_dir.name}")
-            continue
+    changed = 0
+    for model_name, model in WHISPER_MODEL_CATALOG.items():
+        size_dir = root / model_name
+        files = model["files"]
+        assert isinstance(files, dict)
+        repo_cache_name = "models--" + str(model["repo_id"]).replace("/", "--")
+        unexpected_entries = {
+            entry.name for entry in size_dir.iterdir()
+            # .locks/CACHEDIR.TAG are Hugging Face cache bookkeeping and are
+            # never copied or included by the PyInstaller model-file allowlist.
+            if entry.name not in set(files) | {repo_cache_name, ".locks", "CACHEDIR.TAG"}
+        }
+        if unexpected_entries:
+            raise ValueError(
+                f"{model_name}: unexpected entries in materialization source: "
+                f"{sorted(unexpected_entries)}"
+            )
+        snapshot = _snapshot_dir(model_name, size_dir)
+        validate_model_directory(model_name, snapshot)
 
-        print(f"[materialize] {size_dir.name}: snapshot={snap}")
-
-        for fname in REQUIRED_FILES:
-            src = snap / fname
-            if not src.exists():
-                print(f"  - missing in snapshot: {fname}")
-                continue
-
-            dst = size_dir / fname
-
-            # Always overwrite; ensures we replace a previous symlink/stub.
-            dst.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                # copy2 follows symlinks by default and copies the target content.
-                shutil.copy2(src, dst)
-            except OSError as e:
-                print(f"  - copy failed {fname}: {e}")
-                continue
-
-            sz = dst.stat().st_size
-            if fname == "model.bin" and sz < 10_000_000:
-                # model.bin should be huge; warn loudly.
-                print(f"  - WARN: model.bin too small after copy: {sz} bytes ({dst})")
-            else:
-                print(f"  - OK: {fname} ({sz} bytes)")
-            changed += 1
-
+        with tempfile.TemporaryDirectory(prefix=f"whisper-{model_name}-", dir=size_dir) as temp:
+            verified_copy = Path(temp)
+            for filename in files:
+                shutil.copy2(snapshot / filename, verified_copy / filename)
+            validate_model_directory(model_name, verified_copy)
+            for filename in files:
+                os.replace(verified_copy / filename, size_dir / filename)
+                changed += 1
+        print(f"[materialize] verified {model_name}@{model['revision']}")
     return changed
 
 
 def main() -> int:
-    project_root = Path(__file__).resolve().parents[1]
-    root = project_root / "faster_whisper_models"
-    count = materialize_models(root)
+    count = materialize_models(PROJECT_ROOT / "faster_whisper_models")
     print(f"[materialize] done: {count} files updated")
     return 0
 
 
 if __name__ == "__main__":
     raise SystemExit(main())
-
