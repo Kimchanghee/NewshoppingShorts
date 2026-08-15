@@ -59,7 +59,8 @@ function Assert-AuthenticodeArtifact {
   $codeSigningEku = "1.3.6.1.5.5.7.3.3"
   $ekuOids = @(
     $signature.SignerCertificate.EnhancedKeyUsageList |
-      ForEach-Object { [string]$_.ObjectId.Value }
+      ForEach-Object { ([string]$_.ObjectId).Trim() } |
+      Where-Object { $_ }
   )
   if ($codeSigningEku -notin $ekuOids) {
     throw "$Label signer certificate is missing the Code Signing EKU ($codeSigningEku)."

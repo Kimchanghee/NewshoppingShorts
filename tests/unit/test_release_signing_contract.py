@@ -3,6 +3,7 @@
 import ast
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
@@ -112,6 +113,22 @@ def test_v1564_pin_is_compatibility_bridge_and_never_public_trust():
     assert "not public trust" in verified.reason
 
 
+def test_legacy_bridge_rejects_non_code_signing_eku():
+    verified = classify_authenticode(
+        _evidence(
+            status="UnknownError",
+            thumbprint=LEGACY_THUMBPRINT,
+            eku_oids=["1.3.6.1.5.5.7.3.1"],
+        ),
+        expected_thumbprints=[LEGACY_THUMBPRINT],
+        artifact_version="1.5.64",
+        allow_legacy_integrity_bridge=True,
+    )
+
+    assert verified.trust is AuthenticodeTrust.INVALID
+    assert "code-signing EKU is missing" in verified.reason
+
+
 def test_next_version_is_not_implicitly_authorized_as_transition_bridge():
     verified = classify_authenticode(
         _evidence(status="UnknownError", thumbprint=LEGACY_THUMBPRINT),
@@ -171,6 +188,42 @@ def test_build_policy_requires_baked_transition_and_future_public_pin(monkeypatc
     assert "baked public release signer" in public_reason
 
 
+def test_transition_bridge_rejects_legacy_only_public_allowlist(monkeypatch):
+    monkeypatch.setattr(authenticode, "TRANSITION_BRIDGE_VERSION", "1.6.0")
+    monkeypatch.setattr(
+        authenticode,
+        "PUBLIC_RELEASE_SIGNER_THUMBPRINTS",
+        frozenset({LEGACY_THUMBPRINT}),
+    )
+
+    ok, reason = validate_build_signing_configuration(
+        "integrity-bridge",
+        "1.6.0",
+        LEGACY_THUMBPRINT,
+    )
+
+    assert ok is False
+    assert "non-legacy future public signer" in reason
+
+
+def test_transition_bridge_accepts_mixed_legacy_and_future_public_pins(monkeypatch):
+    monkeypatch.setattr(authenticode, "TRANSITION_BRIDGE_VERSION", "1.6.0")
+    monkeypatch.setattr(
+        authenticode,
+        "PUBLIC_RELEASE_SIGNER_THUMBPRINTS",
+        frozenset({LEGACY_THUMBPRINT, PUBLIC_THUMBPRINT}),
+    )
+
+    ok, reason = validate_build_signing_configuration(
+        "integrity-bridge",
+        "1.6.0",
+        LEGACY_THUMBPRINT,
+    )
+
+    assert ok is True
+    assert "future public signer pins are baked" in reason
+
+
 def test_build_uses_rfc3161_and_inno_named_sign_tool_contract():
     build = (ROOT / "scripts" / "build_exe.ps1").read_text(encoding="utf-8-sig")
     installer = (ROOT / "installer.iss").read_text(encoding="utf-8-sig")
@@ -198,6 +251,47 @@ def test_build_public_gate_is_fail_closed_and_checks_expected_identity():
     assert 'if ([string]$signature.Status -ne "Valid")' in build
     assert "UnknownError is not accepted in public mode" in build
     assert '"verify", "/pa", "/all", "/v"' in build
+
+
+def test_all_signing_layers_extract_eku_representation_oid_and_require_private_key():
+    workflow = (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
+        encoding="utf-8"
+    )
+    build = (ROOT / "scripts" / "build_exe.ps1").read_text(encoding="utf-8-sig")
+    authenticode_policy = (ROOT / "utils" / "authenticode.py").read_text(
+        encoding="utf-8"
+    )
+    signing_sources = workflow + build + authenticode_policy
+    extraction = "ForEach-Object { ([string]$_.ObjectId).Trim() }"
+
+    assert ".ObjectId.Value" not in signing_sources
+    assert workflow.count(extraction) == 2
+    assert extraction in build
+    assert extraction in authenticode_policy
+    assert "if (-not $installed.HasPrivateKey)" in workflow
+    assert "Expected signer does not have an accessible private key" in workflow
+
+    powershell = shutil.which("pwsh") or shutil.which("powershell")
+    if not powershell:
+        pytest.skip("PowerShell is required for the EKU representation regression")
+    regression = r'''
+      $codeSigningEku = "1.3.6.1.5.5.7.3.3"
+      function Get-EkuOids($Representations) {
+        @($Representations | ForEach-Object { ([string]$_.ObjectId).Trim() } | Where-Object { $_ })
+      }
+      $codeSigning = Get-EkuOids @([PSCustomObject]@{ ObjectId = "  1.3.6.1.5.5.7.3.3  " })
+      if ($codeSigningEku -notin $codeSigning) { throw "Code Signing EKU was not extracted" }
+      $serverAuth = Get-EkuOids @([PSCustomObject]@{ ObjectId = "1.3.6.1.5.5.7.3.1" })
+      if ($codeSigningEku -in $serverAuth) { throw "Non-code-signing EKU was accepted" }
+    '''
+    completed = subprocess.run(
+        [powershell, "-NoProfile", "-Command", regression],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_build_bundles_and_verifies_font_license_notices():
@@ -280,6 +374,13 @@ def test_repo_importing_python_steps_use_validated_workspace_under_isolation(
     ):
         assert contract in script
     assert script.index(workspace_check) < script.index(path_insert) < script.index(module_import)
+    if step_name == "Read baked release authorization":
+        assert "LEGACY_INTEGRITY_BRIDGE_THUMBPRINTS" in script
+        assert (
+            "nonlegacy_public_signers = PUBLIC_RELEASE_SIGNER_THUMBPRINTS "
+            "- LEGACY_INTEGRITY_BRIDGE_THUMBPRINTS"
+        ) in script
+        assert "if nonlegacy_public_signers else 'false'" in script
 
     temp_script = tmp_path / "workflow-step.py"
     github_output = tmp_path / "github-output.txt"
@@ -303,8 +404,16 @@ def test_repo_importing_python_steps_use_validated_workspace_under_isolation(
     assert completed.returncode == 0, completed.stderr
     if step_name == "Read baked release authorization":
         outputs = github_output.read_text(encoding="utf-8").splitlines()
-        assert any(line.startswith("transition_bridge_version=") for line in outputs)
-        assert any(line.startswith("has_public_signer_pins=") for line in outputs)
+        expected_bridge = authenticode.TRANSITION_BRIDGE_VERSION.strip().lstrip("vV")
+        expected_public_pins = (
+            authenticode.PUBLIC_RELEASE_SIGNER_THUMBPRINTS
+            - authenticode.LEGACY_INTEGRITY_BRIDGE_THUMBPRINTS
+        )
+        assert f"transition_bridge_version={expected_bridge}" in outputs
+        assert (
+            f"has_public_signer_pins={'true' if expected_public_pins else 'false'}"
+            in outputs
+        )
     else:
         assert "Committed version contract verified: 1.5.64" in completed.stdout
 

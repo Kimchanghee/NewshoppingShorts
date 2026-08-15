@@ -9,6 +9,7 @@ from startup.app_controller import (
     _is_allowed_update_download_url,
     _verify_authenticode_signature,
 )
+from utils.authenticode import CODE_SIGNING_EKU_OID
 
 
 def test_github_release_asset_redirect_is_trusted():
@@ -155,6 +156,7 @@ def test_historical_v1564_signer_is_update_bridge_not_public_trust(monkeypatch, 
             "which is not trusted by the trust provider"
         ),
         "Thumbprint": "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
+        "EnhancedKeyUsageOids": [CODE_SIGNING_EKU_OID],
     }
     monkeypatch.setattr(
         "utils.authenticode.subprocess.run",
@@ -182,6 +184,7 @@ def test_historical_signer_is_rejected_for_unapproved_next_version(monkeypatch, 
         "Status": "UnknownError",
         "StatusMessage": "Untrusted private root",
         "Thumbprint": "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
+        "EnhancedKeyUsageOids": [CODE_SIGNING_EKU_OID],
     }
     monkeypatch.delenv("SSMAKER_TRANSITION_BRIDGE_VERSION", raising=False)
     monkeypatch.setattr(
@@ -209,6 +212,7 @@ def test_pinned_release_signer_rejects_hash_mismatch(monkeypatch, tmp_path):
         "Status": "HashMismatch",
         "StatusMessage": "The contents of the file do not match its signature.",
         "Thumbprint": "4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0",
+        "EnhancedKeyUsageOids": [CODE_SIGNING_EKU_OID],
     }
     monkeypatch.setattr(
         "utils.authenticode.subprocess.run",

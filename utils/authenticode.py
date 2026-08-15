@@ -132,6 +132,7 @@ def validate_build_signing_configuration(
     version = str(artifact_version or "").strip().lstrip("vV")
     thumbprint = normalize_thumbprint(signing_thumbprint)
     baked_public_signers = parse_thumbprints(PUBLIC_RELEASE_SIGNER_THUMBPRINTS)
+    nonlegacy_public_signers = baked_public_signers - LEGACY_INTEGRITY_BRIDGE_THUMBPRINTS
 
     if not thumbprint:
         return False, "build signing thumbprint is empty"
@@ -154,8 +155,8 @@ def validate_build_signing_configuration(
         return False, "baked transition bridge version is empty"
     if version != TRANSITION_BRIDGE_VERSION:
         return False, "candidate version does not match the baked transition bridge version"
-    if not baked_public_signers:
-        return False, "transition bridge does not bake a future public signer allowlist"
+    if not nonlegacy_public_signers:
+        return False, "transition bridge does not bake a non-legacy future public signer allowlist"
     return True, "explicit transition bridge version and future public signer pins are baked"
 
 
@@ -225,6 +226,8 @@ def classify_authenticode(
     normalized_transition_version = str(transition_bridge_version or "").strip().lstrip("vV")
     is_legacy_signer = thumbprint in LEGACY_INTEGRITY_BRIDGE_THUMBPRINTS
     if is_legacy_signer:
+        if CODE_SIGNING_EKU_OID not in eku_oids:
+            return result(AuthenticodeTrust.INVALID, "invalid: code-signing EKU is missing")
         bridge_version_allowed = allow_legacy_integrity_bridge and is_legacy_bridge_version(
             normalized_version,
             transition_bridge_version=normalized_transition_version,
@@ -293,7 +296,7 @@ def _powershell_evidence_script(file_path: str) -> str:
         "$subject=[string]$sig.SignerCertificate.Subject; "
         "$issuer=[string]$sig.SignerCertificate.Issuer; "
         "$eku=@($sig.SignerCertificate.EnhancedKeyUsageList | "
-        "ForEach-Object { [string]$_.ObjectId.Value }) }; "
+        "ForEach-Object { ([string]$_.ObjectId).Trim() } | Where-Object { $_ }) }; "
         "$timestampPresent=($null -ne $sig.TimeStamperCertificate); "
         "$timestampSubject=''; if ($timestampPresent) { "
         "$timestampSubject=[string]$sig.TimeStamperCertificate.Subject }; "
