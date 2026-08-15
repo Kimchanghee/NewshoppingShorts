@@ -8,7 +8,7 @@ const FEED_DESCRIPTION =
   "SSMaker 업데이트, 초기 세팅 매뉴얼, 쿠팡 파트너스, Linktree, YouTube OAuth, Google Cloud 설정 가이드 모음";
 const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=20";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
-const FEED_UPDATED = "2026-04-30T00:00:00.000Z";
+const FEED_FALLBACK_UPDATED = "2026-04-30T00:00:00.000Z";
 
 const staticItems = [
   {
@@ -121,10 +121,16 @@ async function fetchReleaseItems() {
     if (!Array.isArray(releases)) return [];
 
     return releases
-      .filter((release) => typeof release?.tag_name === "string")
+      .filter(
+        (release) =>
+          typeof release?.tag_name === "string" &&
+          !release.draft &&
+          !release.prerelease &&
+          typeof release.published_at === "string",
+      )
       .map((release) => {
         const title = release.name || `${release.tag_name} 업데이트`;
-        const date = typeof release.published_at === "string" ? release.published_at : FEED_UPDATED;
+        const date = release.published_at;
         return {
           title,
           url: `${SITE_URL}/notice/release-${encodeURIComponent(release.tag_name)}/index.html`,
@@ -142,7 +148,7 @@ function sortItems(items) {
   return [...items].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
 }
 
-function renderRss(items) {
+function renderRss(items, feedUpdated) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
@@ -150,7 +156,7 @@ function renderRss(items) {
     <link>${SITE_URL}/notice/index.html</link>
     <description>${escapeXml(FEED_DESCRIPTION)}</description>
     <language>ko-KR</language>
-    <lastBuildDate>${new Date(FEED_UPDATED).toUTCString()}</lastBuildDate>
+    <lastBuildDate>${new Date(feedUpdated).toUTCString()}</lastBuildDate>
     <atom:link href="${SITE_URL}/feed.xml" rel="self" type="application/rss+xml" />
 ${items
   .map(
@@ -168,7 +174,7 @@ ${items
 `;
 }
 
-function renderAtom(items) {
+function renderAtom(items, feedUpdated) {
   return `<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <id>${SITE_URL}/notice/index.html</id>
@@ -176,7 +182,7 @@ function renderAtom(items) {
   <subtitle>${escapeXml(FEED_DESCRIPTION)}</subtitle>
   <link href="${SITE_URL}/notice/index.html" />
   <link href="${SITE_URL}/atom.xml" rel="self" type="application/atom+xml" />
-  <updated>${FEED_UPDATED}</updated>
+  <updated>${new Date(feedUpdated).toISOString()}</updated>
   <author>
     <name>${SITE_NAME}</name>
   </author>
@@ -222,10 +228,11 @@ function renderJsonFeed(items) {
 
 const releaseItems = await fetchReleaseItems();
 const items = sortItems([...staticItems, ...releaseItems]);
+const feedUpdated = items[0]?.date ?? FEED_FALLBACK_UPDATED;
 const publicDir = path.join(process.cwd(), "public");
 
-fs.writeFileSync(path.join(publicDir, "feed.xml"), renderRss(items), "utf8");
-fs.writeFileSync(path.join(publicDir, "atom.xml"), renderAtom(items), "utf8");
+fs.writeFileSync(path.join(publicDir, "feed.xml"), renderRss(items, feedUpdated), "utf8");
+fs.writeFileSync(path.join(publicDir, "atom.xml"), renderAtom(items, feedUpdated), "utf8");
 fs.writeFileSync(path.join(publicDir, "feed.json"), renderJsonFeed(items), "utf8");
 
 console.log(`wrote RSS/Atom/JSON feeds (${items.length} items)`);

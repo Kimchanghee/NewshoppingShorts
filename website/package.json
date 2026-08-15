@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "vite",
     "prebuild": "node scripts/generate-route-html.mjs && node scripts/generate-sitemap.mjs && node scripts/generate-feeds.mjs",
-    "build": "vite build && npm run verify:bundle",
+    "build": "vite build && npm run verify:bundle && npm run verify:seo",
     "build:dev": "vite build --mode development",
     "check": "npm run lint && tsc --noEmit -p tsconfig.app.json && tsc --noEmit -p tsconfig.node.json && vitest run",
     "lint": "eslint .",
@@ -17,6 +17,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "verify:bundle": "node scripts/verify-bundle-size.mjs",
+    "verify:seo": "node scripts/verify-seo-output.mjs",
     "seo:indexnow": "node scripts/submit-indexnow.mjs"
   },
   "dependencies": {

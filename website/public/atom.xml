@@ -5,17 +5,10 @@
   <subtitle>SSMaker 업데이트, 초기 세팅 매뉴얼, 쿠팡 파트너스, Linktree, YouTube OAuth, Google Cloud 설정 가이드 모음</subtitle>
   <link href="https://shoppingshorts.store/notice/index.html" />
   <link href="https://shoppingshorts.store/atom.xml" rel="self" type="application/atom+xml" />
-  <updated>2026-04-30T00:00:00.000Z</updated>
+  <updated>2026-08-15T04:31:44.000Z</updated>
   <author>
     <name>SSMaker</name>
   </author>
-  <entry>
-    <id>https://shoppingshorts.store/notice/release-ocr-showcase-20260815/index.html</id>
-    <title>SSmaker OCR Showcase Media (2026-08-15)</title>
-    <link href="https://shoppingshorts.store/notice/release-ocr-showcase-20260815/index.html" />
-    <updated>2026-08-15T05:18:26.000Z</updated>
-    <summary>Public before and after media assets for the SSmaker OCR subtitle blur showcase. These assets are separate from desktop application releases.</summary>
-  </entry>
   <entry>
     <id>https://shoppingshorts.store/notice/release-v1.5.64/index.html</id>
     <title>Release v1.5.64</title>
@@ -141,13 +134,6 @@
     <link href="https://shoppingshorts.store/notice/release-v1.5.47/index.html" />
     <updated>2026-08-06T01:07:36.000Z</updated>
     <summary>SSMaker v1.5.47 Microsoft Store MSIX 배포 및 패키지 안정성 개선 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 41386a40efe01b17afa3b213d08567ef270693c45c663121c…</summary>
-  </entry>
-  <entry>
-    <id>https://shoppingshorts.store/notice/release-v1.5.46/index.html</id>
-    <title>Release v1.5.46</title>
-    <link href="https://shoppingshorts.store/notice/release-v1.5.46/index.html" />
-    <updated>2026-08-05T08:29:06.000Z</updated>
-    <summary>SSMaker v1.5.46 SSMaker v1.5.46 Production hardening and recovery 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 8e79e662d79e3016840505f5140325dec3d2…</summary>
   </entry>
   <entry>
     <id>https://shoppingshorts.store/notice/spring-2026-new-subscriber-extra-month/index.html</id>

@@ -1,3 +1,5 @@
+import sampleCatalog from "./samples.catalog.json";
+
 export type SampleCategory = "ocr" | "automation";
 
 export type VideoSample = {
@@ -10,6 +12,9 @@ export type VideoSample = {
   afterVideo: string;
   beforePoster: string;
   afterPoster: string;
+  beforeDuration: string;
+  afterDuration: string;
+  uploadDate: string;
 };
 
 const OCR_MEDIA_BASE =
@@ -17,7 +22,15 @@ const OCR_MEDIA_BASE =
 const AUTOMATION_MEDIA_BASE =
   "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/website-samples-20260815";
 
-const ocrSample = (id: number, slug: string, title: string): VideoSample => {
+const SAMPLE_UPLOAD_DATE = "2026-08-15T00:00:00+09:00";
+
+const ocrSample = (
+  id: number,
+  slug: string,
+  title: string,
+  beforeDuration: string,
+  afterDuration: string,
+): VideoSample => {
   const number = String(id).padStart(2, "0");
   return {
     id,
@@ -29,10 +42,19 @@ const ocrSample = (id: number, slug: string, title: string): VideoSample => {
     afterVideo: `${OCR_MEDIA_BASE}/${number}_${slug}.mp4`,
     beforePoster: `${OCR_MEDIA_BASE}/poster_${number}_before.jpg`,
     afterPoster: `${OCR_MEDIA_BASE}/poster_${number}_after.jpg`,
+    beforeDuration,
+    afterDuration,
+    uploadDate: SAMPLE_UPLOAD_DATE,
   };
 };
 
-const automationSample = (id: number, slug: string, title: string): VideoSample => {
+const automationSample = (
+  id: number,
+  slug: string,
+  title: string,
+  beforeDuration: string,
+  afterDuration: string,
+): VideoSample => {
   const number = String(id).padStart(2, "0");
   return {
     id,
@@ -44,20 +66,15 @@ const automationSample = (id: number, slug: string, title: string): VideoSample 
     afterVideo: `${AUTOMATION_MEDIA_BASE}/${number}_${slug}.mp4`,
     beforePoster: `${AUTOMATION_MEDIA_BASE}/poster_${number}_source.jpg`,
     afterPoster: `${AUTOMATION_MEDIA_BASE}/poster_${number}_after.jpg`,
+    beforeDuration,
+    afterDuration,
+    uploadDate: SAMPLE_UPLOAD_DATE,
   };
 };
 
-export const VIDEO_SAMPLES: VideoSample[] = [
-  ocrSample(1, "milk_frother", "전동 우유 거품기"),
-  ocrSample(2, "mosquito_swatter", "충전식 전기 모기채"),
-  ocrSample(3, "bathroom_scrubber", "무선 욕실 청소기"),
-  ocrSample(4, "electric_whisk", "무선 전동 거품기"),
-  ocrSample(5, "pepper_grinder", "전동 후추 그라인더"),
-  automationSample(6, "air_cooler", "휴대용 미니 냉풍기"),
-  automationSample(7, "uv_parasol", "UV 차단 미니 양산"),
-  automationSample(8, "mosquito_trap", "태양광 모기 퇴치기"),
-  automationSample(9, "aqua_shoes", "여름 아쿠아슈즈"),
-  automationSample(10, "beach_towel", "대형 비치타월"),
-];
+export const VIDEO_SAMPLES: VideoSample[] = sampleCatalog.map((sample) => {
+  const factory = sample.category === "ocr" ? ocrSample : automationSample;
+  return factory(sample.id, sample.slug, sample.title, sample.beforeDuration, sample.afterDuration);
+});
 
 export const SAMPLE_VIDEO_COUNT = VIDEO_SAMPLES.length * 2;

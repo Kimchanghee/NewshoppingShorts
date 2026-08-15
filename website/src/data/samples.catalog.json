@@ -1,0 +1,12 @@
+[
+  { "id": 1, "slug": "milk_frother", "title": "전동 우유 거품기", "category": "ocr", "beforeDuration": "PT35S", "afterDuration": "PT25.5S" },
+  { "id": 2, "slug": "mosquito_swatter", "title": "충전식 전기 모기채", "category": "ocr", "beforeDuration": "PT32.933S", "afterDuration": "PT22.6S" },
+  { "id": 3, "slug": "bathroom_scrubber", "title": "무선 욕실 청소기", "category": "ocr", "beforeDuration": "PT35S", "afterDuration": "PT21.433S" },
+  { "id": 4, "slug": "electric_whisk", "title": "무선 전동 거품기", "category": "ocr", "beforeDuration": "PT35S", "afterDuration": "PT22.967S" },
+  { "id": 5, "slug": "pepper_grinder", "title": "전동 후추 그라인더", "category": "ocr", "beforeDuration": "PT35S", "afterDuration": "PT21.1S" },
+  { "id": 6, "slug": "air_cooler", "title": "휴대용 미니 냉풍기", "category": "automation", "beforeDuration": "PT43.367S", "afterDuration": "PT8.266S" },
+  { "id": 7, "slug": "uv_parasol", "title": "UV 차단 미니 양산", "category": "automation", "beforeDuration": "PT48.762S", "afterDuration": "PT8.233S" },
+  { "id": 8, "slug": "mosquito_trap", "title": "태양광 모기 퇴치기", "category": "automation", "beforeDuration": "PT26.974S", "afterDuration": "PT8.267S" },
+  { "id": 9, "slug": "aqua_shoes", "title": "여름 아쿠아슈즈", "category": "automation", "beforeDuration": "PT36.037S", "afterDuration": "PT8.25S" },
+  { "id": 10, "slug": "beach_towel", "title": "대형 비치타월", "category": "automation", "beforeDuration": "PT25.831S", "afterDuration": "PT8.867S" }
+]

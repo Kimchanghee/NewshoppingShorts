@@ -1,11 +1,14 @@
 import fs from "node:fs";
 import path from "node:path";
 
+import { SAMPLE_MEDIA } from "./sample-media.mjs";
+
 const SITE_URL = "https://shoppingshorts.store";
 const OG_IMAGE = `${SITE_URL}/og.jpg`;
 const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=20";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
 const ROBOTS = "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1";
+const excludedReleasePaths = [];
 const KEYWORDS = [
   "SSMaker",
   "쇼핑 숏폼",
@@ -30,6 +33,11 @@ const staticRoutes = [
       "중국어 자막 위치와 노출 시간을 감지해 블러한 OCR 샘플 5건과 쿠팡 상품 소스 매칭, 세로 편집, 한국어 음성·자막까지 완료한 풀자동 제작 샘플 5건을 공개합니다.",
       "각 샘플은 원본 Before 영상과 SSMaker 제작 After 영상을 함께 제공하며 총 20개의 실제 MP4 영상을 직접 재생할 수 있습니다.",
     ],
+    links: SAMPLE_MEDIA.map((sample) => ({
+      href: `/samples/index.html#sample-${sample.id}`,
+      title: `${sample.title} Before / After`,
+      summary: `${sample.categoryLabel}: ${sample.description}`,
+    })),
   },
   {
     path: "/notice",
@@ -244,7 +252,14 @@ async function fetchReleaseRoutes() {
     if (!Array.isArray(releases)) return [];
 
     return releases
-      .filter((release) => typeof release?.tag_name === "string")
+      .filter((release) => {
+        if (typeof release?.tag_name !== "string") return false;
+        if (release.draft || release.prerelease) {
+          excludedReleasePaths.push(`/notice/release-${encodeURIComponent(release.tag_name)}`);
+          return false;
+        }
+        return typeof release.published_at === "string";
+      })
       .map((release) => {
         const tagName = release.tag_name;
         const title = release.name || `${tagName} 업데이트 안내`;
@@ -255,6 +270,8 @@ async function fetchReleaseRoutes() {
           description,
           type: "article",
           h1: title,
+          datePublished: release.published_at,
+          dateModified: release.published_at,
           paragraphs: [
             description,
             "SSMaker 릴리즈 공지는 최신 설치 파일, 자동화 개선 사항, YouTube Shorts 업로드, Linktree, 쿠팡 파트너스 관련 변경 사항을 안내합니다.",
@@ -271,22 +288,56 @@ function render(route) {
   const canonicalPath = route.path === "/" ? "/" : `${route.path.replace(/\/+$/, "")}/index.html`;
   const canonical = `${SITE_URL}${canonicalPath}`;
   const schemaType = route.type === "article" ? "Article" : route.path === "/contact" ? "ContactPage" : "WebPage";
-  const schema = {
-    "@context": "https://schema.org",
+  const pageSchema = {
     "@type": schemaType,
+    "@id": canonical,
     name: route.h1,
-    headline: route.h1,
+    ...(route.type === "article" && { headline: route.h1 }),
     description: route.description,
     url: canonical,
     inLanguage: "ko-KR",
     image: OG_IMAGE,
+    ...(route.datePublished && { datePublished: route.datePublished }),
+    ...(route.dateModified && { dateModified: route.dateModified }),
     publisher: {
       "@type": "Organization",
+      "@id": `${SITE_URL}#organization`,
       name: "SSMaker",
       url: SITE_URL,
+      logo: OG_IMAGE,
     },
   };
-  const noscriptLinks = Array.isArray(route.links)
+  const videoSchemas =
+    route.path === "/samples"
+      ? SAMPLE_MEDIA.flatMap((sample) =>
+          ["before", "after"].map((kind) => {
+            const isBefore = kind === "before";
+            const label = isBefore ? "Before 원본" : "After SSMaker 제작본";
+            const watchUrl = `${canonical}#sample-${sample.id}`;
+            return {
+              "@type": "VideoObject",
+              "@id": `${watchUrl}-${kind}`,
+              name: `${sample.title} ${label}`,
+              description: `${sample.description} ${label} 영상입니다.`,
+              thumbnailUrl: isBefore ? sample.beforePoster : sample.afterPoster,
+              uploadDate: sample.uploadDate,
+              contentUrl: isBefore ? sample.beforeVideo : sample.afterVideo,
+              duration: isBefore ? sample.beforeDuration : sample.afterDuration,
+              url: watchUrl,
+              isPartOf: { "@id": canonical },
+              inLanguage: "ko-KR",
+              encodingFormat: "video/mp4",
+              isFamilyFriendly: true,
+              publisher: { "@id": `${SITE_URL}#organization` },
+            };
+          }),
+        )
+      : [];
+  const schema = {
+    "@context": "https://schema.org",
+    "@graph": [pageSchema, ...videoSchemas],
+  };
+  const fallbackLinks = Array.isArray(route.links)
     ? `
         <ul>
         ${route.links
@@ -306,42 +357,42 @@ function render(route) {
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>${escapeHtml(route.title)}</title>
-    <meta name="description" content="${escapeHtml(route.description)}" />
-    <meta name="keywords" content="${escapeHtml(KEYWORDS)}" />
-    <meta name="robots" content="${ROBOTS}" />
-    <meta name="googlebot" content="${ROBOTS}" />
-    <meta name="author" content="SSMaker Team" />
-    <meta name="language" content="ko-KR" />
-    <meta name="subject" content="AI 쇼핑 숏폼 자동 제작, 쿠팡 파트너스, YouTube Shorts, Linktree 자동화" />
-    <link rel="canonical" href="${canonical}" />
-    <link rel="alternate" hrefLang="ko-KR" href="${canonical}" />
-    <link rel="alternate" hrefLang="x-default" href="${canonical}" />
-    <link rel="alternate" type="text/plain" href="/llms.txt" title="SSMaker LLM summary" />
-    <link rel="alternate" type="text/plain" href="/llms-full.txt" title="SSMaker full LLM context" />
-    <link rel="alternate" type="application/rss+xml" href="/feed.xml" title="SSMaker RSS feed" />
-    <link rel="alternate" type="application/atom+xml" href="/atom.xml" title="SSMaker Atom feed" />
-    <link rel="alternate" type="application/feed+json" href="/feed.json" title="SSMaker JSON feed" />
-    <meta property="og:type" content="${route.type}" />
-    <meta property="og:url" content="${canonical}" />
-    <meta property="og:title" content="${escapeHtml(route.title)}" />
-    <meta property="og:description" content="${escapeHtml(route.description)}" />
-    <meta property="og:image" content="${OG_IMAGE}" />
-    <meta property="og:image:alt" content="${escapeHtml(route.h1)}" />
-    <meta property="og:locale" content="ko_KR" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="${escapeHtml(route.title)}" />
-    <meta name="twitter:description" content="${escapeHtml(route.description)}" />
-    <meta name="twitter:image" content="${OG_IMAGE}" />
-    <script type="application/ld+json">${JSON.stringify(schema)}</script>
+    <meta name="description" content="${escapeHtml(route.description)}" data-static-seo />
+    <meta name="keywords" content="${escapeHtml(KEYWORDS)}" data-static-seo />
+    <meta name="robots" content="${ROBOTS}" data-static-seo />
+    <meta name="googlebot" content="${ROBOTS}" data-static-seo />
+    <meta name="author" content="SSMaker Team" data-static-seo />
+    <meta name="language" content="ko-KR" data-static-seo />
+    <meta name="subject" content="AI 쇼핑 숏폼 자동 제작, 쿠팡 파트너스, YouTube Shorts, Linktree 자동화" data-static-seo />
+    <link rel="canonical" href="${canonical}" data-static-seo />
+    <link rel="alternate" hreflang="ko-KR" href="${canonical}" data-static-seo />
+    <link rel="alternate" hreflang="x-default" href="${canonical}" data-static-seo />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="SSMaker LLM summary" data-static-seo />
+    <link rel="alternate" type="text/plain" href="/llms-full.txt" title="SSMaker full LLM context" data-static-seo />
+    <link rel="alternate" type="application/rss+xml" href="/feed.xml" title="SSMaker RSS feed" data-static-seo />
+    <link rel="alternate" type="application/atom+xml" href="/atom.xml" title="SSMaker Atom feed" data-static-seo />
+    <link rel="alternate" type="application/feed+json" href="/feed.json" title="SSMaker JSON feed" data-static-seo />
+    <meta property="og:type" content="${route.type}" data-static-seo />
+    <meta property="og:url" content="${canonical}" data-static-seo />
+    <meta property="og:title" content="${escapeHtml(route.title)}" data-static-seo />
+    <meta property="og:description" content="${escapeHtml(route.description)}" data-static-seo />
+    <meta property="og:image" content="${OG_IMAGE}" data-static-seo />
+    <meta property="og:image:alt" content="${escapeHtml(route.h1)}" data-static-seo />
+    <meta property="og:locale" content="ko_KR" data-static-seo />
+    <meta name="twitter:card" content="summary_large_image" data-static-seo />
+    <meta name="twitter:title" content="${escapeHtml(route.title)}" data-static-seo />
+    <meta name="twitter:description" content="${escapeHtml(route.description)}" data-static-seo />
+    <meta name="twitter:image" content="${OG_IMAGE}" data-static-seo />
+    <script type="application/ld+json" data-static-seo>${JSON.stringify(schema)}</script>
   </head>
   <body>
-    <div id="root"></div>
-    <noscript>
-      <main>
+    <div id="root">
+      <main data-static-fallback>
         <h1>${escapeHtml(route.h1)}</h1>
-        ${route.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("\n        ")}${noscriptLinks}
+        ${route.paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("\n        ")}${fallbackLinks}
+        <p><a href="/">SSMaker 홈으로 이동</a></p>
       </main>
-    </noscript>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
@@ -350,6 +401,11 @@ function render(route) {
 
 const releaseRoutes = await fetchReleaseRoutes();
 const routes = [...staticRoutes, ...releaseRoutes];
+
+for (const routePath of excludedReleasePaths) {
+  const dir = path.join(process.cwd(), routePath.replace(/^\/+/, ""));
+  if (fs.existsSync(dir)) fs.rmSync(dir, { recursive: true, force: true });
+}
 
 for (const route of routes) {
   const dir = path.join(process.cwd(), route.path.replace(/^\/+/, ""));

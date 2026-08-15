@@ -141,7 +141,11 @@ export function buildWebsiteSchema(): SchemaObject {
       },
     ],
     publisher: {
+      "@type": "Organization",
       "@id": `${SITE_URL}#organization`,
+      name: SITE_NAME,
+      url: SITE_URL,
+      logo: DEFAULT_OG_IMAGE_URL,
     },
   };
 }
@@ -373,10 +377,13 @@ export function buildSpeakableSchema(
 }
 
 export function buildVideoObjectSchema(input: {
+  id?: string;
   name: string;
   description: string;
   thumbnailUrl: string;
   uploadDate: string;
+  pageUrl?: string;
+  watchUrl?: string;
   contentUrl?: string;
   embedUrl?: string;
   duration?: string;
@@ -384,6 +391,7 @@ export function buildVideoObjectSchema(input: {
   return {
     "@context": "https://schema.org",
     "@type": "VideoObject",
+    ...(input.id && { "@id": input.id }),
     name: input.name,
     description: input.description,
     thumbnailUrl: input.thumbnailUrl,
@@ -391,8 +399,21 @@ export function buildVideoObjectSchema(input: {
     ...(input.contentUrl && { contentUrl: input.contentUrl }),
     ...(input.embedUrl && { embedUrl: input.embedUrl }),
     ...(input.duration && { duration: input.duration }),
+    ...(input.pageUrl && {
+      url: input.watchUrl ?? input.pageUrl,
+      isPartOf: {
+        "@id": input.pageUrl,
+      },
+    }),
+    inLanguage: SITE_LANGUAGE,
+    encodingFormat: "video/mp4",
+    isFamilyFriendly: true,
     publisher: {
+      "@type": "Organization",
       "@id": `${SITE_URL}#organization`,
+      name: SITE_NAME,
+      url: SITE_URL,
+      logo: DEFAULT_OG_IMAGE_URL,
     },
   };
 }

@@ -14,9 +14,9 @@ export default function AnswerEngineSection() {
       <div className="container mx-auto px-6">
         <FadeIn>
           <div className="mx-auto max-w-3xl text-center">
-            <p className="mb-3 text-sm font-medium uppercase tracking-widest text-primary">Answer-ready summary</p>
+            <p className="mb-3 text-sm font-medium uppercase tracking-widest text-primary">핵심 기능 요약</p>
             <h2 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">
-              검색과 AI 답변에 바로 쓰이는 핵심 정리
+              자주 찾는 핵심 정보를 한눈에
             </h2>
             <p className="mt-5 text-base leading-relaxed text-muted-foreground md:text-lg" data-speakable>
               SSMaker는 중국 쇼핑 영상을 한국어 쇼핑 숏폼으로 바꾸고, 쿠팡 파트너스 링크, YouTube Shorts 업로드,
@@ -42,7 +42,7 @@ export default function AnswerEngineSection() {
 
         <FadeIn delay={0.25}>
           <div className="mx-auto mt-10 max-w-5xl rounded-lg border border-primary/20 bg-primary/5 p-5">
-            <h3 className="text-sm font-semibold uppercase tracking-widest text-primary">노출 키워드 클러스터</h3>
+            <h3 className="text-sm font-semibold uppercase tracking-widest text-primary">연결되는 작업 흐름</h3>
             <ul className="mt-4 grid gap-3 text-sm text-muted-foreground md:grid-cols-2">
               {SIGNALS.map((signal) => (
                 <li key={signal} className="border-l border-primary/40 pl-3">

@@ -83,4 +83,12 @@ describe("Samples page", () => {
       expect(url).toMatch(/\.mp4$/);
     }
   });
+
+  it("publishes complete duration and upload metadata for every indexed video", () => {
+    for (const sample of VIDEO_SAMPLES) {
+      expect(sample.uploadDate).toMatch(/^2026-08-15T/);
+      expect(sample.beforeDuration).toMatch(/^PT\d+(?:\.\d+)?S$/);
+      expect(sample.afterDuration).toMatch(/^PT\d+(?:\.\d+)?S$/);
+    }
+  });
 });

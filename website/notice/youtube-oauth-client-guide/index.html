@@ -4,43 +4,43 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YouTube 채널 연결용 Google Cloud OAuth 설정 가이드 | SSMaker</title>
-    <meta name="description" content="SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다." />
-    <meta name="keywords" content="SSMaker, 쇼핑 숏폼, 쇼핑 숏폼 자동화, AI 영상 편집, 유튜브 쇼츠 자동 업로드, 쿠팡 파트너스 단축 링크, 링크트리 자동 등록, 중국 쇼핑 영상 변환, 중국어 자막 블러, 구매대행 마케팅" />
-    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
-    <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
-    <meta name="author" content="SSMaker Team" />
-    <meta name="language" content="ko-KR" />
-    <meta name="subject" content="AI 쇼핑 숏폼 자동 제작, 쿠팡 파트너스, YouTube Shorts, Linktree 자동화" />
-    <link rel="canonical" href="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" />
-    <link rel="alternate" hrefLang="ko-KR" href="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" />
-    <link rel="alternate" hrefLang="x-default" href="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" />
-    <link rel="alternate" type="text/plain" href="/llms.txt" title="SSMaker LLM summary" />
-    <link rel="alternate" type="text/plain" href="/llms-full.txt" title="SSMaker full LLM context" />
-    <link rel="alternate" type="application/rss+xml" href="/feed.xml" title="SSMaker RSS feed" />
-    <link rel="alternate" type="application/atom+xml" href="/atom.xml" title="SSMaker Atom feed" />
-    <link rel="alternate" type="application/feed+json" href="/feed.json" title="SSMaker JSON feed" />
-    <meta property="og:type" content="article" />
-    <meta property="og:url" content="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" />
-    <meta property="og:title" content="YouTube 채널 연결용 Google Cloud OAuth 설정 가이드 | SSMaker" />
-    <meta property="og:description" content="SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다." />
-    <meta property="og:image" content="https://shoppingshorts.store/og.jpg" />
-    <meta property="og:image:alt" content="YouTube 채널 연결용 Google Cloud OAuth 설정 가이드" />
-    <meta property="og:locale" content="ko_KR" />
-    <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="YouTube 채널 연결용 Google Cloud OAuth 설정 가이드 | SSMaker" />
-    <meta name="twitter:description" content="SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다." />
-    <meta name="twitter:image" content="https://shoppingshorts.store/og.jpg" />
-    <script type="application/ld+json">{"@context":"https://schema.org","@type":"Article","name":"YouTube 채널 연결용 Google Cloud OAuth 설정 가이드","headline":"YouTube 채널 연결용 Google Cloud OAuth 설정 가이드","description":"SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다.","url":"https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html","inLanguage":"ko-KR","image":"https://shoppingshorts.store/og.jpg","publisher":{"@type":"Organization","name":"SSMaker","url":"https://shoppingshorts.store"}}</script>
+    <meta name="description" content="SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다." data-static-seo />
+    <meta name="keywords" content="SSMaker, 쇼핑 숏폼, 쇼핑 숏폼 자동화, AI 영상 편집, 유튜브 쇼츠 자동 업로드, 쿠팡 파트너스 단축 링크, 링크트리 자동 등록, 중국 쇼핑 영상 변환, 중국어 자막 블러, 구매대행 마케팅" data-static-seo />
+    <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" data-static-seo />
+    <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" data-static-seo />
+    <meta name="author" content="SSMaker Team" data-static-seo />
+    <meta name="language" content="ko-KR" data-static-seo />
+    <meta name="subject" content="AI 쇼핑 숏폼 자동 제작, 쿠팡 파트너스, YouTube Shorts, Linktree 자동화" data-static-seo />
+    <link rel="canonical" href="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" data-static-seo />
+    <link rel="alternate" hreflang="ko-KR" href="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" data-static-seo />
+    <link rel="alternate" hreflang="x-default" href="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" data-static-seo />
+    <link rel="alternate" type="text/plain" href="/llms.txt" title="SSMaker LLM summary" data-static-seo />
+    <link rel="alternate" type="text/plain" href="/llms-full.txt" title="SSMaker full LLM context" data-static-seo />
+    <link rel="alternate" type="application/rss+xml" href="/feed.xml" title="SSMaker RSS feed" data-static-seo />
+    <link rel="alternate" type="application/atom+xml" href="/atom.xml" title="SSMaker Atom feed" data-static-seo />
+    <link rel="alternate" type="application/feed+json" href="/feed.json" title="SSMaker JSON feed" data-static-seo />
+    <meta property="og:type" content="article" data-static-seo />
+    <meta property="og:url" content="https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html" data-static-seo />
+    <meta property="og:title" content="YouTube 채널 연결용 Google Cloud OAuth 설정 가이드 | SSMaker" data-static-seo />
+    <meta property="og:description" content="SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다." data-static-seo />
+    <meta property="og:image" content="https://shoppingshorts.store/og.jpg" data-static-seo />
+    <meta property="og:image:alt" content="YouTube 채널 연결용 Google Cloud OAuth 설정 가이드" data-static-seo />
+    <meta property="og:locale" content="ko_KR" data-static-seo />
+    <meta name="twitter:card" content="summary_large_image" data-static-seo />
+    <meta name="twitter:title" content="YouTube 채널 연결용 Google Cloud OAuth 설정 가이드 | SSMaker" data-static-seo />
+    <meta name="twitter:description" content="SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다." data-static-seo />
+    <meta name="twitter:image" content="https://shoppingshorts.store/og.jpg" data-static-seo />
+    <script type="application/ld+json" data-static-seo>{"@context":"https://schema.org","@graph":[{"@type":"Article","@id":"https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html","name":"YouTube 채널 연결용 Google Cloud OAuth 설정 가이드","headline":"YouTube 채널 연결용 Google Cloud OAuth 설정 가이드","description":"SSMaker YouTube Shorts 자동 업로드를 위한 Google Cloud YouTube Data API v3와 데스크톱 앱 OAuth JSON 설정 방법입니다.","url":"https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html","inLanguage":"ko-KR","image":"https://shoppingshorts.store/og.jpg","publisher":{"@type":"Organization","@id":"https://shoppingshorts.store#organization","name":"SSMaker","url":"https://shoppingshorts.store","logo":"https://shoppingshorts.store/og.jpg"}}]}</script>
   </head>
   <body>
-    <div id="root"></div>
-    <noscript>
-      <main>
+    <div id="root">
+      <main data-static-fallback>
         <h1>YouTube 채널 연결용 Google Cloud OAuth 설정 가이드</h1>
         <p>YouTube 업로드에는 API Key만으로는 부족합니다. 사용자의 YouTube 채널 권한을 승인하는 데스크톱 앱 OAuth 클라이언트 JSON이 필요합니다.</p>
         <p>Google Cloud 프로젝트에서 YouTube Data API v3를 사용 설정하고 OAuth 동의 화면과 데스크톱 앱 클라이언트를 준비합니다.</p>
+        <p><a href="/">SSMaker 홈으로 이동</a></p>
       </main>
-    </noscript>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

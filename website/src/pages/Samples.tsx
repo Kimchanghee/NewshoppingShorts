@@ -9,7 +9,7 @@ import { DOWNLOAD_URL } from "@/constants/release";
 import { SITE_KEYWORDS } from "@/constants/site";
 import { SAMPLE_VIDEO_COUNT, VIDEO_SAMPLES, type SampleCategory, type VideoSample } from "@/data/samples";
 import { gaEvent } from "@/lib/ga4";
-import { buildBreadcrumbSchema, buildItemListSchema, buildWebPageSchema } from "@/lib/structuredData";
+import { buildBreadcrumbSchema, buildItemListSchema, buildVideoObjectSchema, buildWebPageSchema } from "@/lib/structuredData";
 
 type Filter = "all" | SampleCategory;
 
@@ -33,6 +33,25 @@ const SAMPLE_STRUCTURED_DATA = [
     path: "/samples/index.html",
     items: VIDEO_SAMPLES.map((sample) => `${sample.title} ${sample.categoryLabel} Before / After`),
   }),
+  ...VIDEO_SAMPLES.flatMap((sample) =>
+    (["before", "after"] as const).map((kind) => {
+      const isBefore = kind === "before";
+      const label = isBefore ? "Before 원본" : "After SSMaker 제작본";
+      const pageUrl = "https://shoppingshorts.store/samples/index.html";
+      const watchUrl = `${pageUrl}#sample-${sample.id}`;
+      return buildVideoObjectSchema({
+        id: `${watchUrl}-${kind}`,
+        name: `${sample.title} ${label}`,
+        description: `${sample.description} ${label} 영상입니다.`,
+        thumbnailUrl: isBefore ? sample.beforePoster : sample.afterPoster,
+        uploadDate: sample.uploadDate,
+        contentUrl: isBefore ? sample.beforeVideo : sample.afterVideo,
+        duration: isBefore ? sample.beforeDuration : sample.afterDuration,
+        pageUrl,
+        watchUrl,
+      });
+    }),
+  ),
 ];
 
 const FILTERS: Array<{ value: Filter; label: string; count: number }> = [
@@ -174,7 +193,7 @@ export default function Samples() {
         description="SSMaker 실제 프로그램으로 처리한 원본 10개와 제작본 10개를 나란히 재생해 보세요. OCR 자막 블러 5건과 풀자동 쇼핑 숏폼 제작 5건을 공개합니다."
         path="/samples/index.html"
         keywords={[...SITE_KEYWORDS, "SSMaker 샘플", "Before After 영상", "OCR 자막 블러 예시"]}
-        modifiedTime="2026-08-15"
+        modifiedTime="2026-08-16"
         structuredData={SAMPLE_STRUCTURED_DATA}
       />
       <Navigation />
