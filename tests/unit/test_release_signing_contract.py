@@ -3,6 +3,7 @@
 import ast
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -228,17 +229,32 @@ def test_build_uses_rfc3161_and_inno_named_sign_tool_contract():
     build = (ROOT / "scripts" / "build_exe.ps1").read_text(encoding="utf-8-sig")
     installer = (ROOT / "installer.iss").read_text(encoding="utf-8-sig")
 
-    assert '"/tr", "https://timestamp.digicert.com"' in build
-    assert '"/td", "SHA256"' in build
-    assert "/fd SHA256 /tr https://timestamp.digicert.com /td SHA256" in build
+    official_rfc3161_url = "http://timestamp.digicert.com"
+    timestamp_urls = re.findall(
+        r'/tr(?:"\s*,\s*"|\s+)(https?://[^\s"\x27,]+)',
+        build,
+        flags=re.IGNORECASE,
+    )
+
+    assert timestamp_urls == [official_rfc3161_url, official_rfc3161_url]
+    assert (
+        '"/tr", "http://timestamp.digicert.com",\n'
+        '      "/td", "SHA256"'
+    ) in build
+    assert "/fd SHA256 /tr http://timestamp.digicert.com /td SHA256" in build
+    assert build.count("/tr") == 2
+    assert build.count("/td") == 2
+    assert "https://timestamp.digicert.com" not in build
+    assert "RFC 3161 endpoint is HTTP-only" in build
+    assert "response is cryptographically" in build
+    assert "TimeStamperCertificate" in build
     assert '"/DSignToolAvailable"' in build
     assert '"/Sssmaker=$innoSignCommand"' in build
     assert "$env:INNO_SETUP_ISCC," in build
     assert build.index("$env:INNO_SETUP_ISCC,") < build.index("Get-Command iscc")
     assert "SignTool=ssmaker" in installer
     assert "SignedUninstaller=yes" in installer
-    assert '"/t", "http://timestamp' not in build.lower()
-    assert " /t http://timestamp" not in build.lower()
+    assert not re.search(r'(?i)/t(?:"\s*,\s*"|\s+)https?://', build)
 
 
 def test_build_public_gate_is_fail_closed_and_checks_expected_identity():

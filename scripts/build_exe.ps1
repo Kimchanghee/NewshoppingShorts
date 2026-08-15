@@ -331,10 +331,12 @@ try {
       throw "signtool.exe not found in PATH. Install Windows SDK Signing Tools."
     }
 
+    # DigiCert's RFC 3161 endpoint is HTTP-only. The response is cryptographically
+    # verified by SignTool, and the post-sign gate requires TimeStamperCertificate.
     Invoke-Native "[2.5/5] Code signing ssmaker.exe..." $signtool @(
       "sign",
       "/fd", "SHA256",
-      "/tr", "https://timestamp.digicert.com",
+      "/tr", "http://timestamp.digicert.com",
       "/td", "SHA256",
       "/u", "1.3.6.1.5.5.7.3.3",
       "/sha1", $signThumb,
@@ -603,7 +605,7 @@ try {
   # Inno invokes this named signing tool for both its generated uninstaller and
   # the final Setup executable. $q and $f are Inno placeholders and therefore
   # intentionally remain literal here.
-  $innoSignCommand = '$q' + $signtool + '$q sign /fd SHA256 /tr https://timestamp.digicert.com /td SHA256 /u 1.3.6.1.5.5.7.3.3 /sha1 ' + $signThumb + ' $f'
+  $innoSignCommand = '$q' + $signtool + '$q sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /u 1.3.6.1.5.5.7.3.3 /sha1 ' + $signThumb + ' $f'
   Invoke-Native "[4/5] Compiling installer..." $iscc @(
     "/DMyAppVersion=$AppVersion",
     "/DSignToolAvailable",
