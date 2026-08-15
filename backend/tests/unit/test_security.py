@@ -16,6 +16,9 @@ Covers:
 import os
 import sys
 import importlib
+import hashlib
+import hmac
+import json
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -38,6 +41,7 @@ _TEST_ENV = {
     "ADMIN_PASSWORD_HASH": "$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.G6tHnCvWNeQvKy",
     "ADMIN_SESSION_PEPPER": "p" * 64,
     "APP_VERSION_UPDATE_API_KEY": "d" * 64,
+    "APP_VERSION_UPDATE_HMAC_KEY": "h" * 64,
     "SSMAKER_API_KEY": "c" * 32,
     "BILLING_KEY_ENCRYPTION_KEY": "uKVciQZlzUKtZPwuiKHl3wVCJJhQrWL6TqrFRClcEOI=",
     "ENVIRONMENT": "production",
@@ -331,6 +335,19 @@ class TestAuthentication:
         )
         assert response.status_code == 403
 
+    def test_production_version_update_requires_configured_hmac_key(self, client, monkeypatch):
+        from app import main
+
+        monkeypatch.setattr(main.settings, "APP_VERSION_UPDATE_HMAC_KEY", "")
+        response = client.post(
+            "/app/version/update",
+            json={"version": "9.9.9", "download_url": "https://github.com/example/release.exe"},
+            headers={"Authorization": "Bearer " + "d" * 64},
+        )
+
+        assert response.status_code == 500
+        assert response.json()["detail"] == "Update HMAC key not configured"
+
     def test_version_check_uses_github_fallback_when_server_metadata_is_stale(self, client, monkeypatch):
         """Version check should not be pinned to stale persisted metadata."""
         from app import main
@@ -403,20 +420,73 @@ class TestAuthentication:
 
         original_info = dict(main.APP_VERSION_INFO)
         monkeypatch.setattr(main, "APP_VERSION_INFO", original_info)
-        monkeypatch.setattr(main, "_persist_app_version_info_to_db", lambda _info: False)
+        monkeypatch.setattr(
+            main,
+            "_persist_app_version_info_monotonic",
+            lambda _info: ("error", original_info),
+        )
 
+        payload = {
+            "version": "9.9.9",
+            "download_url": "https://github.com/example/release.exe",
+            "is_mandatory": False,
+            "file_hash": "a" * 64,
+        }
+        signature_body = json.dumps(payload, separators=(",", ":")).encode()
+        signature = hmac.new(b"h" * 64, signature_body, hashlib.sha256).hexdigest()
         response = client.post(
             "/app/version/update",
-            json={
-                "version": "9.9.9",
-                "download_url": "https://github.com/example/release.exe",
-                "file_hash": "a" * 64,
+            content=signature_body,
+            headers={
+                "Authorization": "Bearer " + "d" * 64,
+                "Content-Type": "application/json",
+                "X-Update-Signature": signature,
             },
-            headers={"Authorization": "Bearer " + "d" * 64},
         )
 
         assert response.status_code == 503
         assert main.APP_VERSION_INFO == original_info
+
+    def test_version_update_rejects_semantic_version_downgrade(self, client, monkeypatch):
+        from app import main
+
+        current_info = {**main.APP_VERSION_INFO, "version": "9.9.9"}
+        monkeypatch.setattr(main, "APP_VERSION_INFO", current_info)
+        monkeypatch.setattr(
+            main,
+            "_persist_app_version_info_monotonic",
+            lambda _info: ("downgrade", current_info),
+        )
+        payload = {
+            "version": "9.9.8",
+            "download_url": "https://github.com/example/older.exe",
+            "is_mandatory": False,
+            "file_hash": "b" * 64,
+        }
+        signature_body = json.dumps(payload, separators=(",", ":")).encode()
+        signature = hmac.new(b"h" * 64, signature_body, hashlib.sha256).hexdigest()
+
+        response = client.post(
+            "/app/version/update",
+            content=signature_body,
+            headers={
+                "Authorization": "Bearer " + "d" * 64,
+                "Content-Type": "application/json",
+                "X-Update-Signature": signature,
+            },
+        )
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "Version downgrade rejected"
+
+    def test_monotonic_persistence_uses_database_row_lock_contract(self):
+        source = Path(app_main.__file__).read_text(encoding="utf-8")
+
+        assert "def _persist_app_version_info_monotonic" in source
+        assert 'lock_suffix = " FOR UPDATE"' in source
+        assert source.index("SELECT setting_value FROM system_settings") < source.index(
+            "UPDATE system_settings SET setting_value"
+        )
 
     def test_version_metadata_round_trips_on_legacy_two_column_table(self, monkeypatch):
         """Release metadata must not depend on optional legacy schema columns."""
