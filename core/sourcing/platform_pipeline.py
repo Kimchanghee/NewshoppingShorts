@@ -57,7 +57,7 @@ def _platform_relevance_threshold(
         configured = 0.75
     return max(0.70, min(0.75, configured))
 
-# 재편집 기본값: 살짝 빠르게(Content ID 완화) — 원본 오디오 유지.
+# 재편집 기본값: 쇼츠 템포에 맞춰 살짝 빠르게 — 원본 오디오 유지.
 DEFAULT_REEDIT_OPTIONS = {"speed": 1.03, "mirror": False, "mute": False, "bgm_path": None}
 
 # 산출물 보존 기간(일) — 지난 파일은 다음 실행 때 정리.
@@ -210,6 +210,7 @@ _DIAGNOSTIC_PLATFORM_LABELS = {
     "search:brave": "Brave Search",
 }
 _DIAGNOSTIC_REASON_LABELS = {
+    "browser_session_failed": "브라우저 연결 종료",
     "access_challenge": "로그인/봇 차단",
     "page_open_timeout": "페이지 시간초과",
     "page_open_error": "페이지 열기 실패",
@@ -278,6 +279,13 @@ def describe_platform_search_failure(diagnostics: Optional[Dict[str, Any]]) -> D
     """Turn low-level search counters into one actionable user-facing cause."""
     diagnostics = dict(diagnostics or {})
     counts = dict(diagnostics.get("counts") or {})
+    if counts.get("browser_session_failed"):
+        return _failure(
+            "browser_session_failed",
+            "자동 검색 브라우저 연결이 실행 중 종료되었습니다.",
+            "현재 상품은 재시도 대기로 두고, 다음 실행에서 브라우저를 새로 시작합니다.",
+            diagnostics=diagnostics,
+        )
     if counts.get("access_challenge"):
         return _failure(
             "platform_access_blocked",
@@ -377,41 +385,185 @@ async def run_platform_sourcing(
         "queries": [], "hit": None, "final_video": "",
         "render_integrity": {"ok": False, "source": "platform_video"},
         "failure": None, "blocked_stages": [],
+        "source_kind": "",
+        "auto_publish_safe": False,
+        "requires_review": False,
+        "fallback_reason": "",
     }
 
     own_browser = False
-    if browser is None:
+    product: Dict[str, Any] = {}
+
+    async def ensure_browser(step: str) -> bool:
+        """Start the owned browser lazily and report one structured failure."""
+        nonlocal browser, own_browser
+        if browser is not None:
+            return True
         try:
             browser = await start_browser()
             own_browser = True
-        except Exception as e:
+            return True
+        except Exception as exc:
             report["failure"] = _failure(
                 "browser_start_failed",
-                f"자동 검색 브라우저를 시작하지 못했습니다 ({type(e).__name__}).",
-                "열려 있는 자동화 Chrome 창을 모두 닫고 다시 검색해 주세요.",
+                f"자동 검색 브라우저를 시작하지 못했습니다 ({type(exc).__name__}).",
+                "이 상품은 자동으로 대체 소스를 확인한 뒤 다음 예약 상품으로 넘어갑니다.",
             )
-            report["error"] = format_failure_message("상품 검색을 시작하지 못했어요.", report["failure"])
+            report["error"] = format_failure_message(
+                "상품 검색을 시작하지 못했어요.", report["failure"]
+            )
             report["blocked_stages"] = list(report["failure"]["blocked_stages"])
-            _emit(progress, "product_analysis", report["error"], 0.0)
-            _persist_platform_run_report(out_dir, report)
-            return report
+            _emit(progress, step, report["error"], 0.0)
+            return False
+
+    async def try_review_image_fallback(
+        triggering_failure: Dict[str, Any],
+    ) -> bool:
+        """Create a local review artifact without promoting it to auto-upload."""
+        if download_only:
+            return False
+        image_url = str(product.get("image") or "").strip()
+        if not image_url.startswith(("http://", "https://", "//")):
+            return False
+
+        from core.sourcing.pipeline import create_product_image_video_fallback
+
+        _emit(
+            progress,
+            "video_create",
+            "실사용 영상을 확보하지 못해 상품 이미지 검토용 영상을 만드는 중...",
+            0.1,
+        )
+        fallback = await create_product_image_video_fallback(
+            coupang_url=coupang_url,
+            product_info=product,
+            output_dir=out_dir,
+        )
+        if not fallback:
+            return False
+
+        fallback_video = str(fallback.get("video_file") or "")
+        if not fallback_video or not os.path.exists(fallback_video):
+            return False
+        if before_commit is not None:
+            try:
+                before_commit(fallback_video)
+            except Exception as exc:
+                report["failure"] = _failure(
+                    "work_finalize_failed",
+                    f"검토용 영상의 사용량을 확정하지 못했습니다 ({type(exc).__name__}).",
+                    "저장된 영상을 확인한 뒤 작업을 다시 시도해 주세요.",
+                )
+                report["error"] = format_failure_message(
+                    "검토용 영상은 만들었지만 작업을 확정하지 못했어요.",
+                    report["failure"],
+                )
+                report["blocked_stages"] = list(report["failure"]["blocked_stages"])
+                return False
+
+        fallback = dict(fallback)
+        fallback.setdefault("platform", "coupang_image")
+        fallback.setdefault("via", "product_image")
+        report["hit"] = fallback
+        report["selected_source_url"] = str(
+            fallback.get("video_url") or image_url
+        )
+        report["selected_source_id"] = ""
+        report["final_video"] = fallback_video
+        report["source_kind"] = "coupang_image"
+        report["auto_publish_safe"] = False
+        report["requires_review"] = True
+        report["fallback_reason"] = str(
+            fallback.get("fallback_reason") or "no_marketplace_video"
+        )
+        report["fallback_failure"] = dict(triggering_failure or {})
+        report["failure"] = None
+        report["error"] = ""
+        report["blocked_stages"] = ["youtube_upload", "linktree_publish"]
+        report["render_integrity"] = {
+            "ok": True,
+            "source": "coupang_image",
+            "platform": "coupang_image",
+            "via": "product_image",
+        }
+        report["ok"] = True
+        _emit(
+            progress,
+            "video_create",
+            "검토용 상품 이미지 영상 생성 완료 · 자동 업로드는 건너뜁니다.",
+            1.0,
+        )
+        return True
 
     try:
-        # ── 1) 쿠팡 상품 분석 ──
-        _emit(progress, "product_analysis", "쿠팡 상품 분석 중...", 0.0)
-        product: Dict[str, Any] = {}
+        # ── 1) 캐시/큐 힌트를 먼저 사용하고, 꼭 필요할 때만 쿠팡을 연다. ──
+        _emit(progress, "product_analysis", "저장된 상품 정보 확인 중...", 0.0)
         product_error = ""
         try:
-            product = await scrape_product(browser, coupang_url) or {}
-        except Exception as e:
-            logger.warning("[PlatformPipeline] 상품 스크랩 실패: %s", e)
-            product_error = type(e).__name__
+            from core.sourcing.report_cache import find_cached_product_info
+
+            product = dict(find_cached_product_info(coupang_url) or {})
+        except Exception as exc:
+            logger.warning("[PlatformPipeline] 상품 정보 캐시 확인 실패: %s", exc)
+            product_error = type(exc).__name__
+            product = {}
+
+        hint = str(product_name_hint or "").strip()
+        if hint:
+            product = dict(product or {})
+            product["name"] = hint
+            product.setdefault("url", coupang_url)
+            product["name_source"] = "product_name_hint"
+
         product_name = str(product.get("name") or product.get("title") or "").strip()
         if not product_name:
-            product_name = str(product_name_hint or "").strip()
-            if product_name:
-                product = dict(product or {})
-                product["name"] = product_name
+            # A prior explicitly publish-safe report can identify the product
+            # even when its metadata record is incomplete. This URL-only
+            # preflight must happen before Chrome or the blocked Coupang page.
+            try:
+                from core.sourcing.pipeline import find_cached_publish_safe_video
+
+                preflight_hit = find_cached_publish_safe_video(
+                    coupang_url=coupang_url,
+                    product_info={},
+                    output_dir=out_dir,
+                    used_source_ids=set(),
+                    min_similarity_score=_platform_relevance_threshold(
+                        min_similarity_score,
+                        required_score=platform_min_relevance_score,
+                    ),
+                )
+            except Exception as exc:
+                logger.warning(
+                    "[PlatformPipeline] URL 기반 안전 영상 캐시 확인 실패: %s",
+                    exc,
+                )
+                preflight_hit = None
+            if preflight_hit:
+                cached_title = str(
+                    (preflight_hit.get("product") or {}).get("title")
+                    or preflight_hit.get("title")
+                    or ""
+                ).strip()
+                if cached_title:
+                    product = {
+                        "name": cached_title,
+                        "url": coupang_url,
+                        "source": "publish_safe_video_cache",
+                    }
+                    product_name = cached_title
+
+        if not product_name:
+            if not await ensure_browser("product_analysis"):
+                return report
+            try:
+                product = await scrape_product(browser, coupang_url) or {}
+            except Exception as exc:
+                logger.warning("[PlatformPipeline] 상품 스크랩 실패: %s", exc)
+                product_error = type(exc).__name__
+                product = {}
+            product_name = str(product.get("name") or product.get("title") or "").strip()
+
         if not product_name:
             report["failure"] = _failure(
                 "coupang_product_unavailable",
@@ -420,12 +572,18 @@ async def run_platform_sourcing(
                     + (f" ({product_error})" if product_error else "")
                     + "."
                 ),
-                "파트너스 링크가 현재 열리는지 확인한 뒤 다시 검색하거나 다른 상품을 선택해 주세요.",
+                "저장된 상품 정보가 생기면 자동으로 재시도하며, 현재 큐는 다음 상품으로 진행합니다.",
             )
-            report["error"] = format_failure_message("쿠팡 상품 확인에 실패했어요.", report["failure"])
+            report["error"] = format_failure_message(
+                "쿠팡 상품 확인에 실패했어요.", report["failure"]
+            )
             report["blocked_stages"] = list(report["failure"]["blocked_stages"])
             _emit(progress, "product_analysis", report["error"], 0.0)
             return report
+
+        product = dict(product or {})
+        product["name"] = product_name
+        product.setdefault("url", coupang_url)
         report["product_info"] = product
         _emit(progress, "product_analysis", f"상품: {product_name[:40]}", 1.0)
 
@@ -460,8 +618,8 @@ async def run_platform_sourcing(
         _emit(progress, "keyword_convert",
               f"검색어: {' / '.join(q[:14] for q in queries[:3])}", 1.0)
 
-        # ── 4) 3채널 검색·다운로드(소스 중복 스킵) ──
-        _emit(progress, "overseas_search", f"'{product_name[:20]}' 중국어로 3채널 검색 중...", 0.1)
+        # ── 4) 안전 캐시 → 3채널 검색·다운로드(소스 중복 스킵) ──
+        _emit(progress, "overseas_search", "검증된 이전 영상 확인 중...", 0.05)
         skip_ids = set()
         try:
             from managers.uploaded_registry import get_uploaded_registry
@@ -470,31 +628,108 @@ async def run_platform_sourcing(
             report["error"] = f"중복 업로드 기록을 확인할 수 없어 자동 제작을 중단했어요: {exc}"
             _emit(progress, "overseas_search", report["error"], 0.0)
             return report
-        search_diagnostics: Dict[str, Any] = {}
-        hit = await search_platform_shorts(
-            browser,
-            queries,
-            out_dir,
-            platforms=platforms,
-            skip_source_ids=skip_ids,
-            relevance_references=relevance_references,
-            min_relevance_score=_platform_relevance_threshold(
-                min_similarity_score,
-                required_score=platform_min_relevance_score,
-            ),
-            category_terms=category_terms,
-            # A related product-family clip is sufficient. Later platforms are
-            # fallbacks, not a contest for an identical-listing score.
-            prefer_best=False,
-            diagnostics=search_diagnostics,
+        relevance_threshold = _platform_relevance_threshold(
+            min_similarity_score,
+            required_score=platform_min_relevance_score,
         )
-        report["search_diagnostics"] = search_diagnostics
-        if not hit:
-            report["failure"] = describe_platform_search_failure(search_diagnostics)
-            report["error"] = format_failure_message("상품 영상 검색에 실패했어요.", report["failure"])
-            report["blocked_stages"] = list(report["failure"]["blocked_stages"])
-            _emit(progress, "overseas_search", report["error"], 0.0)
-            return report
+        from core.sourcing.pipeline import find_cached_publish_safe_video
+
+        try:
+            hit = find_cached_publish_safe_video(
+                coupang_url=coupang_url,
+                product_info=product,
+                output_dir=out_dir,
+                used_source_ids=skip_ids,
+                min_similarity_score=relevance_threshold,
+            )
+        except Exception as exc:
+            logger.warning("[PlatformPipeline] 안전 영상 캐시 확인 실패: %s", exc)
+            report["cache_warning"] = f"{type(exc).__name__}: {exc}"
+            hit = None
+        if hit:
+            hit = dict(hit)
+            hit.setdefault("platform", str(hit.get("source") or "cached"))
+            hit.setdefault("via", "verified_cache")
+            report["source_kind"] = "cached_marketplace_video"
+            report["cache_hit"] = True
+            _emit(progress, "overseas_search", "검증된 이전 영상 재사용", 1.0)
+        else:
+            if not await ensure_browser("overseas_search"):
+                browser_failure = dict(report.get("failure") or {})
+                if await try_review_image_fallback(browser_failure):
+                    return report
+                return report
+
+            _emit(
+                progress,
+                "overseas_search",
+                f"'{product_name[:20]}' 중국어로 3채널 검색 중...",
+                0.1,
+            )
+            search_diagnostics: Dict[str, Any] = {}
+            try:
+                hit = await search_platform_shorts(
+                    browser,
+                    queries,
+                    out_dir,
+                    platforms=platforms,
+                    skip_source_ids=skip_ids,
+                    relevance_references=relevance_references,
+                    min_relevance_score=relevance_threshold,
+                    category_terms=category_terms,
+                    # A related product-family clip is sufficient. Later platforms are
+                    # fallbacks, not a contest for an identical-listing score.
+                    prefer_best=False,
+                    diagnostics=search_diagnostics,
+                )
+            except (ConnectionError, BrokenPipeError) as exc:
+                search_failure = _failure(
+                    "browser_session_failed",
+                    f"자동 검색 브라우저 연결이 실행 중 종료되었습니다 ({type(exc).__name__}).",
+                    "현재 상품은 대체 소스를 확인하고 다음 실행에서 브라우저를 새로 시작합니다.",
+                    diagnostics=search_diagnostics,
+                )
+                report["search_diagnostics"] = search_diagnostics
+                report["failure"] = search_failure
+                report["error"] = format_failure_message(
+                    "상품 영상 검색 연결이 끊겼어요.", search_failure
+                )
+                report["blocked_stages"] = list(search_failure["blocked_stages"])
+                _emit(progress, "overseas_search", report["error"], 0.0)
+                if await try_review_image_fallback(search_failure):
+                    return report
+                return report
+            except Exception as exc:
+                search_failure = _failure(
+                    "platform_search_failed",
+                    f"플랫폼 검색 처리 중 오류가 발생했습니다 ({type(exc).__name__}).",
+                    "현재 상품은 건너뛰고 다음 예약 상품을 계속 처리합니다.",
+                    diagnostics=search_diagnostics,
+                )
+                report["search_diagnostics"] = search_diagnostics
+                report["failure"] = search_failure
+                report["error"] = format_failure_message(
+                    "상품 영상 검색 처리에 실패했어요.", search_failure
+                )
+                report["blocked_stages"] = list(search_failure["blocked_stages"])
+                _emit(progress, "overseas_search", report["error"], 0.0)
+                if await try_review_image_fallback(search_failure):
+                    return report
+                return report
+            report["search_diagnostics"] = search_diagnostics
+            if not hit:
+                search_failure = describe_platform_search_failure(search_diagnostics)
+                report["failure"] = search_failure
+                report["error"] = format_failure_message(
+                    "상품 영상 검색에 실패했어요.", search_failure
+                )
+                report["blocked_stages"] = list(search_failure["blocked_stages"])
+                _emit(progress, "overseas_search", report["error"], 0.0)
+                if await try_review_image_fallback(search_failure):
+                    return report
+                return report
+            report["source_kind"] = "platform_video"
+
         report["hit"] = hit
         report["selected_source_url"] = str(hit.get("video_url") or "")
         from managers.uploaded_registry import normalize_source_id
@@ -510,6 +745,9 @@ async def run_platform_sourcing(
             report["ok"] = True
             report["download_only"] = True
             report["downloaded_video"] = str(hit.get("video_file") or "")
+            report["auto_publish_safe"] = bool(hit.get("auto_publish_safe", True))
+            report["requires_review"] = bool(hit.get("requires_review", False))
+            report["fallback_reason"] = str(hit.get("fallback_reason") or "")
             report["render_integrity"] = {
                 "ok": True,
                 "source": "platform_video_download",
@@ -518,8 +756,8 @@ async def run_platform_sourcing(
             }
             return report
 
-        # ── 5) 재편집(변형 저작물화) ──
-        _emit(progress, "video_create", "재편집 중(워터마크 크롭·9:16·속도 변형)...", 0.1)
+        # ── 5) 쇼츠 규격 재편집 ──
+        _emit(progress, "video_create", "재편집 중(9:16·속도·오디오 옵션 적용)...", 0.1)
         opts = {**DEFAULT_REEDIT_OPTIONS, **(reedit_options or {})}
         edited = os.path.join(
             out_dir, f"edited_{hit['platform']}_{uuid.uuid4().hex[:8]}.mp4"
@@ -544,16 +782,20 @@ async def run_platform_sourcing(
                 _emit(progress, "video_create", report["error"], 1.0)
                 return report
         report["final_video"] = edited
+        report["auto_publish_safe"] = True
+        report["requires_review"] = False
+        report["fallback_reason"] = str(hit.get("fallback_reason") or "")
         report["render_integrity"] = {"ok": True, "source": "platform_video",
                                       "platform": hit["platform"], "via": hit.get("via", "")}
         _emit(progress, "video_create", "재편집 완료", 1.0)
 
         # ── 6) 원본 정리 ──
         # 소스 사용 기록은 실제 원격 업로드 성공과 같은 트랜잭션에서 확정한다.
-        try:
-            os.remove(hit["video_file"])
-        except OSError:
-            pass
+        if not hit.get("cached_from_report"):
+            try:
+                os.remove(hit["video_file"])
+            except OSError:
+                pass
 
         report["ok"] = True
         report["blocked_stages"] = []

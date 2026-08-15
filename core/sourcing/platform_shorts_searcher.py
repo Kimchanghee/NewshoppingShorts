@@ -85,6 +85,34 @@ def _diagnostic_event(
     del events[:-50]
 
 
+_BROWSER_SESSION_EXCEPTION_NAMES = frozenset({
+    "BrowserClosed",
+    "BrowserError",
+    "ConnectionClosed",
+    "ConnectionClosedError",
+    "InvalidState",
+    "TargetClosedError",
+    "WebSocketException",
+})
+
+
+def _is_browser_session_error(exc: BaseException) -> bool:
+    """Classify typed transport/session failures without matching messages."""
+    if isinstance(exc, (ConnectionError, BrokenPipeError, EOFError)):
+        return True
+    return any(
+        cls.__name__ in _BROWSER_SESSION_EXCEPTION_NAMES
+        for cls in type(exc).__mro__
+    )
+
+
+def _has_browser_session_failure(
+    diagnostics: Optional[Dict[str, Any]],
+) -> bool:
+    counts = (diagnostics or {}).get("counts") or {}
+    return bool(counts.get("browser_session_failed"))
+
+
 def _normalized_relevance_text(value: str) -> str:
     return " ".join(re.findall(r"[0-9a-zA-Z가-힣\u3400-\u9fff]+", str(value or "").lower()))
 
@@ -453,6 +481,14 @@ async def _external_search_links(
             )
             continue
         except Exception as exc:
+            if _is_browser_session_error(exc):
+                _diagnostic_event(
+                    diagnostics,
+                    "browser_session_failed",
+                    platform=diagnostic_platform,
+                    detail=type(exc).__name__,
+                )
+                return []
             _diagnostic_event(
                 diagnostics,
                 "page_open_error",
@@ -481,7 +517,11 @@ async def _external_search_links(
                 block_provider(provider)
                 continue
             links = await _extract_video_page_links(
-                tab, platform, output_dir, f"{provider}:{query}"
+                tab,
+                platform,
+                output_dir,
+                f"{provider}:{query}",
+                diagnostics=diagnostics,
             )
             if links:
                 logger.info(
@@ -670,12 +710,24 @@ async def start_browser() -> Any:
     )
 
 
-async def _extract_platform_videos(tab: Any) -> List[str]:
+async def _extract_platform_videos(
+    tab: Any,
+    diagnostics: Optional[Dict[str, Any]] = None,
+    platform: str = "",
+) -> List[str]:
     """제네릭 추출 + 플랫폼 CDN 보강."""
     urls: List[str] = []
     try:
         urls = list(await asyncio.wait_for(_extract_video_urls(tab), timeout=EVAL_TIMEOUT * 2) or [])
-    except Exception:
+    except Exception as exc:
+        if _is_browser_session_error(exc):
+            _diagnostic_event(
+                diagnostics,
+                "browser_session_failed",
+                platform=platform,
+                detail=type(exc).__name__,
+            )
+            raise
         urls = []
     try:
         extra = await asyncio.wait_for(
@@ -685,8 +737,15 @@ async def _extract_platform_videos(tab: Any) -> List[str]:
             for u in extra:
                 if isinstance(u, str) and u.startswith("http") and u not in urls:
                     urls.append(u)
-    except Exception:
-        pass
+    except Exception as exc:
+        if _is_browser_session_error(exc):
+            _diagnostic_event(
+                diagnostics,
+                "browser_session_failed",
+                platform=platform,
+                detail=type(exc).__name__,
+            )
+            raise
     return [u for u in urls if u.startswith("http")]
 
 
@@ -694,6 +753,7 @@ async def _browser_cookies_for(
     browser: Any,
     platform: str,
     target_url: str = "",
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """Return only cookies whose browser domain matches the target host."""
     keyword = {"douyin": "douyin", "kuaishou": "kuaishou", "xiaohongshu": "xiaohongshu"}.get(platform, platform)
@@ -712,13 +772,24 @@ async def _browser_cookies_for(
                     out[str(getattr(c, "name", ""))] = str(getattr(c, "value", ""))
             except Exception:
                 continue
-    except Exception:
-        pass
+    except Exception as exc:
+        if _is_browser_session_error(exc):
+            _diagnostic_event(
+                diagnostics,
+                "browser_session_failed",
+                platform=platform,
+                detail=type(exc).__name__,
+            )
+            raise
     return out
 
 
 async def _extract_video_page_links(
-    tab: Any, platform: str, output_dir: str = "", query: str = ""
+    tab: Any,
+    platform: str,
+    output_dir: str = "",
+    query: str = "",
+    diagnostics: Optional[Dict[str, Any]] = None,
 ) -> List[str]:
     """검색 결과 페이지에서 영상 '페이지 링크'를 추출(yt-dlp 위임용).
 
@@ -732,7 +803,15 @@ async def _extract_video_page_links(
         html = await asyncio.wait_for(
             tab.evaluate(_PAGE_HTML_JS, await_promise=False), timeout=EVAL_TIMEOUT
         )
-    except Exception:
+    except Exception as exc:
+        if _is_browser_session_error(exc):
+            _diagnostic_event(
+                diagnostics,
+                "browser_session_failed",
+                platform=platform,
+                detail=type(exc).__name__,
+            )
+            raise
         return []
     if not isinstance(html, str) or not html:
         return []
@@ -746,8 +825,15 @@ async def _extract_video_page_links(
                 f.write(f"<!-- query: {query} -->\n")
                 f.write(html)
             logger.info("[PlatformSearch] 디버그 덤프: %s (%d bytes)", dump, len(html))
-        except Exception:
-            pass
+        except Exception as exc:
+            if _is_browser_session_error(exc):
+                _diagnostic_event(
+                    diagnostics,
+                    "browser_session_failed",
+                    platform=platform,
+                    detail=type(exc).__name__,
+                )
+                raise
 
     return _page_links_from_html(platform, html)
 
@@ -884,7 +970,14 @@ async def _browser_page_video_download(
     """
     try:
         tab = await asyncio.wait_for(browser.get(link, new_tab=True), timeout=PAGE_OPEN_TIMEOUT)
-    except Exception:
+    except Exception as exc:
+        if _is_browser_session_error(exc):
+            _diagnostic_event(
+                diagnostics,
+                "browser_session_failed",
+                platform=platform,
+                detail=type(exc).__name__,
+            )
         return None
     if tab is None:
         return None
@@ -901,11 +994,20 @@ async def _browser_page_video_download(
                     detail="video page login or bot challenge",
                 )
                 return None
-        except Exception:
-            pass
+        except Exception as exc:
+            if _is_browser_session_error(exc):
+                _diagnostic_event(
+                    diagnostics,
+                    "browser_session_failed",
+                    platform=platform,
+                    detail=type(exc).__name__,
+                )
+                return None
         urls: List[str] = []
         for _ in range(3):
-            urls = await _extract_platform_videos(tab)
+            urls = await _extract_platform_videos(
+                tab, diagnostics=diagnostics, platform=platform
+            )
             if urls:
                 break
             await asyncio.sleep(2.0)
@@ -919,10 +1021,19 @@ async def _browser_page_video_download(
             ) or "")[:120]
             if page_title:
                 logger.info("[PlatformSearch] %s 소스 제목: %s", platform, page_title[:80])
-        except Exception:
-            pass
+        except Exception as exc:
+            if _is_browser_session_error(exc):
+                _diagnostic_event(
+                    diagnostics,
+                    "browser_session_failed",
+                    platform=platform,
+                    detail=type(exc).__name__,
+                )
+                raise
         for vurl in urls[:3]:
-            cookies = await _browser_cookies_for(browser, platform, vurl)
+            cookies = await _browser_cookies_for(
+                browser, platform, vurl, diagnostics=diagnostics
+            )
             path = os.path.join(output_dir, f"platform_{platform}_{uuid.uuid4().hex[:8]}.mp4")
             try:
                 size = await asyncio.wait_for(
@@ -1082,14 +1193,22 @@ async def search_one_platform(
                         platform=platform,
                         detail="warmup page login or bot challenge",
                     )
-            except Exception:
-                pass
+            except Exception as exc:
+                if _is_browser_session_error(exc):
+                    raise
             try:
                 await asyncio.wait_for(wtab.close(), timeout=5)
             except Exception:
                 pass
-        except Exception:
-            pass
+        except Exception as exc:
+            if _is_browser_session_error(exc):
+                _diagnostic_event(
+                    diagnostics,
+                    "browser_session_failed",
+                    platform=platform,
+                    detail=type(exc).__name__,
+                )
+                return None
 
     for q in _queries_for_chinese_platform(queries):
         if _time.monotonic() > deadline:
@@ -1107,6 +1226,14 @@ async def search_one_platform(
             continue
         except Exception as e:
             logger.warning("[PlatformSearch] %s 열기 실패: %s", platform, e)
+            if _is_browser_session_error(e):
+                _diagnostic_event(
+                    diagnostics,
+                    "browser_session_failed",
+                    platform=platform,
+                    detail=type(e).__name__,
+                )
+                return None
             _diagnostic_event(
                 diagnostics, "page_open_error", platform=platform,
                 detail=type(e).__name__,
@@ -1126,6 +1253,14 @@ async def search_one_platform(
         except Exception as e:
             # 쿼리 하나가 죽어도 다음 쿼리/플랫폼은 계속 — 전체 소싱을 무너뜨리지 않는다.
             logger.warning("[PlatformSearch] %s 쿼리 처리 오류(계속 진행): %s", platform, str(e)[:140])
+            if _is_browser_session_error(e):
+                _diagnostic_event(
+                    diagnostics,
+                    "browser_session_failed",
+                    platform=platform,
+                    detail=type(e).__name__,
+                )
+                return None
             _diagnostic_event(
                 diagnostics, "query_error", platform=platform,
                 detail=type(e).__name__,
@@ -1135,6 +1270,8 @@ async def search_one_platform(
                 await asyncio.wait_for(tab.close(), timeout=5)
             except Exception:
                 pass
+        if _has_browser_session_failure(diagnostics):
+            return None
         if hit:
             return hit
         if len(tried_source_ids.difference(skip)) >= MAX_PAGE_ATTEMPTS_PER_PLATFORM:
@@ -1173,8 +1310,9 @@ async def _search_query_on_tab(
                     detail="native search login or bot challenge",
                 )
                 native_access_blocked = True
-        except Exception:
-            pass
+        except Exception as exc:
+            if _is_browser_session_error(exc):
+                raise
         # lazy-load 유도
         if not native_access_blocked:
             try:
@@ -1199,13 +1337,14 @@ async def _search_query_on_tab(
                         detail="challenge appeared after page load",
                     )
                     native_access_blocked = True
-            except Exception:
-                pass
+            except Exception as exc:
+                if _is_browser_session_error(exc):
+                    raise
 
         # ── 전략 1: 영상 페이지 링크 → yt-dlp(브라우저 쿠키 동봉) ──
         if platform in _YTDLP_PLATFORMS:
             page_links = [] if native_access_blocked else await _extract_video_page_links(
-                tab, platform, output_dir, q
+                tab, platform, output_dir, q, diagnostics=diagnostics
             )
             logger.info("[PlatformSearch] %s: 영상 페이지 링크 %d개", platform, len(page_links))
             # Native result pages frequently expose only one stale/deleted
@@ -1237,7 +1376,11 @@ async def _search_query_on_tab(
                     diagnostics, "no_results", platform=platform, detail=q
                 )
             ytdlp_cookies = (
-                await _browser_cookies_for(browser, platform) if fresh_links else {}
+                await _browser_cookies_for(
+                    browser, platform, diagnostics=diagnostics
+                )
+                if fresh_links
+                else {}
             )
             # Spread the finite platform budget across exact and family-alias
             # queries. Four stale links from the first over-specific query used
@@ -1352,7 +1495,9 @@ async def _search_query_on_tab(
         # ── 전략 2(폴백): 직접 mp4 추출 → requests 다운로드 ──
         if native_access_blocked:
             return None
-        video_urls = await _extract_platform_videos(tab)
+        video_urls = await _extract_platform_videos(
+            tab, diagnostics=diagnostics, platform=platform
+        )
         video_urls = [u for u in video_urls if _normalize_source_id(u) not in skip]
         if not video_urls:
             logger.info("[PlatformSearch] %s: 영상 URL 못 찾음", platform)
@@ -1368,7 +1513,9 @@ async def _search_query_on_tab(
                 _diagnostic_event(diagnostics, "time_budget_exceeded", platform=platform)
                 return None
             filepath = os.path.join(output_dir, f"platform_{platform}_{uuid.uuid4().hex[:8]}.mp4")
-            session_cookies = await _browser_cookies_for(browser, platform, vurl)
+            session_cookies = await _browser_cookies_for(
+                browser, platform, vurl, diagnostics=diagnostics
+            )
             try:
                 size = await asyncio.wait_for(
                     asyncio.to_thread(
@@ -1461,6 +1608,8 @@ async def search_platform_shorts(
             category_terms=category_terms,
             diagnostics=diagnostics,
         )
+        if _has_browser_session_failure(diagnostics):
+            break
         if hit:
             _diagnostic_event(diagnostics, "success", platform=platform)
             if not prefer_best:
