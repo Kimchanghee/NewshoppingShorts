@@ -54,7 +54,7 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
             == EXPECTED_ALEMBIC_REVISION
-            == "20260811_0006"
+            == "20260816_0007"
         )
         registration_columns = {
             column["name"] for column in inspect(connection).get_columns("registration_requests")
@@ -67,6 +67,41 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
             "terms_accepted_at",
             "privacy_accepted_at",
         } <= registration_columns
+        assert "program_type" in registration_columns
+        user_indexes = {index["name"] for index in inspect(connection).get_indexes("users")}
+        registration_indexes = {
+            index["name"]
+            for index in inspect(connection).get_indexes("registration_requests")
+        }
+        login_attempt_indexes = {
+            index["name"]
+            for index in inspect(connection).get_indexes("login_attempts")
+        }
+        assert "uq_users_username_program" in user_indexes
+        assert "uq_registration_requests_username_program" in registration_indexes
+        assert "ix_login_attempts_username_program_time" in login_attempt_indexes
+        assert "ix_login_attempts_username_time" not in login_attempt_indexes
+
+
+def test_program_scope_migration_replaces_legacy_login_attempt_index(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'legacy-login-index.db').as_posix()}"
+    _run_alembic(url, "upgrade", "20260811_0006")
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE INDEX ix_login_attempts_username_time "
+                "ON login_attempts(username, attempted_at)"
+            )
+        )
+
+    _run_alembic(url, "upgrade", "head")
+
+    login_attempt_indexes = {
+        index["name"] for index in inspect(engine).get_indexes("login_attempts")
+    }
+    assert "ix_login_attempts_username_program_time" in login_attempt_indexes
+    assert "ix_login_attempts_username_time" not in login_attempt_indexes
 
 
 def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):

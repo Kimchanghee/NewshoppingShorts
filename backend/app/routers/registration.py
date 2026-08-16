@@ -108,9 +108,20 @@ async def submit_registration_request(
     try:
         # Pre-process username
         username_clean = data.username.lower().strip()
+        pt = data.program_type
+        program_type_enum = (
+            ProgramType.STMAKER if pt == "stmaker" else ProgramType.SSMAKER
+        )
 
         # 1. User 테이블 중복 확인
-        existing_user = db.query(User).filter(User.username == username_clean).first()
+        existing_user = (
+            db.query(User)
+            .filter(
+                User.username == username_clean,
+                User.program_type == program_type_enum,
+            )
+            .first()
+        )
         if existing_user:
             logger.info(f"[Register Fail] Username exists in Users table: {username_clean}")
             return RegistrationResponse(
@@ -134,7 +145,10 @@ async def submit_registration_request(
         # 2. RegistrationRequest 테이블 중복 확인 (모든 상태 체크)
         existing_request = (
             db.query(RegistrationRequest)
-            .filter(RegistrationRequest.username == username_clean)
+            .filter(
+                RegistrationRequest.username == username_clean,
+                RegistrationRequest.program_type == pt,
+            )
             .first()
         )
         
@@ -165,10 +179,6 @@ async def submit_registration_request(
 
         # 가입 시점 기준 무료 체험 횟수 결정
         trial_work_count = get_free_trial_work_count()
-
-        # program_type 결정 (ssmaker 또는 stmaker)
-        pt = data.program_type if data.program_type in ('ssmaker', 'stmaker') else 'ssmaker'
-        program_type_enum = ProgramType.STMAKER if pt == 'stmaker' else ProgramType.SSMAKER
 
         new_user = User(
             username=username_clean,
@@ -207,6 +217,7 @@ async def submit_registration_request(
         registration_request = RegistrationRequest(
             name=data.name,
             username=username_clean,
+            program_type=pt,
             password_hash=password_hash,
             contact=data.contact,
             email=data.email,
@@ -235,6 +246,7 @@ async def submit_registration_request(
             data={
                 "user_id": new_user.id,
                 "username": new_user.username,
+                "program_type": pt,
                 "work_count": trial_work_count,
                 "is_trial": True,
                 "token": token,  # JWT 토큰 추가
@@ -337,8 +349,16 @@ async def approve_registration(
             )
 
         # Check if username is still available
+        request_program_type = str(
+            getattr(reg_request, "program_type", "ssmaker") or "ssmaker"
+        )
         existing_user = (
-            db.query(User).filter(User.username == reg_request.username).first()
+            db.query(User)
+            .filter(
+                User.username == reg_request.username,
+                User.program_type == request_program_type,
+            )
+            .first()
         )
         if existing_user:
             reg_request.status = RequestStatus.REJECTED
@@ -370,6 +390,7 @@ async def approve_registration(
             ym_news_opt_in=bool(getattr(reg_request, "ym_news_opt_in", False)),
             phone=reg_request.contact,
             name=reg_request.name,
+            program_type=request_program_type,
         )
 
         db.add(new_user)
@@ -392,6 +413,7 @@ async def approve_registration(
             data={
                 "user_id": new_user.id,
                 "username": new_user.username,
+                "program_type": request_program_type,
                 "subscription_expires_at": subscription_expires_at.isoformat(),
                 "work_count": data.work_count,
             },

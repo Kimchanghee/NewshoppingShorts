@@ -26,6 +26,31 @@ from startup.constants import DEFAULT_PROCESS_PORT
 logger = get_logger(__name__)
 
 
+class LoginRequestWorker(QtCore.QThread):
+    """Run authentication without freezing the login window."""
+
+    completed = pyqtSignal(dict)
+
+    def __init__(self, payload: Dict[str, Any], parent=None) -> None:
+        super().__init__(parent)
+        self.payload = dict(payload)
+
+    def run(self) -> None:
+        try:
+            result = rest.login(**self.payload)
+        except Exception:
+            logger.exception("Login request worker failed")
+            result = {
+                "status": "error",
+                "message": "로그인 처리 중 오류가 발생했습니다.",
+                "error_module": "ui.windows.login_window",
+                "error_code": "LOGIN_WORKER_ERROR",
+                "retryable": True,
+                "offline_allowed": False,
+            }
+        self.completed.emit(dict(result or {}))
+
+
 class StartupLockError(RuntimeError):
     """Structured local startup-lock failure; never eligible for offline bypass."""
 
@@ -287,13 +312,19 @@ class Login(QMainWindow, Ui_LoginWindow):
         self._loginCheck()
 
     def _get_local_ip(self) -> str:
+        cached_ip = str(getattr(self, "_cached_local_ip", "") or "").strip()
+        if cached_ip:
+            return cached_ip
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
                 s.connect(("8.8.8.8", 80))
-                return s.getsockname()[0]
+                resolved_ip = s.getsockname()[0]
+                self._cached_local_ip = resolved_ip
+                return resolved_ip
         except (OSError, socket.error) as e:
             logger.warning(f"Failed to get local IP: {e}")
-        return "127.0.0.1"  # Fallback IP
+        self._cached_local_ip = "127.0.0.1"
+        return self._cached_local_ip
 
     def _close_single_instance_sockets(self) -> None:
         sockets = list(getattr(self, "serverSockets", []) or [])
@@ -308,58 +339,70 @@ class Login(QMainWindow, Ui_LoginWindow):
         self.serverSocket = None
 
     def _loginCheck(self, force: bool = False):
+        worker = getattr(self, "_login_worker", None)
+        if worker is not None and worker.isRunning():
+            return
+
         user_id = self.idEdit.text()
         user_pw = self.pwEdit.text()
         ip = self._get_local_ip()
         if force:
             logger.info("Ignoring deprecated force-login request")
         
-        try:
-            client_key = os.getenv("SSMAKER_CLIENT_API_KEY", "").strip()
-            res = rest.login(userId=user_id, userPw=user_pw, key=client_key, ip=ip, force=False)
-            if res.get("status") is True:
-                self._handle_login_success(res)
-            elif res.get("status") == "EU003":
-                logger.info("Duplicate login detected (EU003)")
-                error_module = str(res.get("error_module") or "caller.rest")
-                error_code = str(res.get("error_code") or "LOGIN_ALREADY_ACTIVE")
-                show_warning(
-                    self,
-                    "중복 로그인",
-                    f"[{error_module}/{error_code}]\n"
-                    "다른 기기에서 이미 로그인되어 있습니다.\n"
-                    "기존 기기에서 로그아웃한 뒤 다시 시도해주세요.",
-                )
-                self.loginButton.setText("로그인")
-            else:
-                # Use friendly message converter
-                error_msg = rest._friendly_login_message(res)
-                error_module = str(res.get("error_module") or "caller.rest")
-                error_code = str(res.get("error_code") or "LOGIN_REJECTED")
-                display_msg = f"[{error_module}/{error_code}]\n{error_msg}"
-                if res.get("offline_allowed"):
-                    display_msg += (
-                        "\n\n서버 연결 없이 설정을 확인하려면 "
-                        "'오프라인 설정 모드'를 선택하세요."
-                    )
-                logger.warning(
-                    "Login failed: module=%s code=%s retryable=%s offline_allowed=%s status=%s",
-                    error_module,
-                    error_code,
-                    bool(res.get("retryable")),
-                    bool(res.get("offline_allowed")),
-                    res.get("status"),
-                )
-                self.showCustomMessageBox("로그인 실패", display_msg)
-                self.loginButton.setText("로그인")
-        except Exception as e:
-            logger.error(f"Login exception: {str(e)}", exc_info=True)
-            self.showCustomMessageBox(
-                "오류",
-                "[ui.windows.login_window/LOGIN_UI_ERROR]\n"
-                "로그인 처리 중 오류가 발생했습니다.\n잠시 후 다시 시도해주세요.",
+        client_key = os.getenv("SSMAKER_CLIENT_API_KEY", "").strip()
+        self.loginButton.setEnabled(False)
+        self.loginButton.setText("로그인 중...")
+        self._login_worker = LoginRequestWorker(
+            {
+                "userId": user_id,
+                "userPw": user_pw,
+                "key": client_key,
+                "ip": ip,
+                "force": False,
+            },
+            self,
+        )
+        self._login_worker.completed.connect(self._on_login_request_done)
+        self._login_worker.start()
+
+    def _on_login_request_done(self, res: dict) -> None:
+        self.loginButton.setEnabled(True)
+        if res.get("status") is True:
+            self._handle_login_success(res)
+            return
+        if res.get("status") == "EU003":
+            logger.info("Duplicate login detected (EU003)")
+            error_module = str(res.get("error_module") or "caller.rest")
+            error_code = str(res.get("error_code") or "LOGIN_ALREADY_ACTIVE")
+            show_warning(
+                self,
+                "중복 로그인",
+                f"[{error_module}/{error_code}]\n"
+                "이 프로그램이 다른 기기에서 이미 로그인되어 있습니다.\n"
+                "기존 기기에서 로그아웃한 뒤 다시 시도해주세요.",
             )
             self.loginButton.setText("로그인")
+            return
+
+        error_msg = rest._friendly_login_message(res)
+        error_module = str(res.get("error_module") or "caller.rest")
+        error_code = str(res.get("error_code") or "LOGIN_REJECTED")
+        display_msg = f"[{error_module}/{error_code}]\n{error_msg}"
+        if res.get("offline_allowed"):
+            display_msg += (
+                "\n\n서버 연결 없이 설정을 확인하려면 "
+                "'오프라인 설정 모드'를 선택하세요."
+            )
+        logger.warning(
+            "Login failed: module=%s code=%s retryable=%s offline_allowed=%s status=%s",
+            error_module,
+            error_code,
+            bool(res.get("retryable")),
+            bool(res.get("offline_allowed")),
+            res.get("status"),
+        )
+        self.showCustomMessageBox("로그인 실패", display_msg)
+        self.loginButton.setText("로그인")
 
     def _enter_offline_mode(self) -> None:
         """Delegate to startup recovery without creating authenticated state."""

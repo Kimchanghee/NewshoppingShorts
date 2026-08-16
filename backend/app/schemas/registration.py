@@ -39,7 +39,9 @@ class RegistrationRequestCreate(BaseModel):
     )
     terms_version: str = Field(..., min_length=10, max_length=32)
     privacy_version: str = Field(..., min_length=10, max_length=32)
-    program_type: Optional[str] = Field("ssmaker", description="프로그램 유형 (ssmaker/stmaker)")
+    program_type: Literal["ssmaker", "stmaker"] = Field(
+        "ssmaker", description="프로그램 유형 (ssmaker/stmaker)"
+    )
 
     @field_validator('password')
     @classmethod
@@ -96,6 +98,7 @@ class RegistrationRequestResponse(BaseModel):
     id: int
     name: str
     username: str
+    program_type: str = "ssmaker"
     email: Optional[str] = None
     ym_news_opt_in: bool = False
     terms_accepted: bool = False

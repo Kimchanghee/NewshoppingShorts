@@ -276,3 +276,38 @@ def test_registration_reports_deployment_disabled_402(monkeypatch):
     assert result["success"] is False
     assert result["http_status"] == 402
     assert "결제 제한" in result["message"]
+
+
+def test_username_availability_reuses_pooled_session_and_short_cache(monkeypatch):
+    import caller.rest as rest
+
+    calls = []
+
+    class FakeResponse:
+        status_code = 200
+        text = '{"available": true, "message": "사용 가능한 아이디입니다."}'
+
+        def json(self):
+            return {"available": True, "message": "사용 가능한 아이디입니다."}
+
+    class FakeSession:
+        def get(self, url, params, timeout):
+            calls.append((url, params, timeout))
+            return FakeResponse()
+
+    monkeypatch.setattr(rest, "_secure_session", FakeSession())
+    monkeypatch.setattr(rest, "main_server", EXPECTED_API_URL)
+    rest._username_availability_cache.clear()
+
+    first = rest.checkUsernameAvailability("speed_user", program_type="ssmaker")
+    second = rest.checkUsernameAvailability("speed_user", program_type="ssmaker")
+
+    assert first["available"] is True
+    assert second == first
+    assert calls == [
+        (
+            f"{EXPECTED_API_URL}/user/check-username/speed_user",
+            {"program_type": "ssmaker"},
+            (2, 5),
+        )
+    ]

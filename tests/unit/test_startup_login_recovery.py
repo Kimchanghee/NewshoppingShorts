@@ -256,6 +256,7 @@ def _run_login_qt_script(script: str, tmp_path: Path) -> None:
 def test_offline_settings_button_is_visible_and_delegates_without_auth(tmp_path):
     _run_login_qt_script(
         r'''
+import time
 from PyQt6.QtWidgets import QApplication
 from ui.windows import login_window
 login_window.Login.setPort = lambda _self: True
@@ -285,6 +286,7 @@ window.close()
 def test_login_failure_shows_module_and_code_and_keeps_window(tmp_path):
     _run_login_qt_script(
         r'''
+import time
 from PyQt6.QtWidgets import QApplication
 from ui.windows import login_window
 login_window.Login.setPort = lambda _self: True
@@ -309,6 +311,10 @@ window.pwEdit.setText("Password123")
 window.show()
 app.processEvents()
 window._loginCheck()
+deadline = time.monotonic() + 2
+while not shown and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
 assert window.isVisible()
 assert shown
 assert "[caller.rest/LOGIN_CONNECTION_ERROR]" in shown[0][1]
@@ -319,9 +325,77 @@ window.close()
     )
 
 
+def test_login_request_keeps_ui_responsive_while_network_runs(tmp_path):
+    _run_login_qt_script(
+        r'''
+import time
+from PyQt6.QtWidgets import QApplication
+from ui.windows import login_window
+login_window.Login.setPort = lambda _self: True
+login_window.ui_controller.userLoadInfo = lambda _self: None
+login_window.Login._preload_ip = lambda _self: None
+login_window.Login._warmup_server = lambda _self: None
+def slow_login(**_kwargs):
+    time.sleep(0.25)
+    return {
+        "status": "error",
+        "message": "server unavailable",
+        "error_module": "caller.rest",
+        "error_code": "LOGIN_CONNECTION_ERROR",
+    }
+login_window.rest.login = slow_login
+app = QApplication([])
+window = login_window.Login()
+window._get_local_ip = lambda: "127.0.0.1"
+window.idEdit.setText("sstest_client")
+window.pwEdit.setText("Password123")
+shown = []
+window.showCustomMessageBox = lambda title, message: shown.append((title, message))
+
+started_at = time.perf_counter()
+window._loginCheck()
+returned_after = time.perf_counter() - started_at
+assert returned_after < 0.1
+assert window.loginButton.isEnabled() is False
+
+deadline = time.monotonic() + 2
+while not shown and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
+assert shown
+assert window.loginButton.isEnabled()
+window.close()
+''',
+        tmp_path,
+    )
+
+
+def test_login_reuses_preloaded_local_ip_without_reopening_socket(tmp_path):
+    _run_login_qt_script(
+        r'''
+from PyQt6.QtWidgets import QApplication
+from ui.windows import login_window
+login_window.Login.setPort = lambda _self: True
+login_window.ui_controller.userLoadInfo = lambda _self: None
+login_window.Login._preload_ip = lambda _self: None
+login_window.Login._warmup_server = lambda _self: None
+app = QApplication([])
+window = login_window.Login()
+window._cached_local_ip = "10.0.0.7"
+login_window.socket.socket = lambda *_args, **_kwargs: (_ for _ in ()).throw(
+    AssertionError("socket should not be reopened")
+)
+assert window._get_local_ip() == "10.0.0.7"
+window.close()
+''',
+        tmp_path,
+    )
+
+
 def test_duplicate_login_is_blocked_without_force_takeover(tmp_path):
     _run_login_qt_script(
         r'''
+import time
 from PyQt6.QtWidgets import QApplication
 from ui.windows import login_window
 login_window.Login.setPort = lambda _self: True
@@ -347,6 +421,10 @@ window.pwEdit.setText("Password123")
 window.show()
 app.processEvents()
 window._loginCheck()
+deadline = time.monotonic() + 2
+while not shown and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
 assert len(requests) == 1
 assert requests[0]["force"] is False
 assert shown and shown[0][0] == "중복 로그인"

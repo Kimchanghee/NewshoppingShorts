@@ -3,9 +3,9 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, update
+from sqlalchemy import and_, case, func, or_, update
 from sqlalchemy.exc import IntegrityError
-from app.models.user import User, UserType
+from app.models.user import ProgramType, User, UserType
 from app.models.session import SessionModel
 from app.models.login_attempt import LoginAttempt
 from app.models.work_usage import WorkUsage
@@ -137,16 +137,30 @@ class AuthService:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    async def login(self, username: str, password: str, ip_address: str, force: bool) -> Dict[str, Any]:
+    async def login(
+        self,
+        username: str,
+        password: str,
+        ip_address: str,
+        force: bool,
+        program_type: str = "ssmaker",
+    ) -> Dict[str, Any]:
         """Login logic with dual rate limiting (username + IP)"""
         username = username.lower()
+        program_type = (
+            ProgramType.STMAKER.value
+            if str(program_type).strip().lower() == ProgramType.STMAKER.value
+            else ProgramType.SSMAKER.value
+        )
         # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
         logger.debug(
             f"Login attempt: username={_mask_username(username)}, ip={ip_address}, force={force}"
         )
 
         # Rate limiting check - both username and IP based
-        rate_limit_result = await self._check_rate_limit(username, ip_address)
+        rate_limit_result = await self._check_rate_limit(
+            username, ip_address, program_type
+        )
         if not rate_limit_result["allowed"]:
             # Security: Mask username and hash IP in logs for privacy
             # 보안: 개인 정보 보호를 위해 로그에서 사용자 이름 마스킹 및 IP 해시
@@ -158,7 +172,14 @@ class AuthService:
                 "message": "Too many login attempts. Please try again later.",
             }
 
-        user = self.db.query(User).filter(User.username == username).first()
+        user = (
+            self.db.query(User)
+            .filter(
+                User.username == username,
+                User.program_type == program_type,
+            )
+            .first()
+        )
 
         # Always perform password verification to prevent timing attacks
         # Use dummy hash if user doesn't exist to ensure constant-time response
@@ -171,13 +192,17 @@ class AuthService:
 
         if not user:
             # User enumeration is allowed per user request for better UX
-            self._record_login_attempt(username, ip_address, success=False)
+            self._record_login_attempt(
+                username, ip_address, success=False, program_type=program_type
+            )
             logger.info(f"[Login Failed] User not found: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # User not found - masked as invalid credentials
 
         if not password_valid:
             # Record failed attempt
-            self._record_login_attempt(username, ip_address, success=False)
+            self._record_login_attempt(
+                username, ip_address, success=False, program_type=program_type
+            )
             logger.info(f"[Login Failed] Invalid password: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # Invalid password
 
@@ -195,7 +220,9 @@ class AuthService:
         self.apply_trial_monthly_reset(user)
 
         if not user.is_active:
-            self._record_login_attempt(username, ip_address, success=False)
+            self._record_login_attempt(
+                username, ip_address, success=False, program_type=program_type
+            )
             logger.info(f"[Login Failed] User inactive: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # Unified error for inactive
 
@@ -293,8 +320,16 @@ class AuthService:
         user.last_login_ip = ip_address
         user.login_count = (user.login_count or 0) + 1
 
-        # Record success
-        self._record_login_attempt(username, ip_address, success=True)
+        # Record the successful attempt in the same transaction as the new
+        # session. Committing it separately added a full extra DB round trip.
+        self.db.add(
+            LoginAttempt(
+                username=username,
+                ip_address=ip_address,
+                success=True,
+                program_type=program_type,
+            )
+        )
 
         self.db.commit()
 
@@ -491,45 +526,58 @@ class AuthService:
             logger.exception("Session check failed unexpectedly")
             return {"status": "error", "message": "Session verification failed"}
 
-    async def _check_rate_limit(self, username: str, ip_address: str) -> dict:
+    async def _check_rate_limit(
+        self, username: str, ip_address: str, program_type: str = "ssmaker"
+    ) -> dict:
         """Check if login attempts exceed rate limit - dual check (username AND IP)"""
         cutoff_time = datetime.now(timezone.utc) - timedelta(
             minutes=settings.LOGIN_ATTEMPT_WINDOW_MINUTES
         )
 
-        # Check per-username limit (failed attempts only)
-        username_attempts = (
-            self.db.query(func.count(LoginAttempt.id))
-            .filter(
-                LoginAttempt.username == username,
-                LoginAttempt.attempted_at > cutoff_time,
-                LoginAttempt.success == False,
-            )
-            .scalar()
+        # Compute both counters in one query. On a serverless database this
+        # removes an entire network round trip from every login attempt.
+        username_failure = and_(
+            LoginAttempt.username == username,
+            LoginAttempt.program_type == program_type,
+            LoginAttempt.attempted_at > cutoff_time,
+            LoginAttempt.success == False,
         )
+        ip_attempt = and_(
+            LoginAttempt.ip_address == ip_address,
+            LoginAttempt.attempted_at > cutoff_time,
+        )
+        counts = (
+            self.db.query(
+                func.sum(case((username_failure, 1), else_=0)),
+                func.sum(case((ip_attempt, 1), else_=0)),
+            )
+            .filter(or_(username_failure, ip_attempt))
+            .one()
+        )
+        username_attempts = int(counts[0] or 0)
+        ip_attempts = int(counts[1] or 0)
 
         if username_attempts >= settings.MAX_LOGIN_ATTEMPTS:
             return {"allowed": False, "reason": "username_limit"}
-
-        # Check per-IP limit (all attempts - prevents enumeration)
-        ip_attempts = (
-            self.db.query(func.count(LoginAttempt.id))
-            .filter(
-                LoginAttempt.ip_address == ip_address,
-                LoginAttempt.attempted_at > cutoff_time,
-            )
-            .scalar()
-        )
 
         if ip_attempts >= settings.MAX_IP_ATTEMPTS:
             return {"allowed": False, "reason": "ip_limit"}
 
         return {"allowed": True, "reason": None}
 
-    def _record_login_attempt(self, username: str, ip_address: str, success: bool):
+    def _record_login_attempt(
+        self,
+        username: str,
+        ip_address: str,
+        success: bool,
+        program_type: str = "ssmaker",
+    ):
         """Record login attempt for rate limiting - commits immediately for consistency"""
         attempt = LoginAttempt(
-            username=username, ip_address=ip_address, success=success
+            username=username,
+            ip_address=ip_address,
+            success=success,
+            program_type=program_type,
         )
         self.db.add(attempt)
         self.db.commit()  # Commit immediately to ensure rate limiting works

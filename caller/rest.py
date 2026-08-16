@@ -28,6 +28,9 @@ from utils.validators import validate_user_id, validate_user_identifier, validat
 logger = get_logger(__name__)
 secrets_manager = get_secrets_manager()
 _in_memory_auth_token: Optional[str] = None
+_username_availability_cache: Dict[tuple[str, str], tuple[float, Dict[str, Any]]] = {}
+_username_availability_cache_lock = threading.RLock()
+_USERNAME_AVAILABILITY_CACHE_SECONDS = 30.0
 
 # Generic error messages for client responses (don't expose internals)
 # ???????? ?  (?? ? ? ?)
@@ -1160,6 +1163,84 @@ def getVersion() -> str:
     except Exception as e:
         logger.debug(f"Unexpected version check error: {e} - using default version")
         return "1.0.0"
+
+
+def checkUsernameAvailability(
+    username: str, *, program_type: str = "ssmaker"
+) -> Dict[str, Any]:
+    """Check a program-scoped username using the pooled auth connection.
+
+    Successful lookups are cached briefly so repeated clicks or form
+    validation do not pay another serverless/database round trip.
+    """
+    global main_server
+
+    username_clean = str(username or "").strip().lower()
+    program_scope = "stmaker" if program_type == "stmaker" else "ssmaker"
+    if not re.fullmatch(r"[a-z0-9_]{4,50}", username_clean):
+        return {"available": False, "message": "아이디 형식이 올바르지 않습니다."}
+
+    cache_key = (program_scope, username_clean)
+    now = time.monotonic()
+    with _username_availability_cache_lock:
+        cached = _username_availability_cache.get(cache_key)
+        if cached and cached[0] > now:
+            return dict(cached[1])
+        if cached:
+            _username_availability_cache.pop(cache_key, None)
+
+    route_missing = False
+    last_result = {"available": False, "message": "서버 연결 실패"}
+    candidates = _candidate_api_servers()
+    for index, base_url in enumerate(candidates):
+        target_url = f"{base_url}/user/check-username/{username_clean}"
+        try:
+            response = _secure_session.get(
+                target_url,
+                params={"program_type": program_scope},
+                timeout=(2, 5),
+            )
+        except requests.exceptions.RequestException as exc:
+            if _is_dns_resolution_error(exc):
+                _record_dns_failure("UsernameCheck", exc)
+            continue
+
+        if response.status_code == 200:
+            try:
+                payload = response.json()
+            except (ValueError, json.JSONDecodeError):
+                last_result = {
+                    "available": False,
+                    "message": "서버 응답을 확인할 수 없습니다.",
+                }
+                continue
+            result = {
+                "available": bool(payload.get("available", False)),
+                "message": str(payload.get("message") or ""),
+            }
+            with _username_availability_cache_lock:
+                _username_availability_cache[cache_key] = (
+                    now + _USERNAME_AVAILABILITY_CACHE_SECONDS,
+                    dict(result),
+                )
+            _reset_dns_failure_state()
+            if index > 0:
+                main_server = base_url
+            return result
+
+        if response.status_code == 404:
+            route_missing = True
+            continue
+        if _should_try_next_auth_server(response):
+            continue
+        return {
+            "available": False,
+            "message": f"서버 오류 ({response.status_code})",
+        }
+
+    if route_missing:
+        return {"available": True, "message": "사용 가능 (서버 검증 생략)"}
+    return last_result
 
 
 def submitRegistrationRequest(

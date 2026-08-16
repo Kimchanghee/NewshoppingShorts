@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, Enum as SQLEnum
+from sqlalchemy import Column, Integer, String, Boolean, TIMESTAMP, Enum as SQLEnum, Index
 from sqlalchemy.sql import func
 import enum
 from app.database import Base
@@ -20,8 +20,17 @@ class ProgramType(str, enum.Enum):
 class User(Base):
     __tablename__ = "users"
 
+    __table_args__ = (
+        Index(
+            "uq_users_username_program",
+            "username",
+            "program_type",
+            unique=True,
+        ),
+    )
+
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
-    username = Column(String(50), unique=True, nullable=False, index=True)
+    username = Column(String(50), nullable=False, index=True)
     email = Column(String(255), nullable=True)
     ym_news_opt_in = Column(Boolean, default=False, nullable=False)
     phone = Column(String(50), nullable=True)

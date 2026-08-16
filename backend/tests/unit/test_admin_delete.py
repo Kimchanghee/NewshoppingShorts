@@ -58,7 +58,7 @@ from app.database import Base
 from app.models.computer_use_job import ComputerUseJob
 from app.models.login_attempt import LoginAttempt
 from app.models.registration_request import RegistrationRequest, RequestStatus
-from app.models.user import User
+from app.models.user import ProgramType, User
 from app.models.user_log import UserLog
 
 
@@ -77,8 +77,19 @@ def test_delete_user_removes_non_cascading_and_registration_records():
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 
-    user = User(username="delete_me", password_hash="hash", is_active=True)
-    db.add(user)
+    user = User(
+        username="delete_me",
+        password_hash="hash",
+        is_active=True,
+        program_type=ProgramType.SSMAKER,
+    )
+    other_program_user = User(
+        username="delete_me",
+        password_hash="hash",
+        is_active=True,
+        program_type=ProgramType.STMAKER,
+    )
+    db.add_all([user, other_program_user])
     db.flush()
     db.add_all(
         [
@@ -88,12 +99,28 @@ def test_delete_user_removes_non_cascading_and_registration_records():
                 password_hash="hash",
                 contact="01012341234",
                 status=RequestStatus.APPROVED,
+                program_type="ssmaker",
+            ),
+            RegistrationRequest(
+                name="Keep Other Program",
+                username=user.username,
+                password_hash="hash",
+                contact="01099998888",
+                status=RequestStatus.APPROVED,
+                program_type="stmaker",
             ),
             UserLog(user_id=user.id, action="login", content="test"),
             LoginAttempt(
                 username=user.username,
                 ip_address="127.0.0.1",
                 success=True,
+                program_type="ssmaker",
+            ),
+            LoginAttempt(
+                username=user.username,
+                ip_address="127.0.0.2",
+                success=True,
+                program_type="stmaker",
             ),
             ComputerUseJob(
                 job_id="delete-job",
@@ -122,15 +149,39 @@ def test_delete_user_removes_non_cascading_and_registration_records():
     )
     assert (
         db.query(RegistrationRequest)
-        .filter(RegistrationRequest.username == "delete_me")
+        .filter(
+            RegistrationRequest.username == "delete_me",
+            RegistrationRequest.program_type == "ssmaker",
+        )
         .count()
         == 0
     )
     assert (
         db.query(LoginAttempt)
-        .filter(LoginAttempt.username == "delete_me")
+        .filter(
+            LoginAttempt.username == "delete_me",
+            LoginAttempt.program_type == "ssmaker",
+        )
         .count()
         == 0
+    )
+    assert (
+        db.query(RegistrationRequest)
+        .filter(
+            RegistrationRequest.username == "delete_me",
+            RegistrationRequest.program_type == "stmaker",
+        )
+        .count()
+        == 1
+    )
+    assert (
+        db.query(LoginAttempt)
+        .filter(
+            LoginAttempt.username == "delete_me",
+            LoginAttempt.program_type == "stmaker",
+        )
+        .count()
+        == 1
     )
 
     db.close()

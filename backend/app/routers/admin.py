@@ -658,6 +658,7 @@ async def delete_user(
             )
 
         username = user.username
+        user_program_type = getattr(user.program_type, "value", user.program_type)
 
         # These records either contain registration PII or reference users
         # without an ON DELETE CASCADE constraint. Remove them in the same
@@ -675,12 +676,18 @@ async def delete_user(
         )
         deleted_registration_requests = (
             db.query(RegistrationRequest)
-            .filter(RegistrationRequest.username == username)
+            .filter(
+                RegistrationRequest.username == username,
+                RegistrationRequest.program_type == user_program_type,
+            )
             .delete(synchronize_session=False)
         )
         deleted_login_attempts = (
             db.query(LoginAttempt)
-            .filter(LoginAttempt.username == username)
+            .filter(
+                LoginAttempt.username == username,
+                LoginAttempt.program_type == user_program_type,
+            )
             .delete(synchronize_session=False)
         )
         db.delete(user)

@@ -6,7 +6,7 @@ import re
 import logging
 from typing import Any, Dict, Optional, List
 
-from fastapi import APIRouter, Depends, Request, Header, HTTPException
+from fastapi import APIRouter, Depends, Request, Header, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 from slowapi.errors import RateLimitExceeded
 from sqlalchemy.orm import Session
@@ -195,7 +195,11 @@ async def login(request: Request, data: LoginRequest, db: Session = Depends(get_
     
     service = AuthService(db)
     result = await service.login(
-        username=data.id, password=data.pw, ip_address=client_ip, force=data.force
+        username=data.id,
+        password=data.pw,
+        ip_address=client_ip,
+        force=data.force,
+        program_type=data.program_type,
     )
     
     log_status = result.get("status")
@@ -340,7 +344,10 @@ async def save_user_settings(
 @router.get("/check-username/{username}")
 @limiter.limit("30/minute")
 async def check_username(
-    request: Request, username: str, db: Session = Depends(get_db)
+    request: Request,
+    username: str,
+    program_type: str = Query("ssmaker", pattern="^(ssmaker|stmaker)$"),
+    db: Session = Depends(get_db),
 ):
     """
     Check if username is available for registration.
@@ -348,6 +355,7 @@ async def check_username(
     """
     # Normalize username
     username_clean = username.lower().strip()
+    program_scope = "stmaker" if program_type == "stmaker" else "ssmaker"
     client_ip = get_client_ip(request)
 
     ck_ip_hash = hashlib.sha256(client_ip.encode()).hexdigest()[:12] if client_ip else "unknown"
@@ -368,7 +376,14 @@ async def check_username(
             }
 
         # 1. 기존 활성 사용자 확인
-        existing_user = db.query(User).filter(User.username == username_clean).first()
+        existing_user = (
+            db.query(User)
+            .filter(
+                User.username == username_clean,
+                User.program_type == program_scope,
+            )
+            .first()
+        )
         if existing_user:
             logger.info(f"[CheckUsername] Forbidden: Username exists in User table: {username_clean}")
             return {"available": False, "message": "이미 사용 중인 아이디입니다."}
@@ -377,7 +392,10 @@ async def check_username(
         # RegistrationRequest에도 동일한 아이디가 있으면 (상태 불문) 충돌 가능성이 있음
         existing_reg = (
             db.query(RegistrationRequest)
-            .filter(RegistrationRequest.username == username_clean)
+            .filter(
+                RegistrationRequest.username == username_clean,
+                RegistrationRequest.program_type == program_scope,
+            )
             .first()
         )
         

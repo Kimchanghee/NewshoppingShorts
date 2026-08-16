@@ -94,11 +94,23 @@ class _FakeDB:
 
 
 class _AuthServiceNoRateLimit(AuthService):
-    async def _check_rate_limit(self, username, ip_address):
+    async def _check_rate_limit(self, username, ip_address, program_type="ssmaker"):
         return {"allowed": True, "reason": None}
 
-    def _record_login_attempt(self, username, ip_address, success):
+    def _record_login_attempt(
+        self, username, ip_address, success, program_type="ssmaker"
+    ):
         return None
+
+    def apply_trial_monthly_reset(self, user):
+        return None
+
+
+class _AuthServiceRealAttemptRecording(AuthService):
+    async def _check_rate_limit(
+        self, username, ip_address, program_type="ssmaker"
+    ):
+        return {"allowed": True, "reason": None}
 
     def apply_trial_monthly_reset(self, user):
         return None
@@ -284,3 +296,69 @@ def test_force_login_cannot_replace_fresh_active_session(monkeypatch):
     assert result == {"status": "EU003", "message": "EU003"}
     assert active.is_active is True
     assert db.added == []
+
+
+def test_successful_login_records_attempt_in_single_commit(monkeypatch):
+    monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
+    monkeypatch.setattr(
+        "app.services.auth_service.create_access_token",
+        lambda user_id, ip: (
+            "new-token",
+            "new-jti",
+            datetime.now(timezone.utc) + timedelta(hours=1),
+        ),
+    )
+
+    db = _FakeDB(user=_make_user(), sessions=[])
+    service = _AuthServiceRealAttemptRecording(db)
+    result = asyncio.run(
+        service.login(
+            username="tester",
+            password="irrelevant",
+            ip_address="1.1.1.1",
+            force=False,
+        )
+    )
+
+    assert result["status"] is True
+    assert db.commit_count == 1
+    assert len([item for item in db.added if item.__class__.__name__ == "LoginAttempt"]) == 1
+
+
+def test_rate_limit_counts_username_and_ip_in_one_database_round_trip():
+    from sqlalchemy import create_engine, event
+    from sqlalchemy.orm import Session
+    from app.models.login_attempt import LoginAttempt
+
+    engine = create_engine("sqlite:///:memory:")
+    LoginAttempt.__table__.create(engine)
+    with Session(engine) as db:
+        db.add(
+            LoginAttempt(
+                username="tester",
+                program_type="ssmaker",
+                ip_address="1.1.1.1",
+                success=False,
+            )
+        )
+        db.commit()
+
+        selects = []
+
+        def count_selects(_conn, _cursor, statement, _parameters, _context, _many):
+            if statement.lstrip().upper().startswith("SELECT"):
+                selects.append(statement)
+
+        event.listen(engine, "before_cursor_execute", count_selects)
+        try:
+            result = asyncio.run(
+                AuthService(db)._check_rate_limit(
+                    "tester", "1.1.1.1", "ssmaker"
+                )
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", count_selects)
+
+    assert result["allowed"] is True
+    assert len(selects) == 1
+    assert "WHERE" in selects[0].upper()

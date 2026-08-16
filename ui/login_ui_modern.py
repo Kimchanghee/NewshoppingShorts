@@ -129,96 +129,49 @@ def _read_app_version() -> str:
 class UsernameCheckWorker(QThread):
     """아이디 중복 확인 백그라운드 워커"""
 
-    finished = pyqtSignal(bool, str)  # (available, message)
+    finished = pyqtSignal(str, bool, str)  # (username, available, message)
 
     def __init__(self, username: str):
         super().__init__()
         self.username = username
 
     def run(self):
-        import os
-        import requests
-        import logging
-
-        logger = logging.getLogger(__name__)
-
         try:
-            default_api_url = "https://newshopping-shorts-auth.vercel.app"
-            deprecated_404_urls = {
-                "https://project-user-dashboard-api.vercel.app",
-                "https://13-124-7-65.nip.io",
-                "https://ssmaker-auth-api-1049571775048.us-central1.run.app",
-                "https://ssmaker-auth-api-m2hewckpba-uc.a.run.app",
-            }
-            candidates = []
-            for raw in (
-                os.getenv("API_SERVER_URL", ""),
-                os.getenv("USER_DASHBOARD_API_URL", ""),
-                os.getenv("API_SERVER_URL_FALLBACK", ""),
-                default_api_url,
-            ):
-                api_url = (raw or "").strip().rstrip("/")
-                if api_url in deprecated_404_urls:
-                    api_url = default_api_url
-                if api_url and api_url not in candidates:
-                    candidates.append(api_url)
+            from caller import rest
 
-            route_missing = False
-            last_error_message = "서버 연결 실패"
-
-            for api_url in candidates:
-                target_url = f"{api_url}/user/check-username/{self.username}"
-                logger.info(f"[UsernameCheck] 중복확인 요청 중: {target_url}")
-
-                try:
-                    resp = requests.get(
-                        target_url, params={"program_type": "ssmaker"}, timeout=5
-                    )
-                except requests.exceptions.ConnectionError:
-                    continue
-                except Exception as e:
-                    last_error_message = f"오류 발생 ({str(e)})"
-                    continue
-
-                if resp.status_code == 200:
-                    data = resp.json()
-                    available = data.get("available", False)
-                    message = data.get("message", "")
-                    logger.info(f"[UsernameCheck] 중복확인 성공: available={available}, msg={message}")
-                    self.finished.emit(available, message)
-                    return
-
-                if resp.status_code == 404:
-                    route_missing = True
-                    logger.info(
-                        "[UsernameCheck] check-username route returned 404 at %s. Trying fallback.",
-                        api_url,
-                    )
-                    continue
-
-                last_error_message = f"서버 오류 ({resp.status_code})"
-                logger.warning(
-                    f"[UsernameCheck] 중복확인 실패 (HTTP {resp.status_code}): {resp.text}"
-                )
-                if resp.status_code < 500:
-                    self.finished.emit(False, last_error_message)
-                    return
-
-            if route_missing:
-                # 일부 자체 호스팅 서버에는 /user/check-username 라우트가 없습니다.
-                # 회원가입 차단을 막기 위해 "사용 가능"으로 처리하고, 실제 중복 충돌은
-                # /user/register/request 단계에서 서버가 거절하도록 둡니다.
-                logger.info(
-                    "[UsernameCheck] 모든 후보 서버에서 check-username 라우트가 없어 통과 처리 (404)."
-                )
-                self.finished.emit(True, "사용 가능 (서버 검증 생략)")
-                return
-
-            self.finished.emit(False, last_error_message)
-        except requests.exceptions.ConnectionError:
-            self.finished.emit(False, "서버 연결 실패")
+            result = rest.checkUsernameAvailability(
+                self.username, program_type="ssmaker"
+            )
+            self.finished.emit(
+                self.username,
+                bool(result.get("available", False)),
+                str(result.get("message") or ""),
+            )
         except Exception as e:
-            self.finished.emit(False, f"오류 발생 ({str(e)})")
+            self.finished.emit(self.username, False, f"오류 발생 ({str(e)})")
+
+
+class RegistrationSubmitWorker(QThread):
+    """Run the registration HTTP request without blocking the Qt event loop."""
+
+    completed = pyqtSignal(dict)
+
+    def __init__(self, payload: dict, parent=None):
+        super().__init__(parent)
+        self.payload = dict(payload)
+
+    def run(self):
+        try:
+            from caller import rest
+
+            result = rest.submitRegistrationRequest(**self.payload)
+        except Exception:
+            logger.exception("[UI] Registration worker exception")
+            result = {
+                "success": False,
+                "message": "회원가입 요청 중 오류가 발생했습니다. 잠시 후 다시 시도해주세요.",
+            }
+        self.completed.emit(dict(result or {}))
 
 
 class ModernLoginUi:
@@ -537,6 +490,8 @@ class RegistrationRequestDialog(QWidget):
         super().__init__(parent)
         self._username_available = False
         self.registration_result = {}
+        self._registration_in_progress = False
+        self._pending_registration_fields = None
         self._setup_ui()
         self._connect_validation_signals()
 
@@ -863,7 +818,7 @@ class RegistrationRequestDialog(QWidget):
         """)
         self.submitButton.setCursor(Qt.CursorShape.PointingHandCursor)
         self.submitButton.clicked.connect(self._on_submit)
-        self.submitButton.setEnabled(True)
+        self.submitButton.setEnabled(not self._registration_in_progress)
         form_layout.addWidget(self.submitButton)
         form_layout.addStretch(1)
 
@@ -1020,10 +975,10 @@ class RegistrationRequestDialog(QWidget):
             self._show_error("아이디는 영문, 숫자, 밑줄(_)만 사용할 수 있습니다.")
             return
 
-        # Cancel previous worker if still running
+        # Keep the existing request alive; terminating QThread during an HTTP
+        # call can corrupt Qt state. Its result is ignored if the text changed.
         if hasattr(self, "_username_worker") and self._username_worker.isRunning():
-            self._username_worker.terminate()
-            self._username_worker.wait()
+            return
 
         self.checkUsernameBtn.setEnabled(False)
         self.checkUsernameBtn.setText("확인중...")
@@ -1034,9 +989,18 @@ class RegistrationRequestDialog(QWidget):
         self._username_worker.finished.connect(self._on_username_check_done)
         self._username_worker.start()
 
-    def _on_username_check_done(self, available: bool, message: str):
+    def _on_username_check_done(
+        self, checked_username: str, available: bool, message: str
+    ):
         self.checkUsernameBtn.setEnabled(True)
         self.checkUsernameBtn.setText("중복확인")
+
+        current_username = self.usernameEdit.text().strip().lower()
+        if current_username != checked_username:
+            self._username_available = False
+            self.usernameStatusLabel.setText("")
+            self._validate_form()
+            return
 
         if available:
             self._username_available = True
@@ -1061,7 +1025,9 @@ class RegistrationRequestDialog(QWidget):
 
     def _on_submit(self):
         import re
-        from caller import rest
+
+        if self._registration_in_progress:
+            return
 
         issues = self._collect_form_issues()
         if issues:
@@ -1087,41 +1053,61 @@ class RegistrationRequestDialog(QWidget):
         contact = re.sub(r"[^0-9]", "", contact_raw)
         email = self.emailEdit.text().strip()
 
-        try:
-            logger.info(
-                "[UI] Registration API call | name=%s username=%s contact=%s email=%s",
-                name,
-                username,
-                contact,
-                email,
+        logger.info(
+            "[UI] Registration API call | name=%s username=%s contact=%s email=%s",
+            name,
+            username,
+            contact,
+            email,
+        )
+        payload = {
+            "name": name,
+            "username": username,
+            "password": password,
+            "contact": contact,
+            "email": email,
+            "terms_accepted": self.termsConsentCheckBox.isChecked(),
+            "privacy_accepted": self.privacyConsentCheckBox.isChecked(),
+            "terms_version": TERMS_DOCUMENT_VERSION,
+            "privacy_version": PRIVACY_DOCUMENT_VERSION,
+        }
+        self._pending_registration_fields = (
+            name,
+            username,
+            password,
+            contact,
+            email,
+        )
+        self._registration_in_progress = True
+        self.submitButton.setEnabled(False)
+        self.submitButton.setText("가입 처리 중...")
+        self._registration_worker = RegistrationSubmitWorker(payload, self)
+        self._registration_worker.completed.connect(self._on_registration_done)
+        self._registration_worker.start()
+
+    def _on_registration_done(self, result: dict) -> None:
+        self._registration_in_progress = False
+        self.submitButton.setText("회원가입 요청 제출")
+        self.submitButton.setEnabled(True)
+        fields = self._pending_registration_fields
+        self._pending_registration_fields = None
+
+        if result.get("success") and fields:
+            self.registration_result = dict(result)
+            name, username, password, contact, email = fields
+            logger.info("[UI] Registration success | username=%s", username)
+            self.registrationRequested.emit(name, username, password, contact, email)
+            self.close()
+            return
+
+        logger.warning(
+            "[UI] Registration failed | message=%s", result.get("message")
+        )
+        self._show_error(
+            result.get(
+                "message", "알 수 없는 오류가 발생했습니다."
             )
-            result = rest.submitRegistrationRequest(
-                name=name,
-                username=username,
-                password=password,
-                contact=contact,
-                email=email,
-                terms_accepted=self.termsConsentCheckBox.isChecked(),
-                privacy_accepted=self.privacyConsentCheckBox.isChecked(),
-                terms_version=TERMS_DOCUMENT_VERSION,
-                privacy_version=PRIVACY_DOCUMENT_VERSION,
-            )
-            if result.get("success"):
-                self.registration_result = dict(result)
-                show_success(self, "완료", "회원가입이 완료되었습니다! 바로 로그인해주세요.")
-                logger.info("[UI] Registration success | username=%s", username)
-                self.registrationRequested.emit(name, username, password, contact, email)
-                self.close()
-            else:
-                logger.warning(
-                    "[UI] Registration failed | username=%s message=%s",
-                    username,
-                    result.get("message"),
-                )
-                self._show_error(result.get("message", "\uC54C \uC218 \uC5C6\uB294 \uC624\uB958\uAC00 \uBC1C\uC0DD\uD588\uC2B5\uB2C8\uB2E4."))
-        except Exception as e:
-            logger.exception("[UI] Registration exception")
-            show_error(self, "오류", str(e))
+        )
 
     def _show_missing_field_alert(self, missing_issues):
         """Show a clear alert describing exactly which required fields are missing."""
@@ -1151,6 +1137,7 @@ class RegistrationRequestDialog(QWidget):
         self.termsConsentCheckBox.setChecked(False)
         self.privacyConsentCheckBox.setChecked(False)
         self._username_available = False
+        self._registration_in_progress = False
         self.usernameStatusLabel.setText("")
         self.submitButton.setEnabled(True)
 

@@ -4,7 +4,7 @@ Registration Request Model
 
 사용자의 회원가입 요청을 저장하고 관리자 승인 대기 상태를 추적합니다.
 """
-from sqlalchemy import Column, Integer, String, Enum, TIMESTAMP, Text, Boolean, DateTime
+from sqlalchemy import Column, Integer, String, Enum, TIMESTAMP, Text, Boolean, DateTime, Index
 from sqlalchemy.sql import func
 from app.database import Base
 import enum
@@ -21,9 +21,19 @@ class RegistrationRequest(Base):
     """회원가입 요청 테이블"""
     __tablename__ = "registration_requests"
 
+    __table_args__ = (
+        Index(
+            "uq_registration_requests_username_program",
+            "username",
+            "program_type",
+            unique=True,
+        ),
+    )
+
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     name = Column(String(100), nullable=False)  # 가입자 명
-    username = Column(String(50), unique=True, nullable=False, index=True)  # 요청 아이디
+    username = Column(String(50), nullable=False, index=True)  # 요청 아이디
+    program_type = Column(String(20), nullable=False, default="ssmaker", index=True)
     email = Column(String(255), nullable=True)  # 이메일
     ym_news_opt_in = Column(Boolean, default=False, nullable=False)
     terms_accepted = Column(Boolean, default=False, nullable=False)
