@@ -140,6 +140,13 @@ def test_same_username_can_login_once_per_program_without_cross_program_eu003(
 
         assert first_stmaker_login["status"] is True
         assert first_stmaker_login["data"]["data"]["id"] == str(stmaker_user.id)
+        assert (
+            db.query(SessionModel)
+            .filter(SessionModel.token_jti == "st-session")
+            .one()
+            .program_type
+            == "stmaker"
+        )
         assert second_stmaker_login == {"status": "EU003", "message": "EU003"}
 
 

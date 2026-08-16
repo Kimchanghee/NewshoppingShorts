@@ -8,6 +8,7 @@ class SessionModel(Base):
 
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    program_type = Column(String(20), nullable=False, default="ssmaker", index=True)
     token_jti = Column(String(36), unique=True, nullable=False, index=True)
     ip_address = Column(String(45), nullable=False)
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())

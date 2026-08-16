@@ -206,6 +206,7 @@ async def submit_registration_request(
         # 세션 저장 (로그인과 동일한 방식)
         session = SessionModel(
             user_id=new_user.id,
+            program_type=pt,
             token_jti=jti,
             ip_address=client_ip,
             expires_at=expires_at,

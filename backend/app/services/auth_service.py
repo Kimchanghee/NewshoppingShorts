@@ -247,6 +247,7 @@ class AuthService:
             self.db.query(SessionModel)
             .filter(
                 SessionModel.user_id == user.id,
+                SessionModel.program_type == program_type,
                 SessionModel.is_active == True,
                 SessionModel.expires_at > db_now,
             )
@@ -309,6 +310,7 @@ class AuthService:
         # Save session
         new_session = SessionModel(
             user_id=user.id,
+            program_type=program_type,
             token_jti=jti,
             ip_address=ip_address,
             expires_at=expires_at,
