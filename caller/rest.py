@@ -743,7 +743,8 @@ def login(**data) -> Dict[str, Any]:
         "pw": data.get("userPw", ""),
         "key": data.get("key", ""),
         "ip": ip_address,
-        "force": data.get("force", False),
+        # Force takeover was removed: an active session must log out or expire.
+        "force": False,
         "program_type": "ssmaker",
     }
 

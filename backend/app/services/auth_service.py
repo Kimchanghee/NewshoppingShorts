@@ -158,7 +158,6 @@ class AuthService:
                 "message": "Too many login attempts. Please try again later.",
             }
 
-        # Find user
         user = self.db.query(User).filter(User.username == username).first()
 
         # Always perform password verification to prevent timing attacks
@@ -199,6 +198,18 @@ class AuthService:
             self._record_login_attempt(username, ip_address, success=False)
             logger.info(f"[Login Failed] User inactive: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # Unified error for inactive
+
+        # Serialize the decisive session check and creation per account.
+        # Earlier quota normalization may commit, so acquire the lock here,
+        # immediately before reading active sessions.
+        user = (
+            self.db.query(User)
+            .filter(User.id == user.id)
+            .with_for_update()
+            .first()
+        )
+        if user is None or not user.is_active:
+            return {"status": "EU001", "message": "EU001"}
 
         # Check existing active sessions.
         db_now = self.db.query(func.current_timestamp()).scalar()
@@ -249,49 +260,21 @@ class AuthService:
                 _hash_ip(ip_address),
             )
 
-        if force:
-            force_target_sessions = same_ip_sessions + other_ip_sessions
-            if force_target_sessions:
-                for session in force_target_sessions:
-                    session.is_active = False
-                session_changes = True
-                logger.info(
-                    "[Login] Force login deactivated %d active session(s): username=%s, ip_hash=%s",
-                    len(force_target_sessions),
-                    _mask_username(username),
-                    _hash_ip(ip_address),
-                )
-        else:
-            # Same-IP active sessions are auto-reclaimed to avoid false EU003 after
-            # client crash or abrupt process termination.
-            if same_ip_sessions:
-                for session in same_ip_sessions:
-                    session.is_active = False
-                session_changes = True
-                logger.info(
-                    "[Login] Reclaimed %d same-IP session(s): username=%s, ip_hash=%s",
-                    len(same_ip_sessions),
-                    _mask_username(username),
-                    _hash_ip(ip_address),
-                )
-
-            # Other-IP active sessions are now also auto-claimed to prevent "duplicate login" errors
-            # per user request. This implements "push notification" style login
-            # where the latest login kicks out previous sessions.
-            if other_ip_sessions:
-                for session in other_ip_sessions:
-                    session.is_active = False
-                session_changes = True
-                logger.info(
-                    "[Login] Reclaimed %d other-IP session(s) (auto-kick): username=%s, ip_hash=%s",
-                    len(other_ip_sessions),
-                    _mask_username(username),
-                    _hash_ip(ip_address),
-                )
-                # return {"status": "EU003", "message": "EU003"}  # Duplicate login - DISABLED
-
-        if session_changes:
-            self.db.commit()
+        # A fresh session always owns the account until it logs out or becomes
+        # stale. The legacy `force` input is intentionally ignored so older
+        # clients cannot bypass the single-session policy.
+        fresh_sessions = same_ip_sessions + other_ip_sessions
+        if fresh_sessions:
+            if session_changes:
+                self.db.commit()
+            logger.info(
+                "[Login] Blocked duplicate login with %d active session(s): username=%s, ip_hash=%s, force_requested=%s",
+                len(fresh_sessions),
+                _mask_username(username),
+                _hash_ip(ip_address),
+                bool(force),
+            )
+            return {"status": "EU003", "message": "EU003"}
 
         # Create JWT token
         token, jti, expires_at = create_access_token(user.id, ip_address)

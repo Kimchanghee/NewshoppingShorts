@@ -19,7 +19,7 @@ from PyQt6.QtGui import QIcon
 
 from caller import rest, ui_controller
 from ui.login_ui_modern import ModernLoginUi as Ui_LoginWindow
-from ui.components.custom_dialog import show_warning, show_question
+from ui.components.custom_dialog import show_warning
 from utils.logging_config import get_logger
 from startup.constants import DEFAULT_PROCESS_PORT
 
@@ -311,27 +311,26 @@ class Login(QMainWindow, Ui_LoginWindow):
         user_id = self.idEdit.text()
         user_pw = self.pwEdit.text()
         ip = self._get_local_ip()
+        if force:
+            logger.info("Ignoring deprecated force-login request")
         
         try:
             client_key = os.getenv("SSMAKER_CLIENT_API_KEY", "").strip()
-            res = rest.login(userId=user_id, userPw=user_pw, key=client_key, ip=ip, force=force)
+            res = rest.login(userId=user_id, userPw=user_pw, key=client_key, ip=ip, force=False)
             if res.get("status") is True:
                 self._handle_login_success(res)
             elif res.get("status") == "EU003":
                 logger.info("Duplicate login detected (EU003)")
                 error_module = str(res.get("error_module") or "caller.rest")
                 error_code = str(res.get("error_code") or "LOGIN_ALREADY_ACTIVE")
-                reply = show_question(
+                show_warning(
                     self,
                     "중복 로그인",
                     f"[{error_module}/{error_code}]\n"
                     "다른 기기에서 이미 로그인되어 있습니다.\n"
-                    "기존 세션을 종료하고 이 기기에서 계속할까요?",
+                    "기존 기기에서 로그아웃한 뒤 다시 시도해주세요.",
                 )
-                if reply and not force:
-                    self._loginCheck(force=True)
-                else:
-                    self.loginButton.setText("로그인")
+                self.loginButton.setText("로그인")
             else:
                 # Use friendly message converter
                 error_msg = rest._friendly_login_message(res)

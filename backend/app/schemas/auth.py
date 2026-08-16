@@ -13,6 +13,7 @@ class LoginRequest(BaseModel):
     # Kept for backward compatibility with older clients that still send `key`.
     key: str = Field("", max_length=256, description="Legacy client key (deprecated)")
     ip: str = Field(..., max_length=45, description="Client IP (legacy, server extracts actual IP)")
+    # Deprecated and ignored by the service. Kept so older clients remain valid.
     force: bool = False
 
     @field_validator('id')

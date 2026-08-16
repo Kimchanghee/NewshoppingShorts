@@ -2,8 +2,8 @@
 """
 Auth duplicate-login policy tests.
 
-Validates that stale/same-IP sessions do not trigger false EU003, and that
-fresh other-IP sessions are reclaimed (auto-kick) per current policy.
+Validates that stale sessions are reclaimed while every fresh active session
+blocks a second login, including legacy force-login requests.
 """
 
 import os
@@ -44,6 +44,9 @@ class _FakeQuery:
         self._items = list(items)
 
     def filter(self, *args, **kwargs):
+        return self
+
+    def with_for_update(self):
         return self
 
     def first(self):
@@ -205,7 +208,7 @@ def test_login_response_includes_latest_paid_plan(monkeypatch):
     assert user_data["last_payment_at"] == "2026-04-30T16:11:16+00:00"
 
 
-def test_login_allows_and_reclaims_same_ip_active_session(monkeypatch):
+def test_login_blocks_same_ip_active_session(monkeypatch):
     monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
     monkeypatch.setattr(
         "app.services.auth_service.create_access_token",
@@ -226,11 +229,12 @@ def test_login_allows_and_reclaims_same_ip_active_session(monkeypatch):
         )
     )
 
-    assert result.get("status") is True
-    assert same_ip_active.is_active is False
+    assert result == {"status": "EU003", "message": "EU003"}
+    assert same_ip_active.is_active is True
+    assert db.added == []
 
 
-def test_login_allows_and_reclaims_other_ip_active_session(monkeypatch):
+def test_login_blocks_other_ip_active_session(monkeypatch):
     monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
     monkeypatch.setattr(
         "app.services.auth_service.create_access_token",
@@ -251,5 +255,32 @@ def test_login_allows_and_reclaims_other_ip_active_session(monkeypatch):
         )
     )
 
-    assert result.get("status") is True
-    assert other_ip_active.is_active is False
+    assert result == {"status": "EU003", "message": "EU003"}
+    assert other_ip_active.is_active is True
+    assert db.added == []
+
+
+def test_force_login_cannot_replace_fresh_active_session(monkeypatch):
+    monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
+    monkeypatch.setattr(
+        "app.services.auth_service.create_access_token",
+        lambda user_id, ip: ("new-token", "new-jti", datetime.now(timezone.utc) + timedelta(hours=1)),
+    )
+
+    user = _make_user()
+    active = _make_session("2.2.2.2", last_activity_seconds_ago=0)
+    db = _FakeDB(user=user, sessions=[active])
+    service = _AuthServiceNoRateLimit(db)
+
+    result = asyncio.run(
+        service.login(
+            username="tester",
+            password="irrelevant",
+            ip_address="1.1.1.1",
+            force=True,
+        )
+    )
+
+    assert result == {"status": "EU003", "message": "EU003"}
+    assert active.is_active is True
+    assert db.added == []

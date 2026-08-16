@@ -317,3 +317,42 @@ window.close()
 ''',
         tmp_path,
     )
+
+
+def test_duplicate_login_is_blocked_without_force_takeover(tmp_path):
+    _run_login_qt_script(
+        r'''
+from PyQt6.QtWidgets import QApplication
+from ui.windows import login_window
+login_window.Login.setPort = lambda _self: True
+login_window.ui_controller.userLoadInfo = lambda _self: None
+login_window.Login._preload_ip = lambda _self: None
+login_window.Login._warmup_server = lambda _self: None
+shown = []
+requests = []
+login_window.show_warning = lambda _parent, title, message: shown.append((title, message))
+def blocked_login(**kwargs):
+    requests.append(kwargs)
+    return {
+        "status": "EU003",
+        "error_module": "caller.rest",
+        "error_code": "LOGIN_ALREADY_ACTIVE",
+    }
+login_window.rest.login = blocked_login
+app = QApplication([])
+window = login_window.Login()
+window._get_local_ip = lambda: "127.0.0.1"
+window.idEdit.setText("sstest_client")
+window.pwEdit.setText("Password123")
+window.show()
+app.processEvents()
+window._loginCheck()
+assert len(requests) == 1
+assert requests[0]["force"] is False
+assert shown and shown[0][0] == "중복 로그인"
+assert "기존 기기에서 로그아웃" in shown[0][1]
+assert window.isVisible()
+window.close()
+''',
+        tmp_path,
+    )
