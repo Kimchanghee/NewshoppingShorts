@@ -1336,11 +1336,15 @@ class AppController:
             try:
                 from ui.windows.update_dialog import UpdateNotesDialog
 
-                self.update_notes_dialog = UpdateNotesDialog(
+                dialog = UpdateNotesDialog(
                     version=version,
                     release_notes=release_notes,
                 )
-                self.update_notes_dialog.show()
+                dialog.destroyed.connect(
+                    lambda: setattr(self, "update_notes_dialog", None)
+                )
+                self.update_notes_dialog = dialog
+                dialog.show()
                 logger.info(f"Showing update notes for v{version}")
             except Exception as e:
                 logger.warning(f"Failed to show update notes dialog: {e}")

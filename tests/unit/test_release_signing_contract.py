@@ -284,6 +284,21 @@ def test_api_update_verifies_all_three_public_metadata_contracts():
     assert "all(contract == expected_contract for contract in verified_contracts.values())" in workflow
 
 
+def test_release_workflows_never_publish_internal_commit_notes_to_customers():
+    release_workflow = (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
+        encoding="utf-8"
+    )
+    metadata_workflow = (
+        ROOT / ".github" / "workflows" / "update-app-version-api.yml"
+    ).read_text(encoding="utf-8")
+
+    assert "generate_release_notes: false" in release_workflow
+    assert "Resolve release notes" not in release_workflow
+    assert "RELEASE_NOTES_SUMMARY: 안정성과 사용성을 개선했습니다." in release_workflow
+    assert "Customer-facing Korean release notes" in metadata_workflow
+    assert "Ignoring non-Korean internal release notes" in metadata_workflow
+
+
 def test_release_workflow_pins_actions_tools_and_never_interpolates_signing_secrets():
     workflow = (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(encoding="utf-8")
 

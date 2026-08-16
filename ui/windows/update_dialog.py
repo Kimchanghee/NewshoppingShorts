@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Consistent update surfaces used before, during, and after an update."""
 
+import re
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase
 from PyQt6.QtWidgets import (
@@ -10,11 +12,34 @@ from PyQt6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QTextEdit,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
 from ui.theme_manager import get_theme_manager
+
+
+_PUBLIC_RELEASE_NOTES_FALLBACK = "안정성과 사용성을 개선했습니다."
+_VERSION_PREFIX = re.compile(
+    r"^SSMaker\s+v?\d+(?:\.\d+){1,3}\s*(?::|[-–—])?\s*",
+    re.IGNORECASE,
+)
+
+
+def _public_release_notes(notes: str) -> str:
+    """Keep only customer-facing Korean release-note lines.
+
+    Release metadata is also used by internal publication tooling, so commit
+    subjects and build notes can occasionally reach this UI. The desktop app
+    must fail to a useful generic message instead of exposing those details.
+    """
+    public_lines = []
+    for raw_line in str(notes or "").splitlines():
+        line = _VERSION_PREFIX.sub("", raw_line.strip()).strip()
+        if line and re.search(r"[가-힣]", line):
+            public_lines.append(line)
+    return "\n".join(public_lines) or _PUBLIC_RELEASE_NOTES_FALLBACK
 
 
 def _font_family() -> str:
@@ -125,7 +150,15 @@ class _UpdateSurface(QWidget):
         content.setSpacing(14)
         return content
 
-    def _header(self, layout: QVBoxLayout, eyebrow: str, title: str, subtitle: str) -> None:
+    def _header(
+        self,
+        layout: QVBoxLayout,
+        eyebrow: str,
+        title: str,
+        subtitle: str,
+        *,
+        on_close=None,
+    ) -> QToolButton | None:
         top = QHBoxLayout()
         top.setSpacing(14)
 
@@ -156,13 +189,42 @@ class _UpdateSurface(QWidget):
         description.setStyleSheet(f"color:{self.COLORS['muted']};")
         text_col.addWidget(description)
         top.addLayout(text_col, 1)
+
+        close_button = None
+        if on_close is not None:
+            close_button = QToolButton()
+            close_button.setText("×")
+            close_button.setAccessibleName("업데이트 안내 닫기")
+            close_button.setCursor(Qt.CursorShape.PointingHandCursor)
+            close_button.setFont(_font(16, QFont.Weight.Normal))
+            close_button.setFixedSize(36, 36)
+            close_button.setStyleSheet(
+                f"""
+                QToolButton {{
+                    color:{self.COLORS['muted']};
+                    background:transparent;
+                    border:1px solid transparent;
+                    border-radius:8px;
+                }}
+                QToolButton:hover {{
+                    color:{self.COLORS['text']};
+                    background:{self.COLORS['surface']};
+                    border-color:{self.COLORS['border']};
+                }}
+                QToolButton:focus {{ border:2px solid {self.COLORS['primary']}; }}
+                """
+            )
+            close_button.clicked.connect(on_close)
+            top.addWidget(close_button, alignment=Qt.AlignmentFlag.AlignTop)
+
         layout.addLayout(top)
+        return close_button
 
     def _notes(self, layout: QVBoxLayout, notes: str, *, height: int) -> QTextEdit:
         editor = QTextEdit()
         editor.setObjectName("releaseNotes")
         editor.setReadOnly(True)
-        editor.setPlainText(notes.strip() or "안정성과 사용성을 개선했습니다.")
+        editor.setPlainText(_public_release_notes(notes))
         editor.setFont(_font(10))
         editor.setFixedHeight(height)
         editor.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -198,28 +260,44 @@ class UpdateNotesDialog(_UpdateSurface):
 
     def __init__(self, version: str = "", release_notes: str = "", parent=None):
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._version = version
+        self._closed_emitted = False
         layout = self._build_surface()
-        self._header(
+        self.close_x_btn = self._header(
             layout,
             f"SSMAKER · VERSION {version}" if version else "SSMAKER · UPDATE",
             "업데이트가 완료됐어요",
-            "달라진 내용을 확인하고 바로 작업을 이어갈 수 있습니다.",
+            "최신 버전이 적용되었습니다.",
+            on_close=self._on_close,
         )
         self._notes(layout, release_notes, height=190)
 
-        self.close_btn = QPushButton("확인")
-        self.close_btn.setAccessibleName("업데이트 내역 확인")
+        self.close_btn = QPushButton("닫기")
+        self.close_btn.setAccessibleName("업데이트 안내 닫기")
         self.close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_btn.setFont(_font(11, QFont.Weight.DemiBold))
         self.close_btn.setFixedHeight(46)
+        self.close_btn.setDefault(True)
+        self.close_btn.setAutoDefault(True)
         self.close_btn.setStyleSheet(_button_style(self.COLORS, primary=True))
         self.close_btn.clicked.connect(self._on_close)
         layout.addWidget(self.close_btn)
 
     def _on_close(self) -> None:
-        self.closed.emit()
+        self.hide()
         self.close()
+
+    def closeEvent(self, event) -> None:
+        self.hide()
+        super().closeEvent(event)
+        if not self._closed_emitted:
+            self._closed_emitted = True
+            self.closed.emit()
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        QTimer.singleShot(0, self.close_btn.setFocus)
 
     def keyPressEvent(self, event) -> None:
         if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter, Qt.Key.Key_Escape):

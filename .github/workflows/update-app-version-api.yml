@@ -13,7 +13,7 @@ on:
         description: 'Optional installer SHA256. If omitted, the workflow downloads the release asset and computes it.'
         required: false
       release_notes:
-        description: 'Release notes shown in-app/website (optional)'
+        description: 'Customer-facing Korean release notes shown in-app/website (optional)'
         required: false
 
 permissions:
@@ -65,6 +65,7 @@ jobs:
           import hmac
           import json
           import os
+          import re
           import time
           import urllib.error
           import urllib.parse
@@ -84,11 +85,15 @@ jobs:
           if origin not in allowed_origins or parsed_api.path not in ("", "/") or parsed_api.query or parsed_api.fragment:
               raise SystemExit("APP_VERSION_API_BASE_URL is not an approved update origin")
           download_url = f"https://github.com/{repository}/releases/download/v{version}/SSMaker_Setup_v{version}.exe"
+          release_notes = (os.environ.get("RELEASE_NOTES") or "").strip()
+          if release_notes and not re.search(r"[가-힣]", release_notes):
+              print("Ignoring non-Korean internal release notes; using the public fallback")
+              release_notes = ""
 
           payload = {
               "version": version,
               "download_url": download_url,
-              "release_notes": (os.environ.get("RELEASE_NOTES") or f"SSMaker v{version} 업데이트").strip(),
+              "release_notes": release_notes or "안정성과 사용성을 개선했습니다.",
               "is_mandatory": False,
               "file_hash": os.environ["FILE_HASH"].strip(),
           }

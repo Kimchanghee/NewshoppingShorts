@@ -264,26 +264,6 @@ jobs:
         print(f"Committed version contract verified: {expected}")
         print(f"Baked signing identity contract verified: {signing_reason}")
 
-    - name: Resolve release notes
-      id: notes
-      shell: bash
-      env:
-        VERSION: ${{ steps.release_policy.outputs.version }}
-        IS_TAG: ${{ steps.release_policy.outputs.is_tag }}
-      run: |
-        SUMMARY=""
-        if [ "$IS_TAG" = "true" ]; then
-          git fetch origin "+refs/tags/v${VERSION}:refs/tags/v${VERSION}" --force 2>/dev/null || true
-          SUMMARY="$(git tag -l --format='%(contents:subject)' "v${VERSION}" 2>/dev/null | head -n1)"
-          HEAD_SUBJECT="$(git log -1 --format='%s' 2>/dev/null | head -n1)"
-          if [ "$SUMMARY" = "$HEAD_SUBJECT" ]; then SUMMARY=""; fi
-        fi
-        if [ -z "$(printf '%s' "$SUMMARY" | tr -d '[:space:]')" ]; then
-          SUMMARY="SSMaker v${VERSION}"
-        fi
-        echo "SUMMARY=${SUMMARY}" >> "$GITHUB_OUTPUT"
-        echo "Resolved release notes: ${SUMMARY}"
-
     - name: Import Code Signing Certificate
       shell: pwsh
       env:
@@ -522,11 +502,11 @@ jobs:
           dist/SSMaker_Setup_v${{ needs.build.outputs.version }}.exe
           dist/SSMaker_Setup_v${{ needs.build.outputs.version }}.exe.sha256
         name: Release v${{ needs.build.outputs.version }}
-        generate_release_notes: true
+        generate_release_notes: false
         body: |
           ## SSMaker v${{ needs.build.outputs.version }}
 
-          SSMaker v${{ needs.build.outputs.version }}
+          안정성과 사용성을 개선했습니다.
 
           ### 설치 방법
           1. 설치 파일을 실행하면 기존 설치를 감지합니다.
@@ -571,7 +551,7 @@ jobs:
         VERSION: ${{ needs.build.outputs.version }}
         FILE_HASH: ${{ needs.build.outputs.file_hash }}
         REPOSITORY: ${{ github.repository }}
-        RELEASE_NOTES_SUMMARY: SSMaker v${{ needs.build.outputs.version }}
+        RELEASE_NOTES_SUMMARY: 안정성과 사용성을 개선했습니다.
         APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
         APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}
         APP_VERSION_UPDATE_HMAC_KEY: ${{ secrets.APP_VERSION_UPDATE_HMAC_KEY }}
@@ -603,7 +583,7 @@ jobs:
         payload = {
             "version": version,
             "download_url": download_url,
-            "release_notes": (os.environ.get("RELEASE_NOTES_SUMMARY") or f"SSMaker v{version} 업데이트").strip(),
+            "release_notes": (os.environ.get("RELEASE_NOTES_SUMMARY") or "안정성과 사용성을 개선했습니다.").strip(),
             "is_mandatory": False,
             "file_hash": os.environ["FILE_HASH"].strip(),
         }
