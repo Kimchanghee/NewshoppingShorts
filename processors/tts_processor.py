@@ -14,6 +14,10 @@ from utils.korean_text_processor import process_korean_script
 
 logger = get_logger(__name__)
 
+# Keep subtitle/TTS units as readable clauses.  The former nine-character
+# target frequently split a complete product sentence into noun fragments.
+PRODUCT_SUBTITLE_TARGET_CHARS = 14
+
 try:
     from google import genai
     from google.genai import types
@@ -90,7 +94,9 @@ class TTSProcessor:
         if not script:
             raise RuntimeError("No translated script available for TTS generation.")
 
-        base_segments = self._split_script_for_tts(script, max_chars=9)
+        base_segments = self._split_script_for_tts(
+            script, max_chars=PRODUCT_SUBTITLE_TARGET_CHARS
+        )
         base_script = "\n".join(base_segments) if base_segments else script
 
         video_duration = self.get_video_duration_helper()
@@ -114,6 +120,8 @@ class TTSProcessor:
         last_duration = 0.0
         last_duration_after_speed = 0.0
         last_path = None
+        last_spoken_script = ""
+        self.gui.actual_tts_script = ""
         # 제품 영상 감지 (영문 + 한국어 키워드)
         translation_text = (self.gui.translation_result or "").lower()
         is_product = any(
@@ -152,7 +160,9 @@ class TTSProcessor:
         if estimated_after_speed > max_allowed * 1.5:
             pre_reduction = max_allowed / estimated_after_speed
             base_script = self._trim_script_for_attempt(base_script, pre_reduction)
-            base_segments = self._split_script_for_tts(base_script, max_chars=9)
+            base_segments = self._split_script_for_tts(
+                base_script, max_chars=PRODUCT_SUBTITLE_TARGET_CHARS
+            )
             script_len_for_estimate = len(base_script.replace("\n", " "))
             logger.info(
                 "[TTS 사전 축소] 예상 길이가 초과하여 스크립트를 %d%% 축소 (%d자)",
@@ -184,7 +194,9 @@ class TTSProcessor:
                     reduction_rate = 0.85**attempt
 
                 trimmed = self._trim_script_for_attempt(base_script, reduction_rate)
-                segments_for_attempt = self._split_script_for_tts(trimmed, max_chars=9)
+                segments_for_attempt = self._split_script_for_tts(
+                    trimmed, max_chars=PRODUCT_SUBTITLE_TARGET_CHARS
+                )
                 full_script = (
                     "\n".join(segments_for_attempt) if segments_for_attempt else trimmed
                 )
@@ -324,6 +336,7 @@ class TTSProcessor:
             last_duration = tts_duration
             last_duration_after_speed = after_speed
             last_path = output_path
+            last_spoken_script = full_script
             self.gui.add_log(
                 f"[TTS] Result length {tts_duration:.2f}s (1.2x => {after_speed:.2f}s)"
             )
@@ -336,6 +349,7 @@ class TTSProcessor:
                     attempt + 1,
                     attempts,
                 )
+                self.gui.actual_tts_script = full_script
                 return metadata, tts_duration, output_path
 
             shortage = after_speed - max_allowed
@@ -365,6 +379,7 @@ class TTSProcessor:
         self.gui.add_log(
             f"[TTS Warning] Failed to meet target length after {attempts} attempts, using shortest version"
         )
+        self.gui.actual_tts_script = last_spoken_script
         return last_metadata, last_duration, last_path
 
     def build_tts_metadata(
@@ -920,7 +935,9 @@ class TTSProcessor:
         )
         return merged
 
-    def _split_script_for_tts(self, script: str, max_chars: int = 9) -> List[str]:
+    def _split_script_for_tts(
+        self, script: str, max_chars: int = PRODUCT_SUBTITLE_TARGET_CHARS
+    ) -> List[str]:
         """
         Split script into naturally phrased segments for TTS and subtitles.
 
@@ -935,7 +952,7 @@ class TTSProcessor:
         if not normalized:
             return []
 
-        target = max_chars or 9
+        target = max_chars or PRODUCT_SUBTITLE_TARGET_CHARS
         min_chars = max(3, target - 3)  # 더 작은 세그먼트 허용
         hard_max = target + 2  # 최대 글자수 (9 + 2 = 11)
 

@@ -25,14 +25,14 @@ from core.api import ApiKeyManager
 from core.video.batch import processor
 from managers.generated_video_manager import GeneratedVideoManager
 from managers.youtube_manager import get_youtube_manager
-from utils.ffmpeg import resolve_ffmpeg_exe
 from utils.token_cost_calculator import TokenCostCalculator
+from core.video.script_quality import assess_product_script
 
 SOURCE_ROOT = Path(
     r"C:\Users\HOME\.ssmaker\sourcing_output\four_new_link_retest_20260601_120001"
 )
 LINKTREE_URL = "https://linktr.ee/studio.idol"
-MIN_UPLOAD_DURATION_SECONDS = 8.0
+MIN_UPLOAD_DURATION_SECONDS = 10.0
 COUPANG_DISCLOSURE = (
     "이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 "
     "제공받습니다."
@@ -265,8 +265,9 @@ def _build_sourcing_context(job: Dict[str, Any]) -> Dict[str, Any]:
         "product_info": {
             "name": job["product_name"],
             "url": job["product_url"],
+            "description": job.get("product_description", ""),
         },
-        "description": job["product_name"],
+        "description": job.get("product_description") or job["product_name"],
         "deep_link": "",
         "sourced_products": [item],
         "sourcing_results": [item],
@@ -316,81 +317,16 @@ def ensure_min_upload_duration(
     output_dir: Path,
     min_duration: float = MIN_UPLOAD_DURATION_SECONDS,
 ) -> tuple[str, Dict[str, Any]]:
-    """Pad very short successful renders so the upload quality gate can pass."""
+    """Return media facts without fabricating duration with a frozen frame.
+
+    The source selector and renderer must produce real content that is at least
+    ``min_duration`` long.  Padding an eight-second render used to hide this
+    defect from the upload gate and created the weak samples reported by users.
+    """
     try:
         duration = float(verification.get("duration") or 0)
     except (TypeError, ValueError):
         duration = 0.0
-    if duration <= 0 or duration >= min_duration:
-        return video_path, verification
-    if not verification.get("has_audio"):
-        return video_path, verification
-
-    ffmpeg = resolve_ffmpeg_exe()
-    if not ffmpeg:
-        return video_path, verification
-
-    pad_seconds = max(0.25, (min_duration + 0.25) - duration)
-    target_duration = duration + pad_seconds
-    source = Path(video_path)
-    padded_path = output_dir / f"{source.stem}_min{int(min_duration)}s{source.suffix}"
-    cmd = [
-        ffmpeg,
-        "-y",
-        "-i",
-        str(source),
-        "-f",
-        "lavfi",
-        "-t",
-        f"{pad_seconds:.3f}",
-        "-i",
-        "anullsrc=channel_layout=stereo:sample_rate=44100",
-        "-filter_complex",
-        (
-            f"[0:v]tpad=stop_mode=clone:stop_duration={pad_seconds:.3f},setsar=1[v];"
-            "[0:a][1:a]concat=n=2:v=0:a=1[a]"
-        ),
-        "-map",
-        "[v]",
-        "-map",
-        "[a]",
-        "-t",
-        f"{target_duration:.3f}",
-        "-c:v",
-        "libx264",
-        "-preset",
-        "veryfast",
-        "-crf",
-        "18",
-        "-pix_fmt",
-        "yuv420p",
-        "-c:a",
-        "aac",
-        "-b:a",
-        "192k",
-        "-movflags",
-        "+faststart",
-        str(padded_path),
-    ]
-    try:
-        subprocess.run(
-            cmd,
-            check=True,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=120,
-        )
-        padded_verification = verify_video(str(padded_path))
-        if float(padded_verification.get("duration") or 0) >= min_duration:
-            print(
-                f"[품질 보정] 최종 영상 {duration:.1f}s -> "
-                f"{float(padded_verification.get('duration') or 0):.1f}s"
-            )
-            return str(padded_path), padded_verification
-    except Exception as exc:
-        print(f"[WARN] Minimum duration padding failed: {exc}", file=sys.stderr)
     return video_path, verification
 
 
@@ -417,14 +353,25 @@ def extract_frame(video_path: str, output_dir: Path, index: int) -> str:
     return str(frame_path)
 
 
-def render_jobs(output_dir: Path, limit: int = 0) -> List[Dict[str, Any]]:
+def render_jobs(
+    output_dir: Path,
+    limit: int = 0,
+    jobs: List[Dict[str, Any]] | None = None,
+) -> List[Dict[str, Any]]:
     app = HeadlessBatchApp(output_dir)
-    jobs = JOBS[:limit] if limit else JOBS
+    jobs = list(jobs or JOBS)
+    jobs = jobs[:limit] if limit else jobs
     results: List[Dict[str, Any]] = []
     try:
         for position, job in enumerate(jobs, start=1):
             if not Path(job["video_file"]).exists():
                 raise FileNotFoundError(job["video_file"])
+            source_probe = verify_video(str(job["video_file"]))
+            if float(source_probe.get("duration") or 0.0) < MIN_UPLOAD_DURATION_SECONDS:
+                raise RuntimeError(
+                    f"Source video must be at least {MIN_UPLOAD_DURATION_SECONDS:.0f}s: "
+                    f"{source_probe.get('duration', 0):.3f}s ({job['video_file']})"
+                )
 
             processor.clear_all_previous_results(app)
             app.product_name = job["product_name"]
@@ -459,11 +406,36 @@ def render_jobs(output_dir: Path, limit: int = 0) -> List[Dict[str, Any]]:
             subtitle_state = app.progress_states.get("subtitle_overlay", {})
             blur_state = app.progress_states.get("subtitle", {})
             analysis = getattr(app, "analysis_result", {}) or {}
+            script_text = str(getattr(app, "translation_result", "") or "").strip()
+            script_quality = (
+                analysis.get("script_quality")
+                if isinstance(analysis, dict)
+                else None
+            ) or assess_product_script(
+                script_text,
+                float(source_probe.get("duration") or 0.0),
+                [],
+            )
+            try:
+                from ui.panels.cta_panel import get_selected_cta_lines
+
+                cta_lines = get_selected_cta_lines(app)
+            except Exception:
+                cta_lines = []
+            spoken_script = str(
+                getattr(app, "actual_tts_script", "") or script_text
+            ).strip()
+            spoken_script_quality = assess_product_script(
+                spoken_script,
+                float(source_probe.get("duration") or 0.0),
+                cta_lines,
+            )
             result = {
                 "index": job["index"],
                 "product_name": job["product_name"],
                 "product_url": job["product_url"],
                 "source_video": str(job["video_file"]),
+                "source_probe": source_probe,
                 "final_video": saved_path,
                 "verify_frame": frame_path,
                 "video_probe": verification,
@@ -477,12 +449,21 @@ def render_jobs(output_dir: Path, limit: int = 0) -> List[Dict[str, Any]]:
                 if isinstance(analysis, dict)
                 else 0,
                 "render_integrity": latest.get("render_integrity_validation") or {},
+                "script_text": script_text,
+                "script_quality": script_quality,
+                "spoken_script": spoken_script,
+                "spoken_script_quality": spoken_script_quality,
             }
             result["render_ok"] = (
                 verification["has_audio"]
                 and verification["is_vertical_1080x1920"]
+                and float(verification.get("duration") or 0.0)
+                >= MIN_UPLOAD_DURATION_SECONDS
                 and result["tts_segment_count"] > 0
                 and subtitle_state.get("status") == "completed"
+                and bool(script_quality.get("ok"))
+                and not bool(script_quality.get("review_required"))
+                and bool(spoken_script_quality.get("ok"))
             )
             results.append(result)
     finally:
@@ -647,7 +628,7 @@ def verify_youtube_comments(uploaded: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def verify_linktree() -> Dict[str, Any]:
+def verify_linktree(jobs: List[Dict[str, Any]] | None = None) -> Dict[str, Any]:
     import requests
 
     response = requests.get(
@@ -662,7 +643,9 @@ def verify_linktree() -> Dict[str, Any]:
         timeout=30,
     )
     text = response.text
-    product_ids = [job["product_url"].rsplit("/", 1)[-1] for job in JOBS]
+    product_ids = [
+        job["product_url"].rsplit("/", 1)[-1] for job in (jobs or JOBS)
+    ]
     return {
         "url": LINKTREE_URL,
         "status_code": response.status_code,
@@ -681,6 +664,16 @@ def main() -> int:
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--output-dir", default="")
     parser.add_argument("--summary-path", default="")
+    parser.add_argument(
+        "--jobs-file",
+        default="",
+        help="JSON array of sample jobs; relative media paths resolve from the JSON file.",
+    )
+    parser.add_argument(
+        "--skip-linktree-check",
+        action="store_true",
+        help="Skip Linktree verification for website-only sample renders.",
+    )
     args = parser.parse_args()
 
     if args.summary_path:
@@ -707,12 +700,31 @@ def main() -> int:
     )
     run_dir.mkdir(parents=True, exist_ok=True)
 
-    results = render_jobs(run_dir, limit=args.limit)
+    selected_jobs = JOBS
+    if args.jobs_file:
+        jobs_path = Path(args.jobs_file).resolve()
+        selected_jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+        if not isinstance(selected_jobs, list) or not selected_jobs:
+            raise ValueError("--jobs-file must contain a non-empty JSON array")
+        for job in selected_jobs:
+            for key in ("video_file", "report_file"):
+                if job.get(key):
+                    value = Path(job[key])
+                    if not value.is_absolute():
+                        value = jobs_path.parent / value
+                    job[key] = value.resolve()
+
+    results = render_jobs(run_dir, limit=args.limit, jobs=selected_jobs)
+    linktree_result = (
+        {"ok": True, "skipped": True}
+        if args.skip_linktree_check
+        else verify_linktree(selected_jobs)
+    )
     summary: Dict[str, Any] = {
         "run_dir": str(run_dir),
         "rendered": results,
         "render_ok": all(item.get("render_ok") for item in results),
-        "linktree": verify_linktree(),
+        "linktree": linktree_result,
     }
     if args.upload:
         uploaded = upload_verified(results, args.privacy)

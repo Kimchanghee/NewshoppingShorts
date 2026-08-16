@@ -50,7 +50,10 @@ DEFAULT_PLATFORM_ORDER = ["douyin", "xiaohongshu", "kuaishou"]
 SUPPORTED_COMMERCE_PLATFORMS = frozenset(DEFAULT_PLATFORM_ORDER)
 
 # 검증 기준(쇼츠 소스로 쓸 수 있는 영상).
-MIN_SOURCE_SECONDS = 4.0
+# The production renderer requires at least ten seconds.  Reject candidates at
+# search time so a short first hit does not end the queue before another valid
+# product video can be selected.
+MIN_SOURCE_SECONDS = 10.0
 # Product demonstrations are often longer than a finished Short.  The existing
 # re-editor selects/trims the usable segment, so accept source material up to
 # five minutes while still rejecting accidental long-form downloads.
@@ -618,11 +621,14 @@ def validate_source_video(path: str) -> tuple[bool, str]:
     """소스로 쓸 수 있는 영상인지 검증(길이·해상도). (ok, reason)."""
     info = probe_media_file(path)
     if not info:
-        # ffprobe가 없거나 실패 — 파일 크기만으로 통과시킴(과차단 방지).
+        # Length is a publishing contract.  File size cannot prove a ten-second
+        # duration, so an unprobeable candidate must not be auto-selected.
         try:
-            return (os.path.getsize(path) > 200_000), "probe_unavailable"
+            if not os.path.exists(path):
+                return False, "file_missing"
         except OSError:
             return False, "file_missing"
+        return False, "probe_unavailable"
     dur = float(info.get("duration") or 0)
     w, h = int(info.get("width") or 0), int(info.get("height") or 0)
     if dur and (dur < MIN_SOURCE_SECONDS or dur > MAX_SOURCE_SECONDS):

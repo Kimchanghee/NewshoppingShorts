@@ -6,7 +6,7 @@
 
 from .subtitle_split import get_subtitle_split_prompt
 from .audio_analysis import get_audio_analysis_prompt
-from .video_analysis import get_video_analysis_prompt
+from .video_analysis import get_product_script_repair_prompt, get_video_analysis_prompt
 from .translation import get_translation_prompt
 from .video_validation import get_video_validation_prompt
 
@@ -14,6 +14,7 @@ __all__ = [
     'get_subtitle_split_prompt',
     'get_audio_analysis_prompt',
     'get_video_analysis_prompt',
+    'get_product_script_repair_prompt',
     'get_translation_prompt',
     'get_video_validation_prompt',
 ]

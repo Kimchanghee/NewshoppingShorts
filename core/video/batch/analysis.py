@@ -24,7 +24,16 @@ from .utils import (
 from caller import ui_controller
 from utils.logging_config import get_logger
 import config
-from prompts import get_video_analysis_prompt, get_translation_prompt
+from prompts import (
+    get_product_script_repair_prompt,
+    get_translation_prompt,
+    get_video_analysis_prompt,
+)
+from core.video.script_quality import (
+    assess_product_script,
+    build_safe_product_fallback,
+    clean_product_script,
+)
 
 logger = get_logger(__name__)
 
@@ -119,6 +128,52 @@ def _get_sourcing_fallback_text(app) -> str:
     return text
 
 
+def _get_product_context(app):
+    """Return stable product identity/context without trusting video text."""
+    result = {}
+    try:
+        result = getattr(getattr(app, "state", None), "sourcing_result", None) or {}
+    except Exception:
+        result = {}
+    if not isinstance(result, dict):
+        result = {}
+    product_info = result.get("product_info") or {}
+    if not isinstance(product_info, dict):
+        product_info = {}
+    name = str(
+        product_info.get("name")
+        or getattr(app, "product_name", "")
+        or getattr(app, "video_title", "")
+        or ""
+    ).strip()
+    description = str(
+        result.get("description") or product_info.get("description") or ""
+    ).strip()
+    return name, description
+
+
+def _source_has_audio(path):
+    """Return True/False when the local media stream can be probed."""
+    if not path:
+        return None
+    try:
+        from core.video.render_integrity import _probe_video
+
+        return bool(_probe_video(str(path)).get("has_audio"))
+    except Exception as exc:
+        logger.debug("[Batch Analysis] Audio stream probe unavailable: %s", exc)
+        return None
+
+
+def _extract_product_description(result_text: str) -> str:
+    match = re.search(
+        r"===\s*(?:상품 설명|한국어 상품 소개)[^=]*===\s*(.+)",
+        str(result_text or ""),
+        re.DOTALL | re.IGNORECASE,
+    )
+    return clean_product_script(match.group(1) if match else result_text)
+
+
 def _apply_sourcing_analysis_fallback(app, reason: str) -> bool:
     """Use sourced product info so the render can continue after AI timeout."""
     fallback_text = _get_sourcing_fallback_text(app)
@@ -139,13 +194,33 @@ def _apply_sourcing_analysis_fallback(app, reason: str) -> bool:
         except Exception:
             pass
 
-    app.video_analysis_result = fallback_text
-    app.translation_result = fallback_text
+    try:
+        from ui.panels.cta_panel import get_selected_cta_lines
+
+        cta_lines = get_selected_cta_lines(app)
+    except Exception:
+        cta_lines = []
+    product_name, product_description = _get_product_context(app)
+    try:
+        video_duration = float(app.get_video_duration_helper() or 0.0)
+    except Exception:
+        video_duration = 10.0
+    fallback_script = build_safe_product_fallback(
+        product_name or fallback_text,
+        product_description or fallback_text,
+        video_duration,
+        cta_lines,
+    )
+    quality = assess_product_script(fallback_script, video_duration, cta_lines)
+    quality.update({"source": "sourcing_fallback", "review_required": True})
+    app.video_analysis_result = fallback_script
+    app.translation_result = fallback_script
     app.analysis_result = {
         "script": [],
         "subtitle_positions": subtitle_positions,
         "raw_subtitle_positions": subtitle_positions,
         "fallback_reason": reason,
+        "script_quality": quality,
         **_collect_subtitle_diagnostics(app, subtitle_positions),
     }
     return True
@@ -180,7 +255,19 @@ def _analyze_video_for_batch(app):
                 return
             raise RuntimeError("Gemini video analysis is unavailable and no fallback product text was found.")
 
-        prompt = get_video_analysis_prompt(cta_lines)
+        try:
+            video_duration = float(app.get_video_duration_helper() or 0.0)
+        except Exception:
+            video_duration = 0.0
+        product_name, product_description = _get_product_context(app)
+        source_has_audio = _source_has_audio(getattr(app, "_temp_downloaded_file", ""))
+        prompt = get_video_analysis_prompt(
+            cta_lines,
+            video_duration=video_duration,
+            product_name=product_name,
+            product_description=product_description,
+            source_has_audio=source_has_audio,
+        )
 
         # 5분 타임아웃으로 분석 실행 (최대 5회 재시도)
         has_sourcing_fallback = bool(_get_sourcing_fallback_text(app))
@@ -446,19 +533,97 @@ def _analyze_video_for_batch(app):
         result_text = _extract_text_from_response(response)
 
         # 상품 설명 모드인지 확인 (한국어 설명이 생성되었는지)
-        is_product_description = "=== 상품 설명" in result_text or ("음성이 없" in result_text and "한국어" in result_text)
+        is_product_description = (
+            source_has_audio is False
+            or "=== 상품 설명" in result_text
+            or "=== 한국어 상품 소개" in result_text
+            or ("음성이 없" in result_text and "한국어" in result_text)
+        )
+
+        def ensure_grounded_product_script(initial_text: str):
+            """Validate the visual script and make Gemini re-read weak drafts."""
+            draft = _extract_product_description(initial_text)
+            quality = assess_product_script(draft, video_duration, cta_lines)
+            repair_attempts = 0
+            while not quality["ok"] and repair_attempts < 2:
+                repair_attempts += 1
+                app.add_log(
+                    "[분석] 상품 소개가 짧거나 단어형이라 영상을 다시 읽고 대본을 재생성합니다. "
+                    f"({repair_attempts}/2)"
+                )
+                logger.warning(
+                    "[Batch Analysis] Weak visual script (%s); grounded retry %d/2",
+                    ",".join(quality["reasons"]),
+                    repair_attempts,
+                )
+                repair_prompt = get_product_script_repair_prompt(
+                    draft or initial_text,
+                    cta_lines,
+                    video_duration,
+                    product_name=product_name,
+                    product_description=product_description,
+                )
+
+                def call_visual_repair():
+                    return app.genai_client.models.generate_content(
+                        model=config.GEMINI_VIDEO_MODEL,
+                        contents=[video_part, repair_prompt],
+                        config=types.GenerateContentConfig(
+                            temperature=min(float(config.GEMINI_TEMPERATURE), 0.5),
+                        ),
+                    )
+
+                try:
+                    repair_response = _run_with_timeout(
+                        call_visual_repair,
+                        ANALYSIS_TIMEOUT,
+                        "Gemini grounded script repair",
+                    )
+                    draft = _extract_product_description(
+                        _extract_text_from_response(repair_response)
+                    )
+                    quality = assess_product_script(draft, video_duration, cta_lines)
+                except Exception as repair_error:
+                    logger.warning(
+                        "[Batch Analysis] Grounded script retry failed: %s",
+                        repair_error,
+                    )
+                    break
+
+            source = "video_grounded"
+            review_required = False
+            if not quality["ok"]:
+                # Never publish a product title or keyword row as spoken copy.
+                # The conservative fallback remains visibly flagged because it
+                # could not be grounded to the scene after the bounded retries.
+                draft = build_safe_product_fallback(
+                    product_name,
+                    product_description,
+                    video_duration,
+                    cta_lines,
+                )
+                quality = assess_product_script(draft, video_duration, cta_lines)
+                source = "safe_product_fallback"
+                review_required = True
+                app.add_log(
+                    "[분석] 영상 기반 대본 재생성에 실패해 안전 문장형 대본을 사용합니다. "
+                    "자동 게시 전 확인이 필요합니다."
+                )
+            quality.update(
+                {
+                    "source": source,
+                    "repair_attempts": repair_attempts,
+                    "review_required": review_required,
+                    "source_has_audio": source_has_audio,
+                }
+            )
+            return draft, quality
 
         if is_product_description:
             # 상품 설명 모드: 한국어 설명을 직접 사용
             logger.info("[배치 분석] 상품 설명 모드 감지 - 음성 대본 없음")
 
-            # 상품 설명 추출
-            desc_match = re.search(r'===\s*상품 설명[^=]*===\s*(.+)', result_text, re.DOTALL)
-            if desc_match:
-                product_desc = desc_match.group(1).strip()
-            else:
-                # 전체 텍스트를 상품 설명으로 사용
-                product_desc = result_text.strip()
+            product_desc, script_quality = ensure_grounded_product_script(result_text)
 
             # 상품 설명 모드에서도 OCR로 자막 위치 감지
             logger.info("[배치 분석] 상품 설명 모드에서도 OCR 자막 감지 시작...")
@@ -474,6 +639,8 @@ def _analyze_video_for_batch(app):
                 'script': [],  # 대본 없음
                 'subtitle_positions': subtitle_positions,
                 'raw_subtitle_positions': subtitle_positions,  # 필터링 전 원본 저장
+                'script_quality': script_quality,
+                'script_generation_mode': 'visual_product_description',
                 **_collect_subtitle_diagnostics(app, subtitle_positions),
             }
             logger.info(f"[배치 분석] 상품 설명 생성 완료 - {len(product_desc)}자")
@@ -496,17 +663,19 @@ def _analyze_video_for_batch(app):
                 **_collect_subtitle_diagnostics(app, subtitle_positions),
             }
 
-            # ★ 대본 파싱 실패 시 원본 텍스트를 fallback으로 저장 ★
+            # Parsing failure is not allowed to turn the raw model response or
+            # a marketplace title into the final narration.  Re-read the video
+            # and build a validated visual product introduction instead.
             if not script_data:
-                logger.warning("[배치 분석] 대본 파싱 실패 - 원본 텍스트를 fallback으로 사용")
-                # 원본 분석 결과에서 한국어/중국어 텍스트 추출
-                fallback_text = result_text.strip()
-                if fallback_text:
-                    app.video_analysis_result = fallback_text
-                    app.translation_result = fallback_text  # 번역 결과로도 저장
-                    logger.info(f"[배치 분석] Fallback 텍스트 저장: {len(fallback_text)}자")
-                else:
-                    app.video_analysis_result = None
+                logger.warning("[배치 분석] 대본 파싱 실패 - 영상 기반 상품 소개 재생성")
+                product_desc, script_quality = ensure_grounded_product_script(result_text)
+                app.video_analysis_result = product_desc
+                app.translation_result = product_desc
+                app.analysis_result["script_quality"] = script_quality
+                app.analysis_result["script_generation_mode"] = "visual_recovery"
+                logger.info(
+                    "[배치 분석] 영상 기반 복구 대본 저장: %d자", len(product_desc)
+                )
             else:
                 app.video_analysis_result = None  # 대본 모드에서는 사용 안함
 
@@ -590,7 +759,9 @@ def _translate_script_for_batch(app):
             target_duration=target_duration,
             target_chars=target_chars,
             length_instruction=length_instruction,
-            cta_lines=cta_lines
+            cta_lines=cta_lines,
+            product_name=_get_product_context(app)[0],
+            product_description=_get_product_context(app)[1],
         )
 
         # Short 2/4-second retries do not outlive Gemini's temporary
@@ -678,9 +849,65 @@ def _translate_script_for_batch(app):
         # 안전하게 텍스트 추출 (thought_signature 경고 방지)
         translated_text = _extract_text_from_response(response) if response else ""
 
-        if not translated_text:
-            translated_text = script_text
-            logger.warning("[배치 번역] 결과가 없어 원본 스크립트를 사용합니다.")
+        quality = assess_product_script(translated_text, video_duration, cta_lines)
+        quality_repairs = 0
+        while not quality["ok"] and quality_repairs < 2:
+            quality_repairs += 1
+            app.add_log(
+                "[번역] 대본이 문장형 상품 소개 기준에 맞지 않아 다시 각색합니다. "
+                f"({quality_repairs}/2)"
+            )
+            repair_prompt = (
+                prompt
+                + "\n\n이전 출력은 다음 품질 문제로 사용할 수 없습니다: "
+                + ", ".join(quality["reasons"])
+                + "\n이전 출력:\n"
+                + (translated_text or "(빈 응답)")
+                + "\n원문 사실을 유지하면서 단어 나열이 아닌 완전한 최종 대본으로 다시 출력하세요."
+            )
+            try:
+                repair_response = app.genai_client.models.generate_content(
+                    model=config.GEMINI_TEXT_MODEL,
+                    contents=[repair_prompt],
+                )
+                translated_text = clean_product_script(
+                    _extract_text_from_response(repair_response)
+                )
+                quality = assess_product_script(
+                    translated_text, video_duration, cta_lines
+                )
+            except Exception as repair_error:
+                logger.warning("[Batch Translation] Script repair failed: %s", repair_error)
+                break
+
+        review_required = False
+        source = "translated_audio"
+        if not quality["ok"]:
+            product_name, product_description = _get_product_context(app)
+            translated_text = build_safe_product_fallback(
+                product_name,
+                product_description or script_text,
+                video_duration,
+                cta_lines,
+            )
+            quality = assess_product_script(translated_text, video_duration, cta_lines)
+            review_required = True
+            source = "safe_translation_fallback"
+            app.add_log(
+                "[번역] 각색 품질 재검사에 실패해 안전 문장형 대본을 사용합니다. "
+                "자동 게시 전 확인이 필요합니다."
+            )
+
+        quality.update(
+            {
+                "source": source,
+                "repair_attempts": quality_repairs,
+                "review_required": review_required,
+            }
+        )
+        if isinstance(getattr(app, "analysis_result", None), dict):
+            app.analysis_result["script_quality"] = quality
+            app.analysis_result["script_generation_mode"] = "translated_audio"
 
         app.translation_result = translated_text
         app.add_log(f"[번역] 번역 완료 - {len(app.translation_result)}자")

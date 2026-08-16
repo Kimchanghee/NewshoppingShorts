@@ -1417,6 +1417,9 @@ def _process_single_video(app, url, current_number, total_urls):
             app._temp_downloaded_file = local_path
             app.video_source = "local"
             app.local_file_path = local_path
+            # Keep the user-owned input separate from derived trim files so
+            # cleanup can remove only artifacts created by this process.
+            app._source_local_file_path = local_path
             app.add_log(f"[다운로드] 로컬 영상 파일 사용: {os.path.basename(local_path)}")
 
         if is_local_file:

@@ -170,6 +170,16 @@ class VideoHelpers:
         """Clean up temporary downloaded files."""
         temp_paths = []
 
+        protected_paths = set()
+        source_local = getattr(self.app, "_source_local_file_path", None)
+        if isinstance(source_local, str) and source_local:
+            protected_paths.add(os.path.normcase(os.path.abspath(source_local)))
+        elif getattr(self.app, "video_source", None) == "local":
+            # Compatibility for sessions created before _source_local_file_path.
+            local_file = getattr(self.app, "local_file_path", None)
+            if isinstance(local_file, str) and local_file:
+                protected_paths.add(os.path.normcase(os.path.abspath(local_file)))
+
         temp_file = getattr(self.app, "_temp_downloaded_file", None)
         if isinstance(temp_file, str) and temp_file:
             temp_paths.append(temp_file)
@@ -181,6 +191,10 @@ class VideoHelpers:
                     temp_paths.append(path)
 
         for path in dict.fromkeys(temp_paths):
+            normalized = os.path.normcase(os.path.abspath(path))
+            if normalized in protected_paths:
+                logger.debug("[정리] 사용자 로컬 원본 보존: %s", path)
+                continue
             if not os.path.exists(path):
                 continue
             try:

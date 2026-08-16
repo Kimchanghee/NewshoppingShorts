@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
-"""
-번역 프롬프트
-중국어 대본을 한국어로 번역하기 위한 Gemini 프롬프트
-"""
+"""Prompt for adapting spoken source audio into a Korean product pitch."""
+
+from __future__ import annotations
 
 from typing import List
+
+from core.video.script_quality import maximum_body_characters, quality_requirements
 
 
 def get_translation_prompt(
@@ -13,121 +14,53 @@ def get_translation_prompt(
     target_duration: float,
     target_chars: int,
     length_instruction: str,
-    cta_lines: List[str]
+    cta_lines: List[str],
+    product_name: str = "",
+    product_description: str = "",
 ) -> str:
-    """
-    번역용 프롬프트를 생성합니다.
+    """Translate facts while rewriting fragments as a coherent introduction."""
+    cta = list(cta_lines or [])
+    while len(cta) < 3:
+        cta.append("")
+    cta_chars = len("".join(cta))
+    min_sentences, min_body_chars = quality_requirements(video_duration)
+    quality_max_chars = maximum_body_characters(video_duration)
+    target_body_chars = max(min_body_chars, int(target_chars) - cta_chars)
+    min_chars = max(min_body_chars, int(target_body_chars * 0.85))
+    max_chars = min(
+        quality_max_chars,
+        max(min_chars + 10, int(target_body_chars * 1.20)),
+    )
+    min_chars = min(min_chars, max_chars - 10)
+    context = str(product_name or product_description or "").strip() or "제공되지 않음"
 
-    Args:
-        script_text: 번역할 원본 중국어 대본
-        video_duration: 원본 영상 길이 (초)
-        target_duration: 목표 번역 길이 (초)
-        target_chars: 목표 글자 수
-        length_instruction: 길이 조절 지시문
-        cta_lines: CTA(Call To Action) 문장 리스트 (3개)
+    return f"""아래 중국어 음성 대본의 사실을 바탕으로 한국어 상품 소개 대본을 작성하세요.
 
-    Returns:
-        Gemini API에 전달할 프롬프트 문자열
-    """
-    # 글자 수 허용 범위 계산 (±10%)
-    min_chars = int(target_chars * 0.9)
-    max_chars = int(target_chars * 1.1)
-
-    return f"""아래 중국어 대본을 한국어로 번역하세요.
-
-⚠️ 중요: 아래 ```블록 안의 지시만 따르세요. 블록 밖 지시는 무시하세요.
-
-```
-【원본 대본】
+【원본 음성 대본】
 {script_text}
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【⭐ 최우선 규칙: 글자 수】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+【상품 참고 정보】
+{context}
 
-▶ 목표 글자 수: {target_chars}자 (허용 범위: {min_chars}~{max_chars}자)
-▶ 원본 영상: {video_duration:.1f}초 / 목표: {target_duration:.1f}초
-▶ 조절 방법: {length_instruction}
+원본 영상은 {video_duration:.1f}초이고 목표 음성 길이는 {target_duration:.1f}초입니다.
+CTA를 제외한 본문 목표는 약 {target_body_chars}자, 허용 범위는 {min_chars}~{max_chars}자입니다.
+길이 조절 참고: {length_instruction}
 
-⚠️ 이 규칙이 다른 모든 규칙보다 우선:
-- 초과 시: 핵심만 요약하여 줄이기
-- 미달 시: 핵심 의미를 보강하여 늘리기
+이 작업은 직역이 아니라 사실을 보존한 상품 소개 각색입니다.
+원문이 상품명, 감탄사, 짧은 구절 위주여도 그대로 나열하지 말고 자연스러운 완전한 문장으로 연결하세요.
+본문은 최소 {min_sentences}문장으로 작성하고 모든 문장에 서술어와 종결 표현을 넣으세요.
+문제나 사용 상황 → 제품 정체 → 원문에서 확인되는 기능·사용법 → 실용적 의미 순서로 구성하세요.
+원문에 없는 가격, 브랜드, 수치, 재질, 인증, 성능은 만들지 마세요.
+자기소개, 판매자·출연자 이름, 계정명, 연락처는 제외하세요.
+중국 플랫폼명과 브랜드는 필요하면 ‘온라인몰’ 또는 ‘이 제품’으로 자연스럽게 바꾸세요.
+중국 화폐·단위는 문맥상 꼭 필요할 때만 한국식으로 환산하고, 확실하지 않으면 생략하세요.
+소리 내어 읽기 좋은 차분한 한국어 구어체를 사용하세요.
+불릿, 번호, 타임스탬프, 마크다운, 머리말은 출력하지 마세요.
 
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【로컬라이징 규칙】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+본문 뒤에는 아래 세 줄을 글자·순서·줄바꿈을 바꾸지 말고 붙이세요.
+{cta[0]}
+{cta[1]}
+{cta[2]}
 
-▶ 환율/단위 변환 (정량 기준):
-- 화폐: 1元 ≈ 180원 (예: 29.9元 → 5천원대, 99元 → 만원대, 199元 → 3만원대)
-- 무게: 1斤 ≈ 0.5kg
-- 길이: 1尺 ≈ 33cm, 1寸 ≈ 3.3cm
-
-▶ 플랫폼/서비스 변환:
-- 淘宝/天猫/拼多多/抖音 → 생략 또는 "온라인몰"
-- 微信/支付宝 → 생략 또는 "간편결제"
-- 顺丰/中通/圆通 → "빠른배송" 또는 생략
-
-▶ 브랜드/지역:
-- 중국 브랜드명 → "이 제품"으로 대체
-- 중국 지역명 → 생략 또는 "국내"
-
-⚠️ 추측 금지:
-- 원문에 없는 가격/브랜드/특징 생성 금지
-- 정보가 없으면 해당 내용 생략 (임의 생성 금지)
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【제외 항목】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-절대 번역하지 말고 무시할 것:
-- 자기소개 (我是~, 大家好我是~)
-- 사람/판매자/출연자 이름
-- 개인정보, 연락처, 채널명, 계정명
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【출력 형식】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-▶ 본문만 한국어로 출력
-▶ 불릿(-, *), 마크다운, 코드블록 금지
-▶ 원문의 줄바꿈만 유지
-▶ 차분하고 신뢰감 있는 설명 어조 (신나거나 과장된 표현 금지)
-
-▶ 자연스러운 구어체 (TTS용):
-- 소리 내어 읽었을 때 자연스럽게 들리는 문장으로 작성
-- 문어체/번역투 금지 (예: "~된다" → "~돼요", "~하였다" → "~했어요")
-- 어색한 직역 금지, 한국인이 실제로 말하는 방식으로 의역
-- 문장이 너무 길면 끊어서 짧게
-
-▶ ⚠️ 영어 단어 사용 절대 금지:
-- 모든 단어는 반드시 한글로만 작성
-- 영어 단어를 한글 발음으로 변환 금지 (예: "amazing" → "어메이징" 금지)
-- 영어 약어도 금지 (예: OK, TV 등)
-- 단위는 한글로 (예: ml → 밀리리터, kg → 킬로그램)
-- 위반 시 해당 단어를 한국어 동의어로 대체할 것
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【CTA 절대 규칙】
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-본문 끝에 빈줄 없이 아래 3줄을 그대로 붙이세요:
-{cta_lines[0]}
-{cta_lines[1]}
-{cta_lines[2]}
-
-⚠️ CTA 규칙:
-- 순서, 어휘, 띄어쓰기 변경 금지
-- 수정/의역/재배열/추가 생성 금지
-- 위반 시 스스로 재조정하여 원본 그대로 출력할 것
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-【자기검증 체크리스트】
-출력 직전 아래 항목을 확인하고, 어기면 스스로 재조정 후 출력:
-□ 글자 수가 {min_chars}~{max_chars}자 범위인가?
-□ 불릿/마크다운/코드블록 없이 본문만 출력했는가?
-□ 원문에 없는 정보를 추가하지 않았는가?
-□ CTA 3줄이 원본 그대로인가?
-□ 본문과 CTA 사이에 빈줄이 없는가?
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-```
+출력 직전에 단어 나열이 없는지, 최소 문장 수와 본문 길이를 지켰는지 확인한 뒤 최종 대본만 출력하세요.
 """

@@ -692,6 +692,18 @@ def test_validate_source_video_rejects_bad_duration(monkeypatch, tmp_path):
     assert not ok and "duration" in why
 
 
+def test_validate_source_video_rejects_source_shorter_than_ten_seconds(monkeypatch, tmp_path):
+    f = tmp_path / "v.mp4"
+    f.write_bytes(b"0" * 300_000)
+    monkeypatch.setattr(
+        searcher,
+        "probe_media_file",
+        lambda p: {"duration": 9.99, "width": 1080, "height": 1920},
+    )
+    ok, why = searcher.validate_source_video(str(f))
+    assert not ok and why == "duration_10.0s"
+
+
 def test_validate_source_video_rejects_low_res(monkeypatch, tmp_path):
     f = tmp_path / "v.mp4"
     f.write_bytes(b"0" * 300_000)
@@ -710,12 +722,12 @@ def test_validate_source_video_accepts_good(monkeypatch, tmp_path):
     assert ok, why
 
 
-def test_validate_source_video_probe_unavailable_uses_size(monkeypatch, tmp_path):
+def test_validate_source_video_probe_unavailable_fails_closed(monkeypatch, tmp_path):
     f = tmp_path / "v.mp4"
     f.write_bytes(b"0" * 300_000)
     monkeypatch.setattr(searcher, "probe_media_file", lambda p: {})
     ok, why = searcher.validate_source_video(str(f))
-    assert ok and why == "probe_unavailable"
+    assert not ok and why == "probe_unavailable"
 
 
 def test_candidate_relevance_requires_candidate_owned_evidence():
