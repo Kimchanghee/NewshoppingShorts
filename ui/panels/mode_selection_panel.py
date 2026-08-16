@@ -6,7 +6,7 @@ from typing import Optional, Dict
 from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QGridLayout, QLabel, QFrame, QWidget, QSizePolicy
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QTimer
+from PyQt6.QtCore import Qt, QSize, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont, QFontMetricsF
 from ui.design_system_v2 import get_design_system, get_color
 
@@ -21,6 +21,7 @@ class ModeCard(QFrame):
         super().__init__(parent)
         self.mode_id = mode_id
         self.is_selected = is_selected
+        self._compact_mode = False
         self.ds = get_design_system()
         self._setup_ui(title, subtitle, description, icon, features)
         self.apply_style()
@@ -30,43 +31,45 @@ class ModeCard(QFrame):
                   icon: str, features: list):
         ds = self.ds
 
-        self.setMinimumSize(260, 380)
-        self.setMaximumWidth(420)
+        self.setMinimumSize(210, 300)
+        self.setMaximumWidth(360)
+        self.setMaximumHeight(350)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(
-            ds.spacing.space_6, ds.spacing.space_6,
-            ds.spacing.space_6, ds.spacing.space_6
+            ds.spacing.space_3, ds.spacing.space_3,
+            ds.spacing.space_3, ds.spacing.space_3
         )
-        layout.setSpacing(ds.spacing.space_4)
+        layout.setSpacing(ds.spacing.space_2)
 
         # Icon + title block. Keep each text row in its own reserved lane so
         # Windows emoji font fallback cannot paint over the title at odd DPI.
-        header_frame = QFrame()
-        header_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        header_frame.setMinimumHeight(130)
-        header_frame.setStyleSheet("background: transparent; border: none;")
-        header_layout = QVBoxLayout(header_frame)
+        self.header_frame = QFrame()
+        self.header_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.header_frame.setMinimumHeight(88)
+        self.header_frame.setStyleSheet("background: transparent; border: none;")
+        header_layout = QVBoxLayout(self.header_frame)
         header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.setSpacing(ds.spacing.space_2)
 
         normalized_icon = (icon or "").replace("\ufe0f", "")
         self.icon_box = QFrame()
-        self.icon_box.setFixedHeight(50)
+        self.icon_box.setFixedHeight(34)
         self.icon_box.setStyleSheet("background: transparent; border: none;")
         icon_box_layout = QVBoxLayout(self.icon_box)
         icon_box_layout.setContentsMargins(0, 0, 0, 0)
         icon_box_layout.setSpacing(0)
 
         self.icon_label = QLabel(normalized_icon)
-        icon_font = QFont("Segoe UI Emoji", 24)
+        icon_font = QFont("Segoe UI Emoji", 19)
         self.icon_label.setFont(icon_font)
         self.icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.icon_label.setSizePolicy(
             QSizePolicy.Policy.Preferred,
             QSizePolicy.Policy.Fixed
         )
-        self.icon_label.setFixedHeight(44)
+        self.icon_label.setFixedHeight(32)
         icon_box_layout.addWidget(self.icon_label)
         header_layout.addWidget(self.icon_box)
 
@@ -79,7 +82,7 @@ class ModeCard(QFrame):
         ))
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setWordWrap(True)
-        self.title_label.setFixedHeight(34)
+        self.title_label.setMinimumHeight(24)
         header_layout.addWidget(self.title_label)
 
         # Subtitle
@@ -90,16 +93,16 @@ class ModeCard(QFrame):
         ))
         self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.subtitle_label.setWordWrap(True)
-        self.subtitle_label.setFixedHeight(36)
+        self.subtitle_label.setMinimumHeight(28)
         header_layout.addWidget(self.subtitle_label)
 
-        layout.addWidget(header_frame)
+        layout.addWidget(self.header_frame)
 
         # Separator
-        separator = QFrame()
-        separator.setFixedHeight(1)
-        separator.setStyleSheet(f"background-color: {get_color('border_light')};")
-        layout.addWidget(separator)
+        self.separator = QFrame()
+        self.separator.setFixedHeight(1)
+        self.separator.setStyleSheet(f"background-color: {get_color('border_light')};")
+        layout.addWidget(self.separator)
 
         # Description
         self.desc_label = QLabel(description)
@@ -113,7 +116,9 @@ class ModeCard(QFrame):
         layout.addWidget(self.desc_label)
 
         # Features list
-        features_layout = QVBoxLayout()
+        self.features_widget = QWidget()
+        features_layout = QVBoxLayout(self.features_widget)
+        features_layout.setContentsMargins(0, 0, 0, 0)
         features_layout.setSpacing(ds.spacing.space_2)
 
         for feature in features:
@@ -137,7 +142,7 @@ class ModeCard(QFrame):
 
             features_layout.addLayout(feature_row)
 
-        layout.addLayout(features_layout)
+        layout.addWidget(self.features_widget)
         layout.addStretch()
 
         # Selection indicator
@@ -154,6 +159,31 @@ class ModeCard(QFrame):
         if event.button() == Qt.MouseButton.LeftButton:
             self.clicked.emit(self.mode_id)
         super().mousePressEvent(event)
+
+    def sizeHint(self) -> QSize:
+        return QSize(280, 330)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(170, 170) if self._compact_mode else QSize(210, 300)
+
+    def set_compact_mode(self, compact: bool) -> None:
+        compact = bool(compact)
+        if compact == self._compact_mode:
+            return
+        self._compact_mode = compact
+        self.desc_label.setVisible(not compact)
+        self.features_widget.setVisible(not compact)
+        if compact:
+            self.setMinimumSize(170, 170)
+            self.setMaximumHeight(210)
+            self.layout().setContentsMargins(10, 10, 10, 10)
+            self.layout().setSpacing(6)
+        else:
+            self.setMinimumSize(210, 300)
+            self.setMaximumHeight(350)
+            self.layout().setContentsMargins(12, 12, 12, 12)
+            self.layout().setSpacing(self.ds.spacing.space_2)
+        self.updateGeometry()
 
     def enterEvent(self, event):
         """Hover effect"""
@@ -238,8 +268,29 @@ class ModeSelectionPanel(QWidget):
         self.ds = get_design_system()
         self.theme_manager = theme_manager
         self._current_mode: Optional[str] = None
+        self._compact_mode = False
         self._cards: Dict[str, ModeCard] = {}
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMinimumHeight(324)
+        self.setMaximumHeight(390)
         self._setup_ui()
+
+    def set_compact_mode(self, compact: bool) -> None:
+        compact = bool(compact)
+        if compact == self._compact_mode:
+            return
+        self._compact_mode = compact
+        for card in self._cards.values():
+            card.set_compact_mode(compact)
+        if compact:
+            self.setMinimumHeight(200)
+            self.setMaximumHeight(240)
+        else:
+            self.setMinimumHeight(324)
+            self.setMaximumHeight(390)
+        self._card_columns = 0
+        self._relayout_cards(3 if self.width() >= (540 if compact else 670) else 2)
+        self.updateGeometry()
 
     def _setup_ui(self):
         ds = self.ds
@@ -256,41 +307,15 @@ class ModeSelectionPanel(QWidget):
 
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(
-            ds.spacing.space_8, ds.spacing.space_6,
-            ds.spacing.space_8, ds.spacing.space_6
+            ds.spacing.space_2, 0,
+            ds.spacing.space_2, 0
         )
-        main_layout.setSpacing(ds.spacing.space_6)
-
-        # Header
-        header_layout = QVBoxLayout()
-        header_layout.setSpacing(ds.spacing.space_2)
-
-        welcome_label = QLabel("영상 제작 모드 선택")
-        welcome_label.setFont(QFont(
-            ds.typography.font_family_primary,
-            ds.typography.size_2xl,
-            QFont.Weight.Bold
-        ))
-        welcome_label.setStyleSheet(f"color: {get_color('text_primary')};")
-        welcome_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(welcome_label)
-
-        desc_label = QLabel("어떤 방식으로 영상을 만들지 골라 주세요")
-        desc_label.setFont(QFont(
-            ds.typography.font_family_primary,
-            ds.typography.size_base
-        ))
-        desc_label.setStyleSheet(f"color: {get_color('text_muted')};")
-        desc_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        header_layout.addWidget(desc_label)
-
-        main_layout.addLayout(header_layout)
-        main_layout.addSpacing(ds.spacing.space_4)
+        main_layout.setSpacing(ds.spacing.space_2)
 
         # Cards container
         self.cards_layout = QGridLayout()
-        self.cards_layout.setHorizontalSpacing(ds.spacing.space_6)
-        self.cards_layout.setVerticalSpacing(ds.spacing.space_6)
+        self.cards_layout.setHorizontalSpacing(ds.spacing.space_3)
+        self.cards_layout.setVerticalSpacing(ds.spacing.space_3)
         self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Single Video Mode Card
@@ -372,10 +397,17 @@ class ModeSelectionPanel(QWidget):
             self.cards_layout.addWidget(card, index // columns, index % columns)
         self._card_columns = columns
 
+    def sizeHint(self) -> QSize:
+        return QSize(720, 220) if self._compact_mode else QSize(900, 324)
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(540, 200) if self._compact_mode else QSize(670, 324)
+
     def resizeEvent(self, event):
         super().resizeEvent(event)
         width = event.size().width()
-        columns = 3 if width >= 1080 else 2 if width >= 660 else 1
+        three_column_min = 540 if self._compact_mode else 670
+        columns = 3 if width >= three_column_min else 2 if width >= 460 else 1
         self._relayout_cards(columns)
 
     def _on_mode_clicked(self, mode_id: str):

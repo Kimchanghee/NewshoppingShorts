@@ -3,13 +3,13 @@ import threading
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QPoint, QRect, QSize
-from PyQt6.QtWidgets import QApplication, QLabel, QPushButton, QWidget
+from PyQt6.QtCore import QPoint, QRect, QSize, Qt
+from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow, QPushButton, QWidget
 
 from ui.components.step_nav import StepNav
 from ui.components.tutorial_manager import TutorialManager
 from ui.components.tutorial_tooltip import TutorialTooltip
-from ui.responsive import calculate_window_rect, layout_profile
+from ui.responsive import apply_fixed_window_geometry, calculate_window_rect, layout_profile
 
 
 _QT_APP = QApplication.instance() or QApplication([])
@@ -30,8 +30,26 @@ def test_initial_window_geometry_never_exceeds_available_desktop():
     ):
         result = calculate_window_rect(available)
         assert available.contains(result)
-        assert result.width() <= 1440
-        assert result.height() <= 960
+        assert result.width() <= 1280
+        assert result.height() <= 800
+        assert abs((result.width() / result.height()) - 1.6) < 0.01
+
+
+def test_fixed_window_profile_disables_resize_and_maximize():
+    window = QMainWindow()
+    target = apply_fixed_window_geometry(window, QRect(0, 0, 1920, 1040))
+
+    assert target.size() == QSize(1280, 800)
+    assert window.size() == target.size()
+    assert window.minimumSize() == target.size()
+    assert window.maximumSize() == target.size()
+    assert not (window.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint)
+
+    compact = apply_fixed_window_geometry(window, QRect(0, 0, 1280, 680))
+    assert compact.size() == QSize(1024, 640)
+    assert window.minimumSize() == compact.size()
+    assert window.maximumSize() == compact.size()
+    window.close()
 
 
 def test_shell_breakpoints_preserve_content_on_short_and_narrow_windows():
@@ -39,14 +57,19 @@ def test_shell_breakpoints_preserve_content_on_short_and_narrow_windows():
     assert narrow.navigation_mode == "icons"
     assert narrow.show_progress_panel is False
     assert narrow.compact_topbar is True
+    assert narrow.compact_mode_page is True
 
     medium = layout_profile(QSize(1024, 720))
-    assert medium.navigation_mode == "compact"
+    assert medium.navigation_mode == "icons"
     assert medium.show_progress_panel is False
+
+    compact = layout_profile(QSize(1200, 720))
+    assert compact.navigation_mode == "compact"
 
     large = layout_profile(QSize(1440, 900))
     assert large.navigation_mode == "full"
     assert large.show_progress_panel is True
+    assert large.compact_mode_page is False
 
 
 def test_tutorial_tooltip_and_next_button_stay_inside_every_viewport():

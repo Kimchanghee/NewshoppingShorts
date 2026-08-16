@@ -1,6 +1,7 @@
 from pathlib import Path
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication, QScrollArea
 
 from config.font_catalog import FONT_IDS, ui_font_options
 from config.voice_profiles import VOICE_PROFILES
@@ -117,12 +118,28 @@ def test_selection_panels_adapt_without_icon_text_overlap():
     mode_panel.resize(1128, 550)
     mode_panel.show()
     app.processEvents()
+    assert mode_panel._card_columns == 3
     for mode_id, card in mode_panel._cards.items():
         icon_box = card.icon_box.geometry()
         title = card.title_label.geometry()
         subtitle = card.subtitle_label.geometry()
         assert icon_box.bottom() < title.top(), mode_id
         assert title.bottom() < subtitle.top(), mode_id
+
+    mode_scroll = QScrollArea()
+    mode_scroll.setWidgetResizable(True)
+    mode_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    mode_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    compact_mode_panel = ModeSelectionPanel(None, gui)
+    mode_scroll.setWidget(compact_mode_panel)
+    mode_scroll.resize(780, 430)
+    mode_scroll.show()
+    app.processEvents()
+    assert compact_mode_panel._card_columns == 3
+    assert mode_scroll.horizontalScrollBar().maximum() == 0
+    assert mode_scroll.verticalScrollBar().maximum() == 0
+    for card in compact_mode_panel._cards.values():
+        assert card.select_label.geometry().bottom() <= card.contentsRect().bottom()
 
     for width, expected_voice_columns, expected_cta_columns in (
         (360, 1, 1),
@@ -140,5 +157,6 @@ def test_selection_panels_adapt_without_icon_text_overlap():
 
     nav.close()
     mode_panel.close()
+    mode_scroll.close()
     voice_panel.close()
     cta_panel.close()

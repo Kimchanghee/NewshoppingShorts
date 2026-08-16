@@ -356,3 +356,28 @@ window.close()
 ''',
         tmp_path,
     )
+
+
+def test_main_window_is_fixed_and_first_page_has_no_scroll(tmp_path):
+    _run_login_qt_script(
+        r'''
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import QApplication
+from main import VideoAnalyzerGUI
+app = QApplication([])
+window = VideoAnalyzerGUI(login_data=None, offline_mode=True, safe_mode=True)
+window.show()
+for _ in range(10):
+    app.processEvents()
+scroll = window.content_scroll
+assert window.minimumSize() == window.size()
+assert window.maximumSize() == window.size()
+assert not (window.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint)
+assert window.stack.currentIndex() == window.page_index["mode"]
+assert window.mode_selection_panel._card_columns == 3
+assert scroll.horizontalScrollBar().maximum() == 0
+assert scroll.verticalScrollBar().maximum() == 0
+window.close()
+''',
+        tmp_path,
+    )

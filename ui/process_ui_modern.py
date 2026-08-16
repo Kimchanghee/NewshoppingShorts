@@ -109,7 +109,7 @@ class ChecklistItem(QFrame):
 class ModernProcessUi:
     def setupUi(self, window: QMainWindow):
         ds = get_design_system()
-        window.resize(620, 560)
+        window.setFixedSize(620, 560)
         window.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 

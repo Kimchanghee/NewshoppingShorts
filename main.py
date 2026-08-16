@@ -440,6 +440,7 @@ class VideoAnalyzerGUI(
         self.stack = widgets["stack"]
         self.page_index = widgets["page_index"]
         self.status_bar = widgets["status_bar"]
+        self.content_scroll = widgets["content_scroll"]
 
         # Store panel references
         self.mode_selection_panel = widgets["mode_selection_panel"]
@@ -630,7 +631,8 @@ def main():
     # DPI awareness (must be before QApplication)
     os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
     try:
-        from startup.environment import setup_dpi_awareness
+        from startup.environment import setup_dpi_awareness, setup_qt_scaling
+        setup_qt_scaling()
         setup_dpi_awareness()
     except Exception:
         pass

@@ -7,7 +7,7 @@ Extracted from main.py for cleaner separation of UI building logic.
 import os
 from typing import TYPE_CHECKING, Dict, Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QCursor, QIcon, QFont
 from PyQt6.QtWidgets import (
     QApplication,
@@ -40,7 +40,11 @@ from ui.panels.multi_account_panel import MultiAccountPanel
 from ui.panels.topbar_panel import TopBarPanel
 from ui.components.status_bar import StatusBar
 from ui.components.step_nav import StepNav
-from ui.responsive import ResponsiveLayoutController, calculate_window_rect
+from ui.responsive import (
+    FixedWindowController,
+    ResponsiveLayoutController,
+    apply_fixed_window_geometry,
+)
 
 from utils.app_identity import APP_DISPLAY_NAME
 from utils.logging_config import get_logger
@@ -60,6 +64,50 @@ class CurrentPageStack(QStackedWidget):
     def minimumSizeHint(self):
         current = self.currentWidget()
         return current.minimumSizeHint() if current is not None else super().minimumSizeHint()
+
+    def hasHeightForWidth(self) -> bool:
+        current = self.currentWidget()
+        return bool(current and current.hasHeightForWidth())
+
+    def heightForWidth(self, width: int) -> int:
+        current = self.currentWidget()
+        if current is None:
+            return super().heightForWidth(width)
+        if current.hasHeightForWidth():
+            return current.heightForWidth(width)
+        return current.sizeHint().height()
+
+
+class CurrentPageHost(QWidget):
+    """Scroll host whose geometry is derived only from the visible page."""
+
+    def __init__(self, stack: CurrentPageStack):
+        super().__init__()
+        self.stack = stack
+        self.host_layout = QVBoxLayout(self)
+        self.host_layout.setContentsMargins(0, 0, 0, 0)
+        self.host_layout.addWidget(stack)
+
+    def _margins(self) -> tuple[int, int, int, int]:
+        return self.host_layout.getContentsMargins()
+
+    def sizeHint(self):
+        hint = self.stack.sizeHint()
+        left, top, right, bottom = self._margins()
+        return hint + QSize(left + right, top + bottom)
+
+    def minimumSizeHint(self):
+        hint = self.stack.minimumSizeHint()
+        left, top, right, bottom = self._margins()
+        return hint + QSize(left + right, top + bottom)
+
+    def hasHeightForWidth(self) -> bool:
+        return self.stack.hasHeightForWidth()
+
+    def heightForWidth(self, width: int) -> int:
+        left, top, right, bottom = self._margins()
+        inner_width = max(1, width - left - right)
+        return self.stack.heightForWidth(inner_width) + top + bottom
 
 
 class UnavailableFeaturePanel(QWidget):
@@ -136,10 +184,11 @@ class UIInitializer:
         screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         if screen:
             available = screen.availableGeometry()
-            initial_rect = calculate_window_rect(available)
-            gui.setGeometry(initial_rect)
+            apply_fixed_window_geometry(gui, available)
         else:
-            gui.resize(1280, 800)
+            gui.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)
+            gui.setFixedSize(1280, 800)
+        gui.fixed_window_controller = FixedWindowController(gui)
 
         central = QWidget()
         central.setObjectName("CentralWidget")
@@ -217,10 +266,9 @@ class UIInitializer:
         stack = CurrentPageStack()
 
         # Add padding around the stack for better visual balance
-        stack_wrapper = QWidget()
-        stack_layout = QVBoxLayout(stack_wrapper)
+        stack_wrapper = CurrentPageHost(stack)
+        stack_layout = stack_wrapper.host_layout
         stack_layout.setContentsMargins(14, 10, 14, 10)
-        stack_layout.addWidget(stack)
 
         # An outer safety scroll area keeps every page reachable on unusually
         # short/portrait desktops. Pages that already scroll continue to size
@@ -292,9 +340,25 @@ class UIInitializer:
 
         page_index = {}
         for idx, (sid, title, subtitle, widget) in enumerate(pages):
-            card = self._wrap_card(widget, title, subtitle)
+            card = self._wrap_card(widget, title, subtitle, compact=sid == "mode")
             stack.addWidget(card)
             page_index[sid] = idx
+
+        def sync_content_scroll(page_index_value: int) -> None:
+            is_mode_page = page_index_value == page_index["mode"]
+            policy = (
+                Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+                if is_mode_page
+                else Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
+            content_scroll.setHorizontalScrollBarPolicy(policy)
+            content_scroll.setVerticalScrollBarPolicy(policy)
+            if is_mode_page:
+                content_scroll.horizontalScrollBar().setValue(0)
+                content_scroll.verticalScrollBar().setValue(0)
+
+        stack.currentChanged.connect(sync_content_scroll)
+        sync_content_scroll(stack.currentIndex())
 
         # '올리기 설정'(UploadPanel)을 '설정' 화면의 '영상 올리기' 탭 안으로 편입.
         try:
@@ -314,6 +378,7 @@ class UIInitializer:
             progress_panel=progress_panel,
             stack_layout=stack_layout,
             topbar=topbar,
+            mode_selection_panel=mode_selection_panel,
         )
         gui.responsive_layout.apply(gui.size())
 
@@ -343,7 +408,14 @@ class UIInitializer:
             "api_key_section": getattr(settings_tab, "api_section", settings_tab),
         }
 
-    def _wrap_card(self, widget: QWidget, title: str, subtitle: str) -> QWidget:
+    def _wrap_card(
+        self,
+        widget: QWidget,
+        title: str,
+        subtitle: str,
+        *,
+        compact: bool = False,
+    ) -> QWidget:
         """Create content card wrapper with STITCH design.
 
         Args:
@@ -376,8 +448,9 @@ class UIInitializer:
         """)
 
         card_layout = QVBoxLayout(card)
-        card_layout.setContentsMargins(20, 20, 20, 20)
-        card_layout.setSpacing(12)
+        margin = 12 if compact else 20
+        card_layout.setContentsMargins(margin, margin, margin, margin)
+        card_layout.setSpacing(8 if compact else 12)
 
         header_layout = QVBoxLayout()
         header_layout.setSpacing(d.spacing.space_2)

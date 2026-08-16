@@ -14,6 +14,22 @@ from utils.logging_config import get_logger
 logger = get_logger(__name__)
 
 
+def setup_qt_scaling() -> None:
+    """Use one exact logical-pixel scale across Windows monitor DPIs."""
+    os.environ.setdefault("QT_AUTO_SCREEN_SCALE_FACTOR", "1")
+    os.environ.setdefault("QT_SCALE_FACTOR_ROUNDING_POLICY", "PassThrough")
+    try:
+        from PyQt6.QtCore import Qt
+        from PyQt6.QtGui import QGuiApplication
+
+        if QGuiApplication.instance() is None:
+            QGuiApplication.setHighDpiScaleFactorRoundingPolicy(
+                Qt.HighDpiScaleFactorRoundingPolicy.PassThrough
+            )
+    except Exception as exc:
+        logger.debug("Qt DPI rounding policy setup failed (non-critical): %s", exc)
+
+
 def setup_dpi_awareness() -> None:
     """
     Configure Windows DPI scaling.

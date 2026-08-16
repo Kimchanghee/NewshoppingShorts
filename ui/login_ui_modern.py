@@ -238,12 +238,7 @@ class ModernLoginUi:
             QtCore.QSize(720, 760),
             QtCore.QSize(600, 520),
         )
-        LoginWindow.resize(login_size)
-        LoginWindow.setMinimumSize(
-            min(600, login_size.width()),
-            min(520, login_size.height()),
-        )
-        LoginWindow.setMaximumSize(QtWidgets.QWIDGETSIZE_MAX, QtWidgets.QWIDGETSIZE_MAX)
+        LoginWindow.setFixedSize(login_size)
         compact_width = login_size.width() < 680
         compact_height = login_size.height() < 700
 
