@@ -3,7 +3,7 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, Union
 from sqlalchemy.orm import Session
-from sqlalchemy import func, or_, update
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from app.models.user import User, UserType
 from app.models.session import SessionModel
@@ -137,9 +137,19 @@ class AuthService:
     def __init__(self, db: Session) -> None:
         self.db = db
 
-    async def login(self, username: str, password: str, ip_address: str, force: bool) -> Dict[str, Any]:
+    async def login(
+        self,
+        username: str,
+        password: str,
+        ip_address: str,
+        force: bool,
+        program_type: str = "ssmaker",
+    ) -> Dict[str, Any]:
         """Login logic with dual rate limiting (username + IP)"""
         username = username.lower()
+        normalized_program_type = (
+            program_type if program_type in {"ssmaker", "stmaker"} else "ssmaker"
+        )
         # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
         logger.debug(
             f"Login attempt: username={_mask_username(username)}, ip={ip_address}, force={force}"
@@ -246,7 +256,11 @@ class AuthService:
             ):
                 stale_sessions.append(session)
                 continue
-            fresh_sessions.append(session)
+            session_program_type = str(
+                getattr(session, "program_type", "ssmaker") or "ssmaker"
+            ).lower()
+            if session_program_type == normalized_program_type:
+                fresh_sessions.append(session)
 
         if stale_sessions:
             for session in stale_sessions:
@@ -284,6 +298,7 @@ class AuthService:
             user_id=user.id,
             token_jti=jti,
             ip_address=ip_address,
+            program_type=normalized_program_type,
             expires_at=expires_at,
         )
         self.db.add(new_session)
@@ -497,30 +512,32 @@ class AuthService:
             minutes=settings.LOGIN_ATTEMPT_WINDOW_MINUTES
         )
 
-        # Check per-username limit (failed attempts only)
-        username_attempts = (
-            self.db.query(func.count(LoginAttempt.id))
-            .filter(
+        username_count = (
+            select(func.count(LoginAttempt.id))
+            .where(
                 LoginAttempt.username == username,
                 LoginAttempt.attempted_at > cutoff_time,
                 LoginAttempt.success == False,
             )
-            .scalar()
+            .scalar_subquery()
         )
+        ip_count = (
+            select(func.count(LoginAttempt.id))
+            .where(
+                LoginAttempt.ip_address == ip_address,
+                LoginAttempt.attempted_at > cutoff_time,
+            )
+            .scalar_subquery()
+        )
+        username_attempts, ip_attempts = self.db.query(
+            username_count.label("username_attempts"),
+            ip_count.label("ip_attempts"),
+        ).one()
 
         if username_attempts >= settings.MAX_LOGIN_ATTEMPTS:
             return {"allowed": False, "reason": "username_limit"}
 
-        # Check per-IP limit (all attempts - prevents enumeration)
-        ip_attempts = (
-            self.db.query(func.count(LoginAttempt.id))
-            .filter(
-                LoginAttempt.ip_address == ip_address,
-                LoginAttempt.attempted_at > cutoff_time,
-            )
-            .scalar()
-        )
-
+        # Per-IP limit counts all attempts to prevent account enumeration.
         if ip_attempts >= settings.MAX_IP_ATTEMPTS:
             return {"allowed": False, "reason": "ip_limit"}
 

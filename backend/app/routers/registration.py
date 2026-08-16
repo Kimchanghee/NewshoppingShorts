@@ -16,6 +16,7 @@ from typing import Optional
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Query
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from app.utils.password import hash_password
@@ -109,9 +110,24 @@ async def submit_registration_request(
         # Pre-process username
         username_clean = data.username.lower().strip()
 
-        # 1. User 테이블 중복 확인
-        existing_user = db.query(User).filter(User.username == username_clean).first()
-        if existing_user:
+        existing_user_id, existing_request_id, existing_request_status = db.query(
+            select(User.id)
+            .where(User.username == username_clean)
+            .limit(1)
+            .scalar_subquery()
+            .label("existing_user_id"),
+            select(RegistrationRequest.id)
+            .where(RegistrationRequest.username == username_clean)
+            .limit(1)
+            .scalar_subquery()
+            .label("existing_request_id"),
+            select(RegistrationRequest.status)
+            .where(RegistrationRequest.username == username_clean)
+            .limit(1)
+            .scalar_subquery()
+            .label("existing_request_status"),
+        ).one()
+        if existing_user_id is not None:
             logger.info(f"[Register Fail] Username exists in Users table: {username_clean}")
             return RegistrationResponse(
                 success=False,
@@ -131,21 +147,14 @@ async def submit_registration_request(
         #     )
         client_ip = get_client_ip(request)  # IP는 여전히 수집하지만 중복 체크는 하지 않음
 
-        # 2. RegistrationRequest 테이블 중복 확인 (모든 상태 체크)
-        existing_request = (
-            db.query(RegistrationRequest)
-            .filter(RegistrationRequest.username == username_clean)
-            .first()
-        )
-        
-        if existing_request:
-            if existing_request.status == RequestStatus.APPROVED:
+        if existing_request_id is not None:
+            if existing_request_status == RequestStatus.APPROVED:
                 # 이미 승인됨 (보통 User 테이블에도 있어야 함)
                 logger.info(f"[Register Fail] Username exists in RegistrationRequest (Approved): {username_clean}")
                 return RegistrationResponse(
                     success=False, message="이미 가입된 계정입니다. 로그인해 주세요."
                 )
-            elif existing_request.status == RequestStatus.PENDING:
+            elif existing_request_status == RequestStatus.PENDING:
                 # 대기 중인 요청이 있음
                 logger.info(f"[Register Fail] Pending request exists: {username_clean}")
                 return RegistrationResponse(
@@ -153,8 +162,10 @@ async def submit_registration_request(
                 )
             
             # 그 외 상태 (REJECTED 등)는 기존 요청 삭제 후 재시도 허용
-            logger.info(f"Deleting existing request (status: {existing_request.status}) for re-registration: {username_clean}")
-            db.delete(existing_request)
+            logger.info(f"Deleting existing request (status: {existing_request_status}) for re-registration: {username_clean}")
+            db.query(RegistrationRequest).filter(
+                RegistrationRequest.id == existing_request_id
+            ).delete(synchronize_session=False)
             db.flush()
 
         # Hash the password
@@ -198,6 +209,7 @@ async def submit_registration_request(
             user_id=new_user.id,
             token_jti=jti,
             ip_address=client_ip,
+            program_type=pt,
             expires_at=expires_at,
         )
         db.add(session)

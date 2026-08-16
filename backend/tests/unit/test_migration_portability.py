@@ -54,8 +54,12 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
             == EXPECTED_ALEMBIC_REVISION
-            == "20260811_0006"
+            == "20260816_0007"
         )
+        session_columns = {
+            column["name"] for column in inspect(connection).get_columns("sessions")
+        }
+        assert "program_type" in session_columns
         registration_columns = {
             column["name"] for column in inspect(connection).get_columns("registration_requests")
         }
@@ -67,6 +71,34 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
             "terms_accepted_at",
             "privacy_accepted_at",
         } <= registration_columns
+
+
+def test_session_program_scope_is_backfilled_from_existing_users(tmp_path):
+    url = f"sqlite:///{(tmp_path / 'session-scope.db').as_posix()}"
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "CREATE TABLE users ("
+                "id INTEGER PRIMARY KEY, program_type VARCHAR(20) NOT NULL)"
+            )
+        )
+        connection.execute(
+            text(
+                "CREATE TABLE sessions ("
+                "id INTEGER PRIMARY KEY, user_id INTEGER NOT NULL)"
+            )
+        )
+        connection.execute(text("INSERT INTO users VALUES (1, 'stmaker')"))
+        connection.execute(text("INSERT INTO sessions VALUES (1, 1)"))
+    _run_alembic(url, "stamp", "20260811_0006")
+
+    _run_alembic(url, "upgrade", "head")
+
+    with engine.connect() as connection:
+        assert connection.execute(
+            text("SELECT program_type FROM sessions WHERE id=1")
+        ).scalar_one() == "stmaker"
 
 
 def test_legacy_tables_and_rows_survive_compatibility_downgrade(tmp_path):

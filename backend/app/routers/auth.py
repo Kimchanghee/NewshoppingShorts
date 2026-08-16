@@ -9,6 +9,7 @@ from typing import Any, Dict, Optional, List
 from fastapi import APIRouter, Depends, Request, Header, HTTPException
 from pydantic import BaseModel, Field, field_validator
 from slowapi.errors import RateLimitExceeded
+from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 from starlette.responses import JSONResponse
 
@@ -195,7 +196,11 @@ async def login(request: Request, data: LoginRequest, db: Session = Depends(get_
     
     service = AuthService(db)
     result = await service.login(
-        username=data.id, password=data.pw, ip_address=client_ip, force=data.force
+        username=data.id,
+        password=data.pw,
+        ip_address=client_ip,
+        force=data.force,
+        program_type=data.program_type,
     )
     
     log_status = result.get("status")
@@ -367,29 +372,24 @@ async def check_username(
                 "message": "아이디는 영문 소문자, 숫자, 밑줄(_)만 사용 가능합니다.",
             }
 
-        # 1. 기존 활성 사용자 확인
-        existing_user = db.query(User).filter(User.username == username_clean).first()
-        if existing_user:
+        user_exists, registration_status = db.query(
+            exists().where(User.username == username_clean).label("user_exists"),
+            select(RegistrationRequest.status)
+            .where(RegistrationRequest.username == username_clean)
+            .limit(1)
+            .scalar_subquery()
+            .label("registration_status"),
+        ).one()
+        if user_exists:
             logger.info(f"[CheckUsername] Forbidden: Username exists in User table: {username_clean}")
             return {"available": False, "message": "이미 사용 중인 아이디입니다."}
 
-        # 2. 대기 중인 가입 요청 또는 자동 승인된 요청 기록 확인 (RegistrationRequest unique constraint 때문)
-        # RegistrationRequest에도 동일한 아이디가 있으면 (상태 불문) 충돌 가능성이 있음
-        existing_reg = (
-            db.query(RegistrationRequest)
-            .filter(RegistrationRequest.username == username_clean)
-            .first()
-        )
-        
-        if existing_reg:
-            if existing_reg.status == RequestStatus.PENDING:
-                logger.info(f"[CheckUsername] Forbidden: Pending request exists: {username_clean}")
-                return {"available": False, "message": "승인 대기 중인 아이디입니다."}
-            elif existing_reg.status == RequestStatus.APPROVED:
-                # 이미 승인되었는데 User 테이블에 없으면 (데이터 불일치 혹은 삭제)
-                # registration.py에서 기존 요청 삭제 후 재등록 허용하므로 True 반환
-                logger.warning(f"[CheckUsername] Warning: Approved request without User record: {username_clean}")
-                return {"available": True, "message": "사용 가능한 아이디입니다."}
+        if registration_status == RequestStatus.PENDING:
+            logger.info(f"[CheckUsername] Forbidden: Pending request exists: {username_clean}")
+            return {"available": False, "message": "승인 대기 중인 아이디입니다."}
+        if registration_status == RequestStatus.APPROVED:
+            logger.warning(f"[CheckUsername] Approved request without User record: {username_clean}")
+            return {"available": False, "message": "이미 가입된 아이디입니다."}
 
         logger.info(f"[CheckUsername] Success: Username {username_clean} is available")
         return {"available": True, "message": "사용 가능한 아이디입니다."}

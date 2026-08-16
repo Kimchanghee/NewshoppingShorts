@@ -10,6 +10,13 @@ class SessionModel(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     token_jti = Column(String(36), unique=True, nullable=False, index=True)
     ip_address = Column(String(45), nullable=False)
+    program_type = Column(
+        String(20),
+        nullable=False,
+        default="ssmaker",
+        server_default="ssmaker",
+        index=True,
+    )
     created_at = Column(TIMESTAMP, server_default=func.current_timestamp())
     expires_at = Column(TIMESTAMP, nullable=False, index=True)
     is_active = Column(Boolean, default=True, nullable=False)

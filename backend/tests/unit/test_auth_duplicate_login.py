@@ -36,6 +36,10 @@ os.environ.setdefault("SESSION_STALE_SECONDS", "150")
 from app.models.user import User, UserType
 from app.models.session import SessionModel
 from app.models.payment_session import PaymentSession, PaymentStatus
+from app.routers import auth as auth_router
+from app.routers import registration as registration_router
+from app.schemas.auth import LoginRequest
+from app.schemas.registration import RegistrationRequestCreate
 from app.services.auth_service import AuthService, _is_session_stale
 
 
@@ -126,7 +130,12 @@ def _make_user():
     )
 
 
-def _make_session(ip: str, *, last_activity_seconds_ago: int):
+def _make_session(
+    ip: str,
+    *,
+    last_activity_seconds_ago: int,
+    program_type: str = "ssmaker",
+):
     now_utc = datetime.now(timezone.utc)
     session = SessionModel(
         user_id=1,
@@ -137,6 +146,7 @@ def _make_session(ip: str, *, last_activity_seconds_ago: int):
     )
     session.last_activity_at = now_utc - timedelta(seconds=last_activity_seconds_ago)
     session.created_at = now_utc - timedelta(seconds=last_activity_seconds_ago)
+    session.program_type = program_type
     return session
 
 
@@ -162,6 +172,111 @@ def test_is_session_stale_uses_last_activity_threshold():
     )
     assert _is_session_stale(session, now_ref=now_utc, stale_seconds=30) is True
     assert _is_session_stale(session, now_ref=now_utc, stale_seconds=90) is False
+
+
+def test_login_request_preserves_program_type():
+    request = LoginRequest(
+        id="tester",
+        pw="password",
+        ip="127.0.0.1",
+        program_type="stmaker",
+    )
+
+    assert request.program_type == "stmaker"
+
+
+def test_login_route_forwards_program_type(monkeypatch):
+    captured = {}
+
+    class _Service:
+        def __init__(self, _db):
+            pass
+
+        async def login(self, **kwargs):
+            captured.update(kwargs)
+            return {"status": "EU001", "message": "EU001"}
+
+    monkeypatch.setattr(auth_router, "AuthService", _Service)
+    monkeypatch.setattr(auth_router, "get_client_ip", lambda _request: "1.1.1.1")
+    request = LoginRequest(
+        id="tester",
+        pw="password",
+        ip="127.0.0.1",
+        program_type="stmaker",
+    )
+
+    login_endpoint = getattr(auth_router.login, "__wrapped__", auth_router.login)
+    asyncio.run(login_endpoint(object(), request, object()))
+
+    assert captured["program_type"] == "stmaker"
+
+
+def test_registration_session_uses_requested_program_type(monkeypatch):
+    class _EmptyQuery:
+        def filter(self, *_args):
+            return self
+
+        def first(self):
+            return None
+
+        def one(self):
+            return (None, None, None)
+
+    class _RegistrationDB:
+        def __init__(self):
+            self.added = []
+            self.query_count = 0
+
+        def query(self, *_models):
+            self.query_count += 1
+            return _EmptyQuery()
+
+        def add(self, value):
+            self.added.append(value)
+
+        def flush(self):
+            for value in self.added:
+                if isinstance(value, User) and value.id is None:
+                    value.id = 1
+
+        def commit(self):
+            pass
+
+        def refresh(self, _value):
+            pass
+
+    monkeypatch.setattr(registration_router, "get_client_ip", lambda _request: "1.1.1.1")
+    monkeypatch.setattr(registration_router, "hash_password", lambda _password: "hash")
+    monkeypatch.setattr(
+        registration_router,
+        "create_access_token",
+        lambda user_id, ip: ("token", "jti", datetime.now(timezone.utc) + timedelta(hours=1)),
+    )
+    data = RegistrationRequestCreate(
+        name="Tester",
+        username="tester",
+        password="Password1",
+        contact="01012345678",
+        email="tester@example.com",
+        terms_accepted=True,
+        privacy_accepted=True,
+        terms_version="2026-08-08",
+        privacy_version="2026-08-08",
+        program_type="stmaker",
+    )
+    db = _RegistrationDB()
+    endpoint = getattr(
+        registration_router.submit_registration_request,
+        "__wrapped__",
+        registration_router.submit_registration_request,
+    )
+
+    result = asyncio.run(endpoint(object(), data, db))
+
+    assert result.success is True
+    assert db.query_count == 1
+    session = next(value for value in db.added if isinstance(value, SessionModel))
+    assert session.program_type == "stmaker"
 
 
 def test_login_allows_when_existing_session_is_stale(monkeypatch):
@@ -342,3 +457,34 @@ def test_force_flag_cannot_replace_active_session(monkeypatch):
     assert result == {"status": "EU003", "message": "EU003"}
     assert active_session.is_active is True
     assert db.added == []
+
+
+def test_login_allows_active_session_from_a_different_program(monkeypatch):
+    monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
+    monkeypatch.setattr(
+        "app.services.auth_service.create_access_token",
+        lambda user_id, ip: ("new-token", "new-jti", datetime.now(timezone.utc) + timedelta(hours=1)),
+    )
+
+    user = _make_user()
+    shopping_shorts_session = _make_session(
+        "2.2.2.2",
+        last_activity_seconds_ago=0,
+        program_type="ssmaker",
+    )
+    db = _FakeDB(user=user, sessions=[shopping_shorts_session])
+    service = _AuthServiceNoRateLimit(db)
+
+    result = asyncio.run(
+        service.login(
+            username="tester",
+            password="irrelevant",
+            ip_address="1.1.1.1",
+            force=False,
+            program_type="stmaker",
+        )
+    )
+
+    assert result.get("status") is True
+    assert shopping_shorts_session.is_active is True
+    assert db.added[-1].program_type == "stmaker"

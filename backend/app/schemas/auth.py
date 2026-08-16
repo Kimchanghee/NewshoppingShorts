@@ -1,7 +1,7 @@
 import re
 from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional, Union
+from typing import Literal, Optional, Union
 from uuid import UUID
 
 
@@ -14,6 +14,7 @@ class LoginRequest(BaseModel):
     key: str = Field("", max_length=256, description="Legacy client key (deprecated)")
     ip: str = Field(..., max_length=45, description="Client IP (legacy, server extracts actual IP)")
     force: bool = False
+    program_type: Literal["ssmaker", "stmaker"] = "ssmaker"
 
     @field_validator('id')
     @classmethod
