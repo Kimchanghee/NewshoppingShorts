@@ -5,7 +5,7 @@ import { SAMPLE_MEDIA } from "./sample-media.mjs";
 
 const SITE_URL = "https://shoppingshorts.store";
 const OG_IMAGE = `${SITE_URL}/og.jpg`;
-const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=20";
+const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=100";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
 const ROBOTS = "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1";
 const excludedReleasePaths = [];
@@ -260,6 +260,7 @@ async function fetchReleaseRoutes() {
         }
         return typeof release.published_at === "string";
       })
+      .slice(0, 20)
       .map((release) => {
         const tagName = release.tag_name;
         const title = release.name || `${tagName} 업데이트 안내`;

@@ -86,9 +86,14 @@ describe("Samples page", () => {
 
   it("publishes complete duration and upload metadata for every indexed video", () => {
     for (const sample of VIDEO_SAMPLES) {
-      expect(sample.uploadDate).toMatch(/^2026-08-15T/);
+      expect(Number.isNaN(Date.parse(sample.uploadDate))).toBe(false);
       expect(sample.beforeDuration).toMatch(/^PT\d+(?:\.\d+)?S$/);
       expect(sample.afterDuration).toMatch(/^PT\d+(?:\.\d+)?S$/);
+      if (sample.category === "automation") {
+        expect(sample.uploadDate).toMatch(/^2026-08-16T/);
+        expect(sample.afterVideo).toContain("website-samples-scripted-20260816");
+        expect(Number.parseFloat(sample.afterDuration.slice(2, -1))).toBeGreaterThanOrEqual(10);
+      }
     }
   });
 });

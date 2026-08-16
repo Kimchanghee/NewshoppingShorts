@@ -6,7 +6,7 @@ const SITE_NAME = "SSMaker";
 const FEED_TITLE = "SSMaker 공지사항과 업데이트";
 const FEED_DESCRIPTION =
   "SSMaker 업데이트, 초기 세팅 매뉴얼, 쿠팡 파트너스, Linktree, YouTube OAuth, Google Cloud 설정 가이드 모음";
-const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=20";
+const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=100";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
 const FEED_FALLBACK_UPDATED = "2026-04-30T00:00:00.000Z";
 
@@ -128,6 +128,7 @@ async function fetchReleaseItems() {
           !release.prerelease &&
           typeof release.published_at === "string",
       )
+      .slice(0, 20)
       .map((release) => {
         const title = release.name || `${release.tag_name} 업데이트`;
         const date = release.published_at;

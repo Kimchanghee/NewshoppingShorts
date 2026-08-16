@@ -40,7 +40,11 @@ if (!robots.includes("Disallow: /api/") || !robots.includes("Disallow: /admin/")
 if (/ocr-showcase-20260815|website-samples-20260815/.test(feed)) {
   fail("media-only prereleases leaked into the public update feed");
 }
-for (const prereleaseRoute of ["release-ocr-showcase-20260815", "release-website-samples-20260815"]) {
+for (const prereleaseRoute of [
+  "release-ocr-showcase-20260815",
+  "release-website-samples-20260815",
+  "release-website-samples-scripted-20260816",
+]) {
   if (fs.existsSync(path.join(distDir, "notice", prereleaseRoute))) {
     fail(`media-only prerelease generated a crawlable notice page: ${prereleaseRoute}`);
   }

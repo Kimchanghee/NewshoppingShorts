@@ -718,7 +718,15 @@ async function fetchReleases(): Promise<GitHubRelease[]> {
     headers: { Accept: "application/vnd.github+json" },
   });
   if (!res.ok) throw new Error("Failed to fetch releases");
-  return res.json();
+  const releases: unknown = await res.json();
+  if (!Array.isArray(releases)) return [];
+  return releases.filter(
+    (release): release is GitHubRelease =>
+      Boolean(release) &&
+      typeof release === "object" &&
+      !(release as { draft?: boolean }).draft &&
+      !(release as { prerelease?: boolean }).prerelease,
+  );
 }
 
 function formatDate(iso: string) {

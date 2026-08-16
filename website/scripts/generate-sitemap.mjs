@@ -4,7 +4,7 @@ import path from "node:path";
 import { durationToSeconds, SAMPLE_MEDIA } from "./sample-media.mjs";
 
 const SITE_URL = "https://shoppingshorts.store";
-const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=20";
+const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=100";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
 const NOTICE_SLUGS = [
   "spring-2026-new-subscriber-extra-month",
@@ -65,6 +65,7 @@ async function fetchReleaseRoutes() {
           !release.prerelease &&
           typeof release.published_at === "string",
       )
+      .slice(0, 20)
       .map((release) => ({
         loc: `/notice/release-${encodeURIComponent(release.tag_name)}/index.html`,
         lastmod: release.published_at.slice(0, 10),
