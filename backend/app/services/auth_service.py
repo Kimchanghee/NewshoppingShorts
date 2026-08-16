@@ -200,6 +200,19 @@ class AuthService:
             logger.info(f"[Login Failed] User inactive: username={_mask_username(username)}, ip_hash={_hash_ip(ip_address)}")
             return {"status": "EU001", "message": "EU001"}  # Unified error for inactive
 
+        # Serialize login decisions for this account. Without a row lock, two
+        # requests arriving together can both observe zero active sessions.
+        locked_user = (
+            self.db.query(User)
+            .filter(User.id == user.id)
+            .with_for_update()
+            .first()
+        )
+        if locked_user is None:
+            self._record_login_attempt(username, ip_address, success=False)
+            return {"status": "EU001", "message": "EU001"}
+        user = locked_user
+
         # Check existing active sessions.
         db_now = self.db.query(func.current_timestamp()).scalar()
         if not isinstance(db_now, datetime):
@@ -217,13 +230,13 @@ class AuthService:
 
         session_changes = False
         stale_sessions = []
-        same_ip_sessions = []
-        other_ip_sessions = []
+        fresh_sessions = []
         configured_stale_seconds = int(getattr(settings, "SESSION_STALE_SECONDS", 0) or 0)
         if configured_stale_seconds <= 0:
-            configured_stale_seconds = max(
-                60, int(getattr(settings, "SESSION_STALE_MINUTES", 2)) * 60
-            )
+            configured_stale_seconds = int(getattr(settings, "SESSION_STALE_MINUTES", 2)) * 60
+        # The desktop heartbeat runs once a minute. Keep more than two full
+        # intervals so a live session is not mistaken for a crashed client.
+        configured_stale_seconds = max(150, configured_stale_seconds)
 
         for session in active_sessions:
             if _is_session_stale(
@@ -233,10 +246,7 @@ class AuthService:
             ):
                 stale_sessions.append(session)
                 continue
-            if session.ip_address == ip_address:
-                same_ip_sessions.append(session)
-            else:
-                other_ip_sessions.append(session)
+            fresh_sessions.append(session)
 
         if stale_sessions:
             for session in stale_sessions:
@@ -249,46 +259,19 @@ class AuthService:
                 _hash_ip(ip_address),
             )
 
-        if force:
-            force_target_sessions = same_ip_sessions + other_ip_sessions
-            if force_target_sessions:
-                for session in force_target_sessions:
-                    session.is_active = False
-                session_changes = True
-                logger.info(
-                    "[Login] Force login deactivated %d active session(s): username=%s, ip_hash=%s",
-                    len(force_target_sessions),
-                    _mask_username(username),
-                    _hash_ip(ip_address),
-                )
-        else:
-            # Same-IP active sessions are auto-reclaimed to avoid false EU003 after
-            # client crash or abrupt process termination.
-            if same_ip_sessions:
-                for session in same_ip_sessions:
-                    session.is_active = False
-                session_changes = True
-                logger.info(
-                    "[Login] Reclaimed %d same-IP session(s): username=%s, ip_hash=%s",
-                    len(same_ip_sessions),
-                    _mask_username(username),
-                    _hash_ip(ip_address),
-                )
-
-            # Other-IP active sessions are now also auto-claimed to prevent "duplicate login" errors
-            # per user request. This implements "push notification" style login
-            # where the latest login kicks out previous sessions.
-            if other_ip_sessions:
-                for session in other_ip_sessions:
-                    session.is_active = False
-                session_changes = True
-                logger.info(
-                    "[Login] Reclaimed %d other-IP session(s) (auto-kick): username=%s, ip_hash=%s",
-                    len(other_ip_sessions),
-                    _mask_username(username),
-                    _hash_ip(ip_address),
-                )
-                # return {"status": "EU003", "message": "EU003"}  # Duplicate login - DISABLED
+        # Matching public IP does not prove this is the same device, and the
+        # legacy force flag must not let callers revoke somebody else's login.
+        if fresh_sessions:
+            logger.info(
+                "[Login] Blocked duplicate login with %d active session(s): username=%s, ip_hash=%s, force_ignored=%s",
+                len(fresh_sessions),
+                _mask_username(username),
+                _hash_ip(ip_address),
+                force,
+            )
+            if session_changes:
+                self.db.commit()
+            return {"status": "EU003", "message": "EU003"}
 
         if session_changes:
             self.db.commit()

@@ -59,7 +59,7 @@ class Settings(BaseSettings):
     # Helps recover from client crashes where logout is never sent.
     # Prefer seconds for tighter duplicate-login recovery; keep minutes for
     # backward compatibility with older deployments.
-    SESSION_STALE_SECONDS: int = 30
+    SESSION_STALE_SECONDS: int = 150
     SESSION_STALE_MINUTES: int = 2
     ENFORCE_SESSION_IP_BINDING: bool = False
     SESSION_RETENTION_DAYS: int = 7

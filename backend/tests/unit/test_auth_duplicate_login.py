@@ -2,8 +2,8 @@
 """
 Auth duplicate-login policy tests.
 
-Validates that stale/same-IP sessions do not trigger false EU003, and that
-fresh other-IP sessions are reclaimed (auto-kick) per current policy.
+Validates that stale sessions can be recovered while every fresh active
+session blocks a second login, regardless of IP or legacy force flags.
 """
 
 import os
@@ -31,7 +31,7 @@ os.environ.setdefault(
     "BILLING_KEY_ENCRYPTION_KEY",
     "uKVciQZlzUKtZPwuiKHl3wVCJJhQrWL6TqrFRClcEOI=",
 )
-os.environ.setdefault("SESSION_STALE_SECONDS", "30")
+os.environ.setdefault("SESSION_STALE_SECONDS", "150")
 
 from app.models.user import User, UserType
 from app.models.session import SessionModel
@@ -40,8 +40,9 @@ from app.services.auth_service import AuthService, _is_session_stale
 
 
 class _FakeQuery:
-    def __init__(self, items):
+    def __init__(self, items, *, on_lock=None):
         self._items = list(items)
+        self._on_lock = on_lock
 
     def filter(self, *args, **kwargs):
         return self
@@ -55,6 +56,11 @@ class _FakeQuery:
     def order_by(self, *args, **kwargs):
         return self
 
+    def with_for_update(self):
+        if self._on_lock is not None:
+            self._on_lock()
+        return self
+
     def scalar(self):
         return self._items[0] if self._items else None
 
@@ -66,12 +72,19 @@ class _FakeDB:
         self.payments = list(payments or [])
         self.added = []
         self.commit_count = 0
+        self.user_lock_requested = False
+
+    def _record_user_lock(self):
+        self.user_lock_requested = True
 
     def query(self, model):
         if str(model) == "CURRENT_TIMESTAMP":
             return _FakeQuery([datetime.now(timezone.utc)])
         if model is User:
-            return _FakeQuery([self.user] if self.user else [])
+            return _FakeQuery(
+                [self.user] if self.user else [],
+                on_lock=self._record_user_lock,
+            )
         if model is SessionModel:
             return _FakeQuery(self.sessions)
         if model is PaymentSession:
@@ -159,7 +172,7 @@ def test_login_allows_when_existing_session_is_stale(monkeypatch):
     )
 
     user = _make_user()
-    stale_other_ip = _make_session("9.9.9.9", last_activity_seconds_ago=120)
+    stale_other_ip = _make_session("9.9.9.9", last_activity_seconds_ago=180)
     db = _FakeDB(user=user, sessions=[stale_other_ip])
     service = _AuthServiceNoRateLimit(db)
 
@@ -174,6 +187,54 @@ def test_login_allows_when_existing_session_is_stale(monkeypatch):
 
     assert result.get("status") is True
     assert stale_other_ip.is_active is False
+
+
+def test_login_locks_account_before_checking_active_sessions(monkeypatch):
+    monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
+    monkeypatch.setattr(
+        "app.services.auth_service.create_access_token",
+        lambda user_id, ip: ("new-token", "new-jti", datetime.now(timezone.utc) + timedelta(hours=1)),
+    )
+
+    db = _FakeDB(user=_make_user(), sessions=[])
+    service = _AuthServiceNoRateLimit(db)
+
+    result = asyncio.run(
+        service.login(
+            username="tester",
+            password="irrelevant",
+            ip_address="1.1.1.1",
+            force=False,
+        )
+    )
+
+    assert result.get("status") is True
+    assert db.user_lock_requested is True
+
+
+def test_login_keeps_session_active_between_desktop_heartbeats(monkeypatch):
+    monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
+    monkeypatch.setattr(
+        "app.services.auth_service.create_access_token",
+        lambda user_id, ip: ("new-token", "new-jti", datetime.now(timezone.utc) + timedelta(hours=1)),
+    )
+
+    user = _make_user()
+    active_session = _make_session("2.2.2.2", last_activity_seconds_ago=45)
+    db = _FakeDB(user=user, sessions=[active_session])
+    service = _AuthServiceNoRateLimit(db)
+
+    result = asyncio.run(
+        service.login(
+            username="tester",
+            password="irrelevant",
+            ip_address="1.1.1.1",
+            force=False,
+        )
+    )
+
+    assert result == {"status": "EU003", "message": "EU003"}
+    assert active_session.is_active is True
 
 
 def test_login_response_includes_latest_paid_plan(monkeypatch):
@@ -205,7 +266,7 @@ def test_login_response_includes_latest_paid_plan(monkeypatch):
     assert user_data["last_payment_at"] == "2026-04-30T16:11:16+00:00"
 
 
-def test_login_allows_and_reclaims_same_ip_active_session(monkeypatch):
+def test_login_blocks_same_ip_active_session(monkeypatch):
     monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
     monkeypatch.setattr(
         "app.services.auth_service.create_access_token",
@@ -226,11 +287,12 @@ def test_login_allows_and_reclaims_same_ip_active_session(monkeypatch):
         )
     )
 
-    assert result.get("status") is True
-    assert same_ip_active.is_active is False
+    assert result == {"status": "EU003", "message": "EU003"}
+    assert same_ip_active.is_active is True
+    assert db.added == []
 
 
-def test_login_allows_and_reclaims_other_ip_active_session(monkeypatch):
+def test_login_blocks_other_ip_active_session(monkeypatch):
     monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
     monkeypatch.setattr(
         "app.services.auth_service.create_access_token",
@@ -251,5 +313,32 @@ def test_login_allows_and_reclaims_other_ip_active_session(monkeypatch):
         )
     )
 
-    assert result.get("status") is True
-    assert other_ip_active.is_active is False
+    assert result == {"status": "EU003", "message": "EU003"}
+    assert other_ip_active.is_active is True
+    assert db.added == []
+
+
+def test_force_flag_cannot_replace_active_session(monkeypatch):
+    monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
+    monkeypatch.setattr(
+        "app.services.auth_service.create_access_token",
+        lambda user_id, ip: ("new-token", "new-jti", datetime.now(timezone.utc) + timedelta(hours=1)),
+    )
+
+    user = _make_user()
+    active_session = _make_session("2.2.2.2", last_activity_seconds_ago=0)
+    db = _FakeDB(user=user, sessions=[active_session])
+    service = _AuthServiceNoRateLimit(db)
+
+    result = asyncio.run(
+        service.login(
+            username="tester",
+            password="irrelevant",
+            ip_address="1.1.1.1",
+            force=True,
+        )
+    )
+
+    assert result == {"status": "EU003", "message": "EU003"}
+    assert active_session.is_active is True
+    assert db.added == []
