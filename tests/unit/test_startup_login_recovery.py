@@ -358,6 +358,51 @@ window.close()
     )
 
 
+def test_registration_uses_issued_session_without_second_login(tmp_path):
+    _run_login_qt_script(
+        r'''
+from types import SimpleNamespace
+from PyQt6.QtWidgets import QApplication
+from ui.windows import login_window
+login_window.Login.setPort = lambda _self: True
+login_window.ui_controller.userLoadInfo = lambda _self: None
+login_window.Login._preload_ip = lambda _self: None
+login_window.Login._warmup_server = lambda _self: None
+app = QApplication([])
+window = login_window.Login()
+window.reg_dialog = SimpleNamespace(registration_result={
+    "success": True,
+    "data": {
+        "user_id": 91,
+        "username": "new_member",
+        "work_count": 5,
+        "is_trial": True,
+        "token": "registration-token",
+    },
+})
+tokens = []
+completed = []
+login_window.rest._set_auth_token = tokens.append
+window._handle_login_success = completed.append
+window._on_registration_requested(
+    "New Member",
+    "new_member",
+    "Password123!",
+    "01012345678",
+    "new_member@example.com",
+)
+assert tokens == ["registration-token"]
+assert len(completed) == 1
+assert completed[0]["status"] is True
+assert completed[0]["data"]["token"] == "registration-token"
+assert completed[0]["data"]["data"]["id"] == "91"
+assert completed[0]["data"]["data"]["user_type"] == "trial"
+window.close()
+''',
+        tmp_path,
+    )
+
+
 def test_main_window_is_fixed_and_first_page_has_no_scroll(tmp_path):
     _run_login_qt_script(
         r'''

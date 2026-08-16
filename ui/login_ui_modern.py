@@ -536,6 +536,7 @@ class RegistrationRequestDialog(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         self._username_available = False
+        self.registration_result = {}
         self._setup_ui()
         self._connect_validation_signals()
 
@@ -1106,6 +1107,7 @@ class RegistrationRequestDialog(QWidget):
                 privacy_version=PRIVACY_DOCUMENT_VERSION,
             )
             if result.get("success"):
+                self.registration_result = dict(result)
                 show_success(self, "완료", "회원가입이 완료되었습니다! 바로 로그인해주세요.")
                 logger.info("[UI] Registration success | username=%s", username)
                 self.registrationRequested.emit(name, username, password, contact, email)

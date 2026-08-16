@@ -444,6 +444,37 @@ class Login(QMainWindow, Ui_LoginWindow):
         # Auto-fill login fields
         self.idEdit.setText(username)
         self.pwEdit.setText(password)
+
+        # Auto-approved registration already creates the authoritative session.
+        # Re-posting /login would now be correctly rejected as a duplicate, so
+        # continue with the token returned by registration instead.
+        registration_result = getattr(
+            getattr(self, "reg_dialog", None), "registration_result", {}
+        )
+        registration_data = (
+            registration_result.get("data", {})
+            if isinstance(registration_result, dict)
+            else {}
+        )
+        token = (
+            registration_data.get("token")
+            if isinstance(registration_data, dict)
+            else None
+        )
+        if token:
+            rest._set_auth_token(token)
+            user_data = dict(registration_data)
+            user_data["id"] = str(user_data.get("user_id") or "")
+            user_data.setdefault(
+                "user_type", "trial" if user_data.get("is_trial") else "member"
+            )
+            self._handle_login_success(
+                {
+                    "status": True,
+                    "data": {"data": user_data, "token": token},
+                }
+            )
+            return
         
         # Optional: Auto-focus login button
         self.loginButton.setFocus()
