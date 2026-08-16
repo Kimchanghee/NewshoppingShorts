@@ -18,10 +18,10 @@ export const SAMPLE_MEDIA = catalog.map((sample) => {
   const isOcr = sample.category === "ocr";
   const sourceBase = isOcr ? OCR_MEDIA_BASE : AUTOMATION_SOURCE_MEDIA_BASE;
   const afterBase = isOcr ? OCR_MEDIA_BASE : AUTOMATION_AFTER_MEDIA_BASE;
-  const categoryLabel = isOcr ? "OCR 자막 블러" : "풀자동 실렌더";
+  const categoryLabel = isOcr ? "자막 정리" : "쇼핑 숏폼";
   const description = isOcr
-    ? "원본 중국 상품 영상의 자막 위치와 노출 시간을 감지해 필요한 구간에 블러를 적용한 비교입니다."
-    : "10초 이상 실제 상품 영상을 장면별로 읽고, 단어 나열이 아닌 완전한 한국어 상품 소개 대본·음성·자막과 세로 편집을 SSMaker가 완성한 결과입니다.";
+    ? "원본 영상에 포함된 화면 자막을 자연스럽게 정리해 제품 장면에 집중할 수 있도록 다듬은 결과입니다."
+    : "상품이 사용되는 장면을 바탕으로 세로 화면과 한국어 음성·자막을 더해 소개 영상으로 완성한 결과입니다.";
 
   return {
     ...sample,

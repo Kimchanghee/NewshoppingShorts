@@ -49,12 +49,22 @@ describe("Samples page", () => {
   it("filters the page to the five new full-automation samples", () => {
     renderPage();
 
-    fireEvent.click(screen.getByRole("button", { name: "풀자동 제작 5" }));
+    fireEvent.click(screen.getByRole("button", { name: "쇼핑 숏폼" }));
 
     expect(screen.getAllByTestId("sample-card")).toHaveLength(5);
     expect(screen.getAllByTestId("sample-video")).toHaveLength(10);
     expect(screen.getByText("휴대용 미니 냉풍기")).toBeInTheDocument();
     expect(screen.queryByText("전동 우유 거품기")).not.toBeInTheDocument();
+  });
+
+  it("keeps internal inventory counts out of the customer-facing hero", () => {
+    renderPage();
+
+    expect(screen.queryByText(/기존 OCR 자막 블러 5건/)).not.toBeInTheDocument();
+    expect(screen.queryByText("5건")).not.toBeInTheDocument();
+    expect(screen.queryByText("20개")).not.toBeInTheDocument();
+    expect(screen.getByText("원본 영상")).toBeInTheDocument();
+    expect(screen.getByText("SSMaker 완성 영상")).toBeInTheDocument();
   });
 
   it("starts both videos from zero and mutes only the source when pair playback is requested", async () => {

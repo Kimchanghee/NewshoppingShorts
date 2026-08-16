@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { Download, Pause, Play, ScanText, Sparkles, WandSparkles } from "lucide-react";
+import { ArrowRight, Download, Pause, Play, Sparkles } from "lucide-react";
 
 import Footer from "@/components/Footer";
 import Navigation from "@/components/Navigation";
@@ -7,7 +7,7 @@ import Seo from "@/components/Seo";
 import { Button } from "@/components/ui/button";
 import { DOWNLOAD_URL } from "@/constants/release";
 import { SITE_KEYWORDS } from "@/constants/site";
-import { SAMPLE_VIDEO_COUNT, VIDEO_SAMPLES, type SampleCategory, type VideoSample } from "@/data/samples";
+import { VIDEO_SAMPLES, type SampleCategory, type VideoSample } from "@/data/samples";
 import { gaEvent } from "@/lib/ga4";
 import { buildBreadcrumbSchema, buildItemListSchema, buildVideoObjectSchema, buildWebPageSchema } from "@/lib/structuredData";
 
@@ -19,8 +19,8 @@ const SAMPLE_STRUCTURED_DATA = [
     { name: "샘플", path: "/samples/index.html" },
   ]),
   buildWebPageSchema({
-    name: "SSMaker Before / After 영상 샘플 10개",
-    description: "SSMaker가 실제로 처리한 OCR 자막 블러 5건과 풀자동 쇼핑 숏폼 제작 5건의 원본·완성본 비교 페이지",
+    name: "SSMaker Before / After 영상 갤러리",
+    description: "원본 영상과 SSMaker로 완성한 결과를 나란히 재생하며 화면 구성, 음성, 자막의 변화를 확인하는 영상 갤러리",
     path: "/samples/index.html",
     breadcrumbPaths: [
       { name: "홈", path: "/" },
@@ -29,7 +29,7 @@ const SAMPLE_STRUCTURED_DATA = [
   }),
   buildItemListSchema({
     name: "SSMaker Before / After 영상 샘플",
-    description: "원본 10개와 SSMaker 제작본 10개를 나란히 확인하는 실제 처리 샘플",
+    description: "원본 영상과 SSMaker 제작 결과를 나란히 확인하는 Before / After 갤러리",
     path: "/samples/index.html",
     items: VIDEO_SAMPLES.map((sample) => `${sample.title} ${sample.categoryLabel} Before / After`),
   }),
@@ -54,10 +54,10 @@ const SAMPLE_STRUCTURED_DATA = [
   ),
 ];
 
-const FILTERS: Array<{ value: Filter; label: string; count: number }> = [
-  { value: "all", label: "전체", count: 10 },
-  { value: "ocr", label: "OCR 자막 블러", count: 5 },
-  { value: "automation", label: "풀자동 제작", count: 5 },
+const FILTERS: Array<{ value: Filter; label: string }> = [
+  { value: "all", label: "전체" },
+  { value: "ocr", label: "자막 정리" },
+  { value: "automation", label: "쇼핑 숏폼" },
 ];
 
 function VideoPanel({
@@ -150,11 +150,6 @@ function SampleCard({ sample }: { sample: VideoSample }) {
               <span className="rounded-full border border-white/10 bg-white/5 px-3 py-1 text-xs font-medium text-white/60">
                 {sample.categoryLabel}
               </span>
-              {sample.id > 5 ? (
-                <span className="rounded-full border border-emerald-400/20 bg-emerald-400/10 px-3 py-1 text-xs font-medium text-emerald-300">
-                  신규 추가
-                </span>
-              ) : null}
             </div>
             <h2 className="text-xl font-bold tracking-tight text-white sm:text-2xl">{sample.title}</h2>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-white/50">{sample.description}</p>
@@ -189,10 +184,10 @@ export default function Samples() {
   return (
     <main className="min-h-screen overflow-hidden bg-background">
       <Seo
-        title="영상 샘플 10개 Before / After | SSMaker"
-        description="SSMaker 실제 프로그램으로 처리한 원본 10개와 제작본 10개를 나란히 재생해 보세요. OCR 자막 블러 5건과 풀자동 쇼핑 숏폼 제작 5건을 공개합니다."
+        title="Before / After 영상 갤러리 | SSMaker"
+        description="원본 상품 영상과 SSMaker로 완성한 결과를 나란히 재생하며 화면 구성, 한국어 음성, 자막의 변화를 직접 비교해 보세요."
         path="/samples/index.html"
-        keywords={[...SITE_KEYWORDS, "SSMaker 샘플", "Before After 영상", "OCR 자막 블러 예시"]}
+        keywords={[...SITE_KEYWORDS, "SSMaker 샘플", "Before After 영상", "영상 자막 정리 예시"]}
         modifiedTime="2026-08-16"
         structuredData={SAMPLE_STRUCTURED_DATA}
       />
@@ -203,29 +198,33 @@ export default function Samples() {
         <div className="container relative mx-auto px-4 text-center sm:px-6">
           <div className="mx-auto mb-6 inline-flex items-center gap-2 rounded-full border border-red-400/20 bg-red-500/10 px-4 py-2 text-sm font-medium text-red-200">
             <Sparkles className="h-4 w-4" />
-            실제 프로그램 처리 결과
+            SSMaker 영상 갤러리
           </div>
           <h1 className="text-balance text-[2.35rem] font-extrabold leading-[1.08] tracking-[-0.04em] text-white sm:text-5xl md:text-6xl lg:text-7xl">
-            원본과 제작본을
+            상품 영상이 달라지는 과정을
             <br />
             <span className="text-gradient">직접 비교해 보세요</span>
           </h1>
           <p className="mx-auto mt-6 max-w-3xl text-balance text-base leading-7 text-white/55 sm:text-lg">
-            기존 OCR 자막 블러 5건에 실제 풀자동 제작 5건을 더했습니다. Before 10개와 After 10개, 총 {SAMPLE_VIDEO_COUNT}개 영상을 같은 화면에서 확인할 수 있습니다.
+            원본과 완성 영상을 나란히 재생하며 화면 구성과 음성, 자막이 어떻게 달라지는지 자연스럽게 확인해 보세요.
           </p>
 
-          <div className="mx-auto mt-10 grid max-w-3xl grid-cols-1 gap-3 sm:grid-cols-3">
-            {[
-              { icon: ScanText, value: "5건", label: "OCR 자막 블러" },
-              { icon: WandSparkles, value: "5건", label: "풀자동 실렌더" },
-              { icon: Play, value: "20개", label: "실제 재생 영상" },
-            ].map((item) => (
-              <div key={item.label} className="glass-card rounded-2xl px-5 py-5 text-left sm:text-center">
-                <item.icon className="mb-3 h-5 w-5 text-red-400 sm:mx-auto" />
-                <div className="text-2xl font-bold text-white">{item.value}</div>
-                <div className="mt-1 text-xs text-white/45">{item.label}</div>
-              </div>
-            ))}
+          <div className="mx-auto mt-10 grid max-w-4xl items-stretch gap-3 text-left md:grid-cols-[minmax(0,1fr)_3.5rem_minmax(0,1fr)] md:gap-4">
+            <div className="glass-card flex min-h-32 flex-col justify-center rounded-3xl px-6 py-6 sm:px-8">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-white/40">Before</span>
+              <strong className="mt-2 text-xl font-bold text-white sm:text-2xl">원본 영상</strong>
+              <span className="mt-2 text-sm leading-6 text-white/45">편집 전 화면과 소리를 그대로 확인합니다.</span>
+            </div>
+            <div className="flex h-10 items-center justify-center self-center md:h-full">
+              <span className="flex h-10 w-10 items-center justify-center rounded-full border border-red-400/25 bg-red-500/10 text-red-300">
+                <ArrowRight className="h-5 w-5 rotate-90 md:rotate-0" aria-hidden="true" />
+              </span>
+            </div>
+            <div className="glass-card flex min-h-32 flex-col justify-center rounded-3xl border-red-400/20 bg-red-500/[0.07] px-6 py-6 sm:px-8">
+              <span className="text-xs font-semibold uppercase tracking-[0.2em] text-red-300/70">After</span>
+              <strong className="mt-2 text-xl font-bold text-white sm:text-2xl">SSMaker 완성 영상</strong>
+              <span className="mt-2 text-sm leading-6 text-white/45">쇼츠에 맞춘 화면과 음성, 자막을 함께 비교합니다.</span>
+            </div>
           </div>
         </div>
       </section>
@@ -233,8 +232,8 @@ export default function Samples() {
       <section className="container mx-auto px-4 py-16 sm:px-6 sm:py-20" aria-label="Before After 영상 샘플 목록">
         <div className="mb-10 flex flex-col gap-5 lg:flex-row lg:items-end lg:justify-between">
           <div>
-            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-400">10 Before · 10 After</p>
-            <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">처리 유형별 샘플</h2>
+            <p className="text-sm font-semibold uppercase tracking-[0.18em] text-red-400">Before · After</p>
+            <h2 className="mt-3 text-3xl font-bold tracking-tight text-white sm:text-4xl">완성 결과 살펴보기</h2>
             <p className="mt-3 max-w-2xl text-sm leading-6 text-white/50">
               각 영상의 기본 컨트롤로 따로 재생하거나, 카드 상단의 버튼으로 원본은 음소거하고 제작본 음성과 함께 동시에 재생할 수 있습니다.
             </p>
@@ -252,7 +251,7 @@ export default function Samples() {
                     : "border-white/10 bg-white/[0.03] text-white/50 hover:border-white/20 hover:text-white"
                 }`}
               >
-                {item.label} <span className="ml-1 text-xs opacity-60">{item.count}</span>
+                {item.label}
               </button>
             ))}
           </div>
