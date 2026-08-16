@@ -50,8 +50,13 @@ def test_vercel_serves_landing_routes_before_the_fastapi_fallback():
     assert "npm run check" in config["buildCommand"]
     assert "npm run build" in config["buildCommand"]
     assert routes[0] == {"src": "^/$", "dest": "/index.html"}
-    assert routes[1] == {"handle": "filesystem"}
-    assert routes[2]["dest"] == "/index.html"
+    filesystem_index = routes.index({"handle": "filesystem"})
+    landing_fallback_index = next(
+        index
+        for index, route in enumerate(routes)
+        if index > filesystem_index and route.get("dest") == "/index.html"
+    )
+    assert filesystem_index < landing_fallback_index < len(routes) - 1
     assert routes[-1] == {"src": "^/(.*)$", "dest": "/api/index.py"}
 
 
