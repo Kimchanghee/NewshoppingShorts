@@ -26,6 +26,24 @@ def test_load_queue_accepts_utf8_bom(monkeypatch, tmp_path):
     assert queue_runner.load_queue() == {"items": []}
 
 
+def test_build_run_dir_strips_coupang_query_parameters(monkeypatch, tmp_path):
+    monkeypatch.setattr(queue_runner.Path, "home", classmethod(lambda _cls: tmp_path))
+
+    run_dir = queue_runner.build_run_dir(
+        {
+            "planned_number": "[228]",
+            "coupang_url": (
+                "https://www.coupang.com/vp/products/8904338758"
+                "?itemId=26004154612&vendorItemId=92986244700"
+            ),
+        }
+    )
+
+    assert run_dir.is_dir()
+    assert run_dir.name.startswith("summer_coupang_queue_228_8904338758_")
+    assert "?" not in run_dir.name
+
+
 def test_queue_platform_sourcing_forwards_configured_sources_and_threshold(
     monkeypatch, tmp_path
 ):

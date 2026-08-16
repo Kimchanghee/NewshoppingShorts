@@ -1164,7 +1164,12 @@ def parse_upload_number(raw: Any) -> Optional[int]:
 
 def build_run_dir(item: Dict[str, Any]) -> Path:
     number = parse_upload_number(item.get("planned_number")) or 0
-    product_id = str(item.get("coupang_url", "")).rstrip("/").rsplit("/", 1)[-1]
+    coupang_url = str(item.get("coupang_url") or "")
+    fallback_segment = coupang_url.rstrip("/").rsplit("/", 1)[-1].split("?", 1)[0]
+    product_id = coupang_product_id(coupang_url) or re.sub(
+        r"[^0-9A-Za-z._-]+", "_", fallback_segment
+    ).strip("._-")
+    product_id = product_id or "unknown"
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     path = Path.home() / ".ssmaker" / "sourcing_output" / f"{AUTOMATION_LABEL}_{number:03d}_{product_id}_{stamp}"
     path.mkdir(parents=True, exist_ok=True)
