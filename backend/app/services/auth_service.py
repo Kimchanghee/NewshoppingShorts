@@ -260,9 +260,12 @@ class AuthService:
         other_ip_sessions = []
         configured_stale_seconds = int(getattr(settings, "SESSION_STALE_SECONDS", 0) or 0)
         if configured_stale_seconds <= 0:
-            configured_stale_seconds = max(
-                60, int(getattr(settings, "SESSION_STALE_MINUTES", 2)) * 60
-            )
+            configured_stale_seconds = int(
+                getattr(settings, "SESSION_STALE_MINUTES", 2)
+            ) * 60
+        # Desktop heartbeats run once a minute. Keep more than two complete
+        # intervals so a delayed heartbeat cannot open a second live session.
+        configured_stale_seconds = max(150, configured_stale_seconds)
 
         for session in active_sessions:
             if _is_session_stale(

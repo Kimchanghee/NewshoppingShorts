@@ -174,7 +174,7 @@ def test_login_allows_when_existing_session_is_stale(monkeypatch):
     )
 
     user = _make_user()
-    stale_other_ip = _make_session("9.9.9.9", last_activity_seconds_ago=120)
+    stale_other_ip = _make_session("9.9.9.9", last_activity_seconds_ago=180)
     db = _FakeDB(user=user, sessions=[stale_other_ip])
     service = _AuthServiceNoRateLimit(db)
 
@@ -189,6 +189,27 @@ def test_login_allows_when_existing_session_is_stale(monkeypatch):
 
     assert result.get("status") is True
     assert stale_other_ip.is_active is False
+
+
+def test_login_keeps_session_fresh_across_two_heartbeat_intervals(monkeypatch):
+    monkeypatch.setattr("app.services.auth_service.verify_password", lambda *_: True)
+
+    user = _make_user()
+    still_fresh = _make_session("9.9.9.9", last_activity_seconds_ago=120)
+    db = _FakeDB(user=user, sessions=[still_fresh])
+    service = _AuthServiceNoRateLimit(db)
+
+    result = asyncio.run(
+        service.login(
+            username="tester",
+            password="irrelevant",
+            ip_address="1.1.1.1",
+            force=False,
+        )
+    )
+
+    assert result == {"status": "EU003", "message": "EU003"}
+    assert still_fresh.is_active is True
 
 
 def test_login_response_includes_latest_paid_plan(monkeypatch):
