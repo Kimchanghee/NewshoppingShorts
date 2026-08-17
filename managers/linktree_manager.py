@@ -32,6 +32,10 @@ class LinktreeManager:
     DEFAULT_TIMEOUT_SECONDS = 12
     MAX_PRODUCT_TITLE_LENGTH = 40
 
+    @staticmethod
+    def _has_hangul(text: str) -> bool:
+        return bool(re.search(r"[가-힣]", str(text or "")))
+
     def __init__(self):
         self.settings = get_settings_manager()
 
@@ -324,6 +328,23 @@ class LinktreeManager:
         Reuse this index on connected channels so users can match the Linktree
         card to YouTube descriptions, comments, and future social posts.
         """
+        if not self._has_hangul(product_name):
+            logger.warning(
+                "[Linktree] English-only sourcing keyword blocked as a public product title."
+            )
+            return {
+                "ok": False,
+                "publish_index": None,
+                "number": "",
+                "title": "",
+                "url": str(coupang_url or "").strip(),
+                "description": COUPANG_AFFILIATE_DISCLOSURE,
+                "error_code": "korean_product_title_required",
+                "error": (
+                    "Linktree 상품명에 한국어 쿠팡 원상품명이 필요합니다. "
+                    "영어 소싱 키워드는 공개 카드 제목으로 등록하지 않습니다."
+                ),
+            }
         if not is_coupang_partner_link(coupang_url):
             logger.warning(
                 "[Linktree] Non-Partners Coupang URL blocked. Generate a link.coupang.com URL first."

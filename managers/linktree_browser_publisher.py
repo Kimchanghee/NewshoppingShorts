@@ -112,7 +112,13 @@ def _build_create_link_url(title: str, url: str) -> str:
     return f"{ADMIN_URL}?{params}"
 
 
-def _verify_public_card(number: str, purchase_url: str, *, profile_url: str) -> Dict[str, Any]:
+def _verify_public_card(
+    number: str,
+    purchase_url: str,
+    *,
+    profile_url: str,
+    expected_title: str = "",
+) -> Dict[str, Any]:
     try:
         response = requests.get(
             profile_url,
@@ -133,11 +139,13 @@ def _verify_public_card(number: str, purchase_url: str, *, profile_url: str) -> 
         return {"ok": False, "error": str(exc), "status_code": 0}
     text = response.text
     marker_ok = True if not number else number in text
+    title_ok = True if not expected_title else expected_title in text
     return {
-        "ok": response.status_code == 200 and marker_ok and purchase_url in text,
+        "ok": response.status_code == 200 and marker_ok and purchase_url in text and title_ok,
         "status_code": response.status_code,
         "has_number": marker_ok,
         "has_purchase_url": purchase_url in text,
+        "has_title": title_ok,
     }
 
 
@@ -173,7 +181,12 @@ def publish_link_via_visible_browser(
         }
 
     profile = str(profile_url or "").strip() or DEFAULT_LINKTREE_PROFILE_URL
-    existing_check = _verify_public_card(str(number or "").strip(), target_url, profile_url=profile)
+    existing_check = _verify_public_card(
+        str(number or "").strip(),
+        target_url,
+        profile_url=profile,
+        expected_title=target_title,
+    )
     if existing_check.get("ok"):
         return {
             "ok": True,
@@ -181,6 +194,17 @@ def publish_link_via_visible_browser(
             "profile_url": profile,
             "public_verification": existing_check,
             "blocking_reason": "",
+        }
+    if existing_check.get("has_number") and existing_check.get("has_purchase_url"):
+        return {
+            "ok": False,
+            "method": "browser_title_mismatch",
+            "profile_url": profile,
+            "public_verification": existing_check,
+            "blocking_reason": (
+                "Existing Linktree card has the right number and URL but the wrong title. "
+                "Automatic create-link is blocked to prevent a duplicate card."
+            ),
         }
 
     started = time.time()
@@ -192,7 +216,12 @@ def publish_link_via_visible_browser(
 
         public_check: Dict[str, Any] = {}
         while time.time() - started < timeout_seconds:
-            public_check = _verify_public_card(number, target_url, profile_url=profile)
+            public_check = _verify_public_card(
+                number,
+                target_url,
+                profile_url=profile,
+                expected_title=target_title,
+            )
             if public_check.get("ok"):
                 result = {
                     "ok": True,

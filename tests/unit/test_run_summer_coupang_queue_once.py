@@ -125,6 +125,20 @@ def test_build_upload_item_uses_problem_hook_metadata_title():
     )
 
 
+def test_public_product_title_prefers_korean_coupang_title_over_sourcing_keyword():
+    item = {
+        "product_name": "toucan water gun set mixed colors",
+        "product_title": "투칸 워터건 2종 물놀이용품, 혼합색상, 1개",
+    }
+
+    title = queue_runner.public_product_title(
+        item,
+        {"product_info": {"name": "toucan water gun"}},
+    )
+
+    assert title == "투칸 워터건 2종 물놀이용품, 혼합색상, 1개"
+
+
 def test_youtube_preflight_block_does_not_consume_pending(monkeypatch, capsys):
     payload = {
         "items": [
@@ -1373,15 +1387,20 @@ def test_publish_linktree_accepts_existing_public_card(monkeypatch):
     monkeypatch.setattr(
         queue_runner,
         "verify_linktree_public_card",
-        lambda number, url: {
+        lambda number, url, **_kwargs: {
             "ok": True,
             "has_number": number == "[036]",
             "has_purchase_url": url.endswith("/9169351491"),
+            "has_title": True,
         },
     )
 
     result = queue_runner.publish_linktree_if_possible(
-        {"planned_number": "[036]", "coupang_url": "https://www.coupang.com/vp/products/9169351491"},
+        {
+            "planned_number": "[036]",
+            "coupang_url": "https://www.coupang.com/vp/products/9169351491",
+            "product_title": "캠핑용 무선 선풍기",
+        },
         "desk camping fan",
         "https://www.coupang.com/vp/products/9169351491",
     )
@@ -1420,7 +1439,11 @@ def test_publish_linktree_without_webhook_does_not_open_browser_by_default(monke
     )
 
     result = queue_runner.publish_linktree_if_possible(
-        {"planned_number": "[036]", "coupang_url": "https://www.coupang.com/vp/products/9169351491"},
+        {
+            "planned_number": "[036]",
+            "coupang_url": "https://www.coupang.com/vp/products/9169351491",
+            "product_title": "캠핑용 무선 선풍기",
+        },
         "desk camping fan",
         "https://www.coupang.com/vp/products/9169351491",
     )
@@ -1443,7 +1466,7 @@ def test_verify_linktree_public_card_retries_until_public_page_updates(monkeypat
         def text(self):
             if len(calls) < 2:
                 return "not updated yet"
-            return f"[036] {purchase_url}"
+            return f"[036] 캠핑용 무선 선풍기 {purchase_url}"
 
     def fake_get(*_args, **_kwargs):
         calls.append(True)
@@ -1454,6 +1477,7 @@ def test_verify_linktree_public_card_retries_until_public_page_updates(monkeypat
     result = queue_runner.verify_linktree_public_card(
         "[036]",
         purchase_url,
+        expected_title="[036] 캠핑용 무선 선풍기",
         attempts=3,
         delay_seconds=0,
     )
@@ -1461,6 +1485,27 @@ def test_verify_linktree_public_card_retries_until_public_page_updates(monkeypat
     assert result["ok"] is True
     assert result["attempts"] == 2
     assert len(calls) == 2
+
+
+def test_verify_linktree_public_card_rejects_matching_number_and_url_with_wrong_title(monkeypatch):
+    purchase_url = "https://link.coupang.com/a/ggKpNXe3Y4"
+
+    class FakeResponse:
+        status_code = 200
+        text = f"[245] toucan water gun set mixed colors {purchase_url}"
+
+    monkeypatch.setattr("requests.get", lambda *_args, **_kwargs: FakeResponse())
+
+    result = queue_runner.verify_linktree_public_card(
+        "[245]",
+        purchase_url,
+        expected_title="[245] 투칸 워터건 2종 물놀이용품",
+    )
+
+    assert result["ok"] is False
+    assert result["has_number"] is True
+    assert result["has_purchase_url"] is True
+    assert result["has_title"] is False
 
 
 def test_process_pending_items_marks_linktree_retry_pending_after_upload(monkeypatch, tmp_path):

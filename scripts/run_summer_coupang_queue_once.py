@@ -77,6 +77,7 @@ AFFILIATE_LINK_BLOCKED_STATUS = "blocked_affiliate_link_missing"
 SOURCING_RETRY_STATUS = "retry_pending_sourcing"
 REVIEW_ONLY_STATUS = "completed_review_only"
 COUPANG_PARTNER_LINK_HOST = "link.coupang.com"
+HANGUL_RE = re.compile(r"[가-힣]")
 SUCCESS_FINAL_STATUSES = {
     "completed",
 }
@@ -466,19 +467,44 @@ def extract_result_youtube_url(result: Dict[str, Any]) -> str:
     return str(metadata.get("video_url") or "").strip()
 
 
+def has_hangul(text: Any) -> bool:
+    """Return whether a public-facing product title contains Korean text."""
+    return bool(HANGUL_RE.search(str(text or "")))
+
+
+def public_product_title(item: Dict[str, Any], *contexts: Dict[str, Any]) -> str:
+    """Choose the Korean Coupang title instead of an English sourcing keyword."""
+    candidates: List[str] = []
+
+    def add(value: Any) -> None:
+        text = str(value or "").strip()
+        if text and text not in candidates:
+            candidates.append(text)
+
+    add(item.get("product_title"))
+    for context in contexts:
+        if not isinstance(context, dict):
+            continue
+        add(context.get("product_title"))
+        product_info = context.get("product_info")
+        if isinstance(product_info, dict):
+            add(product_info.get("product_title"))
+            add(product_info.get("title"))
+            add(product_info.get("name"))
+        add(context.get("product_name"))
+        youtube = context.get("youtube")
+        if isinstance(youtube, dict):
+            add(youtube.get("product_title"))
+            add(youtube.get("product_name"))
+
+    add(item.get("title"))
+    add(item.get("product_name"))
+    return next((candidate for candidate in candidates if has_hangul(candidate)), candidates[0] if candidates else "")
+
+
 def linktree_retry_context(item: Dict[str, Any]) -> Dict[str, str]:
     result = item.get("result") if isinstance(item.get("result"), dict) else {}
-    youtube = result.get("youtube") if isinstance(result.get("youtube"), dict) else {}
-    product_name = str(
-        item.get("product_title")
-        or youtube.get("product_title")
-        or result.get("product_title")
-        or youtube.get("product_name")
-        or result.get("product_name")
-        or item.get("product_name")
-        or item.get("title")
-        or "Coupang product"
-    ).strip()
+    product_name = public_product_title(item, result) or "쿠팡 추천상품"
     purchase_url = str(
         result.get("purchase_url")
         or item.get("affiliate_url")
@@ -1762,13 +1788,30 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
     manager = get_linktree_manager()
     upload_number = parse_upload_number(item.get("planned_number"))
     marker = manager.format_publish_index(upload_number)
+    product_name = public_product_title(item, {"product_name": product_name})
     title = manager._build_numbered_product_title(product_name, upload_number)
     source_url = str(item.get("coupang_url") or "")
+
+    if not has_hangul(product_name):
+        return {
+            "ok": False,
+            "method": "invalid_product_title",
+            "webhook_sent": False,
+            "title": title,
+            "number": marker,
+            "purchase_url": purchase_url,
+            "profile_url": manager.get_profile_url(),
+            "public_verification": {},
+            "blocking_reason": (
+                "Linktree 상품명에 한국어 쿠팡 원상품명이 없습니다. "
+                "영어 소싱 키워드는 공개 카드 제목으로 등록하지 않습니다."
+            ),
+        }
 
     settings = manager.get_settings()
     webhook_url = str(settings.get("webhook_url", "") or "").strip()
     browser_fallback_enabled = linktree_browser_publish_enabled() if not webhook_url else False
-    public_check = verify_linktree_public_card(marker, purchase_url)
+    public_check = verify_linktree_public_card(marker, purchase_url, expected_title=title)
     if public_check.get("ok"):
         return {
             "ok": True,
@@ -1810,6 +1853,7 @@ def publish_linktree_if_possible(item: Dict[str, Any], product_name: str, purcha
     public_check = verify_linktree_public_card(
         marker,
         purchase_url,
+        expected_title=title,
         attempts=env_int(
             LINKTREE_PUBLIC_VERIFY_ATTEMPTS_ENV,
             DEFAULT_LINKTREE_PUBLIC_VERIFY_ATTEMPTS,
@@ -1842,6 +1886,7 @@ def verify_linktree_public_card(
     number: str,
     purchase_url: str,
     *,
+    expected_title: str = "",
     attempts: int = 1,
     delay_seconds: float = 0.0,
 ) -> Dict[str, Any]:
@@ -1856,6 +1901,7 @@ def verify_linktree_public_card(
         "status_code": 0,
         "has_number": False,
         "has_purchase_url": False,
+        "has_title": False,
         "attempts": 0,
     }
     for attempt in range(1, attempts + 1):
@@ -1877,12 +1923,14 @@ def verify_linktree_public_card(
                 timeout=30,
             )
             text = response.text
+            title_ok = True if not expected_title else expected_title in text
             last_result = {
-                "ok": response.status_code == 200 and number in text and purchase_url in text,
+                "ok": response.status_code == 200 and number in text and purchase_url in text and title_ok,
                 "url": profile_url,
                 "status_code": response.status_code,
                 "has_number": number in text,
                 "has_purchase_url": purchase_url in text,
+                "has_title": title_ok,
                 "attempts": attempt,
             }
         except Exception as exc:
@@ -1892,6 +1940,7 @@ def verify_linktree_public_card(
                 "status_code": 0,
                 "has_number": False,
                 "has_purchase_url": False,
+                "has_title": False,
                 "error": str(exc),
                 "attempts": attempt,
             }
@@ -2341,7 +2390,16 @@ async def process_pending_items(
                     or (safe_item.get("product") or {}).get("url")
                     or ""
                 )
-        product_name = str((report.get("product_info") or {}).get("name") or item.get("product_name") or "").strip()
+        sourcing_product_name = str(
+            (report.get("product_info") or {}).get("name")
+            or item.get("product_name")
+            or ""
+        ).strip()
+        product_name = public_product_title(
+            item,
+            report,
+            {"product_name": sourcing_product_name},
+        )
 
         if platform_mode:
             system_failure = platform_system_failure(report)
@@ -2357,7 +2415,11 @@ async def process_pending_items(
                     "failure": system_failure,
                 }
 
-        duplicate_reason = duplicate_upload_reason(item, queue_payload, product_name=product_name)
+        duplicate_reason = duplicate_upload_reason(
+            item,
+            queue_payload,
+            product_name=sourcing_product_name,
+        )
         if duplicate_reason:
             attach_result(
                 item,
