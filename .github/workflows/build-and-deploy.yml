@@ -189,6 +189,8 @@ jobs:
     - name: Read baked release authorization
       id: baked_release
       shell: python
+      env:
+        PYTHONPATH: ${{ github.workspace }}
       run: |
         import os
         from utils.authenticode import PUBLIC_RELEASE_SIGNER_THUMBPRINTS, TRANSITION_BRIDGE_VERSION
