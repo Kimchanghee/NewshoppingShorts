@@ -242,19 +242,43 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
 
     manager = _make_manager({"webhook_url": "https://example.com/hook", "api_key": "", "profile_url": "", "auto_publish": True})
     ok = manager.publish_coupang_link(
-        product_name="test product name",
+        product_name="테스트 상품명",
         coupang_url="https://link.coupang.com/a/abc",
         source_url="https://www.coupang.com/vp/products/1",
     )
 
     assert ok is True
     assert captured["url"] == "https://link.coupang.com/a/abc"
-    assert captured["title"].startswith("[001] test")
+    assert captured["title"].startswith("[001] 테스트")
     assert len(captured["title"]) <= LinktreeManager.MAX_PRODUCT_TITLE_LENGTH
     assert captured["description"] == COUPANG_AFFILIATE_DISCLOSURE
     assert captured["source_url"] == "https://www.coupang.com/vp/products/1"
     assert captured["extra"]["channel"] == "shopping_shorts_maker"
     assert captured["extra"]["display_number"] == "[001]"
+
+
+def test_publish_coupang_link_rejects_english_sourcing_keyword(monkeypatch):
+    def fail_publish(*_args, **_kwargs):
+        raise AssertionError("English-only sourcing keywords must not be published")
+
+    monkeypatch.setattr(LinktreeManager, "publish_link", fail_publish)
+    manager = _make_manager(
+        {
+            "webhook_url": "https://example.com/hook",
+            "api_key": "",
+            "profile_url": "",
+            "auto_publish": True,
+        }
+    )
+
+    result = manager.publish_coupang_link_with_metadata(
+        product_name="toucan water gun set mixed colors",
+        coupang_url="https://link.coupang.com/a/ggKpNXe3Y4",
+    )
+
+    assert result["ok"] is False
+    assert result["error_code"] == "korean_product_title_required"
+    assert result["publish_index"] is None
 
 
 def test_publish_coupang_link_with_metadata_returns_matching_number(monkeypatch, tmp_path):

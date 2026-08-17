@@ -25,7 +25,12 @@ def test_browser_publish_existing_card_does_not_open_browser(monkeypatch):
     monkeypatch.setattr(
         publisher,
         "_verify_public_card",
-        lambda number, purchase_url, profile_url: {"ok": True, "has_number": True, "has_purchase_url": True},
+        lambda number, purchase_url, profile_url, expected_title="": {
+            "ok": True,
+            "has_number": True,
+            "has_purchase_url": True,
+            "has_title": True,
+        },
     )
 
     def fail_open_browser(_url):
@@ -73,7 +78,7 @@ def test_browser_publish_opens_create_link_deeplink_and_verifies(monkeypatch):
         {"ok": True, "has_number": True, "has_purchase_url": True},
     ]
 
-    def fake_verify(number, purchase_url, profile_url):
+    def fake_verify(number, purchase_url, profile_url, expected_title=""):
         return checks.pop(0)
 
     monkeypatch.setattr(publisher, "_verify_public_card", fake_verify)
@@ -114,7 +119,12 @@ def test_browser_publish_closes_deeplink_window_after_timeout(monkeypatch):
     monkeypatch.setattr(
         publisher,
         "_verify_public_card",
-        lambda number, purchase_url, profile_url: {"ok": False, "has_number": False, "has_purchase_url": False},
+        lambda number, purchase_url, profile_url, expected_title="": {
+            "ok": False,
+            "has_number": False,
+            "has_purchase_url": False,
+            "has_title": False,
+        },
     )
     monkeypatch.setattr(publisher, "_open_browser_url", lambda url: opened.append(url))
     monkeypatch.setattr(
@@ -137,3 +147,32 @@ def test_browser_publish_closes_deeplink_window_after_timeout(monkeypatch):
     assert len(opened) == 1
     assert closed == [True]
     assert result["browser_cleanup"]["closed"] is True
+
+
+def test_browser_publish_blocks_duplicate_when_existing_card_title_is_wrong(monkeypatch):
+    monkeypatch.setenv("SSMAKER_LINKTREE_BROWSER_PUBLISH", "1")
+    monkeypatch.setattr(
+        publisher,
+        "_verify_public_card",
+        lambda number, purchase_url, profile_url, expected_title="": {
+            "ok": False,
+            "has_number": True,
+            "has_purchase_url": True,
+            "has_title": False,
+        },
+    )
+
+    def fail_open_browser(_url):
+        raise AssertionError("a title mismatch must not create a duplicate card")
+
+    monkeypatch.setattr(publisher, "_open_browser_url", fail_open_browser)
+
+    result = publisher.publish_link_via_visible_browser(
+        title="[245] 투칸 워터건 2종 물놀이용품",
+        url="https://link.coupang.com/a/ggKpNXe3Y4",
+        number="[245]",
+    )
+
+    assert result["ok"] is False
+    assert result["method"] == "browser_title_mismatch"
+    assert "duplicate" in result["blocking_reason"].lower()
