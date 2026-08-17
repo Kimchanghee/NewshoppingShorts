@@ -1690,6 +1690,9 @@ def test_process_pending_items_exhausts_linktree_retry_without_republishing(monk
         def format_publish_index(self, number):
             return f"[{number:03d}]" if number else ""
 
+        def _build_numbered_product_title(self, product_name, number):
+            return f"[{number:03d}] {product_name}" if number else product_name
+
         def get_profile_url(self):
             return "https://linktr.ee/example"
 
@@ -1759,6 +1762,9 @@ def test_main_settles_exhausted_linktree_retry_then_processes_due_upload(monkeyp
         def format_publish_index(self, number):
             return f"[{number:03d}]" if number else ""
 
+        def _build_numbered_product_title(self, product_name, number):
+            return f"[{number:03d}] {product_name}" if number else product_name
+
         def get_profile_url(self):
             return "https://linktr.ee/example"
 
@@ -1792,6 +1798,60 @@ def test_main_settles_exhausted_linktree_retry_then_processes_due_upload(monkeyp
     assert output["linktree_housekeeping_count"] == 1
     assert output["linktree_housekeeping"][0]["planned_number"] == "[157]"
     assert payload["items"][0]["status"] == queue_runner.LINKTREE_FAILED_STATUS
+
+
+def test_settle_exhausted_linktree_retry_requires_matching_korean_title(monkeypatch):
+    item = {
+        "planned_number": "[245]",
+        "status": queue_runner.LINKTREE_RETRY_STATUS,
+        "attempts": queue_runner.DEFAULT_LINKTREE_RETRY_MAX_ATTEMPTS + 1,
+        "product_name": "toucan water gun set mixed colors",
+        "product_title": "투칸 워터건 2종 물놀이용품, 혼합색상, 1개",
+        "result": {
+            "purchase_url": "https://link.coupang.com/a/ggKpNXe3Y4",
+            "youtube_url": "https://youtu.be/already-uploaded",
+            "render_path": "C:/tmp/final.mp4",
+            "linktree_result": {"ok": False},
+        },
+    }
+
+    class _StubLinktreeManager:
+        def format_publish_index(self, number):
+            return f"[{number:03d}]"
+
+        def _build_numbered_product_title(self, product_name, number):
+            assert product_name.startswith("투칸 워터건")
+            return "[245] 투칸 워터건 2종 물놀이용품"
+
+        def get_profile_url(self):
+            return "https://linktr.ee/studio.idol"
+
+    checks = []
+
+    def fake_verify(number, purchase_url, **kwargs):
+        checks.append((number, purchase_url, kwargs))
+        return {
+            "ok": True,
+            "has_number": True,
+            "has_purchase_url": True,
+            "has_title": True,
+        }
+
+    monkeypatch.setattr(queue_runner, "get_linktree_manager", lambda: _StubLinktreeManager())
+    monkeypatch.setattr(queue_runner, "verify_linktree_public_card", fake_verify)
+
+    result = queue_runner.settle_linktree_retry_item(item)
+
+    assert result["status"] == "completed"
+    assert item["status"] == "completed"
+    assert item["result"]["linktree_result"]["title"] == "[245] 투칸 워터건 2종 물놀이용품"
+    assert checks == [
+        (
+            "[245]",
+            "https://link.coupang.com/a/ggKpNXe3Y4",
+            {"expected_title": "[245] 투칸 워터건 2종 물놀이용품"},
+        )
+    ]
 
 
 def test_linktree_retry_blocked_when_youtube_video_is_gone(monkeypatch):

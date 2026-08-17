@@ -625,11 +625,20 @@ def settle_linktree_retry_item(item: Dict[str, Any]) -> Dict[str, Any]:
         marker = manager.format_publish_index(
             parse_upload_number(item.get("planned_number"))
         )
-        public_check = verify_linktree_public_card(marker, purchase_url)
+        expected_title = manager._build_numbered_product_title(
+            retry_context["product_name"],
+            parse_upload_number(item.get("planned_number")),
+        )
+        public_check = verify_linktree_public_card(
+            marker,
+            purchase_url,
+            expected_title=expected_title,
+        )
         if public_check.get("ok"):
             linktree_result = {
                 "ok": True,
                 "method": "public_existing_late",
+                "title": expected_title,
                 "number": marker,
                 "purchase_url": purchase_url,
                 "profile_url": manager.get_profile_url(),
