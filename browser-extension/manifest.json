@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "SSMaker Chrome 연결",
+  "version": "1.0.0",
+  "description": "SSMaker가 로그인된 Chrome에서 공개 영상 검색 결과를 확인하도록 연결합니다.",
+  "permissions": [
+    "alarms",
+    "scripting",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1:38471/*",
+    "https://www.google.com/*",
+    "https://www.google.co.kr/*"
+  ],
+  "background": {
+    "service_worker": "service_worker.js"
+  },
+  "action": {
+    "default_title": "SSMaker Chrome 연결",
+    "default_popup": "popup.html"
+  }
+}

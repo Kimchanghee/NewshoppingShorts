@@ -85,6 +85,7 @@ hidden_imports = [
 datas = [
     ('resource', 'resource'),
     ('version.json', '.'),
+    ('browser-extension', 'browser-extension'),
 ]
 
 

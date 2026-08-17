@@ -323,19 +323,22 @@ _WARMUP_URL = {
 
 # 외부 검색엔진 폴백 — 플랫폼 '검색'만 게이트일 뿐 영상 페이지는 비로그인 시청 가능
 # (실측: 도우인 검색=셸만 렌더, 콰이쇼우 검색=홈 리다이렉트). 그래서 검색은
-# DuckDuckGo(html 버전, JS 불필요·봇 관대)에 site: 필터로 위임하고,
-# 다운로드는 기존 yt-dlp+쿠키 경로를 그대로 쓴다.
+# 일반 Chrome/로그인 프로필에서 성공률이 가장 높았던 Google 색인 검색을
+# 먼저 사용하고, DuckDuckGo/Bing/Brave를 순차 폴백한다. 다운로드는 기존
+# yt-dlp+쿠키 경로를 그대로 쓴다.
 _EXTERNAL_SITE_FILTER = {
     "douyin": "douyin.com/video",
     "kuaishou": "kuaishou.com/short-video",
     "xiaohongshu": "xiaohongshu.com/explore",
     "bilibili": "bilibili.com/video",
 }
-_EXTERNAL_SEARCH_PROVIDERS = ("duckduckgo", "bing", "brave")
+_EXTERNAL_SEARCH_PROVIDERS = ("google", "duckduckgo", "bing", "brave")
 
 
 def _external_search_url(provider: str, query: str) -> str:
     encoded = urllib.parse.quote(query)
+    if provider == "google":
+        return f"https://www.google.com/search?q={encoded}&hl=zh-CN"
     if provider == "duckduckgo":
         return f"https://html.duckduckgo.com/html/?q={encoded}"
     if provider == "bing":
@@ -423,6 +426,53 @@ async def _external_search_links(
             stored = diagnostics.setdefault("blocked_search_providers", [])
             if provider_name not in stored:
                 stored.append(provider_name)
+
+    # A paired extension uses the user's already-running Chrome profile. This
+    # avoids copying cookies and still gives SSMaker the indexed public page
+    # links that were visible in a normal logged-in Chrome session.
+    try:
+        from core.sourcing.chrome_extension_bridge import get_chrome_extension_bridge
+
+        extension_bridge = get_chrome_extension_bridge()
+        # App startup normally owns the bridge. Starting lazily as well keeps
+        # queue-only and diagnostic entrypoints able to use the paired Chrome
+        # profile without requiring the full GUI process.
+        extension_bridge.start()
+        if extension_bridge.is_connected():
+            extension_links = await asyncio.wait_for(
+                asyncio.to_thread(
+                    extension_bridge.search_index,
+                    platform,
+                    intent_query,
+                    35.0,
+                ),
+                timeout=40.0,
+            )
+            if extension_links:
+                logger.info(
+                    "[PlatformSearch] %s: 로그인된 Chrome 색인 링크 %d개",
+                    platform,
+                    len(extension_links),
+                )
+                return extension_links
+            _diagnostic_event(
+                diagnostics,
+                "no_results",
+                platform="search:chrome_extension",
+            )
+    except asyncio.TimeoutError:
+        _diagnostic_event(
+            diagnostics,
+            "page_open_timeout",
+            platform="search:chrome_extension",
+        )
+    except Exception as exc:
+        _diagnostic_event(
+            diagnostics,
+            "page_open_error",
+            platform="search:chrome_extension",
+            detail=type(exc).__name__,
+        )
 
     for provider in _EXTERNAL_SEARCH_PROVIDERS:
         if provider in blocked_providers:
@@ -746,7 +796,44 @@ async def _extract_platform_videos(
                 detail=type(exc).__name__,
             )
             raise
-    return [u for u in urls if u.startswith("http")]
+    return [u for u in urls if _is_probable_platform_media_url(u)]
+
+
+def _is_probable_platform_media_url(url: str) -> bool:
+    """Drop page manifests and API documents before the downloader sees them."""
+    try:
+        parsed = urllib.parse.urlsplit(str(url or "").strip())
+    except ValueError:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return False
+    path = (parsed.path or "").lower()
+    query = (parsed.query or "").lower()
+    rejected_suffixes = (
+        ".css",
+        ".gif",
+        ".htm",
+        ".html",
+        ".ico",
+        ".jpeg",
+        ".jpg",
+        ".js",
+        ".json",
+        ".m3u8",
+        ".png",
+        ".svg",
+        ".webmanifest",
+        ".xml",
+    )
+    if path.endswith(rejected_suffixes):
+        return False
+    if any(marker in path for marker in ("manifest.json", "/webmanifest", "/favicon")):
+        return False
+    if "mime_type=" in query and not re.search(
+        r"(?:^|&)mime_type=video_(?:mp4|x-flv)(?:&|$)", query
+    ):
+        return False
+    return True
 
 
 async def _browser_cookies_for(

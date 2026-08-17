@@ -1830,6 +1830,7 @@ def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2,
         return _download_hls_via_ffmpeg(url, filepath, referer, max_seconds)
 
     for attempt in range(1, max_retries + 1):
+        r = None
         try:
             headers = {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -1842,6 +1843,25 @@ def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2,
                 if attempt < max_retries:
                     time.sleep(2)
                     continue
+                return None
+
+            content_type = str(r.headers.get("Content-Type") or "").split(";", 1)[0].strip().lower()
+            if (
+                content_type.startswith("text/")
+                or content_type.startswith("image/")
+                or content_type
+                in {
+                    "application/json",
+                    "application/ld+json",
+                    "application/manifest+json",
+                    "application/xml",
+                }
+            ):
+                logger.warning(
+                    "[ProductSearcher] Non-video response discarded (%s): %s",
+                    content_type or "unknown",
+                    url[:80],
+                )
                 return None
 
             deadline = time.time() + max_seconds
@@ -1887,6 +1907,12 @@ def _download_video(url: str, filepath: str, referer: str, max_retries: int = 2,
                            attempt, max_retries, url[:80])
         except Exception as e:
             logger.warning("[ProductSearcher] Download error (attempt %d/%d): %s", attempt, max_retries, e)
+        finally:
+            if r is not None:
+                try:
+                    r.close()
+                except Exception:
+                    pass
 
         if os.path.exists(filepath):
             os.remove(filepath)

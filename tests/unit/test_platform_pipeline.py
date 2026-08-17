@@ -44,9 +44,54 @@ def test_build_queries_adds_chinese_product_family_after_exact_brand_query():
     assert "起泡器" in q
 
 
+@pytest.mark.parametrize(
+    ("chinese", "alias"),
+    [
+        ("旋转 喷泉 注射器式 水枪", "抽拉式 喷泉 水枪"),
+        ("旋转 喷泉 水枪", "旋转喷泉水枪 玩具"),
+        ("水枪 海豚", "海豚水枪玩具"),
+        ("水枪 鲨鱼 鱼形", "鲨鱼水枪玩具"),
+        ("LED飞行回旋球 自动飞行回旋球", "感应悬浮回旋球 玩具"),
+        ("旋转 喷泉 水枪 恐龙", "恐龙抽拉式水枪"),
+    ],
+)
+def test_build_queries_adds_live_verified_summer_toy_seller_alias(chinese, alias):
+    q = pp.build_queries("여름 장난감", {"chinese": chinese, "english": "summer toy"})
+
+    assert q[0] == chinese
+    assert alias in q
+    assert q.index(alias) < q.index("水枪") if "水枪" in q else True
+
+
 def test_browser_media_probe_supports_suffixless_douyin_resource_urls():
     assert "mime_type=video_" in searcher._PLATFORM_MP4_JS
     assert "/video/tos/" in searcher._PLATFORM_MP4_JS
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://example.com/manifest.json",
+        "https://example.com/site.webmanifest",
+        "https://example.com/player.html",
+        "https://example.com/master.m3u8",
+        "https://example.com/api.json?mime_type=application_json",
+    ],
+)
+def test_platform_media_filter_rejects_manifests_and_documents(url):
+    assert searcher._is_probable_platform_media_url(url) is False
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://v3-dy-o.zjcdn.com/video/tos/cn/tos-cn-ve-15/abc?mime_type=video_mp4",
+        "https://example.kwaicdn.com/play?id=abc&mime_type=video_mp4",
+        "https://example.xhscdn.com/demo.mp4?sign=abc",
+    ],
+)
+def test_platform_media_filter_keeps_real_and_suffixless_video_urls(url):
+    assert searcher._is_probable_platform_media_url(url) is True
 
 
 def test_platform_video_threshold_targets_related_category_not_identical_listing():
@@ -127,6 +172,16 @@ def test_reedit_cmd_speed_applies_setpts_and_atempo(tmp_path):
     joined = " ".join(cmd)
     assert "setpts=PTS/1.0300" in joined
     assert "atempo=1.0300" in joined
+
+
+def test_reedit_cmd_short_source_loop_is_bounded(tmp_path):
+    src = tmp_path / "in.mp4"
+    src.write_bytes(b"x")
+    cmd = reeditor.build_reedit_cmd(
+        str(src), str(tmp_path / "out.mp4"), target_duration=10.0
+    )
+    assert cmd[2:4] == ["-stream_loop", "-1"]
+    assert cmd[cmd.index("-t") + 1] == "10.000"
 
 
 def test_reedit_cmd_mirror_and_mute(tmp_path):
@@ -424,6 +479,11 @@ def test_access_challenge_detection_covers_platform_login_and_search_bot_pages(p
 def test_external_search_skips_blocked_and_empty_providers(monkeypatch, tmp_path):
     opened = []
     http_opened = []
+    # This test exercises the legacy fallback chain. Google has its own
+    # regression below so the provider-specific assertions stay focused.
+    monkeypatch.setattr(
+        searcher, "_EXTERNAL_SEARCH_PROVIDERS", ("duckduckgo", "bing", "brave")
+    )
 
     class Tab:
         def __init__(self, provider):
@@ -481,6 +541,77 @@ def test_external_search_skips_blocked_and_empty_providers(monkeypatch, tmp_path
     assert second_links == links
     assert opened == ["duckduckgo", "bing", "bing"]
     assert http_opened == [("brave", "douyin"), ("brave", "douyin")]
+
+
+def test_google_index_search_is_first_and_returns_platform_video_links(
+    monkeypatch, tmp_path
+):
+    opened = []
+
+    class Tab:
+        async def close(self):
+            return None
+
+    class Browser:
+        async def get(self, url, **_kwargs):
+            opened.append(url)
+            return Tab()
+
+    async def no_challenge(_tab):
+        return False
+
+    async def google_links(_tab, platform, *_args, **_kwargs):
+        assert platform == "douyin"
+        return ["https://www.douyin.com/video/7658326682089144783"]
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(searcher, "_page_has_access_challenge", no_challenge)
+    monkeypatch.setattr(searcher, "_extract_video_page_links", google_links)
+    monkeypatch.setattr(searcher.asyncio, "sleep", no_sleep)
+
+    links = asyncio.run(
+        searcher._external_search_links(
+            Browser(), "douyin", "旋转 喷泉 水枪", str(tmp_path), diagnostics={}
+        )
+    )
+
+    assert links == ["https://www.douyin.com/video/7658326682089144783"]
+    assert len(opened) == 1
+    assert opened[0].startswith("https://www.google.com/search?")
+    assert "site%3Adouyin.com/video" in opened[0]
+
+
+def test_paired_chrome_extension_precedes_automated_browser(monkeypatch, tmp_path):
+    from core.sourcing import chrome_extension_bridge as bridge_module
+
+    class Bridge:
+        def start(self):
+            return True
+
+        def is_connected(self):
+            return True
+
+        def search_index(self, platform, query, timeout):
+            assert (platform, query) == ("douyin", "旋转 喷泉 水枪")
+            assert timeout > 0
+            return ["https://www.douyin.com/video/7658326682089144783"]
+
+    class Browser:
+        async def get(self, *_args, **_kwargs):
+            raise AssertionError("paired Chrome should satisfy the search first")
+
+    monkeypatch.setattr(
+        bridge_module, "get_chrome_extension_bridge", lambda: Bridge()
+    )
+
+    links = asyncio.run(
+        searcher._external_search_links(
+            Browser(), "douyin", "旋转 喷泉 水枪", str(tmp_path), diagnostics={}
+        )
+    )
+    assert links == ["https://www.douyin.com/video/7658326682089144783"]
 
 
 def test_http_external_search_extracts_direct_platform_links(monkeypatch):
@@ -892,6 +1023,7 @@ def test_platform_source_is_deferred_until_successful_upload(
         }
 
     def fake_reedit(_source_path, output_path, **_kwargs):
+        assert _kwargs["min_duration"] == 10.0
         with open(output_path, "wb") as handle:
             handle.write(b"finished-video")
         return True

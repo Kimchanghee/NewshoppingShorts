@@ -72,6 +72,7 @@ def build_reedit_cmd(
     mirror: bool = False,
     mute: bool = False,
     bgm_path: Optional[str] = None,
+    target_duration: float = 0.0,
 ) -> list:
     """reedit용 ffmpeg 명령 생성(테스트 가능하도록 분리)."""
     m = max(0.0, min(0.2, float(crop_margin)))
@@ -99,7 +100,11 @@ def build_reedit_cmd(
             )
 
     use_bgm = bool(bgm_path and os.path.exists(bgm_path))
-    cmd = ["ffmpeg", "-y", "-i", input_path]
+    target = max(0.0, min(60.0, float(target_duration or 0.0)))
+    cmd = ["ffmpeg", "-y"]
+    if target > 0:
+        cmd += ["-stream_loop", "-1"]
+    cmd += ["-i", input_path]
     if use_bgm:
         cmd += ["-stream_loop", "-1", "-i", bgm_path]
     cmd += ["-vf", vf,
@@ -114,8 +119,31 @@ def build_reedit_cmd(
         cmd += ["-c:a", "aac", "-b:a", "128k"]
         if abs(spd - 1.0) > 1e-6:
             cmd += ["-af", f"atempo={spd:.4f}"]
+    if target > 0:
+        cmd += ["-t", f"{target:.3f}"]
     cmd += ["-movflags", "+faststart", output_path]
     return cmd
+
+
+def _probe_duration(path: str) -> float:
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe", "-v", "error", "-show_entries", "format=duration",
+                "-of", "default=noprint_wrappers=1:nokey=1", path,
+            ],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=30,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        if result.returncode == 0:
+            return max(0.0, float((result.stdout or "0").strip() or 0))
+    except (OSError, ValueError, subprocess.SubprocessError):
+        pass
+    return 0.0
 
 
 def reedit(
@@ -129,6 +157,7 @@ def reedit(
     mirror: bool = False,
     mute: bool = False,
     bgm_path: Optional[str] = None,
+    min_duration: float = 0.0,
 ) -> bool:
     """
     Transform a source short into a branding-free 1080x1920 clip.
@@ -150,9 +179,13 @@ def reedit(
         logger.warning("[Reeditor] 입력 없음: %s", input_path)
         return False
 
+    minimum = max(0.0, min(60.0, float(min_duration or 0.0)))
+    source_duration = _probe_duration(input_path) if minimum > 0 else 0.0
+    target_duration = minimum if 0 < source_duration < minimum else 0.0
     cmd = build_reedit_cmd(
         input_path, output_path, hook_text=hook_text, crop_margin=crop_margin,
         font_path=font_path, speed=speed, mirror=mirror, mute=mute, bgm_path=bgm_path,
+        target_duration=target_duration,
     )
     try:
         r = subprocess.run(

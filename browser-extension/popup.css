@@ -1,0 +1,71 @@
+:root {
+  color-scheme: light;
+  font-family: "Malgun Gothic", system-ui, sans-serif;
+}
+
+body {
+  width: 320px;
+  margin: 0;
+  color: #172033;
+  background: #ffffff;
+}
+
+main {
+  padding: 18px;
+}
+
+h1 {
+  margin: 0 0 10px;
+  font-size: 18px;
+}
+
+.status {
+  margin: 0 0 14px;
+  padding: 9px 10px;
+  border-radius: 8px;
+  color: #6b4800;
+  background: #fff5d8;
+  font-size: 13px;
+}
+
+.status.connected {
+  color: #08613c;
+  background: #e8f8ef;
+}
+
+label {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+input {
+  box-sizing: border-box;
+  width: 100%;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid #c8d0df;
+  border-radius: 8px;
+  font-size: 18px;
+  letter-spacing: 4px;
+}
+
+button {
+  width: 100%;
+  height: 40px;
+  margin-top: 10px;
+  border: 0;
+  border-radius: 8px;
+  color: #ffffff;
+  background: #ed1745;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.help {
+  margin: 12px 0 0;
+  color: #657085;
+  font-size: 11px;
+  line-height: 1.55;
+}

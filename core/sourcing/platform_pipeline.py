@@ -110,7 +110,26 @@ def build_queries(product_name: str, keywords: Dict[str, str]) -> List[str]:
     if cn:
         from core.sourcing.product_searcher import _preferred_chinese_query_variants
 
-        queries = list(_preferred_chinese_query_variants(cn, en))
+        base_queries = list(_preferred_chinese_query_variants(cn, en))
+        # Google-indexed short-form results use seller vocabulary that is often
+        # more specific than the literal Korean title translation.  Keep the
+        # exact translation first, then try the live-verified product-family
+        # aliases before broad fallbacks such as ``水枪``.
+        seller_aliases: List[str] = []
+        if "水枪" in cn and "喷泉" in cn:
+            seller_aliases.extend(["抽拉式 喷泉 水枪", "旋转喷泉水枪 玩具"])
+        if "水枪" in cn and "海豚" in cn:
+            seller_aliases.append("海豚水枪玩具")
+        if "水枪" in cn and "鲨鱼" in cn:
+            seller_aliases.append("鲨鱼水枪玩具")
+        if "水枪" in cn and "恐龙" in cn:
+            seller_aliases.append("恐龙抽拉式水枪")
+        if "回旋球" in cn or "飞行回旋球" in cn:
+            seller_aliases.append("感应悬浮回旋球 玩具")
+
+        queries = list(dict.fromkeys(
+            base_queries[:1] + seller_aliases + base_queries[1:]
+        ))
         # Product-video discovery does not require an identical seller/model.
         # Exact translated intent remains first, then add the Chinese product
         # family chunks so a brand or generation suffix cannot collapse recall
@@ -769,6 +788,7 @@ async def run_platform_sourcing(
             mirror=bool(opts.get("mirror")),
             mute=bool(opts.get("mute")),
             bgm_path=opts.get("bgm_path"),
+            min_duration=10.0,
         )
         if not ok or not os.path.exists(edited):
             report["error"] = "재편집에 실패했어요."

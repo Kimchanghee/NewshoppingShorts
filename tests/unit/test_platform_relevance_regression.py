@@ -30,6 +30,8 @@ from core.sourcing.product_searcher import (
         ("강아지 고양이 반려동물 스팀 브러쉬", "宠物蒸汽梳"),
         ("2단 접이식 노트북 거치대", "折叠笔记本电脑支架"),
         ("목걸이 목 선풍기", "挂脖风扇"),
+        ("회오리 분수 주사기 물총", "旋转 喷泉 注射器式 水枪"),
+        ("LED 플라잉 부메랑 자동 비행볼", "LED飞行回旋球"),
     ],
 )
 def test_live_product_families_keep_exact_chinese_compound(
@@ -37,6 +39,23 @@ def test_live_product_families_keep_exact_chinese_compound(
 ):
     converted = convert_keywords_rule_based(title)
     assert expected_chinese_anchor in converted["chinese"]
+
+
+@pytest.mark.parametrize(
+    ("title", "expected_chinese_terms"),
+    [
+        ("모디케이 분수물총 회오리 물총 1+1", ("喷泉", "旋转", "水枪")),
+        ("애니멀 워터건 돌핀 돌고래", ("水枪", "海豚")),
+        ("공룡 회오리 롱대포 펌프 워터건", ("恐龙", "旋转", "水枪")),
+        ("피쉬 + 샤크 물총 2종 세트", ("鱼形", "鲨鱼", "水枪")),
+    ],
+)
+def test_summer_toy_fallback_keeps_native_chinese_product_shape(
+    title, expected_chinese_terms
+):
+    converted = convert_keywords_rule_based(title)
+    assert all(term in converted["chinese"] for term in expected_chinese_terms)
+    assert converted["english"]
 
 
 @pytest.mark.parametrize(

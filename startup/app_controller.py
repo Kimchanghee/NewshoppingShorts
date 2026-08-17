@@ -910,6 +910,18 @@ class AppController:
             self._main_launched = True
             self._main_launching = False
             logger.info("Main window shown")
+            try:
+                from core.sourcing.chrome_extension_bridge import (
+                    get_chrome_extension_bridge,
+                )
+
+                chrome_bridge = get_chrome_extension_bridge()
+                if chrome_bridge.start() and hasattr(self.app, "aboutToQuit"):
+                    self.app.aboutToQuit.connect(chrome_bridge.stop)
+            except Exception:
+                # Chrome 연결은 선택 기능이다. 포트 충돌이나 로컬 정책으로
+                # 시작하지 못해도 로그인/편집/업로드 화면은 정상 동작해야 한다.
+                logger.warning("Chrome 연결 도우미를 시작하지 못했습니다.", exc_info=True)
             # Close loading window AFTER main window is shown
             if self.loading_window:
                 self.loading_window.close()

@@ -108,6 +108,10 @@ _COMPOUND_MAP = {
     "기능성 티셔츠": {"cn": "速干T恤", "en": "quick dry shirt"},
     "쿨매트": {"cn": "凉席 冰垫", "en": "cooling mat"},
     "아이스 조끼": {"cn": "降温背心", "en": "cooling vest"},
+    # 여름 장난감. 이 계열은 중국 숏폼에서 영문/Korean 검색 결과가 거의
+    # 나오지 않으므로 판매자가 실제로 쓰는 중국어 상품군을 보존한다.
+    "플라잉 부메랑": {"cn": "LED飞行回旋球", "en": "LED flying boomerang ball"},
+    "자동 비행볼": {"cn": "自动飞行回旋球", "en": "automatic flying boomerang ball"},
 
     # 휴대폰 / 디지털 (phone stand 같은 동음이의 분리용)
     "휴대폰 거치대": {"cn": "手机支架", "en": "phone stand"},
@@ -280,6 +284,19 @@ _KEYWORD_MAP = {
     "냉장고": {"cn": "冰箱", "en": "fridge"},
     "옷장": {"cn": "衣柜", "en": "wardrobe"},
     "후크": {"cn": "挂钩", "en": "hook"},
+    # 여름 물놀이 장난감은 속성 조합 자체가 상품 형태를 구분한다. 예를 들어
+    # 회오리+분수+주사기+물총을 모두 남겨야 일반 전동 물총과 섞이지 않는다.
+    "회오리": {"cn": "旋转", "en": "tornado rotating"},
+    "분수": {"cn": "喷泉", "en": "fountain"},
+    "주사기": {"cn": "注射器式", "en": "syringe style"},
+    "물총": {"cn": "水枪", "en": "water gun"},
+    "워터건": {"cn": "水枪", "en": "water gun"},
+    "물놀이": {"cn": "儿童戏水", "en": "kids water play"},
+    "돌고래": {"cn": "海豚", "en": "dolphin"},
+    "돌핀": {"cn": "海豚", "en": "dolphin"},
+    "공룡": {"cn": "恐龙", "en": "dinosaur"},
+    "샤크": {"cn": "鲨鱼", "en": "shark"},
+    "피쉬": {"cn": "鱼形", "en": "fish shaped"},
 }
 
 _MODIFIER_MAP = {

@@ -362,6 +362,8 @@ try {
     # ── Core ──
     "ssmaker.exe",
     "version.json",
+    "browser-extension\manifest.json",
+    "browser-extension\service_worker.js",
 
     # ── Video / FFmpeg ──
     "imageio_ffmpeg",

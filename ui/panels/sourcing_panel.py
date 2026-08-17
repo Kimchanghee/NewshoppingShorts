@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QFrame, QWidget, QCheckBox, QScrollArea,
     QTextEdit, QSpinBox, QRadioButton, QButtonGroup,
+    QApplication, QMessageBox,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
@@ -865,10 +866,87 @@ class SourcingPanel(QWidget):
         self._method_hint.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
         lay.addWidget(self._method_hint)
 
+        chrome_row = QHBoxLayout()
+        chrome_row.setSpacing(ds.spacing.space_2)
+        self.chrome_bridge_status_label = QLabel("○ Chrome 확장 미연결")
+        self.chrome_bridge_status_label.setFont(
+            QFont(ds.typography.font_family_primary, ds.typography.size_xs)
+        )
+        self.chrome_bridge_status_label.setStyleSheet(
+            f"color: {get_color('text_muted')}; background: transparent;"
+        )
+        chrome_row.addWidget(self.chrome_bridge_status_label, 1)
+
+        self.btn_chrome_bridge_pair = QPushButton("Chrome 연결")
+        self.btn_chrome_bridge_pair.setAccessibleName("Chrome 확장프로그램 연결")
+        self.btn_chrome_bridge_pair.setToolTip(
+            "로그인된 Chrome에서 공개 영상 검색 결과를 확인하도록 연결합니다."
+        )
+        self.btn_chrome_bridge_pair.setFixedHeight(30)
+        self.btn_chrome_bridge_pair.clicked.connect(self._show_chrome_bridge_pairing)
+        chrome_row.addWidget(self.btn_chrome_bridge_pair)
+        lay.addLayout(chrome_row)
+
+        self._chrome_bridge_timer = QTimer(self)
+        self._chrome_bridge_timer.setInterval(3000)
+        self._chrome_bridge_timer.timeout.connect(self._refresh_chrome_bridge_status)
+        self._chrome_bridge_timer.start()
+        QTimer.singleShot(0, self._refresh_chrome_bridge_status)
+
         self.radio_method_coupang.toggled.connect(self._on_sourcing_method_changed)
         self.radio_method_platform.toggled.connect(self._on_sourcing_method_changed)
         self._update_method_hint(current)
         return card
+
+    def _refresh_chrome_bridge_status(self) -> None:
+        label = getattr(self, "chrome_bridge_status_label", None)
+        if label is None:
+            return
+        try:
+            from core.sourcing.chrome_extension_bridge import (
+                get_chrome_extension_bridge,
+            )
+
+            connected = get_chrome_extension_bridge().is_connected()
+        except Exception:
+            connected = False
+        if connected:
+            label.setText("● Chrome 연결됨 · 로그인 검색 사용")
+            label.setStyleSheet(
+                f"color: {get_color('success')}; background: transparent;"
+            )
+        else:
+            label.setText("○ Chrome 확장 미연결")
+            label.setStyleSheet(
+                f"color: {get_color('text_muted')}; background: transparent;"
+            )
+
+    def _show_chrome_bridge_pairing(self) -> None:
+        try:
+            from core.sourcing.chrome_extension_bridge import (
+                get_chrome_extension_bridge,
+            )
+
+            bridge = get_chrome_extension_bridge()
+            if not bridge.start():
+                raise RuntimeError("local bridge unavailable")
+            code = bridge.pairing_code
+            QApplication.clipboard().setText(code)
+            QMessageBox.information(
+                self,
+                "Chrome 연결",
+                "Chrome의 'SSMaker Chrome 연결' 확장프로그램을 연 뒤 "
+                f"연결 코드 {code}를 입력해 주세요.\n\n"
+                "연결 코드는 클립보드에 복사했습니다. "
+                "쿠키와 비밀번호는 프로그램으로 전송하지 않습니다.",
+            )
+        except Exception:
+            logger.warning("[Sourcing] Chrome 연결 코드 준비 실패", exc_info=True)
+            QMessageBox.warning(
+                self,
+                "Chrome 연결",
+                "Chrome 연결을 준비하지 못했습니다. 프로그램을 다시 실행한 뒤 시도해 주세요.",
+            )
 
     def _update_method_hint(self, method: str) -> None:
         if not hasattr(self, "_method_hint"):
