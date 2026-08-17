@@ -253,6 +253,7 @@ jobs:
     - name: Validate committed version contract
       shell: python
       env:
+        PYTHONPATH: ${{ github.workspace }}
         VERSION: ${{ steps.release_policy.outputs.version }}
         SIGNING_MODE: ${{ steps.release_policy.outputs.signing_mode }}
         SIGN_CERT_THUMBPRINT: ${{ secrets.SIGN_CERT_THUMBPRINT }}
