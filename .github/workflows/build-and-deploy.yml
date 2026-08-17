@@ -68,7 +68,24 @@ jobs:
         python -c "import sys; import PyInstaller; assert PyInstaller.__version__ == '6.19.0', PyInstaller.__version__; print('python=', sys.executable); print('pyinstaller=', PyInstaller.__version__)"
 
     - name: Install Inno Setup
-      run: choco install innosetup --version=6.4.3 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --no-progress -y
+      shell: pwsh
+      run: |
+        $isccCandidates = @(
+          "C:\Program Files (x86)\Inno Setup 6\ISCC.exe",
+          "C:\Program Files\Inno Setup 6\ISCC.exe",
+          (Join-Path $env:LOCALAPPDATA "Programs\Inno Setup 6\ISCC.exe")
+        )
+        $existing = $isccCandidates |
+          Where-Object { Test-Path -LiteralPath $_ } |
+          Select-Object -First 1
+        if ($existing) {
+          Write-Host "Using preinstalled Inno Setup: $existing"
+        } else {
+          choco install innosetup --version=6.4.3 --source=https://community.chocolatey.org/api/v2/ --require-checksums --fail-on-unfound --no-progress -y
+          if ($LASTEXITCODE -ne 0) {
+            throw "Inno Setup installation failed with exit code $LASTEXITCODE."
+          }
+        }
 
     - name: Install Tesseract OCR
       shell: pwsh
