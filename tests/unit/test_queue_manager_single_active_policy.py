@@ -115,7 +115,7 @@ def test_add_mix_job_is_rejected_when_active_item_exists(monkeypatch):
     manager, _, _ = _build_manager(monkeypatch)
     assert manager.add_url_to_queue("https://example.com/1") is True
 
-    with pytest.raises(ValueError, match="Only one active job is allowed"):
+    with pytest.raises(ValueError, match="진행 중이거나 대기 중인 작업"):
         manager.add_mix_job(["https://mix.example/1", "https://mix.example/2"])
 
 

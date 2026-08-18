@@ -63,8 +63,12 @@ def _extract_product_name(app) -> str:
         return Tool.sanitize_filename(product.strip()[:30])
 
     # 3. 로컬 파일명에서 추출
-    if getattr(app, 'video_source', 'none') == "local" and getattr(app, 'local_file_path', ''):
-        base_name = os.path.splitext(os.path.basename(app.local_file_path))[0]
+    local_name_source = (
+        getattr(app, "_original_local_file_path", "")
+        or getattr(app, "local_file_path", "")
+    )
+    if getattr(app, 'video_source', 'none') == "local" and local_name_source:
+        base_name = os.path.splitext(os.path.basename(local_name_source))[0]
         if base_name:
             # 날짜/숫자 패턴 제거 (예: 20231124_video -> video)
             cleaned = re.sub(r'^\d{6,}_?', '', base_name)

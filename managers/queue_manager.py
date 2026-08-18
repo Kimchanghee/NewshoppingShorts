@@ -9,11 +9,13 @@ import re
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Iterable, List, Sequence
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
+from config.constants import PathLimits
 from managers.settings_manager import get_settings_manager
 from managers.summer_coupang_queue_status import (
     build_summer_coupang_queue_snapshot,
@@ -245,21 +247,60 @@ class QueueManager:
         """Whether there is any waiting/processing queue item."""
         return bool(self._get_active_queue_keys())
 
+    @staticmethod
+    def _normalize_mix_sources(urls: Sequence[str]) -> List[str]:
+        """Validate and de-duplicate user-provided mix sources."""
+        if not isinstance(urls, Sequence) or isinstance(urls, (str, bytes)):
+            raise ValueError("믹스 영상 목록 형식이 올바르지 않습니다.")
+
+        normalized: List[str] = []
+        seen = set()
+        for raw_source in urls:
+            if not isinstance(raw_source, str) or not raw_source.strip():
+                continue
+
+            source = raw_source.strip()
+            if source.startswith("local://"):
+                raw_path = source[len("local://") :]
+                real_path = os.path.realpath(raw_path) if raw_path else ""
+                extension = os.path.splitext(real_path)[1].lower()
+                if not real_path or not os.path.isfile(real_path):
+                    raise ValueError(
+                        f"선택한 영상 파일을 찾을 수 없습니다: {os.path.basename(raw_path) or raw_path}"
+                    )
+                if extension not in PathLimits.ALLOWED_VIDEO_EXTENSIONS:
+                    raise ValueError(f"지원하지 않는 영상 형식입니다: {extension or '확장자 없음'}")
+                source = f"local://{real_path}"
+                identity = ("local", os.path.normcase(real_path))
+            else:
+                parsed = urlsplit(source)
+                if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                    raise ValueError(f"올바른 영상 링크가 아닙니다: {source[:80]}")
+                identity = ("url", source)
+
+            if identity in seen:
+                continue
+            seen.add(identity)
+            normalized.append(source)
+
+        if len(normalized) > 5:
+            raise ValueError("믹스 모드는 영상을 최대 5개까지 사용할 수 있습니다.")
+        if len(normalized) < 2:
+            raise ValueError("믹스 모드는 서로 다른 영상이 최소 2개 필요합니다.")
+        return normalized
+
     def add_mix_job(self, urls: Sequence[str]) -> str:
-        clean_urls = [u.strip() for u in urls if isinstance(u, str) and u.strip()]
-        clean_urls = clean_urls[:5]
-        if len(clean_urls) < 2:
-            raise ValueError("믹스 모드는 링크가 최소 2개 필요합니다.")
+        clean_urls = self._normalize_mix_sources(urls)
         if self.has_active_queue_item():
             raise ValueError(
-                "Only one active job is allowed. Finish or clear the current waiting/processing item first."
+                "진행 중이거나 대기 중인 작업을 먼저 완료하거나 삭제해 주세요."
             )
 
         key = f"{MIX_JOB_PREFIX}{uuid4().hex[:12]}"
         self._set_mix_job_urls(key, clean_urls)
         if not self.add_url_to_queue(key):
             self._remove_mix_job(key)
-            raise ValueError("Failed to add mix job to queue.")
+            raise ValueError("믹스 작업을 목록에 추가하지 못했습니다.")
         return key
 
     # ----------------------- queue operations -----------------------

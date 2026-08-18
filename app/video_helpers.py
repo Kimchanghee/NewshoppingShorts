@@ -171,7 +171,10 @@ class VideoHelpers:
         temp_paths = []
 
         temp_file = getattr(self.app, "_temp_downloaded_file", None)
-        if isinstance(temp_file, str) and temp_file:
+        owns_temp_file = bool(
+            getattr(self.app, "_temp_downloaded_file_owned", False)
+        )
+        if owns_temp_file and isinstance(temp_file, str) and temp_file:
             temp_paths.append(temp_file)
 
         temp_files = getattr(self.app, "_temp_downloaded_files", None)
@@ -207,4 +210,5 @@ class VideoHelpers:
                 logger.debug(f"[정리] 삭제 실패 (무시됨): {e}")
 
         self.app._temp_downloaded_file = None
+        self.app._temp_downloaded_file_owned = False
         self.app._temp_downloaded_files = []

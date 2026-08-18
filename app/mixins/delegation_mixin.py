@@ -75,7 +75,7 @@ class DelegationMixin:
 
     def save_generated_videos_locally(self, show_popup=True):
         """Save generated videos to output folder."""
-        self._generated_video_manager.save_locally(show_popup)
+        return self._generated_video_manager.save_locally(show_popup)
 
     # ================================================================
     # Session management

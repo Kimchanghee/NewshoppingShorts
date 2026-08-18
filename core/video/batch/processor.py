@@ -10,6 +10,7 @@ import gc
 import time
 import random
 import shutil
+import sys
 import tempfile
 import threading
 import traceback
@@ -310,13 +311,103 @@ def _get_mix_job_urls(app, job_key: str) -> List[str]:
         return []
 
     normalized = []
+    seen = set()
     for url in raw_urls[:MIX_MAX_URLS]:
         if not isinstance(url, str):
             continue
         clean = url.strip()
-        if clean.startswith("http://") or clean.startswith("https://") or clean.startswith("local://"):
+        if (
+            clean not in seen
+            and (
+                clean.startswith("http://")
+                or clean.startswith("https://")
+                or clean.startswith("local://")
+            )
+        ):
+            seen.add(clean)
             normalized.append(clean)
     return normalized
+
+
+def _set_active_source_state(app, source_kind: str, local_path: str = "") -> None:
+    """Keep source-specific state from leaking between consecutive manual jobs."""
+    app.video_source = source_kind
+    app.local_file_path = local_path if source_kind == "local" else ""
+    app._original_local_file_path = app.local_file_path
+
+    state = getattr(app, "state", None)
+    if state is not None:
+        state.video_source = app.video_source
+        state.local_file_path = app.local_file_path
+
+
+def _saved_output_paths(app) -> List[str]:
+    """Return generated outputs that were durably copied to the output folder."""
+    saved_paths: List[str] = []
+    for video_info in getattr(app, "generated_videos", []) or []:
+        if not isinstance(video_info, dict):
+            continue
+        path = video_info.get("saved_path")
+        if (
+            isinstance(path, str)
+            and path
+            and os.path.isfile(path)
+            and os.path.getsize(path) > 0
+        ):
+            saved_paths.append(path)
+    return saved_paths
+
+
+def _save_generated_outputs_or_raise(app) -> List[str]:
+    """Persist rendered outputs and prove every requested render was saved."""
+    generated = getattr(app, "generated_videos", []) or []
+    if not generated or not all(isinstance(item, dict) for item in generated):
+        raise RuntimeError("저장할 완성 영상 정보를 찾을 수 없습니다.")
+
+    saved_outputs = _saved_output_paths(app)
+    if len(saved_outputs) == len(generated):
+        return saved_outputs
+
+    app.save_generated_videos_locally(show_popup=False)
+    saved_outputs = _saved_output_paths(app)
+    if len(saved_outputs) != len(generated):
+        raise RuntimeError(
+            f"완성 영상 {len(generated)}개 중 {len(saved_outputs)}개만 저장되었습니다. "
+            "저장 위치와 디스크 여유 공간을 확인해 주세요."
+        )
+    return saved_outputs
+
+
+def _restore_interrupted_job(app, job_key: str) -> bool:
+    """Make a user-interrupted in-flight job resumable without an app restart."""
+    if getattr(app, "batch_processing", False):
+        return False
+    if _safe_get_url_status(app, job_key) != "processing":
+        return False
+
+    _safe_set_url_status(app, job_key, "waiting")
+    if not hasattr(app, "url_status_message"):
+        app.url_status_message = {}
+    app.url_status_message[job_key] = "사용자 중지 · 다시 시작 가능"
+    app.add_log("[중지] 현재 작업을 대기 상태로 되돌렸습니다. 다시 시작할 수 있습니다.")
+    return True
+
+
+def _count_batch_results(app, processed_keys) -> Tuple[int, int]:
+    """Derive final counts from queue state so exceptional branches cannot drift."""
+    statuses = [_safe_get_url_status(app, key) for key in processed_keys]
+    return statuses.count("completed"), statuses.count("failed")
+
+
+def _build_render_output_filename(
+    product_name: str, voice: str, voice_index: Optional[int]
+) -> str:
+    """Build a collision-resistant filename for each requested voice render."""
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    voice_slug = re.sub(r"[^0-9a-zA-Z가-힣_-]+", "_", str(voice or "voice"))
+    voice_slug = voice_slug.strip("_")[:32] or "voice"
+    index_slug = f"v{int(voice_index):02d}" if voice_index else "v01"
+    return f"{timestamp}_{index_slug}_{voice_slug}_{product_name}.mp4"
 
 
 def _get_job_display_source(app, source_key: str) -> str:
@@ -370,6 +461,8 @@ def _build_mix_source_video(app, source_paths: List[str]) -> Tuple[str, float]:
     clips: List[VideoFileClip] = []
     segments = []
     mixed_clip: Optional[VideoFileClip] = None
+    mix_dir: Optional[str] = None
+    build_succeeded = False
     rng = random.Random()
     target_duration = float(
         getattr(app, "max_final_video_duration", MAX_FINAL_VIDEO_DURATION)
@@ -445,6 +538,7 @@ def _build_mix_source_video(app, source_paths: List[str]) -> Tuple[str, float]:
             logger=None,
             verbose=False,
         )
+        build_succeeded = True
         return output_path, float(mixed_clip.duration or 0.0)
     finally:
         if mixed_clip is not None:
@@ -465,11 +559,17 @@ def _build_mix_source_video(app, source_paths: List[str]) -> Tuple[str, float]:
             except Exception:
                 pass
 
+        if mix_dir and not build_succeeded:
+            shutil.rmtree(mix_dir, ignore_errors=True)
+
 
 def _prepare_mix_source_video(app, job_key: str) -> Tuple[str, float]:
     mix_urls = _get_mix_job_urls(app, job_key)
     if len(mix_urls) < MIX_MIN_URLS:
-        raise RuntimeError("Mix job has fewer than 2 source URLs.")
+        raise RuntimeError(
+            "믹스 작업 정보가 없거나 서로 다른 원본 영상이 2개보다 적습니다. "
+            "목록에서 작업을 삭제한 뒤 영상을 다시 선택해 주세요."
+        )
 
     app.add_log(f"[Mix] Building mix source from {len(mix_urls)} URLs.")
     downloaded = _download_mix_sources(app, mix_urls)
@@ -526,92 +626,6 @@ from core.video.CreateFinalVideo import (
     _update_tts_metadata_path,
 )
 from caller import ui_controller
-import sys
-import io
-
-
-# ★★★ 로그 캡처 시스템 ★★★
-class LogCapture:
-    """
-    stdout을 캡처하면서 원래 출력도 유지하는 클래스
-    Capture stdout while preserving original output with UTF-8 support
-    """
-
-    def __init__(self, app, original_stdout):
-        self.app = app
-        self.original_stdout = original_stdout
-        # UTF-8 인코딩 속성 (logging StreamHandler 호환성)
-        # UTF-8 encoding property for logging StreamHandler compatibility
-        self.encoding = "utf-8"
-        self.errors = "replace"
-
-    def write(self, text):
-        # 원래 stdout에도 출력 (즉시 flush로 버퍼링 방지)
-        # Write to original stdout with immediate flush to prevent buffering
-        if self.original_stdout:
-            try:
-                self.original_stdout.write(text)
-                self.original_stdout.flush()  # 즉시 출력
-            except (UnicodeEncodeError, UnicodeDecodeError):
-                # 인코딩 오류 시 대체 문자로 출력
-                encoding = getattr(self.original_stdout, "encoding", None) or "utf-8"
-                safe_text = text.encode(encoding, errors="replace").decode(
-                    encoding,
-                    errors="replace",
-                )
-                self.original_stdout.write(safe_text)
-                self.original_stdout.flush()
-            except Exception:
-                pass  # 출력 실패 시 무시
-        # 버퍼에도 저장 (빈 줄 제외)
-        if hasattr(self.app, "_url_log_buffer") and text.strip():
-            self.app._url_log_buffer.append(text)
-
-    def flush(self):
-        if self.original_stdout:
-            try:
-                self.original_stdout.flush()
-            except Exception:
-                pass
-
-    def isatty(self):
-        """터미널 여부 반환 (colorama 호환성)"""
-        if self.original_stdout and hasattr(self.original_stdout, "isatty"):
-            return self.original_stdout.isatty()
-        return False
-
-    def fileno(self):
-        """파일 디스크립터 반환 (일부 라이브러리 호환성)"""
-        if self.original_stdout and hasattr(self.original_stdout, "fileno"):
-            return self.original_stdout.fileno()
-        raise io.UnsupportedOperation("fileno")
-
-    @property
-    def buffer(self):
-        """buffer 속성 반환 (io.TextIOWrapper 호환성)"""
-        if self.original_stdout and hasattr(self.original_stdout, "buffer"):
-            return self.original_stdout.buffer
-        return None
-
-
-def _start_log_capture(app):
-    """로그 캡처 시작"""
-    if not hasattr(app, "_original_stdout"):
-        app._original_stdout = sys.stdout
-    sys.stdout = LogCapture(app, app._original_stdout)
-
-
-def _stop_log_capture(app):
-    """로그 캡처 종료"""
-    if hasattr(app, "_original_stdout") and app._original_stdout:
-        sys.stdout = app._original_stdout
-
-
-def _get_captured_log(app) -> str:
-    """캡처된 로그를 문자열로 반환"""
-    if hasattr(app, "_url_log_buffer") and app._url_log_buffer:
-        return "".join(app._url_log_buffer)
-    return ""
 
 
 def dynamic_batch_processing_thread(app):
@@ -620,6 +634,7 @@ def dynamic_batch_processing_thread(app):
     failed_count = 0
     processed_urls = set()
     pending_remaining: List[str] = []
+    unexpected_error: Optional[Exception] = None
 
     try:
         app.add_log("=" * 60)
@@ -639,31 +654,8 @@ def dynamic_batch_processing_thread(app):
                     waiting_urls.append(url)
 
             if not waiting_urls:
-                app.add_log("대기 중인 URL이 없어 잠시 대기합니다.")
-                found = False
-                # 최대 10초 동안 1초 간격으로 재확인
-                for _ in range(10):
-                    if not app.batch_processing:
-                        break
-                    time.sleep(1)
-                    new_waiting = [
-                        url
-                        for url in app.url_queue
-                        if url not in processed_urls
-                        and app.url_status.get(url) in ["waiting", None]
-                    ]
-                    if new_waiting:
-                        app.add_log(
-                            f"대기열에서 새 URL {len(new_waiting)}개를 감지했습니다. 이어서 처리합니다."
-                        )
-                        found = True
-                        break
-
-                if not found and app.batch_processing:
-                    app.add_log("새 URL이 없어 10초 뒤 다시 확인합니다.")
-                    time.sleep(10)
-
-                continue
+                app.add_log("등록된 수동 영상 작업을 모두 처리했습니다.")
+                break
 
             # URL 처리
             url = waiting_urls[0]
@@ -788,6 +780,11 @@ def dynamic_batch_processing_thread(app):
                     # 각 단계 처리 (메인의 메서드 호출)
                     _process_single_video(app, url, current_index, total_in_queue)
 
+                    # The per-voice fast path may have hit a transient filesystem
+                    # error. Retry once before finalizing quota or reporting success.
+                    if _safe_get_url_status(app, url) != "skipped":
+                        _save_generated_outputs_or_raise(app)
+
                     if (
                         work_reservation.finalized
                         and _safe_get_url_status(app, url) == "failed"
@@ -837,8 +834,14 @@ def dynamic_batch_processing_thread(app):
                             "[LocalSave] 저장 시작 - generated_videos: %d개",
                             len(getattr(app, "generated_videos", [])),
                         )
-                        app.save_generated_videos_locally(show_popup=False)
-                        logger.info("[LocalSave] 저장 완료")
+                        saved_outputs = _saved_output_paths(app)
+                        if not saved_outputs:
+                            raise RuntimeError(
+                                "완성 영상이 출력 폴더에 저장되었는지 확인할 수 없습니다."
+                            )
+                        logger.info(
+                            "[LocalSave] 저장 확인 완료 - %d개", len(saved_outputs)
+                        )
                         app.final_video_path = ""
                         app.final_video_temp_dir = None
 
@@ -854,7 +857,7 @@ def dynamic_batch_processing_thread(app):
                                 )
                         except Exception as verify_err:
                             logger.warning("[비고] 로그 검증 실패: %s", verify_err)
-                            app.url_remarks[url] = "통과"
+                            app.url_remarks[url] = "검증 실패 · 확인 필요"
 
                     except Exception as e:
                         logger.error(
@@ -891,6 +894,7 @@ def dynamic_batch_processing_thread(app):
                     break
 
                 except WorkFinalizationPendingError as e:
+                    failed_count += 1
                     app.add_log(
                         "[작업횟수] 영상은 완성되었지만 서버 확정 응답이 없어 "
                         "발행하지 않고 복구 대기 상태로 보관합니다."
@@ -902,6 +906,7 @@ def dynamic_batch_processing_thread(app):
                     break
 
                 except WorkDeliveryPendingError as e:
+                    failed_count += 1
                     app.add_log(
                         "[자동 발행] 사용량은 확정됐지만 요청된 전달 단계가 완료되지 않아 "
                         "복구 키를 유지합니다."
@@ -913,6 +918,7 @@ def dynamic_batch_processing_thread(app):
                     break
 
                 except TrialLimitExceededError as e:
+                    failed_count += 1
                     # Trial limit exceeded - show dialog and stop processing
                     app.add_log(f"[체험판] {str(e)}")
                     logger.info("[TrialLimit] Trial limit exceeded for user")
@@ -923,14 +929,22 @@ def dynamic_batch_processing_thread(app):
                     app.url_status_message[url] = "체험판 한도 초과"
 
                     # Show trial limit dialog on main thread
-                    def show_trial_dialog():
+                    trial_message = str(e)
+                    trial_total = e.total
+                    trial_remaining = e.remaining
+
+                    def show_trial_dialog(
+                        message=trial_message,
+                        total=trial_total,
+                        remaining=trial_remaining,
+                    ):
                         try:
                             # Calculate used from total and remaining
-                            used = e.total - e.remaining
+                            used = total - remaining
                             dialog = TrialLimitDialog(
                                 parent=app,  # app is QMainWindow
                                 used=used,
-                                total=e.total
+                                total=total,
                             )
 
                             # Connect signal to open subscription panel
@@ -945,7 +959,7 @@ def dynamic_batch_processing_thread(app):
                             show_warning(
                                 app,
                                 "체험판 한도 초과",
-                                f"{str(e)}\n\n구독이 필요합니다."
+                                f"{message}\n\n구독이 필요합니다.",
                             )
 
                     # Use ui_callback_signal for thread-safe UI dispatch
@@ -959,6 +973,7 @@ def dynamic_batch_processing_thread(app):
                     break
 
                 except PermissionError as e:
+                    failed_count += 1
                     # Auth/session verification failed - show a clearer dialog than "trial exhausted"
                     app.add_log(f"[인증] {str(e)}")
                     logger.warning("[Auth] Verification failed: %s", e)
@@ -968,12 +983,14 @@ def dynamic_batch_processing_thread(app):
                     _safe_set_url_status(app, url, "failed")
                     app.url_status_message[url] = "로그인 필요"
 
-                    def show_auth_dialog():
+                    auth_message = str(e)
+
+                    def show_auth_dialog(message=auth_message):
                         try:
                             show_warning(
                                 app,
                                 "로그인 필요",
-                                f"{str(e)}\n\n프로그램을 재시작한 뒤 다시 로그인해주세요.",
+                                f"{message}\n\n프로그램을 재시작한 뒤 다시 로그인해주세요.",
                             )
                         except Exception as dialog_err:
                             logger.error(
@@ -993,9 +1010,10 @@ def dynamic_batch_processing_thread(app):
                     error_msg = str(e)
                     error_lower = error_msg.lower()
                     error_step = getattr(e, "_batch_step", "")
+                    is_api_step = error_step in ("analysis", "translation", "tts")
 
                     # ★ 503 서버 과부하 → 5분 대기 후 재시도 (API 키 교체 없음, 무한 재시도)
-                    if (
+                    if is_api_step and (
                         "503" in error_msg
                         or "overloaded" in error_lower
                         or "unavailable" in error_lower
@@ -1025,7 +1043,7 @@ def dynamic_batch_processing_thread(app):
                             break
 
                     # ★ 429 할당량 초과 → API 키 교체 후 재시도
-                    elif (
+                    elif is_api_step and (
                         "429" in error_msg
                         or "quota" in error_lower
                         or "resource_exhausted" in error_lower
@@ -1048,7 +1066,8 @@ def dynamic_batch_processing_thread(app):
                             else:
                                 app.add_log("[WARN] 사용 가능한 API 키 없음 - 동일 키로 재시도")
 
-                            interruptible_sleep(app, wait_time)
+                            if not interruptible_sleep(app, wait_time):
+                                break
                             continue
                         else:
                             app.add_log(f"⚠️ {max_retries}번 재시도 실패 - 사용자 입력 대기 중...")
@@ -1072,7 +1091,7 @@ def dynamic_batch_processing_thread(app):
                             break
 
                     # ★ 500 기타 서버 오류 → 1분 대기 후 재시도
-                    elif "500" in error_msg:
+                    elif is_api_step and "500" in error_msg:
                         retry_count += 1
                         if retry_count < max_retries:
                             wait_time = 60  # 1분 대기
@@ -1112,7 +1131,10 @@ def dynamic_batch_processing_thread(app):
                             "invalid api key", "renew the api key",
                         ]
 
-                        if any(ind in lowered for ind in permission_indicators + key_invalid_indicators):
+                        if is_api_step and any(
+                            ind in lowered
+                            for ind in permission_indicators + key_invalid_indicators
+                        ):
                             api_mgr = getattr(app, "api_key_manager", None)
                             perm_key_name = getattr(api_mgr, "current_key", "unknown") if api_mgr else "unknown"
                             app.add_log(
@@ -1190,6 +1212,8 @@ def dynamic_batch_processing_thread(app):
                             logger.warning("[세션] 저장 실패: %s", session_err)
                         break
 
+            _restore_interrupted_job(app, url)
+
             if (
                 work_reserved
                 and not work_finalized
@@ -1241,6 +1265,7 @@ def dynamic_batch_processing_thread(app):
                     time.sleep(0.5)
 
         # 완료 로그
+        successful_count, failed_count = _count_batch_results(app, processed_urls)
         pending_remaining = [
             url
             for url in app.url_queue
@@ -1264,6 +1289,12 @@ def dynamic_batch_processing_thread(app):
             pass
 
     except Exception as e:
+        unexpected_error = e
+        app.batch_processing = False
+        for job_key in processed_urls:
+            if _safe_get_url_status(app, job_key) == "processing":
+                _safe_set_url_status(app, job_key, "waiting")
+                app.url_status_message[job_key] = "예상하지 못한 오류 · 다시 시작 가능"
         translated_error = _translate_error_message(
             str(e), step=getattr(e, "_batch_step", "")
         )
@@ -1274,6 +1305,12 @@ def dynamic_batch_processing_thread(app):
     finally:
         app.batch_processing = False
         app.dynamic_processing = False
+        successful_count, failed_count = _count_batch_results(app, processed_urls)
+        pending_remaining = [
+            job_key
+            for job_key in app.url_queue
+            if app.url_status.get(job_key) in ("waiting", "processing")
+        ]
         # PyQt6 스레드 안전 UI 업데이트
         def reset_batch_buttons():
             start_btn = getattr(app, "start_batch_button", None)
@@ -1287,7 +1324,7 @@ def dynamic_batch_processing_thread(app):
         if pending_remaining:
             summary += f" (미처리 {len(pending_remaining)}건 대기)"
 
-        all_jobs_finished = not pending_remaining
+        all_jobs_finished = not pending_remaining and unexpected_error is None
 
         # 모든 작업이 완료되었으면 세션 파일 삭제
         if all_jobs_finished:
@@ -1303,8 +1340,28 @@ def dynamic_batch_processing_thread(app):
             except Exception as session_err:
                 logger.warning("[세션] 저장 실패: %s", session_err)
 
-        if processed_urls and all_jobs_finished:
-            _dispatch_ui_callback(app, lambda: show_success(app, "배치 완료", summary))
+        if unexpected_error is not None:
+            error_message = _translate_error_message(
+                str(unexpected_error),
+                step=getattr(unexpected_error, "_batch_step", ""),
+            )
+            _dispatch_ui_callback(
+                app,
+                lambda message=error_message: show_error(
+                    app,
+                    "작업 중단",
+                    f"{message}\n\n작업 상태를 보존했습니다. 다시 시작해 주세요.",
+                ),
+            )
+        elif processed_urls and all_jobs_finished:
+            if failed_count:
+                _dispatch_ui_callback(
+                    app, lambda: show_warning(app, "작업 종료", summary)
+                )
+            else:
+                _dispatch_ui_callback(
+                    app, lambda: show_success(app, "배치 완료", summary)
+                )
         app.update_status("준비 완료")
 
         # 비용은 각 URL 완료 시마다 출력되므로 여기서는 출력하지 않음
@@ -1314,43 +1371,10 @@ def dynamic_batch_processing_thread(app):
 def _process_single_video(app, url, current_number, total_urls):
     """Process a single video inside the dynamic batch workflow."""
 
-    # Check trial limit before starting video processing
-    try:
-        user_id = (
-            app.login_data.get("data", {}).get("data", {}).get("id", "")
-            if app.login_data
-            else ""
-        )
-        if user_id:
-            work_status = rest.check_work_available(user_id)
-            if not work_status.get("success", True):
-                # Auth/session problem (token expired/missing) or verification failure.
-                raise PermissionError(
-                    work_status.get("message")
-                    or "작업 가능 여부 확인에 실패했습니다. 다시 로그인해주세요."
-                )
-
-            if not work_status.get("available", False):
-                used = int(work_status.get("used", 0) or 0)
-                total = int(work_status.get("total", 0) or 0)
-                raise TrialLimitExceededError(
-                    f"체험판 사용 횟수를 초과했습니다 ({used}/{total}). 구독이 필요합니다.",
-                    remaining=0,
-                    total=total,
-                )
-    except TrialLimitExceededError:
-        raise
-    except Exception as trial_check_err:
-        logger.warning("[Trial Check] Failed to verify work availability: %s", trial_check_err)
-
     app.reset_progress_states()
     if hasattr(app, "set_active_job"):
         app.set_active_job(_get_job_display_source(app, url), current_number, total_urls)
 
-    # ★★★ 로그 캡처 시작 ★★★
-    # 이 URL 처리에 대한 모든 로그를 저장
-    app._url_log_buffer = []
-    _start_log_capture(app)
     if not hasattr(app, "_temp_downloaded_files") or not isinstance(
         getattr(app, "_temp_downloaded_files", None), list
     ):
@@ -1383,6 +1407,8 @@ def _process_single_video(app, url, current_number, total_urls):
     display_source = _get_job_display_source(app, url)
     _stage_times = {}  # Track elapsed time per stage
 
+    app._url_log_buffer = []
+    app._capture_url_logs = True
     try:
         # ===============================================================
         # STAGE 1: Download
@@ -1415,16 +1441,19 @@ def _process_single_video(app, url, current_number, total_urls):
             if local_path is None:
                 raise FileNotFoundError(f"로컬 파일을 찾을 수 없거나 허용되지 않는 형식입니다: {url}")
             app._temp_downloaded_file = local_path
-            app.video_source = "local"
-            app.local_file_path = local_path
+            app._temp_downloaded_file_owned = False
+            _set_active_source_state(app, "local", local_path)
             app.add_log(f"[다운로드] 로컬 영상 파일 사용: {os.path.basename(local_path)}")
 
         if is_local_file:
             pass  # Already set above
-        elif len(_get_mix_job_urls(app, url)) >= MIX_MIN_URLS:
+        elif url.startswith(MIX_JOB_PREFIX):
             mixed_path, _ = _prepare_mix_source_video(app, url)
             app._temp_downloaded_file = mixed_path
+            app._temp_downloaded_file_owned = True
+            _set_active_source_state(app, "mix")
         else:
+            _set_active_source_state(app, "remote")
             # 저장 폴더 변경 시나 기존 다운로드 파일이 없으면 재다운로드
             need_redownload = (
                 not hasattr(app, "_temp_downloaded_file")
@@ -1453,6 +1482,7 @@ def _process_single_video(app, url, current_number, total_urls):
                 else:
                     downloaded_path = VideoDownloader.download_video(url)
                 app._temp_downloaded_file = downloaded_path
+                app._temp_downloaded_file_owned = True
                 _register_temp_download_files(app, [downloaded_path])
                 app.add_log(
                     f"[다운로드] 새로 다운로드 완료: {os.path.basename(downloaded_path)}"
@@ -1488,8 +1518,12 @@ def _process_single_video(app, url, current_number, total_urls):
                 app, original_source_file, MAX_VIDEO_DURATION
             )
             app._temp_downloaded_file = trimmed_path
+            app._temp_downloaded_file_owned = True
             if getattr(app, "video_source", None) == "local":
                 app.local_file_path = trimmed_path
+                state = getattr(app, "state", None)
+                if state is not None:
+                    state.local_file_path = trimmed_path
             app.original_source_video_duration = original_video_duration
             original_video_duration = app.get_video_duration_helper()
             app.original_video_duration = original_video_duration
@@ -1771,8 +1805,13 @@ def _process_single_video(app, url, current_number, total_urls):
                     # A rendered temp file now exists. Persist the recovery state
                     # before exposing it, then finalize before any remote publish.
                     active_reservation.mark_pending_finalize()
-                app.save_generated_videos_locally(show_popup=False)
-                logger.info("[LocalSave] 음성 %d/%d 즉시 저장 완료", idx_voice, total_voices)
+                saved_outputs = _save_generated_outputs_or_raise(app)
+                logger.info(
+                    "[LocalSave] 음성 %d/%d 즉시 저장 완료 (%d개)",
+                    idx_voice,
+                    total_voices,
+                    len(saved_outputs),
+                )
 
                 if active_reservation is not None and not active_reservation.finalized:
                     quota_result = active_reservation.finalize()
@@ -2117,7 +2156,10 @@ def _process_single_video(app, url, current_number, total_urls):
             except (WorkFinalizationPendingError, WorkDeliveryPendingError):
                 raise
             except Exception as _save_err:
-                logger.warning("[LocalSave] 즉시 저장 실패 (배치 종료 시 재시도): %s", _save_err)
+                logger.warning(
+                    "[LocalSave] 즉시 저장 실패 (사용량 확정 전 1회 재시도): %s",
+                    _save_err,
+                )
 
             after_video_progress = max(
                 video_progress, int((idx_voice / total_voices) * 100)
@@ -2205,6 +2247,8 @@ def _process_single_video(app, url, current_number, total_urls):
             logger.info("[API 오류] 단계=%s, 키 교체 후 재시도 예정 - 진행 상태 유지", current_step)
 
         raise
+    finally:
+        app._capture_url_logs = False
 
 
 def _create_final_video_for_batch(
@@ -2785,14 +2829,13 @@ def _create_final_video_for_batch(
                 "잔여 작업 정리 완료! 마무리 단계로 이동합니다.",
             )
 
-        # 파일 저장
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-
         # 상품명 추출 (여러 소스에서 시도)
         product_name = _extract_product_name(app)
 
-        # 파일명: 날짜_상품명.mp4
-        output_filename = f"{timestamp}_{product_name}.mp4"
+        # 보이스별 고유 파일명으로 같은 초에 렌더링되어도 충돌하지 않게 한다.
+        output_filename = _build_render_output_filename(
+            product_name, voice, voice_index
+        )
         temp_dir = tempfile.mkdtemp(prefix="batch_video_")
         output_path = os.path.join(temp_dir, output_filename)
         app.final_video_temp_dir = temp_dir
@@ -3112,6 +3155,7 @@ def clear_all_previous_results(app):
 
     # 5. 중요: 임시 다운로드 파일 참조 초기화
     app._temp_downloaded_file = None
+    app._temp_downloaded_file_owned = False
     app._temp_downloaded_files = []
 
     # 6. 분석 결과 데이터 초기화

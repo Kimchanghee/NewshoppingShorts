@@ -69,9 +69,11 @@ class StateBridgeMixin:
         # --- Video source aliases ---
         self.video_source = state.video_source
         self.local_file_path = state.local_file_path
+        self._original_local_file_path = state._original_local_file_path
         self.tiktok_douyin_url = state.tiktok_douyin_url
         self.source_video = state.source_video
         self._temp_downloaded_file = state._temp_downloaded_file
+        self._temp_downloaded_file_owned = state._temp_downloaded_file_owned
         self._temp_downloaded_files = state._temp_downloaded_files
 
         # --- TTS voice aliases ---

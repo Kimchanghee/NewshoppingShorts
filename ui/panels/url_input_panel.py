@@ -690,8 +690,8 @@ class URLInputPanel(QWidget):
                 else:
                     show_warning(
                         self,
-                        "Notice",
-                        "Cannot add this file. It is duplicate or another waiting/processing item already exists.",
+                        "목록에 담지 못했어요",
+                        "같은 파일이 이미 있거나 다른 작업이 진행·대기 중입니다.",
                     )
             else:
                 show_warning(self, "잠시 문제가 생겼어요", "목록을 관리하는 기능을 찾지 못했어요.")

@@ -95,6 +95,7 @@ class GeneratedVideoManager:
         os.makedirs(url_output_dir, exist_ok=True)
 
         saved_count = 0
+        saved_entries = []
         for video_info in self.app.generated_videos:
             src_path = video_info.get("path", "")
             if not src_path or not os.path.exists(src_path):
@@ -111,6 +112,7 @@ class GeneratedVideoManager:
                         self.app.render_integrity_by_path = {}
                     self.app.render_integrity_by_path[dst_path] = dict(integrity)
                 saved_count += 1
+                saved_entries.append(video_info)
                 logger.info(f"[저장] {os.path.basename(dst_path)} -> {url_output_dir}")
             except Exception as e:
                 logger.error(f"[저장] 파일 이동 실패: {e}")
@@ -124,27 +126,34 @@ class GeneratedVideoManager:
                             self.app.render_integrity_by_path = {}
                         self.app.render_integrity_by_path[dst_path] = dict(integrity)
                     saved_count += 1
+                    saved_entries.append(video_info)
                 except Exception as copy_err:
                     logger.error(f"[저장] 복사도 실패: {copy_err}")
 
-        # 임시 디렉토리 정리
-        self._cleanup_temp_dirs()
+        # 저장이 확인된 영상의 임시 디렉토리만 정리한다. 이동과 복사가
+        # 모두 실패한 경우에는 원본 결과물을 남겨 재시도할 수 있어야 한다.
+        self._cleanup_temp_dirs(saved_entries)
 
         if saved_count > 0 and show_popup:
             self._show_success_popup(saved_count, url_output_dir)
 
         # Log video generation
-        try:
-            from caller.rest import log_user_action
-            log_user_action("영상 생성 완료", f"{saved_count}개의 영상이 생성되었습니다.")
-        except Exception:
-            pass
+        if saved_count > 0:
+            try:
+                from caller.rest import log_user_action
+
+                log_user_action(
+                    "영상 생성 완료", f"{saved_count}개의 영상이 생성되었습니다."
+                )
+            except Exception:
+                pass
 
         return saved_count
 
-    def _cleanup_temp_dirs(self):
+    def _cleanup_temp_dirs(self, video_entries=None):
         """Clean up temporary directories from generated videos."""
-        for video_info in self.app.generated_videos:
+        entries = self.app.generated_videos if video_entries is None else video_entries
+        for video_info in entries:
             temp_dir = video_info.get("temp_dir")
             if temp_dir and os.path.exists(temp_dir):
                 try:

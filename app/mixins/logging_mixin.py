@@ -30,6 +30,15 @@ class LoggingMixin:
         log_method = getattr(logger, level, logger.info)
         log_method(message)
 
+        # Manual video jobs opt in to per-job capture. Capturing here avoids
+        # replacing process-wide stdout from a worker thread.
+        if getattr(self, "_capture_url_logs", False):
+            buffer = getattr(self, "_url_log_buffer", None)
+            if not isinstance(buffer, list):
+                buffer = []
+                self._url_log_buffer = buffer
+            buffer.append(f"{message}\n")
+
         # UI 패널 업데이트용 시그널 (터미널 출력은 위에서 이미 완료)
         try:
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")

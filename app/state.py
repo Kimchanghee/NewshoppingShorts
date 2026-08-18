@@ -69,8 +69,10 @@ class AppState:
         # Video source variables
         self.video_source = "none"
         self.local_file_path = ""
+        self._original_local_file_path = ""
         self.tiktok_douyin_url = ""
         self._temp_downloaded_file = None
+        self._temp_downloaded_file_owned = False
         self._temp_downloaded_files: List[str] = []
         self.source_video = ""
 
