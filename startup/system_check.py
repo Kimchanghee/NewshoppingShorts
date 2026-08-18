@@ -10,7 +10,7 @@ import subprocess
 import ctypes
 from typing import Tuple, List, Dict, Any
 
-from PyQt6.QtWidgets import QMessageBox
+from ui.components.custom_dialog import show_error, show_question
 
 from .constants import (
     MIN_RAM_GB,
@@ -208,12 +208,6 @@ def show_system_check_dialog() -> bool:
     )
 
     if not can_run:
-        # Cannot run - show error and exit
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Icon.Critical)
-        msg.setWindowTitle("시스템 요구사항 미충족")
-        msg.setText("이 컴퓨터에서는 프로그램을 실행할 수 없습니다.")
-
         detail = spec_text + "\n\n[문제점]\n"
         for issue in issues:
             detail += f"  {issue}\n"
@@ -222,31 +216,26 @@ def show_system_check_dialog() -> bool:
             for warn in warnings:
                 detail += f"  {warn}\n"
 
-        msg.setDetailedText(detail)
-        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
-        msg.exec()
+        show_error(
+            None,
+            "시스템 요구사항 미충족",
+            "이 컴퓨터에서는 프로그램을 실행할 수 없습니다.\n\n" + detail,
+        )
         return False
 
     elif warnings:
-        # Warnings but can run - confirm continuation
-        msg = QMessageBox()
-        msg.setIcon(QMessageBox.Icon.Warning)
-        msg.setWindowTitle("시스템 사양 확인")
-        msg.setText(
-            "프로그램을 실행할 수 있지만, 일부 제한이 있을 수 있습니다.\n"
-            "계속 진행하시겠습니까?"
-        )
-
         detail = spec_text + "\n\n[경고]\n"
         for warn in warnings:
             detail += f"  {warn}\n"
-
-        msg.setDetailedText(detail)
-        msg.setStandardButtons(QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
-        msg.setDefaultButton(QMessageBox.StandardButton.Yes)
-
-        result = msg.exec()
-        return result == QMessageBox.StandardButton.Yes
+        return bool(
+            show_question(
+                None,
+                "시스템 사양 확인",
+                "프로그램을 실행할 수 있지만 일부 제한이 있을 수 있습니다.\n"
+                "계속 진행하시겠습니까?\n\n"
+                + detail,
+            )
+        )
 
     else:
         # No issues - continue silently

@@ -14,13 +14,14 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QFrame, QWidget, QCheckBox, QScrollArea,
     QTextEdit, QSpinBox, QRadioButton, QButtonGroup,
-    QApplication, QMessageBox,
+    QApplication,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 from ui.components.automation_readiness import AutomationReadinessCard
+from ui.components.custom_dialog import show_info, show_warning
 from utils.logging_config import get_logger
 from utils.url_security import (
     is_coupang_partner_link,
@@ -932,7 +933,7 @@ class SourcingPanel(QWidget):
                 raise RuntimeError("local bridge unavailable")
             code = bridge.pairing_code
             QApplication.clipboard().setText(code)
-            QMessageBox.information(
+            show_info(
                 self,
                 "Chrome 연결",
                 "Chrome의 'SSMaker Chrome 연결' 확장프로그램을 연 뒤 "
@@ -942,7 +943,7 @@ class SourcingPanel(QWidget):
             )
         except Exception:
             logger.warning("[Sourcing] Chrome 연결 코드 준비 실패", exc_info=True)
-            QMessageBox.warning(
+            show_warning(
                 self,
                 "Chrome 연결",
                 "Chrome 연결을 준비하지 못했습니다. 프로그램을 다시 실행한 뒤 시도해 주세요.",

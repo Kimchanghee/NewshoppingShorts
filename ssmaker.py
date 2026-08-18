@@ -32,7 +32,15 @@ def _critical_user_message(parent, title, message, *args, **kwargs):
             message,
             fallback="프로그램 시작 중 문제가 생겼어요.\n프로그램을 다시 실행해 주세요.",
         )
-    return _ORIGINAL_QMESSAGEBOX_CRITICAL(parent, safe_title, safe_message, *args, **kwargs)
+    try:
+        from ui.components.custom_dialog import show_error
+
+        return show_error(parent, safe_title, safe_message)
+    except Exception:
+        logging.debug("Branded critical dialog unavailable; using native fallback", exc_info=True)
+        return _ORIGINAL_QMESSAGEBOX_CRITICAL(
+            parent, safe_title, safe_message, *args, **kwargs
+        )
 
 
 QMessageBox.critical = _critical_user_message

@@ -348,7 +348,18 @@ class VideoAnalyzerGUI(
         if not issues:
             return
 
+        component_labels = {
+            "integration.inpock": "인포크 연동",
+            "integration.sourcing": "상품 소싱",
+            "integration.youtube": "YouTube 연동",
+            "integration.tiktok": "TikTok 연동",
+            "integration.instagram": "Instagram 연동",
+            "integration.coupang": "쿠팡 연동",
+            "settings": "환경 설정",
+            "startup": "시작 설정",
+        }
         unique = []
+        diagnostic_codes = []
         seen = set()
         for issue in issues:
             if not isinstance(issue, dict):
@@ -360,7 +371,9 @@ class VideoAnalyzerGUI(
                 continue
             seen.add(key)
             message = str(issue.get("message") or "해당 기능을 다시 설정해 주세요.")
-            unique.append(f"- [{code}] {component}: {message}")
+            label = component_labels.get(component, "연결 기능")
+            unique.append(f"• {label}\n  {message}")
+            diagnostic_codes.append(code)
         if not unique:
             return
 
@@ -370,8 +383,11 @@ class VideoAnalyzerGUI(
             show_warning(
                 self,
                 "일부 기능 복구 안내",
-                "프로그램은 계속 사용할 수 있지만 다음 항목을 확인해야 합니다.\n\n"
-                + "\n".join(unique[:8]),
+                "프로그램은 계속 사용할 수 있습니다.\n"
+                "아래 연결만 확인한 뒤 필요한 항목을 다시 설정해 주세요.\n\n"
+                + "\n\n".join(unique[:8])
+                + "\n\n진단 코드: "
+                + ", ".join(diagnostic_codes[:8]),
             )
         except Exception:
             logger.warning("[Startup] Recovery issues: %s", "; ".join(unique))

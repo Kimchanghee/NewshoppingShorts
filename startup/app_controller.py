@@ -53,7 +53,15 @@ def _critical_user_message(parent, title, message, *args, **kwargs):
             message,
             fallback="프로그램 처리 중 문제가 생겼어요.\n프로그램을 다시 실행해 주세요.",
         )
-    return _ORIGINAL_QMESSAGEBOX_CRITICAL(parent, safe_title, safe_message, *args, **kwargs)
+    try:
+        from ui.components.custom_dialog import show_error
+
+        return show_error(parent, safe_title, safe_message)
+    except Exception:
+        logger.debug("Branded critical dialog unavailable; using native fallback", exc_info=True)
+        return _ORIGINAL_QMESSAGEBOX_CRITICAL(
+            parent, safe_title, safe_message, *args, **kwargs
+        )
 
 
 QMessageBox.critical = _critical_user_message
@@ -1082,6 +1090,7 @@ class AppController:
         allow_offline: bool,
     ) -> None:
         """Show actionable startup recovery without the generic error wrapper."""
+        del allow_offline  # Offline settings mode is intentionally not user-facing.
         try:
             from startup.diagnostics import get_startup_log_path
 
@@ -1099,24 +1108,21 @@ class AppController:
             f"{log_path}"
         )
 
-        box = QMessageBox(getattr(self, "loading_window", None))
-        box.setIcon(QMessageBox.Icon.Critical)
-        box.setWindowTitle("SSMaker 시작 복구")
-        box.setText(message)
-        retry_button = box.addButton("다시 시도", QMessageBox.ButtonRole.AcceptRole)
-        offline_button = None
-        if allow_offline and bool(issue.get("offline_allowed", True)):
-            offline_button = box.addButton(
-                "오프라인 설정 모드",
-                QMessageBox.ButtonRole.ActionRole,
-            )
-        box.addButton("닫기", QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-        clicked = box.clickedButton()
-        if clicked is retry_button:
+        from ui.components.custom_dialog import CustomDialog
+
+        box = None
+        box = CustomDialog(
+            getattr(self, "loading_window", None),
+            "SSMaker 시작 복구",
+            message,
+            "error",
+            buttons=[
+                ("닫기", lambda: box.done_with_result("close")),
+                ("다시 시도", lambda: box.done_with_result("retry")),
+            ],
+        )
+        if box.show_and_wait() == "retry":
             QtCore.QTimer.singleShot(0, retry_callback)
-        elif offline_button is not None and clicked is offline_button:
-            QtCore.QTimer.singleShot(0, self._launch_safe_offline_mode)
 
     # ---- Runtime update monitoring ----
 
