@@ -19,7 +19,7 @@ os.environ.setdefault("JWT_SECRET_KEY", "a" * 64)
 
 from app.models.login_attempt import LoginAttempt
 from app.models.payment_session import PaymentSession
-from app.models.registration_request import RegistrationRequest
+from app.models.registration_request import RegistrationRequest, RequestStatus
 from app.models.session import SessionModel
 from app.models.user import ProgramType, User, UserType
 from app.schemas.auth import LoginRequest
@@ -185,3 +185,40 @@ def test_username_availability_is_scoped_to_requested_program():
 
         assert ssmaker_result["available"] is False
         assert stmaker_result["available"] is True
+
+
+def test_approved_registration_record_without_user_is_recoverable():
+    engine = create_engine("sqlite:///:memory:")
+    _create_auth_tables(engine)
+
+    with Session(engine) as db:
+        db.add(
+            RegistrationRequest(
+                name="Tester",
+                username="approved_user",
+                program_type="ssmaker",
+                password_hash="hash",
+                contact="01012345678",
+                status=RequestStatus.APPROVED,
+            )
+        )
+        db.commit()
+        route = check_username
+        while hasattr(route, "__wrapped__"):
+            route = route.__wrapped__
+        request = SimpleNamespace(
+            client=SimpleNamespace(host="127.0.0.1"),
+            headers={},
+        )
+
+        result = asyncio.run(
+            route(
+                request=request,
+                username="approved_user",
+                program_type="ssmaker",
+                db=db,
+            )
+        )
+
+        assert result["available"] is True
+        assert "복구" in result["message"]
