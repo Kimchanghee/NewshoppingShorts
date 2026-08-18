@@ -15,14 +15,14 @@ from typing import Optional, List
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Query, HTTPException, Header
-from sqlalchemy import func
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.database import get_db
 from app.dependencies import verify_admin_api_key
-from app.models.user import User, UserType, ProgramType
+from app.models.user import User, UserType
 from app.models.login_attempt import LoginAttempt
 from app.models.registration_request import RegistrationRequest
 from app.models.user_log import UserLog
@@ -34,12 +34,11 @@ from app.configuration import get_settings
 from app.models.admin_session import AdminSession, hash_admin_token
 from app.utils.password import verify_password
 from app.utils.rate_limit import limiter
+from app.utils.ip_utils import get_client_ip
 
 
 logger = logging.getLogger(__name__)
 
-
-from app.utils.ip_utils import get_client_ip
 
 router = APIRouter(prefix="/user/admin", tags=["admin"])
 settings = get_settings()
@@ -251,6 +250,8 @@ async def list_users(
     search: Optional[str] = Query(None, description="아이디 검색"),
     program_type: Optional[str] = Query(None, description="프로그램 유형 필터 (ssmaker/stmaker)"),
     status: Optional[str] = Query(None, description="User status filter"),
+    include_total: bool = Query(True, description="Whether to compute the exact filtered total"),
+    cleanup_offline: bool = Query(False, description="Whether to clean up stale heartbeats before listing"),
     page: int = Query(1, ge=1, description="페이지 번호"),
     page_size: int = Query(50, ge=1, le=100, description="페이지 크기"),
     db: Session = Depends(get_db),
@@ -262,6 +263,10 @@ async def list_users(
 
     Requires X-Admin-API-Key header.
     """
+    normalized_status = status.strip().lower() if isinstance(status, str) else None
+    if cleanup_offline or normalized_status == "online":
+        await AuthService(db).cleanup_offline_users()
+
     query = db.query(User)
 
     # Filter by program type
@@ -297,12 +302,24 @@ async def list_users(
                 )
             )
 
-    # Get total count
-    total = query.count()
-
     # Pagination
     offset = (page - 1) * page_size
-    users = query.order_by(User.created_at.desc()).offset(offset).limit(page_size).all()
+    ordered_query = query.order_by(User.id.desc())
+    if include_total:
+        rows = (
+            ordered_query
+            .add_columns(func.count(User.id).over().label("_filtered_total"))
+            .offset(offset)
+            .limit(page_size)
+            .all()
+        )
+        users = [row[0] for row in rows]
+        total = int(rows[0][1]) if rows else 0
+        if not rows and page > 1:
+            total = query.order_by(None).count()
+    else:
+        users = ordered_query.offset(offset).limit(page_size).all()
+        total = len(users)
 
     return UserListResponse(
         users=[_to_user_response(u) for u in users],
@@ -390,10 +407,17 @@ async def extend_subscription(
                 message="사용자를 찾을 수 없습니다."
             )
 
-        # Calculate new expiration date
+        # Trial expiry is only a trial entitlement boundary. When converting a
+        # trial account to a subscriber, start the paid period from now instead
+        # of stacking it on top of the future trial expiry.
+        subscription_expiry = (
+            user.subscription_expires_at
+            if user.user_type == UserType.SUBSCRIBER
+            else None
+        )
         new_expiry = calculate_subscription_expiry(
             days=data.days,
-            current_expiry=user.subscription_expires_at
+            current_expiry=subscription_expiry,
         )
 
         user.subscription_expires_at = new_expiry
@@ -724,6 +748,7 @@ async def delete_user(
 async def get_stats(
     request: Request,
     program_type: Optional[str] = Query(None, description="프로그램 유형 필터 (ssmaker/stmaker)"),
+    include_requests: bool = Query(True, description="Whether to include registration request counts"),
     db: Session = Depends(get_db),
     _admin: bool = Depends(verify_admin_api_key)
 ):
@@ -743,47 +768,44 @@ async def get_stats(
     if program_type and program_type in ('ssmaker', 'stmaker'):
         base_query = base_query.filter(User.program_type == program_type)
 
-    # User stats
-    total_users = base_query.count()
-    active_users = base_query.filter(User.is_active.is_(True)).count()
-    online_users = base_query.filter(User.is_online.is_(True)).count()
-
-    # Users with active subscription
     now = datetime.now(timezone.utc)
-    sub_query = base_query.filter(
-        User.subscription_expires_at > now,
-        User.is_active.is_(True)
-    )
-    active_subscriptions = sub_query.count()
-
-    # Work usage stats (cumulative) - apply program_type filter
-    work_base = db.query(User)
-    if program_type and program_type in ('ssmaker', 'stmaker'):
-        work_base = work_base.filter(User.program_type == program_type)
-
-    total_work_used = int(
-        work_base.with_entities(func.coalesce(func.sum(User.work_used), 0)).scalar() or 0
-    )
-    users_with_work = work_base.filter(User.work_used > 0).count()
     task_text = func.lower(func.trim(func.coalesce(User.current_task, "")))
-    in_progress_query = work_base.filter(
+    in_progress_condition = and_(
         User.is_online.is_(True),
         task_text != "",
         task_text.notin_(["idle", "pending", "waiting", "대기 중"]),
     )
-    in_progress_users = in_progress_query.count()
+    stats_query = base_query.with_entities(
+        func.count(User.id).label("total_users"),
+        func.coalesce(func.sum(case((User.is_active.is_(True), 1), else_=0)), 0).label("active_users"),
+        func.coalesce(func.sum(case((User.is_online.is_(True), 1), else_=0)), 0).label("online_users"),
+        func.coalesce(
+            func.sum(case((and_(User.subscription_expires_at > now, User.is_active.is_(True)), 1), else_=0)),
+            0,
+        ).label("active_subscriptions"),
+        func.coalesce(func.sum(func.coalesce(User.work_used, 0)), 0).label("total_work_used"),
+        func.coalesce(func.sum(case((User.work_used > 0, 1), else_=0)), 0).label("users_with_work"),
+        func.coalesce(func.sum(case((in_progress_condition, 1), else_=0)), 0).label("in_progress_users"),
+    )
+    row = stats_query.first()
+    total_users = int(getattr(row, "total_users", 0) or 0)
+    active_users = int(getattr(row, "active_users", 0) or 0)
+    online_users = int(getattr(row, "online_users", 0) or 0)
+    active_subscriptions = int(getattr(row, "active_subscriptions", 0) or 0)
+    total_work_used = int(getattr(row, "total_work_used", 0) or 0)
+    users_with_work = int(getattr(row, "users_with_work", 0) or 0)
+    in_progress_users = int(getattr(row, "in_progress_users", 0) or 0)
     avg_work_used_per_user = round(total_work_used / total_users, 2) if total_users else 0
 
     # Registration request stats
-    pending_requests = db.query(RegistrationRequest).filter(
-        RegistrationRequest.status == RequestStatus.PENDING
-    ).count()
-    approved_requests = db.query(RegistrationRequest).filter(
-        RegistrationRequest.status == RequestStatus.APPROVED
-    ).count()
-    rejected_requests = db.query(RegistrationRequest).filter(
-        RegistrationRequest.status == RequestStatus.REJECTED
-    ).count()
+    pending_requests = approved_requests = rejected_requests = 0
+    if include_requests:
+        request_counts = db.query(
+            func.coalesce(func.sum(case((RegistrationRequest.status == RequestStatus.PENDING, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((RegistrationRequest.status == RequestStatus.APPROVED, 1), else_=0)), 0),
+            func.coalesce(func.sum(case((RegistrationRequest.status == RequestStatus.REJECTED, 1), else_=0)), 0),
+        ).one()
+        pending_requests, approved_requests, rejected_requests = (int(value or 0) for value in request_counts)
 
     return {
         "users": {

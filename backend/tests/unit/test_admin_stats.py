@@ -11,7 +11,7 @@ import importlib.util
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 
 
@@ -75,6 +75,8 @@ _admin_module = importlib.util.module_from_spec(_admin_spec)
 assert _admin_spec and _admin_spec.loader
 _admin_spec.loader.exec_module(_admin_module)
 get_stats = _admin_module.get_stats
+list_users = _admin_module.list_users
+extend_subscription = _admin_module.extend_subscription
 
 
 def test_admin_stats_includes_work_aggregates():
@@ -173,4 +175,150 @@ def test_admin_stats_includes_work_aggregates():
     assert stats["registration_requests"]["approved"] == 1
     assert stats["registration_requests"]["rejected"] == 1
 
+    db.close()
+
+
+def test_admin_stats_can_skip_registration_request_queries():
+    engine = create_engine("sqlite:///:memory:")
+    statements = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda _conn, _cursor, statement, _parameters, _context, _executemany: statements.append(statement),
+    )
+    SessionLocal = sessionmaker(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+
+    db.add(User(username="fast", password_hash="hash", is_active=True, work_used=2))
+    db.commit()
+    statements.clear()
+
+    fn = get_stats
+    while hasattr(fn, "__wrapped__"):
+        fn = fn.__wrapped__
+    stats = asyncio.run(fn(request=None, include_requests=False, db=db, _admin=True))
+
+    assert stats["users"]["total"] == 1
+    assert stats["work"]["total_used"] == 2
+    assert stats["registration_requests"] == {
+        "pending": 0,
+        "approved": 0,
+        "rejected": 0,
+    }
+    assert len([statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]) == 1
+
+    db.close()
+
+
+def test_admin_user_list_gets_page_and_total_in_one_select():
+    engine = create_engine("sqlite:///:memory:")
+    statements = []
+    event.listen(
+        engine,
+        "before_cursor_execute",
+        lambda _conn, _cursor, statement, _parameters, _context, _executemany: statements.append(statement),
+    )
+    SessionLocal = sessionmaker(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+
+    db.add_all([
+        User(username=f"user-{index}", password_hash="hash", is_active=True)
+        for index in range(3)
+    ])
+    db.commit()
+    statements.clear()
+
+    fn = list_users
+    while hasattr(fn, "__wrapped__"):
+        fn = fn.__wrapped__
+    result = asyncio.run(fn(
+        request=None,
+        search=None,
+        program_type=None,
+        status=None,
+        include_total=True,
+        cleanup_offline=False,
+        page=1,
+        page_size=2,
+        db=db,
+        _admin=True,
+    ))
+
+    assert len(result.users) == 2
+    assert result.total == 3
+    assert len([statement for statement in statements if statement.lstrip().upper().startswith("SELECT")]) == 1
+
+    db.close()
+
+
+def test_extending_trial_starts_subscription_from_now():
+    engine = create_engine("sqlite:///:memory:")
+    SessionLocal = sessionmaker(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    trial = User(
+        username="trial-extension",
+        password_hash="hash",
+        is_active=True,
+        user_type=UserType.TRIAL,
+        work_count=5,
+        subscription_expires_at=datetime.now(timezone.utc) + timedelta(days=365),
+    )
+    db.add(trial)
+    db.commit()
+
+    before = datetime.now(timezone.utc)
+    fn = extend_subscription
+    while hasattr(fn, "__wrapped__"):
+        fn = fn.__wrapped__
+    result = asyncio.run(fn(
+        request=None,
+        user_id=trial.id,
+        data=_admin_module.ExtendSubscriptionRequest(days=30),
+        db=db,
+        _admin=True,
+    ))
+    after = datetime.now(timezone.utc)
+    db.refresh(trial)
+
+    assert result.success is True
+    assert trial.user_type == UserType.SUBSCRIBER
+    assert before + timedelta(days=30) <= trial.subscription_expires_at.replace(tzinfo=timezone.utc)
+    assert trial.subscription_expires_at.replace(tzinfo=timezone.utc) <= after + timedelta(days=30)
+    db.close()
+
+
+def test_extending_subscriber_keeps_remaining_paid_time():
+    engine = create_engine("sqlite:///:memory:")
+    SessionLocal = sessionmaker(bind=engine)
+    Base.metadata.create_all(bind=engine)
+    db = SessionLocal()
+    current_expiry = datetime.now(timezone.utc) + timedelta(days=10)
+    subscriber = User(
+        username="subscriber-extension",
+        password_hash="hash",
+        is_active=True,
+        user_type=UserType.SUBSCRIBER,
+        work_count=-1,
+        subscription_expires_at=current_expiry,
+    )
+    db.add(subscriber)
+    db.commit()
+
+    fn = extend_subscription
+    while hasattr(fn, "__wrapped__"):
+        fn = fn.__wrapped__
+    result = asyncio.run(fn(
+        request=None,
+        user_id=subscriber.id,
+        data=_admin_module.ExtendSubscriptionRequest(days=30),
+        db=db,
+        _admin=True,
+    ))
+    db.refresh(subscriber)
+
+    assert result.success is True
+    assert subscriber.subscription_expires_at.replace(tzinfo=timezone.utc) == current_expiry + timedelta(days=30)
     db.close()

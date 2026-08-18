@@ -1417,31 +1417,30 @@ class AuthService:
             logger.exception("Work reservation release failed")
             return self._reservation_error(key, "Internal error")
 
-    async def cleanup_offline_users(self):
+    def cleanup_offline_users_sync(self) -> None:
         """
         Mark users as offline if they haven't sent a heartbeat for more than 2 minutes.
         동작이 2분 이상 없는 사용자를 오프라인으로 표시.
         """
         try:
             from datetime import timedelta
+            from sqlalchemy import update
+
             threshold = datetime.now(timezone.utc) - timedelta(minutes=2)
-            
-            # Find users who are marked online but haven't sent heartbeat in 2 mins
-            db_users = self.db.query(User).filter(
-                User.is_online == True,
-                or_(
-                    User.last_heartbeat.is_(None),
-                    User.last_heartbeat < threshold,
-                ),
-            ).all()
-            
-            for user in db_users:
-                user.is_online = False
-                logger.info(f"Marked user offline due to inactivity: {user.username}")
-                
-            if db_users:
+
+            result = self.db.execute(
+                update(User)
+                .where(User.is_online.is_(True))
+                .where(or_(User.last_heartbeat.is_(None), User.last_heartbeat < threshold))
+                .values(is_online=False, current_task=None)
+            )
+            if int(getattr(result, "rowcount", 0) or 0) > 0:
                 self.db.commit()
-                
+                logger.info("Marked %s stale users offline", result.rowcount)
         except Exception as e:
             logger.error(f"Error cleaning up offline users: {e}")
             self.db.rollback()
+
+    async def cleanup_offline_users(self) -> None:
+        """Async compatibility wrapper for existing call sites."""
+        self.cleanup_offline_users_sync()

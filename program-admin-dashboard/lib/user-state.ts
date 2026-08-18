@@ -60,3 +60,15 @@ export function projectedExpiry(value: string | null | undefined, days: number, 
   projected.setUTCDate(projected.getUTCDate() + (direction === 'extend' ? days : -days));
   return projected.toISOString();
 }
+
+export function projectedSubscriptionExpiry(
+  user: Pick<User, 'user_type' | 'subscription_expires_at'>,
+  days: number,
+  now = Date.now(),
+) {
+  const current = user.user_type === 'subscriber' ? parseApiDate(user.subscription_expires_at) : null;
+  const base = current && current.getTime() > now ? current : new Date(now);
+  const projected = new Date(base);
+  projected.setUTCDate(projected.getUTCDate() + days);
+  return projected.toISOString();
+}

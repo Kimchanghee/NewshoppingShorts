@@ -29,7 +29,7 @@ import {
   Wifi,
   X,
 } from 'lucide-react';
-import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type {
   AdminActionResponse,
@@ -40,7 +40,7 @@ import type {
   User,
   UserListResponse,
 } from '@/lib/types';
-import { entitlementState, formatDate, projectedExpiry, remainingLabel } from '@/lib/user-state';
+import { entitlementState, formatDate, projectedExpiry, projectedSubscriptionExpiry, remainingLabel } from '@/lib/user-state';
 
 const PROGRAMS: Array<{ key: ProgramKey; label: string; short: string }> = [
   { key: 'all', label: '전체 프로그램', short: 'ALL' },
@@ -115,14 +115,15 @@ export function DashboardShell() {
   const [program, setProgram] = useState<ProgramKey>('all');
   const [filter, setFilter] = useState<FilterKey>('all');
   const [search, setSearch] = useState('');
-  const deferredSearch = useDeferredValue(search.trim());
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [pageSize] = useState(25);
   const [users, setUsers] = useState<User[]>([]);
   const [total, setTotal] = useState(0);
   const [stats, setStats] = useState<StatsResponse>(EMPTY_STATS);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [usersRefreshing, setUsersRefreshing] = useState(false);
+  const [statsRefreshing, setStatsRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [selectedUser, setSelectedUser] = useState<User | null>(null);
@@ -134,74 +135,96 @@ export function DashboardShell() {
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [deleteText, setDeleteText] = useState('');
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
-  const requestSequence = useRef(0);
+  const usersRequestSequence = useRef(0);
+  const statsRequestSequence = useRef(0);
+  const refreshing = usersRefreshing || statsRefreshing;
 
-  const loadData = useCallback(async (quiet = false) => {
-    const requestId = ++requestSequence.current;
+  const loadUsers = useCallback(async (quiet = false) => {
+    const requestId = ++usersRequestSequence.current;
     if (quiet) {
-      setRefreshing(true);
+      setUsersRefreshing(true);
     } else {
       setLoading(true);
     }
     setError('');
-    if (!quiet) {
-      setUsers([]);
-      setTotal(0);
-      setStats(EMPTY_STATS);
-    }
     const query = new URLSearchParams({
       page: String(page),
       page_size: String(pageSize),
       include_total: 'true',
-      cleanup_offline: 'true',
+      cleanup_offline: 'false',
     });
-    const statsQuery = new URLSearchParams({ include_requests: 'false' });
-    if (program !== 'all') {
-      query.set('program_type', program);
-      statsQuery.set('program_type', program);
-    }
+    if (program !== 'all') query.set('program_type', program);
     if (filter !== 'all') query.set('status', filter);
-    if (deferredSearch) query.set('search', deferredSearch);
+    if (debouncedSearch) query.set('search', debouncedSearch);
     try {
       const userData = await apiRequest<UserListResponse>(`users?${query}`);
-      if (requestId !== requestSequence.current) return false;
-      const statsData = await apiRequest<StatsResponse>(`stats?${statsQuery}`);
-      if (requestId !== requestSequence.current) return false;
+      if (requestId !== usersRequestSequence.current) return false;
       setUsers(userData.users || []);
       setTotal(userData.total || 0);
-      setStats(statsData);
       setLastUpdated(new Date());
       return true;
     } catch (requestError) {
-      if (requestId !== requestSequence.current) return false;
-      if (!quiet) {
-        setUsers([]);
-        setTotal(0);
-        setStats(EMPTY_STATS);
-      }
+      if (requestId !== usersRequestSequence.current) return false;
       setError(requestError instanceof Error ? requestError.message : '운영 데이터를 불러오지 못했습니다.');
       return false;
     } finally {
-      if (requestId === requestSequence.current) {
+      if (requestId === usersRequestSequence.current) {
         setLoading(false);
-        setRefreshing(false);
+        setUsersRefreshing(false);
       }
     }
-  }, [deferredSearch, filter, page, pageSize, program]);
+  }, [debouncedSearch, filter, page, pageSize, program]);
+
+  const loadStats = useCallback(async (quiet = false) => {
+    const requestId = ++statsRequestSequence.current;
+    if (quiet) setStatsRefreshing(true);
+    const statsQuery = new URLSearchParams({ include_requests: 'false' });
+    if (program !== 'all') statsQuery.set('program_type', program);
+    try {
+      const statsData = await apiRequest<StatsResponse>(`stats?${statsQuery}`);
+      if (requestId !== statsRequestSequence.current) return false;
+      setStats(statsData);
+      return true;
+    } catch (requestError) {
+      if (requestId !== statsRequestSequence.current) return false;
+      setError(requestError instanceof Error ? requestError.message : '운영 통계를 불러오지 못했습니다.');
+      return false;
+    } finally {
+      if (requestId === statsRequestSequence.current && quiet) setStatsRefreshing(false);
+    }
+  }, [program]);
 
   useEffect(() => {
-    const timer = window.setTimeout(() => void loadData(false), 0);
+    const timer = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
     return () => window.clearTimeout(timer);
-  }, [loadData]);
+  }, [search]);
   useEffect(() => {
-    const timer = window.setInterval(() => void loadData(true), 60_000);
+    const timer = window.setTimeout(() => void loadUsers(false), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadUsers]);
+  useEffect(() => {
+    const timer = window.setTimeout(() => void loadStats(false), 0);
+    return () => window.clearTimeout(timer);
+  }, [loadStats]);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void Promise.all([loadUsers(true), loadStats(true)]);
+    }, 60_000);
     return () => window.clearInterval(timer);
-  }, [loadData]);
+  }, [loadStats, loadUsers]);
   useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(null), 3600);
     return () => window.clearTimeout(timer);
   }, [toast]);
+  useEffect(() => {
+    if (!mobileNav && !selectedUser && !confirm) return;
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = previousOverflow;
+    };
+  }, [confirm, mobileNav, selectedUser]);
 
   const pageCount = Math.max(1, Math.ceil(total / pageSize));
   const activeProgram = PROGRAMS.find((item) => item.key === program) || PROGRAMS[0];
@@ -258,18 +281,18 @@ export function DashboardShell() {
     showToast(successMessage);
     setConfirm(null);
     setDeleteText('');
-    let detailRefreshed = true;
+    let detailRefresh: Promise<boolean> = Promise.resolve(true);
     if (method === 'DELETE') {
       setSelectedUser(null);
     } else {
-      try {
-        await refreshSelected(targetUserId);
-      } catch {
-        detailRefreshed = false;
-      }
+      detailRefresh = refreshSelected(targetUserId).then(() => true, () => false);
     }
-    const listRefreshed = await loadData(true);
-    if (!detailRefreshed || !listRefreshed) {
+    const [detailRefreshed, listRefreshed, statsRefreshed] = await Promise.all([
+      detailRefresh,
+      loadUsers(true),
+      loadStats(true),
+    ]);
+    if (!detailRefreshed || !listRefreshed || !statsRefreshed) {
       showToast(`${successMessage} 화면 갱신에 실패했지만 작업은 다시 실행하지 마세요.`, 'error');
     }
     setActionBusy(false);
@@ -277,7 +300,7 @@ export function DashboardShell() {
 
   function extend(days: number) {
     if (!selectedUser || days < 1 || days > 3650) return;
-    const nextExpiry = projectedExpiry(selectedUser.subscription_expires_at, days, 'extend');
+    const nextExpiry = projectedSubscriptionExpiry(selectedUser, days);
     setConfirm({
       kind: 'extend',
       title: '구독 기간 연장',
@@ -310,13 +333,13 @@ export function DashboardShell() {
 
   return (
     <div className="app-shell">
-      <aside className={`sidebar ${mobileNav ? 'open' : ''}`}>
+      <aside id="mobile-sidebar" className={`sidebar ${mobileNav ? 'open' : ''}`}>
         <div className="sidebar-head">
           <div className="brand-lockup">
             <span className="brand-mark"><Database size={20} /></span>
             <div><strong>SSMaker Ops</strong><small>Program DB Console</small></div>
           </div>
-          <button className="icon-button mobile-only" aria-label="메뉴 닫기" onClick={() => setMobileNav(false)}><X size={19} /></button>
+          <button className="icon-button mobile-only" aria-label="메뉴 닫기" aria-controls="mobile-sidebar" aria-expanded={mobileNav} onClick={() => setMobileNav(false)}><X size={19} /></button>
         </div>
 
         <nav className="primary-nav" aria-label="기본 메뉴">
@@ -350,11 +373,11 @@ export function DashboardShell() {
 
       <main className="main-content">
         <header className="topbar">
-          <button className="icon-button mobile-only" aria-label="메뉴 열기" onClick={() => setMobileNav(true)}><Menu size={20} /></button>
+          <button className="icon-button mobile-only" aria-label="메뉴 열기" aria-controls="mobile-sidebar" aria-expanded={mobileNav} onClick={() => setMobileNav(true)}><Menu size={20} /></button>
           <div className="topbar-title"><span className="eyebrow">LIVE DATABASE</span><h1>프로그램 사용자 운영</h1></div>
           <div className="topbar-actions">
             <div className="sync-state"><span className="live-dot" />{lastUpdated ? `${lastUpdated.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' })} 갱신` : '연결 중'}</div>
-            <button className="button secondary" onClick={() => void loadData(true)} disabled={refreshing}>
+            <button className="button secondary" onClick={() => void Promise.all([loadUsers(true), loadStats(true)])} disabled={refreshing}>
               <RefreshCw className={refreshing ? 'spin' : ''} size={16} /> 새로고침
             </button>
           </div>
@@ -366,7 +389,7 @@ export function DashboardShell() {
             <div className="scope-badge"><Database size={16} /> AUTH PRODUCTION</div>
           </div>
 
-          {error ? <div className="inline-alert"><AlertTriangle size={18} /><span>{error}</span><button onClick={() => void loadData(false)}>다시 시도</button></div> : null}
+          {error ? <div className="inline-alert"><AlertTriangle size={18} /><span>{error}</span><button onClick={() => void Promise.all([loadUsers(false), loadStats(false)])}>다시 시도</button></div> : null}
 
           <section className="metrics-grid" aria-label="운영 통계">
             <MetricCard label="전체 사용자" value={stats.users.total} meta={`${stats.users.active}명 활성`} icon={<Users size={20} />} tone="ink" />
@@ -390,28 +413,28 @@ export function DashboardShell() {
               <table>
                 <thead><tr><th>사용자</th><th>프로그램</th><th>플랜</th><th>작업 사용량</th><th>계정 상태</th><th>마지막 로그인</th><th>권한 만료</th><th><span className="sr-only">작업</span></th></tr></thead>
                 <tbody>
-                  {loading ? <TableSkeleton /> : users.length ? users.map((user) => {
+                  {loading && !lastUpdated ? <TableSkeleton /> : users.length ? users.map((user) => {
                     const state = userState(user);
                     const entitlement = entitlementState(user);
                     return (
                       <tr key={user.id} onClick={() => void openUser(user)} tabIndex={0} onKeyDown={(event) => { if (event.key === 'Enter') void openUser(user); }}>
-                        <td><div className="user-cell"><span className="user-avatar">{user.username.slice(0, 2).toUpperCase()}</span><div><strong>{user.username}</strong><span>{user.name || user.email || `ID ${user.id}`}</span></div></div></td>
-                        <td><span className="program-chip">{programLabel(user.program_type)}</span></td>
-                        <td><span className={`status-pill ${entitlement.tone}`}>{entitlement.label}</span></td>
-                        <td><div className="usage-cell"><strong>{user.work_used.toLocaleString()}</strong><span>{user.work_count === -1 ? '무제한' : `/ ${user.work_count}`}</span></div></td>
-                        <td><span className={`status-pill ${state.tone}`}><i />{state.label}</span></td>
-                        <td><span className="date-primary">{formatDate(user.last_login_at, true)}</span><small>{user.login_count.toLocaleString()}회 로그인</small></td>
-                        <td><span className={entitlement.expired ? 'date-danger' : 'date-primary'}>{formatDate(user.subscription_expires_at, true)}</span><small>{entitlement.expiryLabel} · {remainingLabel(user.subscription_expires_at)}</small></td>
+                        <td data-label="사용자"><div className="user-cell"><span className="user-avatar">{user.username.slice(0, 2).toUpperCase()}</span><div><strong>{user.username}</strong><span>{user.name || user.email || `ID ${user.id}`}</span></div></div></td>
+                        <td data-label="프로그램"><span className="program-chip">{programLabel(user.program_type)}</span></td>
+                        <td data-label="플랜"><span className={`status-pill ${entitlement.tone}`}>{entitlement.label}</span></td>
+                        <td data-label="작업 사용량"><div className="usage-cell"><strong>{user.work_used.toLocaleString()}</strong><span>{user.work_count === -1 ? '무제한' : `/ ${user.work_count}`}</span></div></td>
+                        <td data-label="계정 상태"><span className={`status-pill ${state.tone}`}><i />{state.label}</span></td>
+                        <td data-label="마지막 로그인"><span className="date-primary">{formatDate(user.last_login_at, true)}</span><small>{user.login_count.toLocaleString()}회 로그인</small></td>
+                        <td data-label="권한 만료"><span className={entitlement.expired ? 'date-danger' : 'date-primary'}>{formatDate(user.subscription_expires_at, true)}</span><small>{entitlement.expiryLabel} · {remainingLabel(user.subscription_expires_at)}</small></td>
                         <td><button className="icon-button" aria-label={`${user.username} 상세 보기`} onClick={(event) => { event.stopPropagation(); void openUser(user); }}><MoreHorizontal size={18} /></button></td>
                       </tr>
                     );
-                  }) : <tr><td colSpan={8}><div className="empty-state"><Search size={24} /><strong>조건에 맞는 사용자가 없습니다</strong><span>검색어나 필터를 변경해 보세요.</span></div></td></tr>}
+                  }) : <tr className="empty-row"><td colSpan={8}><div className="empty-state"><Search size={24} /><strong>조건에 맞는 사용자가 없습니다</strong><span>검색어나 필터를 변경해 보세요.</span></div></td></tr>}
                 </tbody>
               </table>
             </div>
             <div className="pagination">
               <span>{total ? `${(page - 1) * pageSize + 1}–${Math.min(page * pageSize, total)} / ${total}` : '0명'}</span>
-              <div><button className="icon-button" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={17} /></button><span>{page} / {pageCount}</span><button className="icon-button" disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}><ChevronRight size={17} /></button></div>
+              <div><button className="icon-button" aria-label="이전 페이지" disabled={page <= 1} onClick={() => setPage((value) => Math.max(1, value - 1))}><ChevronLeft size={17} /></button><span>{page} / {pageCount}</span><button className="icon-button" aria-label="다음 페이지" disabled={page >= pageCount} onClick={() => setPage((value) => Math.min(pageCount, value + 1))}><ChevronRight size={17} /></button></div>
             </div>
           </section>
         </section>
@@ -420,7 +443,7 @@ export function DashboardShell() {
       {selectedUser ? (
         <>
           <button className="drawer-backdrop" aria-label="상세 패널 닫기" onClick={() => setSelectedUser(null)} />
-          <aside className="user-drawer" aria-label={`${selectedUser.username} 사용자 상세`}>
+          <aside className="user-drawer" role="dialog" aria-modal="true" aria-label={`${selectedUser.username} 사용자 상세`}>
             <div className="drawer-head"><div><span className="eyebrow">USER #{selectedUser.id}</span><h2>사용자 상세</h2></div><button className="icon-button" aria-label="닫기" onClick={() => setSelectedUser(null)}><X size={19} /></button></div>
             <div className="profile-hero">
               <span className="profile-avatar">{selectedUser.username.slice(0, 2).toUpperCase()}</span>
@@ -462,7 +485,7 @@ export function DashboardShell() {
       ) : null}
 
       {confirm && selectedUser ? <ConfirmDialog state={confirm} username={selectedUser.username} deleteText={deleteText} setDeleteText={setDeleteText} busy={actionBusy} onCancel={() => { setConfirm(null); setDeleteText(''); }} onConfirm={() => void executeConfirmed()} /> : null}
-      {toast ? <div className={`toast ${toast.tone}`} role="status">{toast.tone === 'success' ? <UserCheck size={18} /> : <AlertTriangle size={18} />}<span>{toast.message}</span><button onClick={() => setToast(null)} aria-label="알림 닫기"><X size={15} /></button></div> : null}
+      {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'}>{toast.tone === 'success' ? <UserCheck size={18} /> : <AlertTriangle size={18} />}<span>{toast.message}</span><button onClick={() => setToast(null)} aria-label="알림 닫기"><X size={15} /></button></div> : null}
     </div>
   );
 }
@@ -477,5 +500,5 @@ function TableSkeleton() {
 
 function ConfirmDialog({ state, username, deleteText, setDeleteText, busy, onCancel, onConfirm }: { state: NonNullable<ConfirmState>; username: string; deleteText: string; setDeleteText: (value: string) => void; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
   const deleteBlocked = state.kind === 'delete' && deleteText !== username;
-  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="confirm-title"><div className="confirm-card"><div className={`state-icon ${state.danger ? 'danger' : ''}`}>{state.kind === 'delete' ? <Trash2 size={22} /> : <AlertTriangle size={22} />}</div><h3 id="confirm-title">{state.title}</h3><p>{state.description}</p>{state.kind === 'delete' ? <label className="confirm-input"><span>확인을 위해 <strong>{username}</strong> 입력</span><input value={deleteText} onChange={(event) => setDeleteText(event.target.value)} autoFocus /></label> : null}<div className="confirm-actions"><button className="button secondary" disabled={busy} onClick={onCancel}>취소</button><button className={`button ${state.danger ? 'danger' : 'primary'}`} disabled={busy || deleteBlocked} onClick={onConfirm}>{busy ? <LoaderCircle className="spin" size={16} /> : null}{state.confirmLabel}</button></div></div></div>;
+  return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-description"><div className="confirm-card"><div className={`state-icon ${state.danger ? 'danger' : ''}`}>{state.kind === 'delete' ? <Trash2 size={22} /> : <AlertTriangle size={22} />}</div><h3 id="confirm-title">{state.title}</h3><p id="confirm-description">{state.description}</p>{state.kind === 'delete' ? <label className="confirm-input"><span>확인을 위해 <strong>{username}</strong> 입력</span><input value={deleteText} onChange={(event) => setDeleteText(event.target.value)} autoFocus /></label> : null}<div className="confirm-actions"><button className="button secondary" disabled={busy} onClick={onCancel}>취소</button><button className={`button ${state.danger ? 'danger' : 'primary'}`} disabled={busy || deleteBlocked} onClick={onConfirm}>{busy ? <LoaderCircle className="spin" size={16} /> : null}{state.confirmLabel}</button></div></div></div>;
 }

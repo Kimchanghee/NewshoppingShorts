@@ -54,6 +54,10 @@ export function LoginForm() {
       </section>
 
       <section className="login-panel">
+        <div className="login-mobile-brand brand-lockup">
+          <span className="brand-mark"><Database size={20} /></span>
+          <div><strong>SSMaker Ops</strong><small>Program DB Console</small></div>
+        </div>
         <div className="login-card">
           <span className="eyebrow">SECURE ACCESS</span>
           <h2>운영 콘솔 로그인</h2>
@@ -71,7 +75,6 @@ export function LoginForm() {
                 onChange={(event) => setPassword(event.target.value)}
                 placeholder="관리자 비밀번호"
                 required
-                autoFocus
               />
             </div>
             {error ? <p className="form-error" role="alert">{error}</p> : null}

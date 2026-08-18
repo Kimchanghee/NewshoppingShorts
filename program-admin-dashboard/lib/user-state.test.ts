@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { entitlementState, parseApiDate, projectedExpiry, remainingLabel } from '@/lib/user-state';
+import { entitlementState, parseApiDate, projectedExpiry, projectedSubscriptionExpiry, remainingLabel } from '@/lib/user-state';
 
 const NOW = Date.parse('2026-08-05T00:00:00Z');
 
@@ -23,5 +23,19 @@ describe('user entitlement presentation', () => {
   it('calculates stable labels and reductions', () => {
     expect(remainingLabel('2026-08-07T00:00:00Z', NOW)).toBe('2일 남음');
     expect(projectedExpiry('2026-08-10T00:00:00Z', 3, 'reduce')).toBe('2026-08-07T00:00:00.000Z');
+  });
+
+  it('starts a trial-to-subscription extension from now', () => {
+    expect(projectedSubscriptionExpiry({
+      user_type: 'trial',
+      subscription_expires_at: '2027-08-05T00:00:00Z',
+    }, 30, NOW)).toBe('2026-09-04T00:00:00.000Z');
+  });
+
+  it('preserves remaining time when extending an existing subscriber', () => {
+    expect(projectedSubscriptionExpiry({
+      user_type: 'subscriber',
+      subscription_expires_at: '2026-08-15T00:00:00Z',
+    }, 30, NOW)).toBe('2026-09-14T00:00:00.000Z');
   });
 });
