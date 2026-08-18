@@ -308,6 +308,29 @@ def test_username_availability_reuses_pooled_session_and_short_cache(monkeypatch
         (
             f"{EXPECTED_API_URL}/user/check-username/speed_user",
             {"program_type": "ssmaker"},
-            (2, 5),
+            (2, 12),
         )
     ]
+
+
+def test_username_availability_never_skips_server_validation(monkeypatch):
+    import caller.rest as rest
+
+    class MissingRouteResponse:
+        status_code = 404
+        text = '{"detail": "Not Found"}'
+
+    class FakeSession:
+        def get(self, url, params, timeout):
+            return MissingRouteResponse()
+
+    monkeypatch.setattr(rest, "_secure_session", FakeSession())
+    monkeypatch.setattr(rest, "main_server", EXPECTED_API_URL)
+    monkeypatch.delenv("USER_DASHBOARD_API_URL", raising=False)
+    monkeypatch.delenv("API_SERVER_URL_FALLBACK", raising=False)
+    rest._username_availability_cache.clear()
+
+    result = rest.checkUsernameAvailability("speed_user", program_type="ssmaker")
+
+    assert result["available"] is False
+    assert "서버" in result["message"]

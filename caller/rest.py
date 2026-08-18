@@ -31,6 +31,10 @@ _in_memory_auth_token: Optional[str] = None
 _username_availability_cache: Dict[tuple[str, str], tuple[float, Dict[str, Any]]] = {}
 _username_availability_cache_lock = threading.RLock()
 _USERNAME_AVAILABILITY_CACHE_SECONDS = 30.0
+_AUTH_CONNECT_TIMEOUT_SECONDS = 2
+_USERNAME_CHECK_READ_TIMEOUT_SECONDS = 12
+_LOGIN_READ_TIMEOUT_SECONDS = 15
+_REGISTRATION_READ_TIMEOUT_SECONDS = 20
 
 # Generic error messages for client responses (don't expose internals)
 # ???????? ?  (?? ? ? ?)
@@ -766,7 +770,10 @@ def login(**data) -> Dict[str, Any]:
                 attempted_response = _secure_session.post(
                     login_url,
                     json=body,
-                    timeout=(3, 10),
+                    timeout=(
+                        _AUTH_CONNECT_TIMEOUT_SECONDS,
+                        _LOGIN_READ_TIMEOUT_SECONDS,
+                    ),
                 )
             except requests.exceptions.RequestException:
                 if idx < len(candidate_servers) - 1:
@@ -1198,7 +1205,10 @@ def checkUsernameAvailability(
             response = _secure_session.get(
                 target_url,
                 params={"program_type": program_scope},
-                timeout=(2, 5),
+                timeout=(
+                    _AUTH_CONNECT_TIMEOUT_SECONDS,
+                    _USERNAME_CHECK_READ_TIMEOUT_SECONDS,
+                ),
             )
         except requests.exceptions.RequestException as exc:
             if _is_dns_resolution_error(exc):
@@ -1239,7 +1249,10 @@ def checkUsernameAvailability(
         }
 
     if route_missing:
-        return {"available": True, "message": "사용 가능 (서버 검증 생략)"}
+        return {
+            "available": False,
+            "message": "아이디 확인 서버를 찾을 수 없습니다. 잠시 후 다시 시도해주세요.",
+        }
     return last_result
 
 
@@ -1338,7 +1351,12 @@ def submitRegistrationRequest(
             logger.info("Sending registration request to: %s", register_url)
             try:
                 attempted_response = _secure_session.post(
-                    register_url, json=body, timeout=30
+                    register_url,
+                    json=body,
+                    timeout=(
+                        _AUTH_CONNECT_TIMEOUT_SECONDS,
+                        _REGISTRATION_READ_TIMEOUT_SECONDS,
+                    ),
                 )
             except requests.exceptions.RequestException:
                 if idx < len(candidate_servers) - 1:
@@ -1449,6 +1467,10 @@ def submitRegistrationRequest(
         result = response.json()
 
         if result.get("success"):
+            with _username_availability_cache_lock:
+                _username_availability_cache.pop(
+                    ("ssmaker", body["username"]), None
+                )
             logger.info(
                 f"Registration request submitted for: {_sanitize_user_id_for_logging(username)}"
             )

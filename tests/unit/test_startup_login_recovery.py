@@ -253,7 +253,7 @@ def _run_login_qt_script(script: str, tmp_path: Path) -> None:
     assert result.returncode == 0, result.stdout + result.stderr
 
 
-def test_offline_settings_button_is_visible_and_delegates_without_auth(tmp_path):
+def test_login_window_does_not_offer_offline_settings_mode(tmp_path):
     _run_login_qt_script(
         r'''
 import time
@@ -265,17 +265,10 @@ login_window.Login._preload_ip = lambda _self: None
 login_window.Login._warmup_server = lambda _self: None
 app = QApplication([])
 window = login_window.Login()
-calls = []
-class Controller:
-    def enter_offline_mode(self):
-        calls.append("offline")
-window.controller = Controller()
 window.show()
 app.processEvents()
-assert window.offlineSettingsButton.isVisible()
-assert window.offlineSettingsButton.text()
-window.offlineSettingsButton.click()
-assert calls == ["offline"]
+assert not hasattr(window, "offlineSettingsButton")
+assert not hasattr(window, "_enter_offline_mode")
 assert not hasattr(app, "login_data")
 window.close()
 ''',

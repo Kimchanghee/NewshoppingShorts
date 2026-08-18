@@ -434,31 +434,6 @@ class ModernLoginUi:
         right_layout.addWidget(self.loginButton)
         right_layout.addSpacing(8)
 
-        self.offlineSettingsButton = QPushButton(self.rightFrame)
-        self.offlineSettingsButton.setObjectName("offlineSettingsButton")
-        self.offlineSettingsButton.setAccessibleName("오프라인 설정 모드")
-        self.offlineSettingsButton.setMinimumHeight(ds.button_sizes["md"].height)
-        self.offlineSettingsButton.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
-        self.offlineSettingsButton.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.offlineSettingsButton.setStyleSheet(f"""
-            QPushButton {{
-                color: {login_color('text_secondary')};
-                background-color: {login_color('surface_variant')};
-                border: 1px solid {login_color('border')};
-                border-radius: {ds.radius.md}px;
-            }}
-            QPushButton:hover {{
-                color: {login_color('primary')};
-                border-color: {login_color('primary')};
-            }}
-        """)
-        self.offlineSettingsButton.setText("오프라인 설정 모드")
-        self.offlineSettingsButton.setToolTip(
-            "로그인 없이 로컬 설정만 엽니다. 인증이 필요한 작업은 사용할 수 없습니다."
-        )
-        right_layout.addWidget(self.offlineSettingsButton)
-        right_layout.addSpacing(8)
-
         self.registerRequestButton = QPushButton(self.rightFrame)
         self.registerRequestButton.setMinimumHeight(ds.button_sizes["lg"].height)
         self.registerRequestButton.setFont(QFont(FONT_FAMILY, ds.typography.size_sm))
@@ -511,7 +486,15 @@ class RegistrationRequestDialog(QWidget):
             min(360, dialog_size.width()),
             min(480, dialog_size.height()),
         )
-        self.setStyleSheet(f"background-color: {login_color('surface')};")
+        self.setObjectName("registrationDialog")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"""
+            QWidget#registrationDialog {{
+                background-color: {login_color('surface_variant')};
+                border: 2px solid {login_color('primary')};
+                border-radius: {ds.radius.lg}px;
+            }}
+        """)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(18, 18, 18, 18)
@@ -552,23 +535,68 @@ class RegistrationRequestDialog(QWidget):
         self.subtitleLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.subtitleLabel.setStyleSheet(f"color: {login_color('text_muted')}; background: transparent; padding-bottom: 3px;")
         self.subtitleLabel.setWordWrap(True)
-        self.subtitleLabel.setText("정보를 입력한 뒤 회원가입 요청을 제출하세요.")
+        self.subtitleLabel.setText("로그인과 별개의 새 계정 생성 화면입니다.")
         title_layout.addWidget(self.subtitleLabel)
 
         header_layout.addLayout(title_layout, 1)
         root_layout.addLayout(header_layout)
 
-        scroll = QScrollArea(self)
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        root_layout.addWidget(scroll, 1)
+        self.scrollArea = QScrollArea(self)
+        self.scrollArea.setObjectName("registrationScrollArea")
+        self.scrollArea.setWidgetResizable(True)
+        self.scrollArea.setFrameShape(QFrame.Shape.NoFrame)
+        self.scrollArea.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.scrollArea.setStyleSheet(f"""
+            QScrollArea#registrationScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            QScrollBar:vertical {{
+                background: {login_color('surface_variant')};
+                width: 10px;
+                margin: 4px 1px 4px 1px;
+                border: none;
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical {{
+                background: {login_color('primary')};
+                min-height: 38px;
+                border: 2px solid {login_color('surface_variant')};
+                border-radius: 5px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background: {login_color('secondary')};
+            }}
+            QScrollBar::add-line:vertical,
+            QScrollBar::sub-line:vertical {{
+                height: 0px;
+                border: none;
+                background: transparent;
+            }}
+            QScrollBar::add-page:vertical,
+            QScrollBar::sub-page:vertical {{
+                background: transparent;
+            }}
+        """)
+        self.scrollArea.viewport().setStyleSheet("background: transparent;")
+        root_layout.addWidget(self.scrollArea, 1)
 
         form_container = QWidget()
-        scroll.setWidget(form_container)
+        form_container.setObjectName("registrationFormCard")
+        form_container.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        form_container.setStyleSheet(f"""
+            QWidget#registrationFormCard {{
+                background-color: {login_color('surface')};
+                border: 1px solid {login_color('border')};
+                border-radius: {ds.radius.md}px;
+            }}
+        """)
+        self.scrollArea.setWidget(form_container)
 
         form_layout = QVBoxLayout(form_container)
-        form_layout.setContentsMargins(2, 2, 2, 2)
+        form_layout.setContentsMargins(14, 14, 14, 14)
         form_layout.setSpacing(8)
         input_height = ds.button_sizes["md"].height
 

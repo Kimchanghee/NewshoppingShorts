@@ -7,6 +7,7 @@ import sys
 import socket
 import errno
 import threading
+import time
 import hashlib
 import json
 from pathlib import Path
@@ -94,7 +95,6 @@ class Login(QMainWindow, Ui_LoginWindow):
             
             # Connect signals
             self.loginButton.clicked.connect(self._loginCheck)
-            self.offlineSettingsButton.clicked.connect(self._enter_offline_mode)
             self.minimumButton.clicked.connect(self.showMinimized)
             self.exitButton.clicked.connect(self._closeWindow)
             self.registerRequestButton.clicked.connect(self._openRegistrationDialog)
@@ -280,7 +280,16 @@ class Login(QMainWindow, Ui_LoginWindow):
         threading.Thread(target=self._get_local_ip, daemon=True).start()
 
     def _warmup_server(self):
-        threading.Thread(target=rest.getVersion, daemon=True).start()
+        self._auth_warmup_event = threading.Event()
+        self._auth_warmup_started_at = time.monotonic()
+
+        def _warm_auth_server() -> None:
+            try:
+                rest.getVersion()
+            finally:
+                self._auth_warmup_event.set()
+
+        threading.Thread(target=_warm_auth_server, daemon=True).start()
         # Best-effort stale-session cleanup to reduce false EU003 after
         # abrupt app termination where logout was not sent.
         threading.Thread(target=rest.cleanup_local_session, daemon=True).start()
@@ -343,6 +352,28 @@ class Login(QMainWindow, Ui_LoginWindow):
         if worker is not None and worker.isRunning():
             return
 
+        warmup_event = getattr(self, "_auth_warmup_event", None)
+        warmup_started_at = float(
+            getattr(self, "_auth_warmup_started_at", time.monotonic())
+        )
+        if (
+            warmup_event is not None
+            and not warmup_event.is_set()
+            and time.monotonic() - warmup_started_at < 15
+        ):
+            self.loginButton.setEnabled(False)
+            self.loginButton.setText("인증 서버 준비 중...")
+            if not getattr(self, "_login_wait_scheduled", False):
+                self._login_wait_scheduled = True
+
+                def _retry_after_warmup() -> None:
+                    self._login_wait_scheduled = False
+                    self.loginButton.setEnabled(True)
+                    self._loginCheck(force=force)
+
+                QtCore.QTimer.singleShot(200, _retry_after_warmup)
+            return
+
         user_id = self.idEdit.text()
         user_pw = self.pwEdit.text()
         ip = self._get_local_ip()
@@ -388,11 +419,6 @@ class Login(QMainWindow, Ui_LoginWindow):
         error_module = str(res.get("error_module") or "caller.rest")
         error_code = str(res.get("error_code") or "LOGIN_REJECTED")
         display_msg = f"[{error_module}/{error_code}]\n{error_msg}"
-        if res.get("offline_allowed"):
-            display_msg += (
-                "\n\n서버 연결 없이 설정을 확인하려면 "
-                "'오프라인 설정 모드'를 선택하세요."
-            )
         logger.warning(
             "Login failed: module=%s code=%s retryable=%s offline_allowed=%s status=%s",
             error_module,
@@ -403,28 +429,6 @@ class Login(QMainWindow, Ui_LoginWindow):
         )
         self.showCustomMessageBox("로그인 실패", display_msg)
         self.loginButton.setText("로그인")
-
-    def _enter_offline_mode(self) -> None:
-        """Delegate to startup recovery without creating authenticated state."""
-        controller = getattr(self, "controller", None)
-        enter_offline_mode = getattr(controller, "enter_offline_mode", None)
-        if not callable(enter_offline_mode):
-            logger.error(
-                "[ui.windows.login_window/OFFLINE_CONTROLLER_UNAVAILABLE] "
-                "Offline settings mode has no controller"
-            )
-            self.showCustomMessageBox(
-                "오프라인 설정 모드",
-                "[ui.windows.login_window/OFFLINE_CONTROLLER_UNAVAILABLE]\n"
-                "오프라인 설정 모드를 시작할 수 없습니다.",
-            )
-            return
-
-        logger.warning(
-            "[ui.windows.login_window/OFFLINE_SETTINGS_REQUESTED] "
-            "Delegating offline settings mode; authentication remains unset"
-        )
-        enter_offline_mode()
 
     def _handle_login_success(self, res):
         # 로그인 정보 저장 처리
@@ -470,8 +474,14 @@ class Login(QMainWindow, Ui_LoginWindow):
         from ui.login_ui_modern import RegistrationRequestDialog
         self.reg_dialog = RegistrationRequestDialog(self)
         self.reg_dialog.setWindowFlags(Qt.WindowType.Dialog | Qt.WindowType.FramelessWindowHint)
+        self.reg_dialog.setWindowModality(Qt.WindowModality.WindowModal)
+        self.reg_dialog.setWindowTitle("SSMaker 회원가입")
         self.reg_dialog.registrationRequested.connect(self._on_registration_requested)
         self.reg_dialog.show()
+        parent_rect = self.frameGeometry()
+        dialog_rect = self.reg_dialog.frameGeometry()
+        dialog_rect.moveCenter(parent_rect.center())
+        self.reg_dialog.move(dialog_rect.topLeft())
 
     def showCustomMessageBox(self, title, message):
         show_warning(self, title, message)
