@@ -81,6 +81,11 @@ hidden_imports = [
     'jwt.algorithms',
     'colorama',
     'dotenv',
+    # Loaded via __import__ in main.py, so PyInstaller cannot discover them
+    # from the static import graph. Missing these modules disables the Inpock
+    # and 1688 integrations in frozen builds (ST-U204 / ST-U205).
+    'managers.inpock_manager',
+    'managers.sourcing_manager',
 ]
 datas = [
     ('resource', 'resource'),

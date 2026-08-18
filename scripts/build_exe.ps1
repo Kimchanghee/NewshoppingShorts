@@ -531,6 +531,42 @@ try {
   }
   Write-Host "OK: frozen YouTube OAuth runtime smoke test passed."
 
+  # Exercise lazy-loaded integrations from the frozen executable. PyInstaller
+  # cannot discover the __import__ calls in main.py, so this blocks releases
+  # that would otherwise show ST-U204 / ST-U205 on every startup.
+  $optionalManagerReport = Join-Path $Root "build\optional_manager_runtime_frozen.json"
+  Remove-Item -LiteralPath $optionalManagerReport -Force -ErrorAction SilentlyContinue
+  $previousOptionalManagerReport = $env:SSMAKER_OPTIONAL_MANAGER_RUNTIME_REPORT
+  try {
+    $env:SSMAKER_OPTIONAL_MANAGER_RUNTIME_REPORT = $optionalManagerReport
+    try {
+      Invoke-Native "[3.6/5] Running frozen optional-manager runtime smoke test..." $ssmakerExe @(
+        "--optional-manager-runtime-smoke"
+      )
+    } catch {
+      if (Test-Path $optionalManagerReport) {
+        $failedOptionalManagerData = Get-Content -LiteralPath $optionalManagerReport -Raw | ConvertFrom-Json
+        $failedOptionalManagers = @(
+          $failedOptionalManagerData.managers.PSObject.Properties |
+            Where-Object { -not $_.Value.ok } |
+            ForEach-Object { "$($_.Name): $($_.Value.error)" }
+        ) -join "; "
+        throw "Frozen optional-manager runtime validation failed: $failedOptionalManagers"
+      }
+      throw
+    }
+  } finally {
+    $env:SSMAKER_OPTIONAL_MANAGER_RUNTIME_REPORT = $previousOptionalManagerReport
+  }
+  if (-not (Test-Path $optionalManagerReport)) {
+    throw "Frozen optional-manager runtime smoke report was not created: $optionalManagerReport"
+  }
+  $optionalManagerData = Get-Content -LiteralPath $optionalManagerReport -Raw | ConvertFrom-Json
+  if (-not $optionalManagerData.ok) {
+    throw "Frozen optional-manager runtime validation failed."
+  }
+  Write-Host "OK: frozen optional-manager runtime smoke test passed."
+
   # Sensitive files must NOT be in the output
   $mustNotContain = @(
     ".env",

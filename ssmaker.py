@@ -194,6 +194,55 @@ def run_youtube_runtime_smoke() -> int:
             return 2
     return 0 if report.get("ok") else 1
 
+
+def run_optional_manager_runtime_smoke() -> int:
+    """Verify lazy integration managers are bundled without opening browsers."""
+    import json
+
+    manager_factories = {
+        "inpock": (
+            "managers.inpock_manager",
+            "get_inpock_manager",
+        ),
+        "sourcing": (
+            "managers.sourcing_manager",
+            "get_sourcing_manager",
+        ),
+    }
+    report = {"ok": True, "managers": {}}
+    for name, (module_name, factory_name) in manager_factories.items():
+        try:
+            module = __import__(module_name, fromlist=[factory_name])
+            factory = getattr(module, factory_name)
+            manager = factory()
+            report["managers"][name] = {
+                "ok": manager is not None,
+                "module": module_name,
+            }
+            if manager is None:
+                report["ok"] = False
+        except Exception as exc:
+            report["ok"] = False
+            report["managers"][name] = {
+                "ok": False,
+                "module": module_name,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+
+    report_path = os.environ.get(
+        "SSMAKER_OPTIONAL_MANAGER_RUNTIME_REPORT", ""
+    ).strip()
+    if report_path:
+        try:
+            report_dir = os.path.dirname(os.path.abspath(report_path))
+            if report_dir:
+                os.makedirs(report_dir, exist_ok=True)
+            with open(report_path, "w", encoding="utf-8") as report_file:
+                json.dump(report, report_file, ensure_ascii=False, indent=2)
+        except OSError:
+            return 2
+    return 0 if report["ok"] else 1
+
 class StartupWorker(QtCore.QThread):
     progress = QtCore.pyqtSignal(int)
     status = QtCore.pyqtSignal(str)
@@ -257,6 +306,8 @@ class StartupWorker(QtCore.QThread):
 if __name__ == "__main__":
     if "--youtube-runtime-smoke" in sys.argv:
         sys.exit(run_youtube_runtime_smoke())
+    if "--optional-manager-runtime-smoke" in sys.argv:
+        sys.exit(run_optional_manager_runtime_smoke())
 
     # Setup logging first
     log_file = setup_logging()
