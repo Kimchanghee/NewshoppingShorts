@@ -154,10 +154,10 @@ async def submit_registration_request(
         
         if existing_request:
             if existing_request.status == RequestStatus.APPROVED:
-                # 이미 승인됨 (보통 User 테이블에도 있어야 함)
-                logger.info(f"[Register Fail] Username exists in RegistrationRequest (Approved): {username_clean}")
-                return RegistrationResponse(
-                    success=False, message="이미 가입된 계정입니다. 로그인해 주세요."
+                # User 행 없이 승인 기록만 남은 비정상 상태는 새 입력으로 복구한다.
+                logger.warning(
+                    "[Register Repair] Removing orphan approved request: %s",
+                    username_clean,
                 )
             elif existing_request.status == RequestStatus.PENDING:
                 # 대기 중인 요청이 있음
@@ -166,7 +166,7 @@ async def submit_registration_request(
                     success=False, message="승인 대기 중인 아이디입니다. 관리자 승인을 기다려주세요."
                 )
             
-            # 그 외 상태 (REJECTED 등)는 기존 요청 삭제 후 재시도 허용
+            # 승인됐지만 User가 없거나 거부된 요청은 삭제 후 재가입을 허용한다.
             logger.info(f"Deleting existing request (status: {existing_request.status}) for re-registration: {username_clean}")
             db.delete(existing_request)
             db.flush()
