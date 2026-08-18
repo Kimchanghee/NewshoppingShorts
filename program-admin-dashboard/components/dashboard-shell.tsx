@@ -40,7 +40,7 @@ import type {
   User,
   UserListResponse,
 } from '@/lib/types';
-import { entitlementState, formatDate, projectedExpiry, remainingLabel } from '@/lib/user-state';
+import { entitlementState, formatDate, projectedExpiry, projectedSubscriptionExpiry, remainingLabel } from '@/lib/user-state';
 
 const PROGRAMS: Array<{ key: ProgramKey; label: string; short: string }> = [
   { key: 'all', label: '전체 프로그램', short: 'ALL' },
@@ -277,7 +277,7 @@ export function DashboardShell() {
 
   function extend(days: number) {
     if (!selectedUser || days < 1 || days > 3650) return;
-    const nextExpiry = projectedExpiry(selectedUser.subscription_expires_at, days, 'extend');
+    const nextExpiry = projectedSubscriptionExpiry(selectedUser, days);
     setConfirm({
       kind: 'extend',
       title: '구독 기간 연장',

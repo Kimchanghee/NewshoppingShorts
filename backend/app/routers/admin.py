@@ -390,10 +390,17 @@ async def extend_subscription(
                 message="사용자를 찾을 수 없습니다."
             )
 
-        # Calculate new expiration date
+        # Trial expiry is only a trial entitlement boundary. When converting a
+        # trial account to a subscriber, start the paid period from now instead
+        # of stacking it on top of the future trial expiry.
+        subscription_expiry = (
+            user.subscription_expires_at
+            if user.user_type == UserType.SUBSCRIBER
+            else None
+        )
         new_expiry = calculate_subscription_expiry(
             days=data.days,
-            current_expiry=user.subscription_expires_at
+            current_expiry=subscription_expiry,
         )
 
         user.subscription_expires_at = new_expiry
