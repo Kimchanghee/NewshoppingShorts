@@ -39,10 +39,10 @@ const stats = [
     sublabel: "자막 감지·블러·번역·TTS·업로드 검수",
   },
   {
-    value: 4,
+    value: 5,
     suffix: "개",
-    label: "병렬 처리 옵션",
-    sublabel: "PC 성능에 따라 동시 처리",
+    label: "믹스 링크 지원",
+    sublabel: "한 작업에서 영상 링크 2~5개 구성",
   },
   {
     value: 1,

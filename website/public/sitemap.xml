@@ -2,81 +2,117 @@
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://shoppingshorts.store/</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>daily</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/contact/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
+    <loc>https://shoppingshorts.store/privacy/index.html</loc>
+    <lastmod>2026-08-20</lastmod>
+    <changefreq>monthly</changefreq>
+    <priority>0.7</priority>
+  </url>
+  <url>
     <loc>https://shoppingshorts.store/notice/spring-2026-new-subscriber-extra-month/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/coupang-partners-channel-setup/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/linktree-signup-link-setup/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/coupang-partners-product-link/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/youtube-oauth-client-guide/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/youtube-google-cloud-oauth-screenshots/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/youtube-linktree-upload-check/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/ssmaker-launch/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/free-voucher/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/gemini-api-guide/index.html</loc>
-    <lastmod>2026-08-15</lastmod>
+    <lastmod>2026-08-20</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.75</priority>
+  </url>
+  <url>
+    <loc>https://shoppingshorts.store/notice/release-source-v1.5.69/index.html</loc>
+    <lastmod>2026-08-19</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.72</priority>
+  </url>
+  <url>
+    <loc>https://shoppingshorts.store/notice/release-source-v1.5.68/index.html</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.72</priority>
+  </url>
+  <url>
+    <loc>https://shoppingshorts.store/notice/release-source-v1.5.67/index.html</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.72</priority>
+  </url>
+  <url>
+    <loc>https://shoppingshorts.store/notice/release-source-v1.5.66/index.html</loc>
+    <lastmod>2026-08-18</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.72</priority>
+  </url>
+  <url>
+    <loc>https://shoppingshorts.store/notice/release-source-v1.5.65/index.html</loc>
+    <lastmod>2026-08-17</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.72</priority>
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/release-v1.5.64/index.html</loc>
@@ -92,6 +128,18 @@
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/release-v1.5.62/index.html</loc>
+    <lastmod>2026-08-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.72</priority>
+  </url>
+  <url>
+    <loc>https://shoppingshorts.store/notice/release-website-samples-scripted-20260816/index.html</loc>
+    <lastmod>2026-08-16</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.72</priority>
+  </url>
+  <url>
+    <loc>https://shoppingshorts.store/notice/release-website-samples-20260815/index.html</loc>
     <lastmod>2026-08-15</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.72</priority>
@@ -153,48 +201,6 @@
   <url>
     <loc>https://shoppingshorts.store/notice/release-v1.5.53/index.html</loc>
     <lastmod>2026-08-11</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.72</priority>
-  </url>
-  <url>
-    <loc>https://shoppingshorts.store/notice/release-v1.5.52/index.html</loc>
-    <lastmod>2026-08-11</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.72</priority>
-  </url>
-  <url>
-    <loc>https://shoppingshorts.store/notice/release-v1.5.51/index.html</loc>
-    <lastmod>2026-08-11</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.72</priority>
-  </url>
-  <url>
-    <loc>https://shoppingshorts.store/notice/release-v1.5.50/index.html</loc>
-    <lastmod>2026-08-08</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.72</priority>
-  </url>
-  <url>
-    <loc>https://shoppingshorts.store/notice/release-v1.5.49/index.html</loc>
-    <lastmod>2026-08-06</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.72</priority>
-  </url>
-  <url>
-    <loc>https://shoppingshorts.store/notice/release-v1.5.48/index.html</loc>
-    <lastmod>2026-08-06</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.72</priority>
-  </url>
-  <url>
-    <loc>https://shoppingshorts.store/notice/release-v1.5.47/index.html</loc>
-    <lastmod>2026-08-06</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.72</priority>
-  </url>
-  <url>
-    <loc>https://shoppingshorts.store/notice/release-v1.5.46/index.html</loc>
-    <lastmod>2026-08-05</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.72</priority>
   </url>

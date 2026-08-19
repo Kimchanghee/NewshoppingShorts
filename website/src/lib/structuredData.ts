@@ -173,7 +173,7 @@ export function buildSoftwareApplicationSchema(): SchemaObject {
       "쿠팡 파트너스 단축 링크 기반 풀자동 소싱",
       "YouTube Shorts 자동 업로드",
       "Linktree 상품 링크 번호 관리",
-      "최대 4개 영상 병렬 처리",
+      "영상 링크 2~5개 믹스 및 순차 대기 목록 처리",
     ],
     audience: {
       "@type": "Audience",
