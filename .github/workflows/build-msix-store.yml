@@ -1,20 +1,31 @@
 name: Build Microsoft Store MSIX
 
 on:
+  push:
+    tags:
+      - 'store-v*'
   workflow_dispatch:
     inputs:
       identity_name:
         description: Partner Center Product identity > Package/Identity/Name
-        required: true
+        required: false
+        default: YMcompany.SSMaker
         type: string
       publisher:
         description: Partner Center Product identity > Package/Identity/Publisher
-        required: true
+        required: false
+        default: CN=447AAE61-8C19-4267-91D6-45419445A405
         type: string
       publisher_display_name:
         description: Partner Center Product identity > Package/Properties/PublisherDisplayName
-        required: true
+        required: false
+        default: YMcompany
         type: string
+      publish_to_store:
+        description: Submit the verified MSIX to Microsoft Store product 9P43TQHLP8WH
+        required: true
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -31,6 +42,58 @@ jobs:
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
+
+    - name: Resolve Store release contract
+      id: store_contract
+      shell: pwsh
+      env:
+        EVENT_NAME: ${{ github.event_name }}
+        REF_NAME: ${{ github.ref_name }}
+        INPUT_IDENTITY_NAME: ${{ inputs.identity_name }}
+        INPUT_PUBLISHER: ${{ inputs.publisher }}
+        INPUT_PUBLISHER_DISPLAY_NAME: ${{ inputs.publisher_display_name }}
+        INPUT_PUBLISH: ${{ inputs.publish_to_store }}
+      run: |
+        $publish = $env:EVENT_NAME -eq "push" -or ($env:INPUT_PUBLISH ?? "").Trim().ToLowerInvariant() -eq "true"
+        if ($env:EVENT_NAME -eq "push" -and $env:REF_NAME -notmatch '^store-v[0-9]+\.[0-9]+\.[0-9]+$') {
+          throw "Store release tags must use store-vMAJOR.MINOR.PATCH."
+        }
+        $committedVersion = [string](Get-Content -Raw "version.json" | ConvertFrom-Json).version
+        if ($env:EVENT_NAME -eq "push") {
+          $tagVersion = $env:REF_NAME.Substring("store-v".Length)
+          if ($tagVersion -ne $committedVersion) {
+            throw "Store tag/version mismatch: tag=$tagVersion version.json=$committedVersion"
+          }
+        }
+        $identity = if ($env:INPUT_IDENTITY_NAME) { $env:INPUT_IDENTITY_NAME } else { "YMcompany.SSMaker" }
+        $publisher = if ($env:INPUT_PUBLISHER) { $env:INPUT_PUBLISHER } else { "CN=447AAE61-8C19-4267-91D6-45419445A405" }
+        $displayName = if ($env:INPUT_PUBLISHER_DISPLAY_NAME) { $env:INPUT_PUBLISHER_DISPLAY_NAME } else { "YMcompany" }
+        "publish=$($publish.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "identity_name=$identity" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "publisher=$publisher" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "publisher_display_name=$displayName" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        "version=$committedVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+        Write-Host "Store contract: product=9P43TQHLP8WH version=$committedVersion publish=$publish identity=$identity"
+
+    - name: Validate Partner Center publication credentials
+      if: steps.store_contract.outputs.publish == 'true'
+      shell: pwsh
+      env:
+        AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+        AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+        AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+        SELLER_ID: ${{ secrets.SELLER_ID }}
+      run: |
+        $required = @(
+          "AZURE_AD_APPLICATION_CLIENT_ID",
+          "AZURE_AD_APPLICATION_SECRET",
+          "AZURE_AD_TENANT_ID",
+          "SELLER_ID"
+        )
+        $missing = @($required | Where-Object { [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable($_)) })
+        if ($missing.Count -gt 0) {
+          throw "Microsoft Store publication credentials are missing: $($missing -join ', ')"
+        }
 
     - name: Set up Python 3.11
       uses: actions/setup-python@v5
@@ -84,9 +147,9 @@ jobs:
     - name: Build unsigned Store MSIX
       shell: pwsh
       env:
-        MSIX_IDENTITY_NAME: ${{ inputs.identity_name }}
-        MSIX_PUBLISHER: ${{ inputs.publisher }}
-        MSIX_PUBLISHER_DISPLAY_NAME: ${{ inputs.publisher_display_name }}
+        MSIX_IDENTITY_NAME: ${{ steps.store_contract.outputs.identity_name }}
+        MSIX_PUBLISHER: ${{ steps.store_contract.outputs.publisher }}
+        MSIX_PUBLISHER_DISPLAY_NAME: ${{ steps.store_contract.outputs.publisher_display_name }}
       run: ./scripts/build_msix.ps1
 
     - name: Upload Store submission package
@@ -95,4 +158,35 @@ jobs:
         name: SSMaker-Microsoft-Store-MSIX
         path: dist/store/*.msix
         if-no-files-found: error
-        retention-days: 14
+        retention-days: 30
+
+    - name: Configure Microsoft Store Developer CLI
+      if: steps.store_contract.outputs.publish == 'true'
+      uses: microsoft/microsoft-store-apppublisher@cc9910a8d59f2eb55cbb83df0a3800cf3b5300e0 # v1.4
+      with:
+        version: v0.4.0
+
+    - name: Authenticate Microsoft Store Developer CLI
+      if: steps.store_contract.outputs.publish == 'true'
+      shell: pwsh
+      env:
+        AZURE_AD_APPLICATION_CLIENT_ID: ${{ secrets.AZURE_AD_APPLICATION_CLIENT_ID }}
+        AZURE_AD_APPLICATION_SECRET: ${{ secrets.AZURE_AD_APPLICATION_SECRET }}
+        AZURE_AD_TENANT_ID: ${{ secrets.AZURE_AD_TENANT_ID }}
+        SELLER_ID: ${{ secrets.SELLER_ID }}
+      run: |
+        msstore reconfigure `
+          --tenantId $env:AZURE_AD_TENANT_ID `
+          --sellerId $env:SELLER_ID `
+          --clientId $env:AZURE_AD_APPLICATION_CLIENT_ID `
+          --clientSecret $env:AZURE_AD_APPLICATION_SECRET
+
+    - name: Submit package to Microsoft Store
+      if: steps.store_contract.outputs.publish == 'true'
+      shell: pwsh
+      run: |
+        $package = Get-ChildItem -LiteralPath "dist/store" -Filter "*.msix" | Select-Object -First 1
+        if (-not $package) {
+          throw "The verified Microsoft Store package was not found."
+        }
+        msstore publish $package.FullName --appId 9P43TQHLP8WH --verbose
