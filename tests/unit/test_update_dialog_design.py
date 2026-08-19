@@ -54,6 +54,21 @@ def test_update_action_buttons_have_accessible_names():
     assert all(button.accessibleName().strip() for button in buttons)
 
 
+def test_update_surface_uses_shared_dark_design_tokens_and_large_close_target():
+    _app()
+    from ui.design_system_v2 import get_color
+    from ui.windows.update_dialog import _colors
+
+    colors = _colors()
+    dialog = UpdateNotesDialog(version="1.5.69", release_notes="업데이트 디자인을 통일했습니다.")
+
+    assert colors["card"] == get_color("surface")
+    assert colors["outer"] == get_color("background")
+    assert colors["primary"] == get_color("primary")
+    assert dialog.close_x_btn.width() >= 44
+    assert dialog.close_x_btn.height() >= 44
+
+
 def test_update_notes_hide_internal_english_release_metadata():
     _app()
     dialog = UpdateNotesDialog(

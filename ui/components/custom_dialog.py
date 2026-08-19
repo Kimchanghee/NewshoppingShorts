@@ -190,7 +190,7 @@ class CustomDialog(QDialog):
         close_button = QPushButton("×", title_bar)
         close_button.setObjectName("dialogCloseButton")
         close_button.setAccessibleName("알림 닫기")
-        close_button.setFixedSize(34, 34)
+        close_button.setFixedSize(44, 44)
         close_button.setCursor(Qt.CursorShape.PointingHandCursor)
         close_button.setStyleSheet(f"""
             QPushButton#dialogCloseButton {{

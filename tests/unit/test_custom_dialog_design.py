@@ -35,6 +35,7 @@ def test_alert_variants_use_branded_frameless_surface(qapp, dialog_type):
     assert dialog.findChild(QFrame, "dialogMessagePanel") is not None
     assert dialog.findChild(QScrollArea, "dialogMessageScroll") is not None
     assert dialog.findChild(QPushButton, "dialogCloseButton").accessibleName() == "알림 닫기"
+    assert dialog.findChild(QPushButton, "dialogCloseButton").height() >= 44
 
     message = dialog.findChild(QLabel, "dialogMessageLabel")
     assert message.textInteractionFlags() & Qt.TextInteractionFlag.TextSelectableByMouse

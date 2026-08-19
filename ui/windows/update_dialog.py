@@ -17,7 +17,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from ui.theme_manager import get_theme_manager
+from ui.design_system_v2 import get_color
 
 
 _PUBLIC_RELEASE_NOTES_FALLBACK = "안정성과 사용성을 개선했습니다."
@@ -56,22 +56,21 @@ def _font(size: int, weight: QFont.Weight = QFont.Weight.Normal) -> QFont:
 
 
 def _colors() -> dict[str, str]:
-    tm = get_theme_manager()
     return {
-        "card": tm.get_color("bg_card"),
-        "outer": tm.get_color("bg_main"),
-        "primary": tm.get_color("primary"),
-        "primary_hover": tm.get_color("primary_hover"),
-        "primary_soft": tm.get_color("primary_light"),
-        "text": tm.get_color("text_primary"),
-        "muted": tm.get_color("text_secondary"),
-        "border": tm.get_color("border_light"),
-        "surface": tm.get_color("bg_input"),
-        "progress": tm.get_color("progress_bg"),
-        "success": tm.get_color("success"),
-        "secondary": tm.get_color("btn_secondary"),
-        "secondary_hover": tm.get_color("btn_secondary_hover"),
-        "secondary_text": tm.get_color("btn_secondary_text"),
+        "card": get_color("surface"),
+        "outer": get_color("background"),
+        "primary": get_color("primary"),
+        "primary_hover": get_color("primary_hover"),
+        "primary_soft": get_color("primary_light"),
+        "text": get_color("text_primary"),
+        "muted": get_color("text_secondary"),
+        "border": get_color("border_medium"),
+        "surface": get_color("surface_variant"),
+        "progress": get_color("border"),
+        "success": get_color("success"),
+        "secondary": get_color("surface_variant"),
+        "secondary_hover": get_color("border"),
+        "secondary_text": get_color("text_primary"),
     }
 
 
@@ -93,6 +92,7 @@ def _setup_window(widget: QWidget) -> None:
     widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
     widget.setFixedSize(widget.WIN_W, widget.WIN_H)
     widget.setWindowTitle("SSMaker 업데이트")
+    widget.setAccessibleName("SSMaker 업데이트")
 
 
 def _button_style(colors: dict[str, str], *, primary: bool) -> str:
@@ -197,7 +197,7 @@ class _UpdateSurface(QWidget):
             close_button.setAccessibleName("업데이트 안내 닫기")
             close_button.setCursor(Qt.CursorShape.PointingHandCursor)
             close_button.setFont(_font(16, QFont.Weight.Normal))
-            close_button.setFixedSize(36, 36)
+            close_button.setFixedSize(44, 44)
             close_button.setStyleSheet(
                 f"""
                 QToolButton {{
@@ -464,21 +464,16 @@ class UpdateReadyDialog(_UpdateSurface):
     deferred = pyqtSignal()
     WIN_W, WIN_H = 560, 350
 
-    def __init__(self, version: str = "", *, store_mode: bool = False, parent=None):
+    def __init__(self, version: str = "", *, parent=None):
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         self._emitted = False
-        self._store_mode = store_mode
         layout = self._build_surface()
         self._header(
             layout,
             f"SSMAKER · VERSION {version}" if version else "SSMAKER · UPDATE",
             "새 업데이트가 준비됐어요",
-            (
-                "Microsoft Store에서 업데이트를 연 뒤 SSmaker를 다시 시작해 주세요."
-                if store_mode
-                else "현재 작업이 끝나면 자동으로 업데이트합니다. 지금 바로 시작할 수도 있어요."
-            ),
+            "현재 작업이 끝나면 자동으로 업데이트합니다. 지금 바로 시작할 수도 있어요.",
         )
         layout.addSpacing(8)
 
@@ -505,7 +500,7 @@ class UpdateReadyDialog(_UpdateSurface):
         later.clicked.connect(self._defer)
         buttons.addWidget(later, 1)
 
-        now = QPushButton("Microsoft Store 열기" if store_mode else "지금 업데이트")
+        now = QPushButton("지금 업데이트")
         now.setAccessibleName(now.text())
         now.setFont(_font(10, QFont.Weight.DemiBold))
         now.setFixedHeight(46)
