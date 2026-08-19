@@ -79,6 +79,10 @@ class SubscriptionStatusResponse(BaseModel):
         default=None,
         description="구독 만료까지 남은 초",
     )
+    expiry_notice: Optional[dict] = Field(
+        default=None,
+        description="앱에서 표시할 구독 만료 임박 안내",
+    )
     plan_id: Optional[str] = Field(default=None, description="현재 결제 플랜 ID")
     plan_name: Optional[str] = Field(default=None, description="현재 결제 플랜 이름")
     last_payment_at: Optional[str] = Field(default=None, description="마지막 결제 성공 일시")

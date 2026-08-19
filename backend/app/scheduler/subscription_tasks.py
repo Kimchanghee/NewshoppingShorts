@@ -25,6 +25,7 @@ from app.utils.subscription_manager import (
     get_subscription_summary,
 )
 from app.utils.payment_error_tracker import get_error_count_by_type
+from app.models.user_log import UserLog
 
 logger = logging.getLogger(__name__)
 
@@ -86,7 +87,7 @@ def task_send_expiry_notifications() -> dict:
     logger.info("[Scheduler] Starting expiry notification task...")
     
     notification_days = [7, 3, 1]  # D-7, D-3, D-1
-    sent_count = 0
+    recorded_count = 0
     failed_count = 0
     
     try:
@@ -96,9 +97,8 @@ def task_send_expiry_notifications() -> dict:
             for days, users in users_by_days.items():
                 for user in users:
                     try:
-                        # 알림 발송 (여기서는 로그만, 실제 구현은 이메일/푸시 서비스 연동)
-                        _send_expiry_notification(user, days)
-                        sent_count += 1
+                        if _send_expiry_notification(db, user, days):
+                            recorded_count += 1
                     except Exception as e:
                         logger.error(
                             f"[Scheduler] Failed to send notification to user={user.id}: {e}"
@@ -108,12 +108,12 @@ def task_send_expiry_notifications() -> dict:
             result = {
                 "task": "send_expiry_notifications",
                 "executed_at": datetime.now(timezone.utc).isoformat(),
-                "sent": sent_count,
+                "recorded": recorded_count,
                 "failed": failed_count,
                 "status": "completed",
             }
             
-            logger.info(f"[Scheduler] Expiry notifications sent: {result}")
+            logger.info(f"[Scheduler] Expiry notifications recorded: {result}")
             return result
     except Exception as e:
         logger.error(f"[Scheduler] Failed to send expiry notifications: {e}")
@@ -125,16 +125,16 @@ def task_send_expiry_notifications() -> dict:
         }
 
 
-def _send_expiry_notification(user, days_remaining: int) -> None:
+def _send_expiry_notification(db: Session, user, days_remaining: int) -> bool:
     """
-    만료 알림을 발송합니다 (플레이스홀더).
-    
-    실제 구현에서는 이메일/푸시 서비스와 연동하세요.
-    예: SendGrid, Firebase Cloud Messaging, 카카오 알림톡 등
+    앱에서 확인할 수 있도록 만료 알림 이벤트를 기록합니다.
+
+    사용자 팝업은 구독 상태 API의 ``expiry_notice``로 전달되고, 이 기록은
+    운영 감사와 동일 만료일에 대한 중복 기록 방지에 사용됩니다.
     """
-    # TODO: 실제 알림 서비스 연동
-    email = getattr(user, 'email', None)
-    user_id = getattr(user, 'id', 'unknown')
+    user_id = getattr(user, "id", None)
+    if user_id is None:
+        raise ValueError("알림 대상 사용자 ID가 없습니다.")
     
     if days_remaining == 7:
         message = "구독이 7일 후 만료됩니다. 갱신을 권장합니다."
@@ -145,10 +145,35 @@ def _send_expiry_notification(user, days_remaining: int) -> None:
     else:
         message = f"구독이 {days_remaining}일 후 만료됩니다."
     
-    logger.info(
-        f"[Notification] Expiry alert: user={user_id}, email={email}, "
-        f"days_remaining={days_remaining}, message={message}"
+    expiry = getattr(user, "subscription_expires_at", None)
+    notice_key = f"expiry:{expiry.isoformat() if expiry else 'unknown'}:{days_remaining}"
+    existing = (
+        db.query(UserLog)
+        .filter(
+            UserLog.user_id == user_id,
+            UserLog.action == "subscription_expiry_notice",
+            UserLog.content.like(f"{notice_key}|%"),
+        )
+        .first()
     )
+    if existing:
+        return False
+
+    db.add(
+        UserLog(
+            user_id=user_id,
+            level="INFO",
+            action="subscription_expiry_notice",
+            content=f"{notice_key}|{message}",
+        )
+    )
+    db.commit()
+    logger.info(
+        "[Notification] Expiry notice recorded: user_id=%s days_remaining=%s",
+        user_id,
+        days_remaining,
+    )
+    return True
 
 
 def task_generate_payment_health_report() -> dict:

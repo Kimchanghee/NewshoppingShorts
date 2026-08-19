@@ -86,6 +86,39 @@ def days_until_expiry(expiry_date: Optional[datetime]) -> int:
     return delta.days
 
 
+def build_expiry_notice(
+    expiry_date: Optional[datetime],
+    reference_dt: Optional[datetime] = None,
+) -> Optional[dict]:
+    """Build a localized in-app notice for the final 7/3/1-day bands."""
+    if not expiry_date:
+        return None
+
+    now = _ensure_aware(reference_dt) if reference_dt else _utcnow()
+    expiry = _ensure_aware(expiry_date)
+    remaining_seconds = max(0, int((expiry - now).total_seconds()))
+    if remaining_seconds <= 0:
+        return None
+
+    if remaining_seconds <= 86400:
+        band = 1
+        message = "구독이 24시간 안에 만료됩니다. 계속 이용하려면 구독을 갱신해 주세요."
+    elif remaining_seconds <= 3 * 86400:
+        band = 3
+        message = "구독 만료까지 3일 이내로 남았습니다. 구독 상태를 확인해 주세요."
+    elif remaining_seconds <= 7 * 86400:
+        band = 7
+        message = "구독 만료까지 7일 이내로 남았습니다. 미리 구독 상태를 확인해 주세요."
+    else:
+        return None
+
+    return {
+        "key": f"{expiry.isoformat()}:{band}",
+        "days_remaining": max(1, (remaining_seconds + 86399) // 86400),
+        "message": message,
+    }
+
+
 def get_trial_cycle_start(reference_dt: Optional[datetime] = None) -> datetime:
     """
     Return trial monthly cycle start as UTC datetime.

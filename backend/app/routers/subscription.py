@@ -25,6 +25,7 @@ from app.models.user import User, UserType
 from app.utils.payment_plans import FIXED_TEST_PLAN_IDS, PLAN_DAYS, PLAN_NAMES
 from app.utils.subscription_utils import (
     _ensure_aware,
+    build_expiry_notice,
     is_subscription_active,
     calculate_subscription_expiry,
 )
@@ -361,6 +362,7 @@ async def get_my_subscription_status(
         if user_type_value in ("admin", "subscriber"):
             subscription_expires_at = expiry.isoformat() if expiry else None
         remaining_seconds = _remaining_seconds(expiry) if subscription_expires_at else None
+        expiry_notice = build_expiry_notice(expiry) if subscription_expires_at else None
 
         return SubscriptionStatusResponse(
             success=True,
@@ -371,6 +373,7 @@ async def get_my_subscription_status(
             can_work=can_work,
             subscription_expires_at=subscription_expires_at,
             subscription_remaining_seconds=remaining_seconds,
+            expiry_notice=expiry_notice,
             plan_id=latest_plan_id if user_type_value == "subscriber" else None,
             plan_name=latest_plan_name if user_type_value == "subscriber" else None,
             last_payment_at=latest_payment_at.isoformat() if latest_payment_at else None,

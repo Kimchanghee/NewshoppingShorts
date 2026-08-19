@@ -28,6 +28,7 @@ import config
 from utils.logging_config import get_logger
 from utils.payment_client import PaymentClient
 from ui.design_system_v2 import get_design_system, get_color, ds
+from user_facing_errors import sanitize_user_message
 
 logger = get_logger(__name__)
 
@@ -1007,7 +1008,9 @@ class PaymentForm(QWidget):
         self.pay_btn.setEnabled(enabled)
 
     def set_status(self, status: str):
-        self.status_label.setText(status)
+        self.status_label.setText(
+            sanitize_user_message(status, fallback="결제 상태를 확인해 주세요.")
+        )
 
     def set_payment_method(self, method: str, notify: bool = True):
         normalized = method if method in PAYAPP_METHOD_LABELS else "vbank"
@@ -1547,9 +1550,13 @@ class SubscriptionPanel(QWidget):
                 webbrowser.open(payurl)
             self._start_poll()
         except RuntimeError as e:
-            message = str(e).strip() or "결제 요청에 실패했습니다. 잠시 후 다시 시도해주세요."
-            logger.error("[Subscription] PayApp checkout failed: %s", message)
-            show_error(self, "오류", message)
+            raw_message = str(e).strip()
+            logger.error("[Subscription] PayApp checkout failed: %s", raw_message)
+            message = sanitize_user_message(
+                raw_message,
+                fallback="결제 요청을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.",
+            )
+            show_error(self, "결제 오류", message)
             self.payment_form.set_status(message)
         except Exception as e:
             logger.exception("[Subscription] PayApp checkout failed unexpectedly")
