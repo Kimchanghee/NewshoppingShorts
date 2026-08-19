@@ -24,7 +24,7 @@
       "handle": "filesystem"
     },
     {
-      "src": "^/(?:notice|contact|samples)(?:/.*)?$",
+      "src": "^/(?:notice|contact|samples|privacy)(?:/.*)?$",
       "dest": "/index.html"
     },
     {

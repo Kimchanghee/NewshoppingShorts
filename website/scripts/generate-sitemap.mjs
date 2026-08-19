@@ -24,6 +24,7 @@ const baseRoutes = [
   { loc: "/notice/index.html", lastmod: "2026-08-15" },
   { loc: "/samples/index.html", lastmod: "2026-08-16", videos: SAMPLE_MEDIA },
   { loc: "/contact/index.html", lastmod: "2026-08-15" },
+  { loc: "/privacy/index.html", lastmod: "2026-08-19" },
 ];
 
 const noticeRoutes = NOTICE_SLUGS.map((slug) => ({

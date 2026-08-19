@@ -5,11 +5,11 @@ import ScrollToHash from "@/components/ScrollToHash";
 import { ThemeProvider } from "@/components/theme-provider";
 import { HelmetProvider } from "react-helmet-async";
 import Analytics from "@/components/Analytics";
-
 const Index = lazy(() => import("./pages/Index"));
 const Notice = lazy(() => import("./pages/Notice"));
 const Contact = lazy(() => import("./pages/Contact"));
 const Samples = lazy(() => import("./pages/Samples"));
+const Privacy = lazy(() => import("./pages/Privacy"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 
 const queryClient = new QueryClient();
@@ -32,6 +32,8 @@ const App = () => (
               <Route path="/contact/index.html" element={<Contact />} />
               <Route path="/samples" element={<Samples />} />
               <Route path="/samples/index.html" element={<Samples />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/privacy/index.html" element={<Privacy />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>
