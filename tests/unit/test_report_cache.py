@@ -256,6 +256,60 @@ def test_publish_safe_cache_reuses_verified_platform_report(tmp_path, monkeypatc
     assert cached["auto_publish_safe"] is True
 
 
+def test_publish_safe_cache_reuses_verified_download_only_platform_report(
+    tmp_path, monkeypatch
+):
+    cache_root = tmp_path / "cache"
+    run_dir = cache_root / "platform-download"
+    video = run_dir / "downloaded.mp4"
+    video.parent.mkdir(parents=True, exist_ok=True)
+    video.write_bytes(b"v" * (128 * 1024))
+    product_url = "https://www.coupang.com/vp/products/9411394523"
+    partner_url = "https://link.coupang.com/a/newPartnerCode"
+    _write_report(
+        run_dir / "report_platform_20260819_010203_abcd1234.json",
+        {
+            "ok": True,
+            "download_only": True,
+            "sourcing_method": "platform_video",
+            "coupang_url": partner_url,
+            "product_info": {"name": "fountain water gun", "url": product_url},
+            "hit": {
+                "platform": "douyin",
+                "title": "fountain water gun demo",
+                "video_url": "https://www.douyin.com/video/7397297191397739811",
+                "relevance_score": 0.96,
+            },
+            "selected_source_url": (
+                "https://www.douyin.com/video/7397297191397739811"
+            ),
+            "downloaded_video": str(video),
+            "auto_publish_safe": True,
+            "requires_review": False,
+            "render_integrity": {
+                "ok": True,
+                "source": "platform_video_download",
+                "platform": "douyin",
+            },
+        },
+        mtime=300,
+    )
+    monkeypatch.setenv("SSMAKER_SOURCING_CACHE_ROOT", str(cache_root))
+
+    cached = find_cached_publish_safe_video(
+        partner_url,
+        {"name": "fountain water gun", "url": product_url},
+        tmp_path / "new-run",
+        used_source_ids=set(),
+        min_similarity_score=0.8,
+    )
+
+    assert cached is not None
+    assert cached["video_file"] == str(video.resolve())
+    assert cached["source"] == "douyin"
+    assert cached["auto_publish_safe"] is True
+
+
 def test_publish_safe_cache_rejects_paths_outside_cache_root(tmp_path, monkeypatch):
     cache_root = tmp_path / "cache"
     report_dir = cache_root / "reports"

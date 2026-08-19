@@ -131,7 +131,7 @@ class SourcingPipeline:
         enforce_min_similarity: bool = True,
         fallback_product_name: str = "",
         fallback_category: str = "",
-        allow_product_image_fallback: bool = True,
+        allow_product_image_fallback: bool = False,
     ):
         """
         Args:
@@ -142,9 +142,9 @@ class SourcingPipeline:
             min_similarity_score: Final marketplace match gate (0.0-1.0).
             enforce_min_similarity: Block automation when no marketplace
                 product reaches min_similarity_score.
-            allow_product_image_fallback: Create a static Coupang-image video
-                after all real-video searches fail. Disable for search-only
-                diagnostics and smoke tests.
+            allow_product_image_fallback: Internal review-tool opt-in for a
+                static Coupang-image artifact. Production automation keeps
+                this disabled because a product photo is not a sourced video.
         """
         self.coupang_url = coupang_url
         self.output_dir = output_dir
@@ -1733,7 +1733,7 @@ class SourcingPipeline:
             and report.get("requires_review") is False
             and isinstance(report.get("render_integrity"), dict)
             and report["render_integrity"].get("ok") is True
-            and report.get("final_video")
+            and (report.get("final_video") or report.get("downloaded_video"))
             and isinstance(report.get("hit"), dict)
         ):
             platform_hit = dict(report["hit"])
@@ -1760,7 +1760,9 @@ class SourcingPipeline:
                     "url": source_url,
                     "source_id": report.get("selected_source_id") or "",
                     "similarity": similarity,
-                    "video_file": report.get("final_video"),
+                    "video_file": (
+                        report.get("final_video") or report.get("downloaded_video")
+                    ),
                     "auto_publish_safe": True,
                     "requires_review": False,
                 }

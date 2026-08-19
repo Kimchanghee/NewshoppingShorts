@@ -56,10 +56,34 @@ def _strip_unrenderable(text: str) -> str:
 
 def _escape_drawtext(text: str) -> str:
     """Escape text for ffmpeg drawtext."""
-    t = _strip_unrenderable(text)
+    t = _truncate_hook_text(_strip_unrenderable(text))
     t = t.replace("\\", "").replace("'", "").replace(":", "\\:").replace("%", "\\%")
     t = re.sub(r"[\r\n]+", " ", t).strip()
-    return t[:40]
+    return t
+
+
+def _truncate_hook_text(text: str, max_units: int = 38) -> str:
+    """Keep a one-line hook inside the 1080px Shorts safe area.
+
+    Hangul/CJK glyphs are approximately twice as wide as Latin glyphs in the
+    bundled font. Counting display units prevents long product names from
+    being centered with both ends outside the frame.
+    """
+    normalized = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not normalized:
+        return ""
+    units = 0
+    kept: list[str] = []
+    truncated = False
+    for char in normalized:
+        width = 2 if ord(char) >= 0x2E80 else 1
+        if units + width > max(4, int(max_units)) - 2:
+            truncated = True
+            break
+        kept.append(char)
+        units += width
+    result = "".join(kept).rstrip()
+    return result + ("…" if truncated and result else "")
 
 
 def build_reedit_cmd(
@@ -95,8 +119,9 @@ def build_reedit_cmd(
         if txt:
             vf += (
                 f",drawtext=fontfile='{_ffmpeg_font_path(font)}':text='{txt}':"
-                f"fontcolor=white:fontsize=64:borderw=6:bordercolor=black:"
-                f"x=(w-text_w)/2:y=140"
+                f"fontcolor=white:fontsize=48:borderw=5:bordercolor=black:"
+                f"box=1:boxcolor=black@0.45:boxborderw=16:"
+                f"x=(w-text_w)/2:y=140:fix_bounds=1"
             )
 
     use_bgm = bool(bgm_path and os.path.exists(bgm_path))

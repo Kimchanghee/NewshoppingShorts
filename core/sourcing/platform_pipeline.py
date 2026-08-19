@@ -19,6 +19,7 @@ import re
 import time
 import uuid
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urljoin
 
 from utils.logging_config import get_logger
 
@@ -199,6 +200,49 @@ def _resolve_purchase_link(coupang_url: str) -> Dict[str, str]:
     except Exception as e:
         logger.debug("[PlatformPipeline] API 딥링크 생략: %s", e)
     return {"purchase_url": coupang_url, "deep_link": "", "source": "original"}
+
+
+def _resolve_partner_product_url(coupang_url: str) -> str:
+    """Resolve one trusted Partners short link to its Coupang product URL.
+
+    Cache matching is based on the stable Coupang product id. A newly issued
+    affiliate code for the same product must therefore be resolved before we
+    give up on an already verified marketplace video. Redirect following is
+    deliberately disabled: only the first Location header is inspected and it
+    is accepted only when it is another official HTTPS Coupang URL containing
+    a product id.
+    """
+    from core.sourcing.report_cache import extract_coupang_product_id
+    from utils.url_security import (
+        is_coupang_partner_link,
+        is_official_coupang_url,
+    )
+
+    source = str(coupang_url or "").strip()
+    if not is_coupang_partner_link(source):
+        return source if extract_coupang_product_id(source) else ""
+
+    try:
+        import requests
+
+        response = requests.get(
+            source,
+            allow_redirects=False,
+            stream=True,
+            timeout=(3.0, 5.0),
+            headers={"User-Agent": "Mozilla/5.0 (SSMaker cache resolver)"},
+        )
+        try:
+            location = urljoin(source, str(response.headers.get("Location") or ""))
+        finally:
+            response.close()
+    except Exception as exc:
+        logger.info("[PlatformPipeline] 파트너스 상품 URL 확인 생략: %s", type(exc).__name__)
+        return ""
+
+    if not is_official_coupang_url(location, allow_shortlinks=False):
+        return ""
+    return location if extract_coupang_product_id(location) else ""
 
 
 def _failure(
@@ -383,6 +427,7 @@ async def run_platform_sourcing(
     before_commit: BeforeCommitCb = None,
     download_only: bool = False,
     platform_min_relevance_score: Optional[float] = None,
+    allow_image_fallback: bool = False,
 ) -> Dict[str, Any]:
     """쿠팡 링크 → 3플랫폼 소싱 + 재편집. 결과 report dict 반환(업로드는 호출자 몫)."""
     from core.sourcing.coupang_scraper import scrape_product
@@ -438,8 +483,8 @@ async def run_platform_sourcing(
     async def try_review_image_fallback(
         triggering_failure: Dict[str, Any],
     ) -> bool:
-        """Create a local review artifact without promoting it to auto-upload."""
-        if download_only:
+        """Create an explicitly opted-in review artifact without charging work."""
+        if download_only or not allow_image_fallback:
             return False
         image_url = str(product.get("image") or "").strip()
         if not image_url.startswith(("http://", "https://", "//")):
@@ -464,22 +509,6 @@ async def run_platform_sourcing(
         fallback_video = str(fallback.get("video_file") or "")
         if not fallback_video or not os.path.exists(fallback_video):
             return False
-        if before_commit is not None:
-            try:
-                before_commit(fallback_video)
-            except Exception as exc:
-                report["failure"] = _failure(
-                    "work_finalize_failed",
-                    f"검토용 영상의 사용량을 확정하지 못했습니다 ({type(exc).__name__}).",
-                    "저장된 영상을 확인한 뒤 작업을 다시 시도해 주세요.",
-                )
-                report["error"] = format_failure_message(
-                    "검토용 영상은 만들었지만 작업을 확정하지 못했어요.",
-                    report["failure"],
-                )
-                report["blocked_stages"] = list(report["failure"]["blocked_stages"])
-                return False
-
         fallback = dict(fallback)
         fallback.setdefault("platform", "coupang_image")
         fallback.setdefault("via", "product_image")
@@ -527,6 +556,43 @@ async def run_platform_sourcing(
             product_error = type(exc).__name__
             product = {}
 
+        # A failed report may contain a newly issued affiliate URL and a valid
+        # product name, but no stable product id. Resolve that trusted short
+        # link once and prefer metadata from the destination product. Without
+        # this step the incomplete report shadows an older verified video and
+        # needlessly sends the run back to blocked marketplace searches.
+        try:
+            from core.sourcing.report_cache import extract_coupang_product_id
+
+            cached_product_url = str(product.get("url") or "")
+            needs_stable_product_id = bool(product) and not extract_coupang_product_id(
+                cached_product_url
+            )
+        except Exception:
+            needs_stable_product_id = False
+        if needs_stable_product_id:
+            original_product_name = str(
+                product.get("name") or product.get("title") or ""
+            ).strip()
+            resolved_product_url = _resolve_partner_product_url(coupang_url)
+            if resolved_product_url and resolved_product_url != coupang_url:
+                try:
+                    resolved_product = dict(
+                        find_cached_product_info(resolved_product_url) or {}
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "[PlatformPipeline] resolved 상품 캐시 확인 실패: %s", exc
+                    )
+                    resolved_product = {}
+                if resolved_product:
+                    product = resolved_product
+                product = dict(product)
+                if original_product_name:
+                    product["name"] = original_product_name
+                product["url"] = resolved_product_url
+                product["affiliate_url"] = coupang_url
+
         hint = str(product_name_hint or "").strip()
         if hint:
             product = dict(product or {})
@@ -571,6 +637,30 @@ async def run_platform_sourcing(
                         "source": "publish_safe_video_cache",
                     }
                     product_name = cached_title
+
+        if not product_name:
+            # With no cached metadata at all, resolve the trusted affiliate
+            # redirect only after the URL-only safe-cache preflight missed.
+            # This keeps the common cache path fast and still avoids opening a
+            # full browser merely to learn the stable Coupang product id.
+            resolved_product_url = _resolve_partner_product_url(coupang_url)
+            if resolved_product_url and resolved_product_url != coupang_url:
+                try:
+                    from core.sourcing.report_cache import find_cached_product_info
+
+                    product = dict(find_cached_product_info(resolved_product_url) or {})
+                except Exception as exc:
+                    logger.warning(
+                        "[PlatformPipeline] resolved 상품 캐시 확인 실패: %s", exc
+                    )
+                    product = {}
+                product_name = str(
+                    product.get("name") or product.get("title") or ""
+                ).strip()
+                if product_name:
+                    product = dict(product)
+                    product["url"] = resolved_product_url
+                    product["affiliate_url"] = coupang_url
 
         if not product_name:
             if not await ensure_browser("product_analysis"):

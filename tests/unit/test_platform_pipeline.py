@@ -110,6 +110,55 @@ def test_explicit_platform_video_threshold_fails_closed(required):
         pp._platform_relevance_threshold(0.9, required_score=required)
 
 
+def test_partner_short_link_resolves_only_to_official_product_url(monkeypatch):
+    class Response:
+        headers = {
+            "Location": "https://www.coupang.com/vp/products/9411394523?itemId=1"
+        }
+
+        def close(self):
+            pass
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda *_args, **_kwargs: Response())
+
+    resolved = pp._resolve_partner_product_url(
+        "https://link.coupang.com/a/newAffiliateCode"
+    )
+
+    assert resolved.startswith("https://www.coupang.com/vp/products/9411394523")
+
+
+@pytest.mark.parametrize(
+    "location",
+    [
+        "https://evil.example/vp/products/9411394523",
+        "http://www.coupang.com/vp/products/9411394523",
+        "https://www.coupang.com/np/search?q=test",
+    ],
+)
+def test_partner_short_link_rejects_untrusted_or_non_product_redirect(
+    monkeypatch, location
+):
+    class Response:
+        headers = {"Location": location}
+
+        def close(self):
+            pass
+
+    import requests
+
+    monkeypatch.setattr(requests, "get", lambda *_args, **_kwargs: Response())
+
+    assert (
+        pp._resolve_partner_product_url(
+            "https://link.coupang.com/a/newAffiliateCode"
+        )
+        == ""
+    )
+
+
 def test_chinese_platform_queries_drop_korean_and_prefer_chinese():
     assert searcher._queries_for_chinese_platform(
         ["无线手持吸尘器 2代 ROMIN", "무선 미니 청소기", "wireless vacuum"]
@@ -205,6 +254,29 @@ def test_reedit_cmd_bgm_replaces_audio(tmp_path):
     )
     assert "-stream_loop" in cmd and "-shortest" in cmd
     assert "-map" in cmd  # 원본 오디오 대신 BGM 매핑
+
+
+def test_reedit_hook_is_truncated_to_vertical_video_safe_width(tmp_path):
+    src = tmp_path / "in.mp4"
+    font = tmp_path / "font.ttf"
+    src.write_bytes(b"x")
+    font.write_bytes(b"font")
+    hook = "[대용량] 알앤엘 1+1 회오리 분수 주사기 물총 2개 1세트 핑크 퍼플"
+
+    truncated = reeditor._truncate_hook_text(hook)
+    cmd = reeditor.build_reedit_cmd(
+        str(src),
+        str(tmp_path / "out.mp4"),
+        hook_text=hook,
+        font_path=str(font),
+    )
+    joined = " ".join(cmd)
+
+    assert truncated.endswith("…")
+    assert len(truncated) < len(hook)
+    assert "fontsize=48" in joined
+    assert "fix_bounds=1" in joined
+    assert "boxcolor=black@0.45" in joined
 
 
 # ── uploaded_registry: 소스 재사용 차단 ──
@@ -1153,7 +1225,10 @@ def test_safe_cached_video_bypasses_coupang_and_platform_browsers(
     assert cached_source.exists(), "shared cached input must not be deleted"
 
 
-def test_browser_failure_creates_review_only_image_video(monkeypatch, tmp_path):
+@pytest.mark.parametrize("allow_image_fallback", [False, True])
+def test_browser_failure_does_not_promote_or_charge_image_fallback(
+    monkeypatch, tmp_path, allow_image_fallback
+):
     from core.sourcing import pipeline as sourcing_pipeline
     from core.sourcing import report_cache
 
@@ -1176,6 +1251,7 @@ def test_browser_failure_creates_review_only_image_video(monkeypatch, tmp_path):
         "find_cached_publish_safe_video",
         lambda **_kwargs: None,
     )
+    monkeypatch.setattr(pp, "_resolve_partner_product_url", lambda _url: "")
 
     async def fake_image_fallback(**_kwargs):
         return {
@@ -1216,17 +1292,24 @@ def test_browser_failure_creates_review_only_image_video(monkeypatch, tmp_path):
         "https://link.coupang.com/a/f8i3PuVSqi",
         output_dir=str(tmp_path / "output"),
         before_commit=committed.append,
+        allow_image_fallback=allow_image_fallback,
     ))
 
-    assert report["ok"] is True
-    assert report["source_kind"] == "coupang_image"
-    assert report["auto_publish_safe"] is False
-    assert report["requires_review"] is True
-    assert report["fallback_reason"] == "no_marketplace_video"
-    assert report["final_video"] == str(fallback_video)
-    assert report["blocked_stages"] == ["youtube_upload", "linktree_publish"]
-    assert report["fallback_failure"]["code"] == "browser_start_failed"
-    assert committed == [str(fallback_video)]
+    if allow_image_fallback:
+        assert report["ok"] is True
+        assert report["source_kind"] == "coupang_image"
+        assert report["auto_publish_safe"] is False
+        assert report["requires_review"] is True
+        assert report["fallback_reason"] == "no_marketplace_video"
+        assert report["final_video"] == str(fallback_video)
+        assert report["blocked_stages"] == ["youtube_upload", "linktree_publish"]
+        assert report["fallback_failure"]["code"] == "browser_start_failed"
+    else:
+        assert report["ok"] is False
+        assert report["source_kind"] == ""
+        assert report["final_video"] == ""
+        assert report["failure"]["code"] == "browser_start_failed"
+    assert committed == []
 
 
 def test_download_only_stops_before_reedit_and_keeps_source(monkeypatch, tmp_path):

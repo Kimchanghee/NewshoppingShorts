@@ -1528,6 +1528,7 @@ class SourcingPanel(QWidget):
                 gemini_client=gemini_client,
                 min_similarity_score=min_similarity_score,
                 before_commit=finalize_before_commit,
+                allow_image_fallback=False,
             ))
             if not report.get("ok"):
                 self._safe_set_platform_failure(report)
@@ -1765,6 +1766,7 @@ class SourcingPanel(QWidget):
             gemini_client=gemini_client,
             min_similarity_score=min_similarity_score,
             enforce_min_similarity=True,
+            allow_product_image_fallback=False,
         )
         self._pipeline = pipeline
 
@@ -1948,7 +1950,7 @@ class SourcingPanel(QWidget):
         if enqueued > 0:
             logger.info("[SourcingPanel] Total %d videos enqueued", enqueued)
             if len(source_items) > 1:
-                logger.info("[SourcingPanel] One-link policy active: queued only the first valid sourced video")
+                logger.info("[SourcingPanel] 단일 작업 정책: 첫 번째 유효 영상만 목록에 추가")
 
             # Linktree auto-publish (prefer Partners deep link, fall back to
             # the original Coupang URL so the action is not silently skipped
