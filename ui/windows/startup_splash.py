@@ -13,6 +13,7 @@ from PyQt6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter,
 from PyQt6.QtWidgets import QApplication, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 from ui.theme_manager import get_theme_manager
+from user_facing_errors import sanitize_user_message
 
 
 class AnimatedLogo(QLabel):
@@ -254,8 +255,11 @@ class StartupSplash(QWidget):
 
     def set_status(self, text):
         """Update status text (maintains backward compatibility)."""
-        self._status_text = text
-        self.status_label.setText(text)
+        self._status_text = sanitize_user_message(
+            text,
+            fallback="프로그램을 준비하고 있어요.",
+        )
+        self.status_label.setText(self._status_text)
 
     def set_progress(self, value):
         """Update progress bar (maintains backward compatibility)."""

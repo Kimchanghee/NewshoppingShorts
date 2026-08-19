@@ -359,6 +359,7 @@ class LinktreeSetupPanel(QWidget):
                 from managers.linktree_manager import get_linktree_manager
                 ok = bool(get_linktree_manager().test_connection())
             except Exception as exc:  # pragma: no cover - network/runtime
+                logger.warning("[LinktreeSetup] connection test failed: %s", exc)
                 detail = str(exc)
                 ok = False
             self._test_finished.emit(ok, detail)
@@ -375,7 +376,7 @@ class LinktreeSetupPanel(QWidget):
         else:
             msg = "테스트에 실패했어요. 자동 등록 주소와 설정 상태를 확인한 뒤 다시 시도하세요."
             if detail:
-                msg += f" (상세: {detail[:120]})"
+                logger.warning("[LinktreeSetup] connection test detail: %s", detail)
             self.test_status.setText(msg)
             self.test_status.setStyleSheet(f"color: {get_color('error')}; font-size: 12px; border: none; background: transparent;")
 
@@ -394,7 +395,7 @@ class LinktreeSetupPanel(QWidget):
             self._persist()
         except Exception as exc:
             logger.error("[LinktreeSetup] save failed: %s", exc)
-            show_warning(self, "저장 실패", f"설정을 저장하지 못했어요.\n{exc}")
+            show_warning(self, "저장 실패", "설정을 저장하지 못했어요. 입력 내용을 확인한 뒤 다시 시도해 주세요.")
             return
 
         if callable(self._on_saved):

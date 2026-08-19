@@ -12,7 +12,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QColor, QMouseEvent
 
 from ..design_system_v2 import get_design_system, get_color
-from user_facing_errors import sanitize_user_message
+from user_facing_errors import sanitize_user_message, sanitize_user_title
 
 
 _TITLE_MAP = {
@@ -56,11 +56,18 @@ class _DialogTitleBar(QFrame):
         super().mousePressEvent(event)
 
 
-def _localize_title(title: str) -> str:
+def _localize_title(title: str, dialog_type: str = "info") -> str:
+    fallback = {
+        "error": "오류",
+        "warning": "확인 필요",
+        "question": "확인",
+        "success": "완료",
+    }.get(dialog_type, "안내")
     raw = (title or "").strip()
     if not raw:
-        return "안내"
-    return _TITLE_MAP.get(raw.lower(), raw)
+        return fallback
+    localized = _TITLE_MAP.get(raw.lower(), raw)
+    return sanitize_user_title(localized, fallback=fallback)
 
 
 def _localize_button_text(text: str) -> str:
@@ -70,8 +77,13 @@ def _localize_button_text(text: str) -> str:
     return _BUTTON_MAP.get(raw.lower(), raw)
 
 
-def _localize_message(message: str) -> str:
-    raw = sanitize_user_message(message, fallback="잠시 후 다시 시도해 주세요.").strip()
+def _localize_message(message: str, dialog_type: str = "info") -> str:
+    fallback = {
+        "error": "작업을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.",
+        "warning": "확인이 필요한 문제가 있어요. 내용을 확인한 뒤 다시 시도해 주세요.",
+        "question": "내용을 확인한 뒤 선택해 주세요.",
+    }.get(dialog_type, "잠시 후 다시 시도해 주세요.")
+    raw = sanitize_user_message(message, fallback=fallback).strip()
     if not raw:
         return raw
 
@@ -99,9 +111,9 @@ class CustomDialog(QDialog):
         super().__init__(parent)
         self.result_value = None
         self.ds = get_design_system()
-        title = _localize_title(title)
-        message = _localize_message(message)
         dialog_type = dialog_type if dialog_type in _TYPE_META else "info"
+        title = _localize_title(title, dialog_type)
+        message = _localize_message(message, dialog_type)
         icon_char, status_text, status_color_name = _TYPE_META[dialog_type]
         icon_color = get_color(status_color_name)
         self.setObjectName("customAlertDialog")

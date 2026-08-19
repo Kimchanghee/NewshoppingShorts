@@ -29,6 +29,7 @@ from managers.account_registry import (
     data_dir,
     secure_account_token_key,
 )
+from user_facing_errors import sanitize_user_message
 
 
 class _ConnectWorker(QObject):
@@ -147,6 +148,14 @@ class MultiAccountPanel(QWidget):
 
     def _show_toast(self, msg: str, kind: str = "info",
                     action_text: str = None, action_cb=None, ms: int = 3500):
+        msg = sanitize_user_message(
+            msg,
+            fallback=(
+                "작업을 완료하지 못했어요. 잠시 후 다시 시도해 주세요."
+                if kind in {"warning", "error"}
+                else "상태를 확인해 주세요."
+            ),
+        )
         accent = {"info": "text_secondary", "success": "success",
                   "warning": "warning", "error": "error"}.get(kind, "text_secondary")
         self._toast_bar.setStyleSheet(

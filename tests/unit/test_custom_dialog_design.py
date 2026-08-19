@@ -107,3 +107,35 @@ def test_remaining_popup_paths_do_not_construct_native_message_boxes():
 
     assert "QMessageBox" not in sourcing
     assert "QMessageBox" not in system_check
+
+
+def test_alert_hides_internal_codes_and_raw_english_errors(qapp):
+    dialog = CustomDialog(
+        None,
+        "PermissionError: Access denied",
+        "[caller.rest/LOGIN_REJECTED]\nInvalid credentials for request_id=abc123",
+        "error",
+    )
+    qapp.processEvents()
+
+    message = dialog.findChild(QLabel, "dialogMessageLabel").text()
+    assert dialog.windowTitle() == "오류"
+    assert "PermissionError" not in dialog.windowTitle()
+    assert "LOGIN_REJECTED" not in message
+    assert "request_id" not in message
+    assert "Invalid credentials" not in message
+    assert any("아이디" in label.text() for label in dialog.findChildren(QLabel))
+    dialog.close()
+
+
+def test_user_message_surfaces_keep_technical_details_out_of_ui_contract():
+    root = Path(__file__).resolve().parents[2]
+    login_window = (root / "ui" / "windows" / "login_window.py").read_text(encoding="utf-8")
+    progress_panel = (root / "ui" / "panels" / "progress_panel.py").read_text(encoding="utf-8")
+    multi_account = (root / "ui" / "panels" / "multi_account_panel.py").read_text(encoding="utf-8")
+    final_video = (root / "core" / "video" / "CreateFinalVideo.py").read_text(encoding="utf-8")
+
+    assert 'display_msg = f"[{error_module}/{error_code}]' not in login_window
+    assert "sanitize_user_message(task_text" in progress_panel
+    assert "msg = sanitize_user_message(" in multi_account
+    assert 'show_error(app.root, "영상 만들기 실패", error_msg)' in final_video

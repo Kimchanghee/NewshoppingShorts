@@ -1,4 +1,8 @@
-from user_facing_errors import sanitize_user_message, friendly_error_title
+from user_facing_errors import (
+    friendly_error_title,
+    sanitize_user_message,
+    sanitize_user_title,
+)
 from app.batch_handler import BatchHandler
 
 
@@ -67,3 +71,91 @@ def test_youtube_oauth_missing_message_is_customer_friendly():
     assert message == "설정에서 YouTube를 다시 연결해 주세요."
     assert "OAuth token" not in message
     assert "pending queue" not in message
+
+
+def test_active_job_english_exception_is_fully_localized():
+    raw = (
+        "Only one active job is allowed. Finish or clear the current "
+        "waiting/processing item first."
+    )
+
+    message = sanitize_user_message(raw)
+
+    assert "대기 중이거나 진행 중인 영상 작업" in message
+    assert "Only one" not in message
+    assert "waiting" not in message
+    assert "processing" not in message
+
+
+def test_internal_login_prefix_is_removed_but_korean_guidance_is_kept():
+    raw = (
+        "[caller.rest/LOGIN_REJECTED]\n"
+        "아이디 또는 비밀번호가 맞는지 다시 확인해 주세요."
+    )
+
+    message = sanitize_user_message(raw)
+
+    assert message == "아이디 또는 비밀번호가 맞는지 다시 확인해 주세요."
+    assert "caller.rest" not in message
+    assert "LOGIN_REJECTED" not in message
+
+
+def test_login_rate_limit_is_fully_localized():
+    raw = "[caller.rest/LOGIN_RATE_LIMITED] Too many login attempts. Please try again later."
+
+    message = sanitize_user_message(raw)
+
+    assert friendly_error_title(raw) == "잠시 후 다시 로그인해 주세요"
+    assert "로그인 시도가 잠시 제한" in message
+    assert "Too many" not in message
+    assert "LOGIN_RATE_LIMITED" not in message
+
+
+def test_legacy_error_code_and_request_id_are_not_shown():
+    raw = "[EU001] 아이디 또는 비밀번호를 확인해 주세요.\n요청 ID: req-1234"
+
+    message = sanitize_user_message(raw)
+
+    assert message == "아이디 또는 비밀번호를 확인해 주세요."
+    assert "EU001" not in message
+    assert "req-1234" not in message
+
+
+def test_startup_recovery_code_and_module_name_are_removed():
+    raw = "- [ST-U204] integration.inpock: 해당 기능을 다시 설정해 주세요."
+
+    message = sanitize_user_message(raw)
+
+    assert message == "- 해당 기능을 다시 설정해 주세요."
+    assert "ST-U204" not in message
+    assert "integration.inpock" not in message
+
+
+def test_mixed_korean_and_raw_exception_keeps_only_actionable_copy():
+    raw = "설정을 저장하지 못했어요.\nPermissionError: [WinError 5] Access is denied"
+
+    message = sanitize_user_message(raw)
+
+    assert message == "설정을 저장하지 못했어요."
+    assert "PermissionError" not in message
+    assert "WinError" not in message
+    assert "Access is denied" not in message
+
+
+def test_unknown_english_exception_falls_back_to_korean():
+    raw = "Unexpected provider invocation failed inside worker bridge"
+
+    message = sanitize_user_message(raw, fallback="작업을 완료하지 못했어요.")
+
+    assert message == "작업을 완료하지 못했어요."
+
+
+def test_safe_product_names_and_output_path_are_not_removed():
+    raw = "YouTube 연결을 완료했어요.\n저장 위치: C:\\Videos\\result.mp4"
+
+    assert sanitize_user_message(raw) == raw
+
+
+def test_developer_facing_title_is_replaced():
+    assert sanitize_user_title("PermissionError: Access denied", fallback="오류") == "오류"
+    assert sanitize_user_title("???ㅻ쪟", fallback="오류") == "오류"

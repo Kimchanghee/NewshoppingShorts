@@ -34,6 +34,7 @@ from managers.coupang_manager import get_coupang_manager
 from managers.linktree_manager import get_linktree_manager
 from managers.tiktok_manager import get_tiktok_manager
 from utils.url_security import is_trusted_service_url
+from user_facing_errors import sanitize_user_message, sanitize_user_title
 import config
 
 # Gemini API 키 패턴 검증
@@ -1870,7 +1871,11 @@ class SettingsTab(QWidget, ThemedMixin):
         if not hasattr(self, "setup_log"):
             return
         ts = datetime.now().strftime("%H:%M:%S")
-        self.setup_log.append(f"[{ts}] {message}")
+        safe_message = sanitize_user_message(
+            message,
+            fallback="작업을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.",
+        )
+        self.setup_log.append(f"[{ts}] {safe_message}")
         self.setup_log.verticalScrollBar().setValue(self.setup_log.verticalScrollBar().maximum())
 
     def _append_setup_monitor(self, message: str):
@@ -1878,7 +1883,11 @@ class SettingsTab(QWidget, ThemedMixin):
         if not hasattr(self, "setup_monitor"):
             return
         ts = datetime.now().strftime("%H:%M:%S")
-        self.setup_monitor.append(f"[{ts}] {message}")
+        safe_message = sanitize_user_message(
+            message,
+            fallback="상태를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.",
+        )
+        self.setup_monitor.append(f"[{ts}] {safe_message}")
         self.setup_monitor.verticalScrollBar().setValue(
             self.setup_monitor.verticalScrollBar().maximum()
         )
@@ -1887,7 +1896,9 @@ class SettingsTab(QWidget, ThemedMixin):
         """Replace the compact monitor text."""
         if not hasattr(self, "setup_monitor"):
             return
-        self.setup_monitor.setPlainText(str(message or "").strip())
+        self.setup_monitor.setPlainText(
+            sanitize_user_message(message, fallback="상태를 확인하고 있어요.")
+        )
 
     def _set_setup_current_action(
         self,
@@ -1898,8 +1909,13 @@ class SettingsTab(QWidget, ThemedMixin):
         show_done: bool,
     ):
         """Update current-action card content and buttons."""
-        self.setup_current_title.setText(title)
-        desc = str(description or "").strip()
+        self.setup_current_title.setText(
+            sanitize_user_title(title, fallback="설정 확인")
+        )
+        desc = sanitize_user_message(
+            description,
+            fallback="화면의 안내에 따라 설정을 계속해 주세요.",
+        )
         if show_done:
             desc += "\n\n팁: code/프로필 URL/API 키를 복사하면 클립보드 자동감지로 입력됩니다."
         self.setup_current_desc.setText(desc)
@@ -3102,7 +3118,14 @@ class SettingsTab(QWidget, ThemedMixin):
                     bridge_url or DEFAULT_COMPUTER_USE_BRIDGE_URL
                 )
             except ValueError as exc:
-                show_error(self, "저장 실패", str(exc))
+                show_error(
+                    self,
+                    "저장 실패",
+                    sanitize_user_message(
+                        exc,
+                        fallback="자동 설정 서버 주소를 확인해 주세요.",
+                    ),
+                )
                 return
             if not bridge_api_key:
                 show_error(self, "저장 실패", "공용 서버 브리지를 사용하려면 브리지 API 키가 필요합니다.")
@@ -3127,7 +3150,8 @@ class SettingsTab(QWidget, ThemedMixin):
             self._refresh_computer_use_access_ui()
             show_info(self, "저장 완료", "Codex CLI 설정을 저장했습니다.")
         except Exception as exc:
-            show_error(self, "저장 실패", f"Codex CLI 설정 저장 중 오류가 발생했습니다.\n{exc}")
+            logger.error("[Settings] Codex settings save failed: %s", exc)
+            show_error(self, "저장 실패", "자동 설정 정보를 저장하지 못했어요. 다시 시도해 주세요.")
 
     @staticmethod
     def _resolve_codex_binary(configured_path: str) -> str:
@@ -3749,14 +3773,18 @@ class SettingsTab(QWidget, ThemedMixin):
                     template_id,
                 )
             except Exception as exc:
-                show_error(self, "연결 오류", f"자동 설정 서버에 연결하지 못했어요.\n잠시 후 다시 시도해주세요.\n\n({exc})")
+                logger.error("[Settings] setup bridge request failed: %s", exc)
+                show_error(
+                    self,
+                    "연결 오류",
+                    "자동 설정 서버에 연결하지 못했어요. 잠시 후 다시 시도해 주세요.",
+                )
                 return
             if not result.get("ok"):
                 show_error(
                     self,
                     "자동 설정 실패",
-                    "자동 설정 요청이 처리되지 않았어요. 잠시 후 다시 시도해주세요.\n"
-                    f"(코드 {result.get('status_code')})",
+                    "자동 설정 요청이 처리되지 않았어요. 잠시 후 다시 시도해 주세요.",
                 )
                 return
             body = result.get("body") or {}
@@ -3815,7 +3843,8 @@ class SettingsTab(QWidget, ThemedMixin):
                 "로그인/2FA/CAPTCHA/API 키 발급만 직접 처리하고, 나머지는 Codex가 진행하도록 맡기세요.",
             )
         except Exception as exc:
-            show_error(self, "Codex 실행 실패", f"터미널 실행 중 오류가 발생했습니다.\n{exc}")
+            logger.error("[Settings] Codex launch failed: %s", exc)
+            show_error(self, "자동 설정 실행 실패", "자동 설정을 시작하지 못했어요. 다시 시도해 주세요.")
 
     def _launch_codex_for_current_step(self):
         """현재 단계를 서버(브리지)에 올린 Codex computer-use로 자동 처리한다.
@@ -4056,7 +4085,7 @@ class SettingsTab(QWidget, ThemedMixin):
             show_info(self, "저장 완료", "쿠팡 API 키를 저장했습니다.")
         except Exception as exc:
             logger.error("[Settings] Failed to save Coupang settings: %s", exc)
-            show_error(self, "저장 실패", f"쿠팡 설정 저장 중 오류가 발생했습니다.\n{exc}")
+            show_error(self, "저장 실패", "쿠팡 설정을 저장하지 못했어요. 다시 시도해 주세요.")
 
     def _test_coupang_connection(self):
         """Validate Coupang API keys by requesting one test deep link."""
@@ -4088,7 +4117,11 @@ class SettingsTab(QWidget, ThemedMixin):
                 )
         except Exception as exc:
             logger.error("[Settings] Coupang connection test failed: %s", exc)
-            show_error(self, "연결 테스트 실패", f"쿠팡 연결 테스트 중 오류가 발생했습니다.\n{exc}")
+            show_error(
+                self,
+                "연결 테스트 실패",
+                "쿠팡 연결 상태를 확인하지 못했어요. 입력한 키를 확인한 뒤 다시 시도해 주세요.",
+            )
 
     def _on_linktree_panel_saved(self):
         """Inline Linktree 패널에서 저장이 끝나면 호출된다.
@@ -4181,7 +4214,7 @@ class SettingsTab(QWidget, ThemedMixin):
             show_info(self, "저장 완료", saved_message)
         except Exception as exc:
             logger.error("[Settings] Failed to save Linktree settings: %s", exc)
-            show_error(self, "저장 실패", f"링크트리 설정 저장 중 오류가 발생했습니다.\n{exc}")
+            show_error(self, "저장 실패", "Linktree 설정을 저장하지 못했어요. 다시 시도해 주세요.")
 
     def _test_linktree_publish(self):
         """Send test payload via configured Linktree webhook integration."""
@@ -4220,7 +4253,11 @@ class SettingsTab(QWidget, ThemedMixin):
                 show_warning(self, "테스트 실패", "테스트 발행에 실패했습니다. Webhook URL/API Key를 확인하세요.")
         except Exception as exc:
             logger.error("[Settings] Linktree test publish failed: %s", exc)
-            show_error(self, "테스트 실패", f"링크트리 테스트 발행 중 오류가 발생했습니다.\n{exc}")
+            show_error(
+                self,
+                "테스트 실패",
+                "Linktree 테스트 등록을 완료하지 못했어요. 연결 설정을 확인해 주세요.",
+            )
 
     @staticmethod
     def _resolve_creator_level(used_count: int):
@@ -4552,7 +4589,11 @@ class SettingsTab(QWidget, ThemedMixin):
             from utils.logging_config import get_logger
             logger = get_logger(__name__)
             logger.error(f"[Settings] API 키 저장 중 오류 발생: {e}")
-            show_error(self, "저장 오류", f"API 키 저장 중 오류가 발생했습니다:\n{e}")
+            show_error(
+                self,
+                "저장 오류",
+                "API 키를 저장하지 못했어요. 입력 내용을 확인한 뒤 다시 시도해 주세요.",
+            )
             return
 
         # 3. UI 업데이트 (앞으로 당기기)

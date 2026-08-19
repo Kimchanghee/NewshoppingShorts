@@ -722,8 +722,9 @@ class AppController:
             if self._update_is_mandatory:
                 QMessageBox.critical(
                     None,
-                    "?낅뜲?댄듃 ?ㅻ쪟",
-                    "?꾩닔 ?낅뜲?댄듃瑜??ㅼ슫濡쒕뱶?????놁뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                    "업데이트 오류",
+                    "필수 업데이트 파일의 위치를 확인하지 못했어요.\n"
+                    "잠시 후 프로그램을 다시 실행해 주세요.",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
@@ -734,8 +735,9 @@ class AppController:
             if self._update_is_mandatory:
                 QMessageBox.critical(
                     None,
-                    "?낅뜲?댄듃 ?ㅻ쪟",
-                    "?꾩닔 ?낅뜲?댄듃 寃利??뺣낫(file_hash)媛 ?놁뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                    "업데이트 오류",
+                    "업데이트 파일의 안전성을 확인할 정보가 없어요.\n"
+                    "잠시 후 프로그램을 다시 실행해 주세요.",
                 )
                 sys.exit(1)
             self._proceed_to_loading()
@@ -1289,16 +1291,15 @@ class AppController:
 
         if numpy_signature:
             return (
-                "硫붿씤 ?깆쓣 ?쒖옉?????놁뒿?덈떎.\n\n"
-                "?먯씤: ?낅뜲?댄듃 以??댁쟾 踰꾩쟾 ?뚯씪???⑥븘 ?쇱씠釉뚮윭由?異⑸룎??諛쒖깮?덉뒿?덈떎.\n\n"
-                "?닿껐 諛⑸쾿\n"
-                "1) 理쒖떊 ?ㅼ튂 ?뚯씪???ㅼ떆 ?ㅽ뻾?섏꽭??\n"
-                "2) ?ㅼ튂 紐⑤뱶?먯꽌 '?ъ꽕移?Reinstall)'瑜??좏깮?섏꽭??\n"
-                "3) ?ㅼ튂 ?꾨즺 ???깆쓣 ?ㅼ떆 ?ㅽ뻾?섏꽭??\n\n"
-                f"湲곗닠 ?뺣낫: {detail}"
+                "프로그램의 핵심 기능을 시작하지 못했어요.\n\n"
+                "업데이트 과정에서 이전 파일이 일부 남았을 수 있어요.\n"
+                "최신 설치 파일을 실행해 다시 설치한 뒤 프로그램을 열어 주세요."
             )
 
-        return f"硫붿씤 ?깆쓣 ?쒖옉?????놁뒿?덈떎:\n{detail}"
+        return (
+            "프로그램의 핵심 기능을 시작하지 못했어요.\n"
+            "프로그램을 다시 실행해 주세요. 계속 실패하면 최신 버전으로 다시 설치해 주세요."
+        )
 
     def _show_update_notes_if_needed(self) -> None:
         """?낅뜲?댄듃 ?댁뿭 ?앹뾽 ?쒖떆 (??踰꾩쟾?닿퀬 由대━利덈끂?멸? ?덉쓣 ??."""
@@ -1455,8 +1456,9 @@ class AppController:
             if self._update_is_mandatory:
                 QMessageBox.critical(
                     None,
-                    "?ㅻ쪟",
-                    "?낅뜲?댄듃 ?뚯씪 寃쎈줈媛 ?щ컮瑜댁? ?딆뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                    "업데이트 오류",
+                    "업데이트 파일의 위치를 확인하지 못했어요.\n"
+                    "잠시 후 프로그램을 다시 실행해 주세요.",
                 )
                 sys.exit(1)
             self._fallback_after_update_failure()
@@ -1467,8 +1469,9 @@ class AppController:
             if self._update_is_mandatory:
                 QMessageBox.critical(
                     None,
-                    "?ㅻ쪟",
-                    "?낅뜲?댄듃 ?뚯씪 寃쎈줈媛 蹂댁븞 寃利앹뿉 ?ㅽ뙣?덉뒿?덈떎.\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                    "업데이트 오류",
+                    "안전하게 확인된 업데이트 주소가 아니어서 설치를 중단했어요.\n"
+                    "프로그램을 다시 실행해 공식 업데이트를 확인해 주세요.",
                 )
                 sys.exit(1)
             self._fallback_after_update_failure()
@@ -1503,8 +1506,9 @@ class AppController:
                 if self._update_is_mandatory:
                     QMessageBox.critical(
                         None,
-                        "?낅뜲?댄듃 ?ㅽ뙣",
-                        f"?낅뜲?댄듃 寃利??ㅽ뙣:\n{result}\n\n?꾨줈洹몃옩??醫낅즺?⑸땲??",
+                        "업데이트 실패",
+                        "업데이트 파일을 안전하게 확인하지 못했어요.\n"
+                        "잠시 후 프로그램을 다시 실행해 주세요.",
                     )
                     sys.exit(1)
                 self._fallback_after_update_failure()
@@ -1581,8 +1585,9 @@ class AppController:
                 self.update_progress_dialog.close()
             QMessageBox.critical(
                 None,
-                "?낅뜲?댄듃 ?ㅽ뻾 ?ㅻ쪟",
-                f"?낅뜲?댄듃 ?ㅽ뻾 以??ㅻ쪟媛 諛쒖깮?덉뒿?덈떎:\n{e}",
+                "업데이트 실행 실패",
+                "설치 프로그램을 시작하지 못했어요.\n"
+                "잠시 후 프로그램을 다시 실행해 주세요.",
             )
             if self._update_is_mandatory:
                 sys.exit(1)

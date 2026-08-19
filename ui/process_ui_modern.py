@@ -11,6 +11,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color
+from user_facing_errors import sanitize_user_message
 
 
 class StatusIcon:
@@ -85,7 +86,17 @@ class ChecklistItem(QFrame):
             "error": StatusIcon.ERROR
         }
         self.status_icon.setText(icon_map.get(status, StatusIcon.WAITING))
-        self.status_text.setText(message or (status if status != "checking" else "확인 중..."))
+        status_fallback = {
+            "checking": "확인 중...",
+            "success": "정상",
+            "warning": "확인 필요",
+            "error": "오류",
+        }.get(status, "대기")
+        self.status_text.setText(
+            sanitize_user_message(message, fallback=status_fallback)
+            if message
+            else status_fallback
+        )
         
         # Use design system colors for status
         if status == "checking":

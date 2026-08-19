@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.design_system_v2 import get_color
+from user_facing_errors import sanitize_user_message
 
 
 _PUBLIC_RELEASE_NOTES_FALLBACK = "안정성과 사용성을 개선했습니다."
@@ -376,7 +377,10 @@ class UpdateProgressDialog(_UpdateSurface):
             self.set_status("설치를 시작합니다")
 
     def set_status(self, text: str) -> None:
-        self._status_text = str(text or "").rstrip(".")
+        self._status_text = sanitize_user_message(
+            text,
+            fallback="업데이트를 준비하고 있어요.",
+        ).rstrip(".")
         self.status_label.setText(self._status_text)
 
     def _update_dots(self) -> None:

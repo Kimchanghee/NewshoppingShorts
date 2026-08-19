@@ -5,6 +5,7 @@ Uses the design system v2 for consistent styling.
 from PyQt6.QtWidgets import QLabel
 from PyQt6.QtCore import Qt
 from ui.design_system_v2 import get_design_system, get_color
+from user_facing_errors import sanitize_user_message
 
 
 class StatusBar(QLabel):
@@ -32,4 +33,6 @@ class StatusBar(QLabel):
                 gui.refresh_voice_status_display()
 
     def set_message(self, message: str):
-        self.setText(message)
+        self.setText(
+            sanitize_user_message(message, fallback="작업 상태를 확인해 주세요.")
+        )

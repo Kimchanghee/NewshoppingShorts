@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from ui.components.base_widget import ThemedMixin
 from ui.design_system_v2 import get_design_system, get_color, is_dark_mode
+from user_facing_errors import sanitize_user_message
 
 
 class ProgressPanel(QFrame, ThemedMixin):
@@ -289,7 +290,9 @@ class ProgressPanel(QFrame, ThemedMixin):
     # -----------------------------------------------------------------
     def set_current_task(self, task_text, status='active'):
         """Update current task display with status icon"""
-        self.gui.current_task_label.setText(task_text)
+        self.gui.current_task_label.setText(
+            sanitize_user_message(task_text, fallback="작업 상태를 확인해 주세요.")
+        )
 
         base_style = "font-size: 9px; background: transparent; border: none;"
         title_style = "font-size: 8px; font-weight: bold; background: transparent; border: none;"

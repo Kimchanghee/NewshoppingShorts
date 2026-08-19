@@ -14,6 +14,7 @@ from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
 from caller import rest
+from ui.components.custom_dialog import show_warning
 from utils.app_identity import load_app_identity
 from utils.logging_config import get_logger
 
@@ -352,6 +353,22 @@ class TopBarPanel(QFrame):
                 # admin은 그대로 유지
                 if login_user_type != "admin":
                     sub_status = rest.getSubscriptionStatus(str(user_id))
+                    expiry_notice = sub_status.get("expiry_notice")
+                    if isinstance(expiry_notice, dict):
+                        notice_key = str(expiry_notice.get("key") or "")
+                        notice_message = str(expiry_notice.get("message") or "")
+                        if (
+                            notice_key
+                            and notice_message
+                            and getattr(self.gui, "_shown_expiry_notice_key", None) != notice_key
+                        ):
+                            self.gui._shown_expiry_notice_key = notice_key
+                            QTimer.singleShot(
+                                0,
+                                lambda message=notice_message: show_warning(
+                                    self.gui, "구독 만료 안내", message
+                                ),
+                            )
                     has_expiry = bool(sub_status.get("subscription_expires_at"))
                     is_unlimited = sub_status.get("work_count") == -1
                     is_trial_flag = sub_status.get("is_trial")

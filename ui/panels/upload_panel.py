@@ -19,6 +19,7 @@ from ui.design_system_v2 import get_design_system, checkbox_qss
 from ui.components.base_widget import ThemedMixin
 from ui.components.social_auth_card import SocialAuthCard, PLATFORM_CONFIG
 from managers.settings_manager import get_settings_manager
+from user_facing_errors import sanitize_user_message
 
 if TYPE_CHECKING:
     from main import VideoAnalyzerGUI
@@ -138,7 +139,17 @@ class _InstagramOAuthWorker(QObject):
             self.finished.emit(True, account_info, "")
         except Exception as e:
             logger.error(f"[UploadPanel] Instagram OAuth 연결 워커 실패: {e}")
-            self.finished.emit(False, {}, str(e))
+            self.finished.emit(
+                False,
+                {},
+                sanitize_user_message(
+                    e,
+                    fallback=(
+                        "인스타그램 계정을 연결하지 못했어요. "
+                        "연결 정보를 확인한 뒤 다시 시도해 주세요."
+                    ),
+                ),
+            )
 
 
 class PromptInputGroup(QFrame):
@@ -1250,7 +1261,12 @@ class UploadPanel(QFrame, ThemedMixin):
                 video_id=video_id,
             )
         except Exception as exc:
-            show_error(self, "복구 실패", str(exc))
+            logger.error("[UploadPanel] uncertain upload recovery failed: %s", exc)
+            show_error(
+                self,
+                "복구 실패",
+                "업로드 기록을 복구하지 못했어요. 채널 연결 상태를 확인한 뒤 다시 시도해 주세요.",
+            )
             return
         show_info(
             self,
@@ -2120,7 +2136,11 @@ class UploadPanel(QFrame, ThemedMixin):
             )
         except Exception as exc:
             logger.error("[UploadPanel] Coupang verification guide failed: %s", exc)
-            show_error(self, "인증 자료를 만들지 못했어요", str(exc))
+            show_error(
+                self,
+                "인증 자료를 만들지 못했어요",
+                "인증 점검표를 저장하지 못했어요. 저장 폴더를 확인한 뒤 다시 시도해 주세요.",
+            )
 
     def _connect_youtube(self, platform_id: str):
         """Connect YouTube channel via OAuth."""
@@ -2130,7 +2150,11 @@ class UploadPanel(QFrame, ThemedMixin):
             self._show_youtube_json_connect()
         except Exception as e:
             logger.error(f"[UploadPanel] YouTube 연결 실패: {e}")
-            show_error(self, "연결 실패", f"유튜브 채널을 연결하지 못했어요.\n\n{e}")
+            show_error(
+                self,
+                "연결 실패",
+                "YouTube 채널을 연결하지 못했어요. 인증 정보를 확인한 뒤 다시 시도해 주세요.",
+            )
 
     def _show_youtube_json_connect(self):
         """Upload OAuth client JSON and connect YouTube channel."""
@@ -2317,7 +2341,14 @@ class UploadPanel(QFrame, ThemedMixin):
             cancel_btn.setEnabled(not running)
             connect_btn.setText("연결 중..." if running else "연결")
             connect_btn.setEnabled((not running) and bool(selected_file["path"]))
-            status_label.setText(status_message if status_message else "")
+            status_label.setText(
+                sanitize_user_message(
+                    status_message,
+                    fallback="연결 상태를 확인하지 못했어요.",
+                )
+                if status_message
+                else ""
+            )
 
         def on_cancel():
             if connection_state["running"]:
@@ -2572,7 +2603,12 @@ class UploadPanel(QFrame, ThemedMixin):
                     key_input.text(), secret_input.text(), redirect_input.text()
                 )
             except ValueError as ve:
-                status_label.setText(str(ve))
+                status_label.setText(
+                    sanitize_user_message(
+                        ve,
+                        fallback="입력한 인증 정보를 확인해 주세요.",
+                    )
+                )
                 return False
             if not ok:
                 status_label.setText("자격증명 저장에 실패했습니다.")
@@ -2584,10 +2620,10 @@ class UploadPanel(QFrame, ThemedMixin):
                 return
             auth_url = str(manager.get_auth_url(state="upload_panel_tiktok") or "").strip()
             if not auth_url:
-                status_label.setText("OAuth URL 생성 실패 — Client Key를 확인하세요.")
+                status_label.setText("인증 주소를 만들지 못했어요. 앱 키를 확인해 주세요.")
                 return
             QDesktopServices.openUrl(QUrl(auth_url))
-            status_label.setText("브라우저에서 승인 후 리디렉션 URL의 code를 붙여넣으세요.")
+            status_label.setText("브라우저에서 승인한 뒤 돌아온 주소 전체를 붙여넣어 주세요.")
 
         open_btn = QPushButton("인증 페이지 열기")
         open_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2799,7 +2835,11 @@ class UploadPanel(QFrame, ThemedMixin):
             self._show_instagram_official_connect()
         except Exception as e:
             logger.error(f"[UploadPanel] Instagram 연결 실패: {e}")
-            show_error(self, "연결 실패", f"인스타그램 계정을 연결하지 못했어요.\n\n{e}")
+            show_error(
+                self,
+                "연결 실패",
+                "인스타그램 계정을 연결하지 못했어요. 연결 정보를 확인한 뒤 다시 시도해 주세요.",
+            )
 
     def _show_instagram_official_connect(self):
         """Meta app credentials input + Facebook Login OAuth dialog."""
@@ -2921,7 +2961,14 @@ class UploadPanel(QFrame, ThemedMixin):
             cancel_btn.setEnabled(not running)
             connect_btn.setText("연결 중..." if running else "연결")
             connect_btn.setEnabled(not running)
-            status_label.setText(status_message if status_message else "")
+            status_label.setText(
+                sanitize_user_message(
+                    status_message,
+                    fallback="연결 상태를 확인하지 못했어요.",
+                )
+                if status_message
+                else ""
+            )
 
         def on_cancel():
             if connection_state["running"]:
