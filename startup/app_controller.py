@@ -74,8 +74,6 @@ _PENDING_UPDATE_PATH = os.path.join(
 RUNTIME_UPDATE_CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000
 RUNTIME_UPDATE_DEFER_POLL_MS = 30 * 1000
 RUNTIME_UPDATE_INITIAL_DELAY_MS = 5 * 60 * 1000
-STORE_UPDATE_INITIAL_DELAY_MS = 20 * 1000
-MICROSOFT_STORE_PRODUCT_ID = "9P43TQHLP8WH"
 
 # Keep API endpoint overridable in local/dev network environments.
 _PUBLIC_API_SERVER_URL = "https://newshopping-shorts-auth.vercel.app"
@@ -1128,6 +1126,11 @@ class AppController:
 
     def _start_runtime_update_monitor(self) -> None:
         """Keep long-running packaged builds current without interrupting work."""
+        if is_msix_package():
+            logger.info(
+                "Microsoft Store package: runtime installer update monitor is disabled"
+            )
+            return
         if not getattr(sys, "frozen", False):
             logger.debug("Development run: runtime update monitor is disabled")
             return
@@ -1145,11 +1148,7 @@ class AppController:
             self._apply_deferred_runtime_update_if_idle
         )
 
-        initial_delay = (
-            STORE_UPDATE_INITIAL_DELAY_MS
-            if is_msix_package()
-            else RUNTIME_UPDATE_INITIAL_DELAY_MS
-        )
+        initial_delay = RUNTIME_UPDATE_INITIAL_DELAY_MS
         QtCore.QTimer.singleShot(initial_delay, self._check_runtime_update)
         logger.info(
             "Runtime update monitor started (initial=%sms interval=%sms)",
@@ -1159,6 +1158,10 @@ class AppController:
 
     def _check_runtime_update(self) -> None:
         """Run one background update check, with a strict concurrency gate."""
+        if is_msix_package():
+            self._runtime_update_check_running = False
+            logger.debug("Microsoft Store package: ignoring installer update check")
+            return
         if self._runtime_update_check_running or self._deferred_runtime_update:
             return
         if getattr(self, "download_worker", None) is not None:
@@ -1209,15 +1212,15 @@ class AppController:
     def _on_runtime_update_available(self, update_data: Dict[str, Any]) -> None:
         """Install at idle, defer active work, or hand Store builds to Windows."""
         self._runtime_update_check_running = False
+        if is_msix_package():
+            logger.info(
+                "Microsoft Store package: ignoring direct-installer update metadata"
+            )
+            return
         version = str(update_data.get("latest_version", "")).strip()
         if version and version == self._runtime_update_seen_version:
             return
         self._runtime_update_seen_version = version
-
-        if is_msix_package():
-            self._store_runtime_update_data = dict(update_data)
-            self._show_store_update_ready()
-            return
 
         if self._is_main_app_busy():
             self._deferred_runtime_update = dict(update_data)
@@ -1269,48 +1272,6 @@ class AppController:
         """Release the hidden dialog while the idle monitor keeps the update queued."""
         logger.info("Runtime update deferred until idle")
         self.runtime_update_dialog = None
-
-    def _show_store_update_ready(self) -> None:
-        if self.runtime_update_dialog is not None:
-            return
-        from ui.windows.update_dialog import UpdateReadyDialog
-
-        data = getattr(self, "_store_runtime_update_data", {}) or {}
-        dialog = UpdateReadyDialog(
-            version=str(data.get("latest_version", "")),
-            store_mode=True,
-            parent=getattr(self, "main_gui", None),
-        )
-        dialog.install_requested.connect(self._open_microsoft_store_update)
-        dialog.deferred.connect(self._on_store_update_deferred)
-        dialog.destroyed.connect(lambda: setattr(self, "runtime_update_dialog", None))
-        self.runtime_update_dialog = dialog
-        dialog.show()
-
-    def _on_store_update_deferred(self) -> None:
-        """Allow a deferred Store update to be offered again on a later check."""
-        logger.info("Microsoft Store update deferred")
-        self.runtime_update_dialog = None
-        self._runtime_update_seen_version = ""
-
-    def _open_microsoft_store_update(self) -> None:
-        """Open the product update page and close only after the user opts in."""
-        from PyQt6.QtCore import QUrl
-        from PyQt6.QtGui import QDesktopServices
-
-        url = QUrl(
-            f"ms-windows-store://pdp/?ProductId={MICROSOFT_STORE_PRODUCT_ID}"
-        )
-        if not QDesktopServices.openUrl(url):
-            QMessageBox.critical(
-                getattr(self, "main_gui", None),
-                "Microsoft Store를 열 수 없어요",
-                "Microsoft Store의 라이브러리에서 SSMaker 업데이트를 확인해 주세요.",
-            )
-            return
-        main = getattr(self, "main_gui", None)
-        if main is not None:
-            QtCore.QTimer.singleShot(1200, main.close)
 
     @staticmethod
     def _build_launch_error_message(exc: Exception) -> str:

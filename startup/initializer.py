@@ -17,6 +17,7 @@ from PyQt6 import QtCore
 from config import PAYMENT_API_BASE_URL
 from utils.logging_config import get_logger
 from utils.tts_config import get_safe_tts_base_dir
+from utils.windows_package import is_msix_package
 from .constants import (
     CHECK_ITEM_IMPACTS, REQUIRED_FONTS, OPTIONAL_FONTS, CONNECTIVITY_ENDPOINTS,
 )
@@ -192,6 +193,12 @@ class Initializer(QtCore.QObject):
         # points to auth-only backends without /app/version routes.
         if not getattr(sys, "frozen", False):
             self.checkItemChanged.emit("update_check", "success", "개발 모드")
+            return update_info
+        if is_msix_package():
+            logger.info(
+                "Microsoft Store package: installer release-note polling is disabled"
+            )
+            self.checkItemChanged.emit("update_check", "success", "Store에서 관리")
             return update_info
 
         base_url = (PAYMENT_API_BASE_URL or "").strip().rstrip("/")

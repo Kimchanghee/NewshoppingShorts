@@ -432,6 +432,25 @@ def test_store_package_update_check_never_calls_legacy_update_server(monkeypatch
     assert result["latest_version"] == checker.current_version
 
 
+def test_store_package_initializer_skips_installer_release_feed(monkeypatch):
+    import startup.initializer as initializer_module
+
+    monkeypatch.setattr(initializer_module.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(initializer_module, "is_msix_package", lambda: True)
+    monkeypatch.setattr(
+        initializer_module.requests,
+        "get",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("Store package must not poll installer release metadata")
+        ),
+    )
+
+    result = initializer_module.Initializer()._check_update_info()
+
+    assert result["is_new_version"] is False
+    assert result["has_update_notes"] is False
+
+
 def test_store_package_controller_skips_pre_login_installer_update(monkeypatch):
     import startup.app_controller as app_controller
 

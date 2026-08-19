@@ -48,3 +48,18 @@ def test_force_close_dialog_is_suppressed_after_terminal_state(monkeypatch):
     handler.error_program_force_close("EU004")
 
     assert calls == ["error", "exit"]
+
+
+def test_auth_required_must_be_confirmed_twice():
+    handler = _handler()
+
+    assert handler._auth_required_is_confirmed("AUTH_REQUIRED") is False
+    assert handler._auth_required_is_confirmed("AUTH_REQUIRED") is True
+
+
+def test_successful_heartbeat_resets_auth_required_confirmation():
+    handler = _handler()
+
+    assert handler._auth_required_is_confirmed("AUTH_REQUIRED") is False
+    assert handler._auth_required_is_confirmed(True) is False
+    assert handler._auth_required_is_confirmed("AUTH_REQUIRED") is False

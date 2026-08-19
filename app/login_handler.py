@@ -33,6 +33,22 @@ class LoginHandler:
         self._terminal_lock = threading.Lock()
         self._terminal_handled = False
         self._watch_thread: threading.Thread | None = None
+        self._auth_required_streak = 0
+
+    def _auth_required_is_confirmed(self, status: object) -> bool:
+        """Require two consecutive auth failures before ending a fresh session.
+
+        A newly-created server session can briefly be invisible to the first
+        heartbeat.  Confirming the response once prevents a valid login from
+        being torn down while still terminating a genuinely expired session
+        after a short retry.
+        """
+        if status == "AUTH_REQUIRED":
+            self._auth_required_streak += 1
+            return self._auth_required_streak >= 2
+
+        self._auth_required_streak = 0
+        return False
 
     def _extract_login_user_and_token(self) -> tuple[object, str]:
         """Extract user_id and JWT token from login_data safely."""
@@ -81,6 +97,7 @@ class LoginHandler:
 
         with self._terminal_lock:
             self._terminal_handled = False
+        self._auth_required_streak = 0
         self.app._login_watch_stop = False
         self._watch_thread = threading.Thread(
             target=self._login_watch_loop,
@@ -191,7 +208,15 @@ class LoginHandler:
                 else:
                     self._update_connection_ui(False)
 
-                if st == "AUTH_REQUIRED":
+                auth_required_confirmed = self._auth_required_is_confirmed(st)
+                if st == "AUTH_REQUIRED" and not auth_required_confirmed:
+                    logger.warning(
+                        "[watch_loop] Transient AUTH_REQUIRED; confirming session once"
+                    )
+                    time.sleep(2)
+                    continue
+
+                if auth_required_confirmed:
                     logger.warning("[watch_loop] Auth token missing/expired (AUTH_REQUIRED)")
                     self.app._login_watch_stop = True
                     cb_signal = getattr(self.app, 'ui_callback_signal', None)

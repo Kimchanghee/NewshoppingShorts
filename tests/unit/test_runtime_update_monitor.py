@@ -54,7 +54,7 @@ def test_deferred_runtime_update_installs_once_app_becomes_idle(monkeypatch):
     assert controller._deferred_runtime_update is None
 
 
-def test_store_runtime_update_never_launches_the_legacy_installer(monkeypatch):
+def test_store_runtime_update_metadata_is_ignored(monkeypatch):
     controller = _controller_with_main()
     calls = []
     update = {
@@ -64,22 +64,21 @@ def test_store_runtime_update_never_launches_the_legacy_installer(monkeypatch):
     }
     monkeypatch.setattr(app_controller, "is_msix_package", lambda: True)
     monkeypatch.setattr(controller, "perform_update", lambda *_args: calls.append("legacy"))
-    monkeypatch.setattr(controller, "_show_store_update_ready", lambda: calls.append("store"))
 
     controller._on_runtime_update_available(update)
 
-    assert calls == ["store"]
-
-
-def test_store_update_can_be_shown_again_after_user_defers_it():
+    assert calls == []
+    assert not hasattr(controller, "_store_runtime_update_data")
+def test_store_package_never_starts_runtime_installer_monitor(monkeypatch):
     controller = _controller_with_main()
-    controller.runtime_update_dialog = object()
-    controller._runtime_update_seen_version = "1.5.50"
+    monkeypatch.setattr(app_controller.sys, "frozen", True, raising=False)
+    monkeypatch.setattr(app_controller, "is_msix_package", lambda: True)
 
-    controller._on_store_update_deferred()
+    controller._start_runtime_update_monitor()
 
-    assert controller.runtime_update_dialog is None
-    assert controller._runtime_update_seen_version == ""
+    assert controller.runtime_update_timer is None
+    assert controller.runtime_update_defer_timer is None
+    assert controller._runtime_update_check_worker is None
 
 
 def test_packaged_controller_checks_for_updates_after_login(monkeypatch):
