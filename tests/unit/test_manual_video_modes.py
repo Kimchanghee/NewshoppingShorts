@@ -51,21 +51,18 @@ def test_mix_job_rejects_invalid_remote_url_before_queueing(monkeypatch):
     assert gui.mix_jobs == {}
 
 
-def test_mix_job_accepts_and_normalizes_distinct_local_files(monkeypatch, tmp_path):
+def test_mix_job_rejects_computer_video_files(monkeypatch, tmp_path):
     manager, gui = _manager(monkeypatch)
     first = tmp_path / "first.mp4"
     second = tmp_path / "second.mov"
     first.write_bytes(b"video-one")
     second.write_bytes(b"video-two")
 
-    key = manager.add_mix_job([f"local://{first}", f"local://{second}"])
+    with pytest.raises(ValueError, match="영상 링크만 입력"):
+        manager.add_mix_job([f"local://{first}", f"local://{second}"])
 
-    assert gui.url_queue == [key]
-    assert gui.url_status[key] == "waiting"
-    assert gui.mix_jobs[key] == [
-        f"local://{first.resolve()}",
-        f"local://{second.resolve()}",
-    ]
+    assert gui.url_queue == []
+    assert gui.mix_jobs == {}
 
 
 def test_restored_mix_sources_are_deduplicated():

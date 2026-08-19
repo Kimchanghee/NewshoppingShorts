@@ -435,7 +435,7 @@ class ModeSelectionPanel(QWidget):
     def _navigate_next(self, mode_id: str):
         """모드별 다음 페이지로 이동.
 
-        - single / mix : 'source' (URL/로컬 파일 입력)
+        - single / mix : 'source' (영상 URL 입력)
         - sourcing     : 'sourcing' (쿠팡 링크 풀 자동화)
         """
         target = 'sourcing' if mode_id == 'sourcing' else 'source'

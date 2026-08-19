@@ -96,7 +96,7 @@ def test_enqueue_urls_keeps_only_first_candidate_and_ignores_rest(monkeypatch):
     assert (added, duplicated) == (1, 0)
     assert gui.url_queue == ["https://example.com/1"]
     info_messages = [args[2] for args, _ in events["info"] if len(args) >= 3]
-    assert any("ignored 2 extra link(s)" in msg for msg in info_messages)
+    assert any("나머지 링크 2개는 제외" in msg for msg in info_messages)
 
 
 def test_enqueue_urls_is_rejected_when_active_item_exists(monkeypatch):
@@ -108,14 +108,15 @@ def test_enqueue_urls_is_rejected_when_active_item_exists(monkeypatch):
     assert (added, duplicated) == (0, 0)
     assert gui.url_queue == ["https://example.com/1"]
     warning_messages = [args[2] for args, _ in events["warning"] if len(args) >= 3]
-    assert any("Only one active link is allowed" in msg for msg in warning_messages)
+    assert any("이미 대기 중이거나 진행 중인 영상 작업" in msg for msg in warning_messages)
+    assert not any("Only one active" in msg for msg in warning_messages)
 
 
 def test_add_mix_job_is_rejected_when_active_item_exists(monkeypatch):
     manager, _, _ = _build_manager(monkeypatch)
     assert manager.add_url_to_queue("https://example.com/1") is True
 
-    with pytest.raises(ValueError, match="진행 중이거나 대기 중인 작업"):
+    with pytest.raises(ValueError, match="이미 대기 중이거나 진행 중인 영상 작업"):
         manager.add_mix_job(["https://mix.example/1", "https://mix.example/2"])
 
 

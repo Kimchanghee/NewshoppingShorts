@@ -15,7 +15,6 @@ from uuid import uuid4
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QTreeWidget, QTreeWidgetItem
 
-from config.constants import PathLimits
 from managers.settings_manager import get_settings_manager
 from managers.summer_coupang_queue_status import (
     build_summer_coupang_queue_snapshot,
@@ -32,6 +31,10 @@ MIX_JOB_PREFIX = "mix://job/"
 LEGACY_QUEUE_PREFIX_PATTERN = re.compile(
     r"^(?:(?:waiting|processing|completed|failed|skipped|done|error|대기|진행|완료|실패|건너뜀)\s+\d+\s+)",
     re.IGNORECASE,
+)
+ACTIVE_QUEUE_MESSAGE = (
+    "이미 대기 중이거나 진행 중인 영상 작업이 있습니다.\n"
+    "현재 작업을 완료하거나 진행 상황 화면에서 삭제한 뒤 다시 담아 주세요."
 )
 
 
@@ -261,22 +264,14 @@ class QueueManager:
 
             source = raw_source.strip()
             if source.startswith("local://"):
-                raw_path = source[len("local://") :]
-                real_path = os.path.realpath(raw_path) if raw_path else ""
-                extension = os.path.splitext(real_path)[1].lower()
-                if not real_path or not os.path.isfile(real_path):
-                    raise ValueError(
-                        f"선택한 영상 파일을 찾을 수 없습니다: {os.path.basename(raw_path) or raw_path}"
-                    )
-                if extension not in PathLimits.ALLOWED_VIDEO_EXTENSIONS:
-                    raise ValueError(f"지원하지 않는 영상 형식입니다: {extension or '확장자 없음'}")
-                source = f"local://{real_path}"
-                identity = ("local", os.path.normcase(real_path))
-            else:
-                parsed = urlsplit(source)
-                if parsed.scheme not in ("http", "https") or not parsed.hostname:
-                    raise ValueError(f"올바른 영상 링크가 아닙니다: {source[:80]}")
-                identity = ("url", source)
+                raise ValueError(
+                    "내 컴퓨터의 영상 파일은 사용할 수 없습니다. 영상 링크만 입력해 주세요."
+                )
+
+            parsed = urlsplit(source)
+            if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                raise ValueError(f"올바른 영상 링크가 아닙니다: {source[:80]}")
+            identity = ("url", source)
 
             if identity in seen:
                 continue
@@ -292,9 +287,7 @@ class QueueManager:
     def add_mix_job(self, urls: Sequence[str]) -> str:
         clean_urls = self._normalize_mix_sources(urls)
         if self.has_active_queue_item():
-            raise ValueError(
-                "진행 중이거나 대기 중인 작업을 먼저 완료하거나 삭제해 주세요."
-            )
+            raise ValueError(ACTIVE_QUEUE_MESSAGE)
 
         key = f"{MIX_JOB_PREFIX}{uuid4().hex[:12]}"
         self._set_mix_job_urls(key, clean_urls)
@@ -806,8 +799,8 @@ class QueueManager:
         if self.has_active_queue_item():
             show_warning(
                 self.gui,
-                "Notice",
-                "Only one active link is allowed. Finish or clear the current waiting/processing item first.",
+                "목록에 담지 못했어요",
+                ACTIVE_QUEUE_MESSAGE,
             )
             return 0, 0
 
@@ -836,7 +829,10 @@ class QueueManager:
         if added_count > 0:
             msg = f"{source_label}에서 링크 {added_count}개를 추가했습니다."
             if ignored_count > 0:
-                msg += f"\nOne-link policy: ignored {ignored_count} extra link(s)."
+                msg += (
+                    f"\n단일 영상 모드는 첫 번째 링크만 담습니다. "
+                    f"나머지 링크 {ignored_count}개는 제외했습니다."
+                )
             if duplicate_count > 0:
                 msg += f"\n중복 링크 {duplicate_count}개는 제외했습니다."
             show_info(self.gui, "완료", msg)
@@ -851,7 +847,7 @@ class QueueManager:
         elif duplicate_count > 0:
             msg = f"입력한 링크가 모두 중복입니다. ({duplicate_count}개)"
             if ignored_count > 0:
-                msg += f"\nOne-link policy: ignored {ignored_count} extra link(s)."
+                msg += f"\n함께 입력한 다른 링크 {ignored_count}개는 제외했습니다."
             show_warning(self.gui, "안내", msg)
 
         return added_count, duplicate_count
