@@ -21,15 +21,18 @@ def test_cloud_run_deploy_migrates_before_traffic_switch():
 def test_vercel_build_fails_closed_on_migration_error():
     config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
     build_command = config["buildCommand"]
-    migration = (
-        "cd backend && uv run --python 3.14 "
-        "--with-requirements requirements.txt python -m alembic upgrade head"
+    assert len(build_command) <= 256
+    assert build_command.startswith(
+        "uv run --python 3.14 --with-requirements backend/requirements.txt "
+        "python backend/scripts/vercel_build.py && "
     )
+    assert build_command.index("vercel_build.py") < build_command.index("npm run build")
 
-    assert build_command.startswith(f"{migration} && ")
-    assert build_command.index("alembic upgrade head") < build_command.index(
-        "npm run build"
-    )
+    build_script = (ROOT / "backend/scripts/vercel_build.py").read_text(encoding="utf-8")
+    preflight_index = build_script.index("if verify_deployment_env()")
+    migration_index = build_script.index('"alembic", "upgrade", "head"')
+    recovery_index = build_script.index("return apply_account_recovery()")
+    assert preflight_index < migration_index < recovery_index
 
 
 def test_vercel_custom_build_preserves_declared_output_directory():
@@ -50,10 +53,22 @@ def test_vercel_function_requirements_match_backend_requirements():
             if line.strip() and not line.lstrip().startswith("#")
         ]
 
-    assert normalized("api/requirements.txt") == normalized("backend/requirements.txt")
+    api_requirements = set(normalized("api/requirements.txt"))
+    backend_requirements = set(normalized("backend/requirements.txt"))
+    assert api_requirements.issubset(backend_requirements)
+    assert not any(
+        requirement.startswith(("uvicorn", "pymysql", "passlib", "alembic"))
+        for requirement in api_requirements
+    )
     assert set(normalized("backend/requirements.txt")).issubset(
         set(normalized("requirements.txt"))
     )
+
+
+def test_vercel_function_bundles_runtime_source_without_build_virtualenv():
+    config = json.loads((ROOT / "vercel.json").read_text(encoding="utf-8"))
+    function = config["functions"]["api/index.py"]
+    assert function["includeFiles"] == "backend/app/**"
 
 
 def test_vercel_ignores_desktop_root_requirements():

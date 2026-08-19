@@ -45,7 +45,7 @@ def test_vercel_serves_landing_routes_before_the_fastapi_fallback():
     routes = config["routes"]
 
     assert config["outputDirectory"] == "website/dist"
-    assert "cd ../website && npm ci" in config["buildCommand"]
+    assert "cd website && npm ci --no-audit --no-fund" in config["buildCommand"]
     assert "npm run build" in config["buildCommand"]
     assert routes[0] == {"src": "^/$", "dest": "/index.html"}
     assert routes[1] == {"handle": "filesystem"}
