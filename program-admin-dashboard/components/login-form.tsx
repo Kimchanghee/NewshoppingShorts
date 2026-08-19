@@ -3,6 +3,7 @@
 import { FormEvent, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowRight, Database, KeyRound, LoaderCircle, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { safeAdminMessage } from '@/lib/user-message';
 
 export function LoginForm() {
   const router = useRouter();
@@ -22,7 +23,12 @@ export function LoginForm() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        setError(payload.error || '로그인하지 못했습니다.');
+        setError(
+          safeAdminMessage(
+            payload.error,
+            '로그인 정보를 확인한 뒤 다시 시도해 주세요.',
+          ),
+        );
         return;
       }
       router.replace('/');

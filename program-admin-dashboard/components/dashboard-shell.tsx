@@ -13,6 +13,7 @@ import {
   Database,
   Gauge,
   History,
+  KeyRound,
   Laptop,
   LoaderCircle,
   LogOut,
@@ -41,6 +42,8 @@ import type {
   UserListResponse,
 } from '@/lib/types';
 import { entitlementState, formatDate, projectedExpiry, projectedSubscriptionExpiry, remainingLabel } from '@/lib/user-state';
+import { adminApiErrorMessage, safeAdminMessage, type ApiErrorPayload } from '@/lib/user-message';
+import { passwordResetError } from '@/lib/password-reset';
 
 const PROGRAMS: Array<{ key: ProgramKey; label: string; short: string }> = [
   { key: 'all', label: '전체 프로그램', short: 'ALL' },
@@ -63,30 +66,6 @@ type ConfirmState = {
   days?: number;
 } | null;
 
-type ApiErrorPayload = {
-  error?: unknown;
-  detail?: unknown;
-  message?: unknown;
-};
-
-const INTERNAL_ERROR_PATTERN = /traceback|psycopg|sqlalchemy|\[sql:|\[parameters:|exception|invalid input value for enum/i;
-
-function safeApiMessage(value: unknown, fallback: string) {
-  if (typeof value !== 'string') return fallback;
-  const message = value.trim();
-  if (!message || message.length > 200 || INTERNAL_ERROR_PATTERN.test(message)) return fallback;
-  return message;
-}
-
-function apiErrorMessage(status: number, payload: ApiErrorPayload) {
-  if (status >= 500) return '사용자 DB 연결에 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.';
-  if (status === 404) return '요청한 사용자 정보를 찾을 수 없습니다.';
-  if (status === 403) return '이 작업을 수행할 권한이 없습니다.';
-  if (status === 429) return '요청이 많습니다. 잠시 후 다시 시도해 주세요.';
-  const fallback = `요청을 처리하지 못했습니다. (${status})`;
-  return safeApiMessage(payload.error, safeApiMessage(payload.message, safeApiMessage(payload.detail, fallback)));
-}
-
 async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`/api/admin/${path}`, { ...init, cache: 'no-store' });
   if (response.status === 401) {
@@ -95,7 +74,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
   }
   const payload = await response.json().catch(() => ({})) as ApiErrorPayload;
   if (!response.ok) {
-    throw new Error(apiErrorMessage(response.status, payload));
+    throw new Error(adminApiErrorMessage(response.status, payload));
   }
   return payload as T;
 }
@@ -134,6 +113,11 @@ export function DashboardShell() {
   const [actionBusy, setActionBusy] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmState>(null);
   const [deleteText, setDeleteText] = useState('');
+  const [passwordResetOpen, setPasswordResetOpen] = useState(false);
+  const [passwordResetUsername, setPasswordResetUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordResetMessage, setPasswordResetMessage] = useState('');
   const [toast, setToast] = useState<{ message: string; tone: 'success' | 'error' } | null>(null);
   const usersRequestSequence = useRef(0);
   const statsRequestSequence = useRef(0);
@@ -258,7 +242,7 @@ export function DashboardShell() {
   }
 
   async function mutate(path: string, method: 'POST' | 'DELETE', successMessage: string, body?: object) {
-    if (!selectedUser) return;
+    if (!selectedUser) return false;
     const targetUserId = selectedUser.id;
     setActionBusy(true);
     try {
@@ -267,13 +251,13 @@ export function DashboardShell() {
         headers: body ? { 'Content-Type': 'application/json' } : undefined,
         body: body ? JSON.stringify(body) : undefined,
       });
-      if (result.success === false) throw new Error(safeApiMessage(result.message, '작업이 적용되지 않았습니다.'));
+      if (result.success === false) throw new Error(safeAdminMessage(result.message, '작업이 적용되지 않았습니다.'));
     } catch (requestError) {
       showToast(requestError instanceof Error ? requestError.message : '작업을 완료하지 못했습니다.', 'error');
       setActionBusy(false);
       setConfirm(null);
       setDeleteText('');
-      return;
+      return false;
     }
 
     // The mutation has already committed. Refresh failures must never be
@@ -296,6 +280,45 @@ export function DashboardShell() {
       showToast(`${successMessage} 화면 갱신에 실패했지만 작업은 다시 실행하지 마세요.`, 'error');
     }
     setActionBusy(false);
+    return true;
+  }
+
+  function closePasswordReset() {
+    setPasswordResetOpen(false);
+    setPasswordResetUsername('');
+    setNewPassword('');
+    setConfirmPassword('');
+    setPasswordResetMessage('');
+  }
+
+  async function executePasswordReset() {
+    if (!selectedUser || actionBusy) return;
+    const validationMessage = passwordResetError({
+      expectedUsername: selectedUser.username,
+      usernameConfirmation: passwordResetUsername,
+      newPassword,
+      confirmPassword,
+    });
+    if (validationMessage) {
+      setPasswordResetMessage(validationMessage);
+      return;
+    }
+    if (selectedUser.program_type !== 'ssmaker' && selectedUser.program_type !== 'stmaker') {
+      setPasswordResetMessage('계정 프로그램 정보를 확인할 수 없습니다.');
+      return;
+    }
+    setPasswordResetMessage('');
+    const applied = await mutate(
+      `users/${selectedUser.id}/reset-password`,
+      'POST',
+      `${selectedUser.username} 계정의 비밀번호를 초기화했습니다.`,
+      {
+        username_confirmation: passwordResetUsername,
+        program_type: selectedUser.program_type,
+        new_password: newPassword,
+      },
+    );
+    if (applied) closePasswordReset();
   }
 
   function extend(days: number) {
@@ -476,6 +499,7 @@ export function DashboardShell() {
 
               <section className="detail-section danger-zone">
                 <div><h4>계정 제어</h4><p>운영에 영향을 주는 작업은 확인 후 적용됩니다.</p></div>
+                <button className="button secondary" onClick={() => { setPasswordResetMessage(''); setPasswordResetOpen(true); }}><KeyRound size={15} /> 비밀번호 초기화</button>
                 <button className="button secondary" onClick={() => setConfirm({ kind: 'toggle', title: selectedUser.is_active ? '계정 비활성화' : '계정 활성화', description: `${selectedUser.username} 계정의 프로그램 접근을 ${selectedUser.is_active ? '차단' : '허용'}합니다.`, confirmLabel: selectedUser.is_active ? '비활성화' : '활성화', danger: selectedUser.is_active })}><Power size={15} /> {selectedUser.is_active ? '비활성화' : '활성화'}</button>
                 <button className="button danger" onClick={() => setConfirm({ kind: 'delete', title: '사용자 영구 삭제', description: '이 작업은 되돌릴 수 없습니다. 확인을 위해 사용자명을 정확히 입력해야 합니다.', confirmLabel: '영구 삭제', danger: true })}><Trash2 size={15} /> 사용자 삭제</button>
               </section>
@@ -485,6 +509,7 @@ export function DashboardShell() {
       ) : null}
 
       {confirm && selectedUser ? <ConfirmDialog state={confirm} username={selectedUser.username} deleteText={deleteText} setDeleteText={setDeleteText} busy={actionBusy} onCancel={() => { setConfirm(null); setDeleteText(''); }} onConfirm={() => void executeConfirmed()} /> : null}
+      {passwordResetOpen && selectedUser ? <PasswordResetDialog username={selectedUser.username} usernameConfirmation={passwordResetUsername} setUsernameConfirmation={setPasswordResetUsername} newPassword={newPassword} setNewPassword={setNewPassword} confirmPassword={confirmPassword} setConfirmPassword={setConfirmPassword} message={passwordResetMessage} busy={actionBusy} onCancel={closePasswordReset} onConfirm={() => void executePasswordReset()} /> : null}
       {toast ? <div className={`toast ${toast.tone}`} role={toast.tone === 'error' ? 'alert' : 'status'}>{toast.tone === 'success' ? <UserCheck size={18} /> : <AlertTriangle size={18} />}<span>{toast.message}</span><button onClick={() => setToast(null)} aria-label="알림 닫기"><X size={15} /></button></div> : null}
     </div>
   );
@@ -501,4 +526,22 @@ function TableSkeleton() {
 function ConfirmDialog({ state, username, deleteText, setDeleteText, busy, onCancel, onConfirm }: { state: NonNullable<ConfirmState>; username: string; deleteText: string; setDeleteText: (value: string) => void; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
   const deleteBlocked = state.kind === 'delete' && deleteText !== username;
   return <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-description"><div className="confirm-card"><div className={`state-icon ${state.danger ? 'danger' : ''}`}>{state.kind === 'delete' ? <Trash2 size={22} /> : <AlertTriangle size={22} />}</div><h3 id="confirm-title">{state.title}</h3><p id="confirm-description">{state.description}</p>{state.kind === 'delete' ? <label className="confirm-input"><span>확인을 위해 <strong>{username}</strong> 입력</span><input value={deleteText} onChange={(event) => setDeleteText(event.target.value)} autoFocus /></label> : null}<div className="confirm-actions"><button className="button secondary" disabled={busy} onClick={onCancel}>취소</button><button className={`button ${state.danger ? 'danger' : 'primary'}`} disabled={busy || deleteBlocked} onClick={onConfirm}>{busy ? <LoaderCircle className="spin" size={16} /> : null}{state.confirmLabel}</button></div></div></div>;
+}
+
+function PasswordResetDialog({ username, usernameConfirmation, setUsernameConfirmation, newPassword, setNewPassword, confirmPassword, setConfirmPassword, message, busy, onCancel, onConfirm }: { username: string; usernameConfirmation: string; setUsernameConfirmation: (value: string) => void; newPassword: string; setNewPassword: (value: string) => void; confirmPassword: string; setConfirmPassword: (value: string) => void; message: string; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+  return (
+    <div className="modal-layer" role="dialog" aria-modal="true" aria-labelledby="password-reset-title" aria-describedby="password-reset-description" onKeyDown={(event) => { if (event.key === 'Escape' && !busy) onCancel(); }}>
+      <form className="confirm-card password-reset-card" onSubmit={(event) => { event.preventDefault(); onConfirm(); }}>
+        <div className="state-icon danger"><KeyRound size={22} /></div>
+        <h3 id="password-reset-title">비밀번호 초기화</h3>
+        <p id="password-reset-description">새 비밀번호를 적용하면 이 계정의 기존 로그인이 모두 종료됩니다. 잘못된 계정 변경을 막기 위해 사용자명을 다시 입력해 주세요.</p>
+        <label className="confirm-input"><span>확인을 위해 <strong>{username}</strong> 입력</span><input value={usernameConfirmation} onChange={(event) => setUsernameConfirmation(event.target.value)} autoComplete="off" autoFocus /></label>
+        <label className="confirm-input"><span>새 비밀번호</span><input type="password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} /></label>
+        <label className="confirm-input"><span>새 비밀번호 확인</span><input type="password" value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} autoComplete="new-password" minLength={8} maxLength={128} /></label>
+        <p className="password-policy">8자 이상, 영문자와 숫자를 각각 1자 이상 포함해야 합니다.</p>
+        {message ? <p className="form-error" role="alert">{message}</p> : null}
+        <div className="confirm-actions"><button type="button" className="button secondary" disabled={busy} onClick={onCancel}>취소</button><button type="submit" className="button danger" disabled={busy}>{busy ? <LoaderCircle className="spin" size={16} /> : null}초기화</button></div>
+      </form>
+    </div>
+  );
 }

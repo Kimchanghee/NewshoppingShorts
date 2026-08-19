@@ -238,7 +238,7 @@ td small { display: block; margin-top: 3px; color: var(--ink-500); font-size: 8p
 .history-item strong { font-size: 9px; }
 .history-item span, .history-item time { color: var(--ink-500); font-family: var(--font-mono), monospace; font-size: 8px; }
 .history-loading, .empty-mini { padding: 20px; display: flex; align-items: center; justify-content: center; gap: 7px; color: var(--ink-500); font-size: 9px; }
-.danger-zone { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 8px; border-bottom: 0; }
+.danger-zone { display: grid; grid-template-columns: 1fr auto auto auto; align-items: center; gap: 8px; border-bottom: 0; }
 .danger-zone p { margin: 4px 0 0; color: var(--ink-500); font-size: 9px; }
 
 /* Modal + toast */
@@ -251,6 +251,9 @@ td small { display: block; margin-top: 3px; color: var(--ink-500); font-size: 8p
 .confirm-input { margin-top: 18px; display: grid; gap: 7px; }
 .confirm-input span { color: var(--ink-600); font-size: 9px; }
 .confirm-input input { width: 100%; }
+.password-reset-card { width: min(100%, 440px); }
+.password-policy { margin-top: 8px !important; color: var(--ink-500) !important; font-size: 9px !important; }
+.form-error { margin-top: 10px !important; padding: 9px 11px; border: 1px solid #f3c8c4; border-radius: 8px; color: var(--red) !important; background: var(--red-soft); font-size: 10px !important; }
 .confirm-actions { margin-top: 22px; display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .toast { min-width: 320px; max-width: calc(100vw - 32px); min-height: 52px; padding: 0 13px; position: fixed; right: 22px; bottom: 22px; z-index: 120; display: flex; align-items: center; gap: 9px; border: 1px solid var(--ink-200); border-radius: 11px; background: #fff; box-shadow: var(--shadow-lg); font-size: 10px; font-weight: 700; animation: toastIn .22s ease-out; }
 .toast.success > svg { color: var(--green); }

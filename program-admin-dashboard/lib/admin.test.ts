@@ -21,8 +21,10 @@ describe('admin server boundary', () => {
   it('allows only dashboard routes and methods', () => {
     expect(adminProxyAllowed('GET', 'users/12/history')).toBe(true);
     expect(adminProxyAllowed('POST', 'users/12/extend')).toBe(true);
+    expect(adminProxyAllowed('POST', 'users/12/reset-password')).toBe(true);
     expect(adminProxyAllowed('DELETE', 'users/12')).toBe(true);
     expect(adminProxyAllowed('PATCH', 'users/12')).toBe(false);
+    expect(adminProxyAllowed('GET', 'users/12/reset-password')).toBe(false);
     expect(adminProxyAllowed('GET', 'users/12/password')).toBe(false);
   });
 

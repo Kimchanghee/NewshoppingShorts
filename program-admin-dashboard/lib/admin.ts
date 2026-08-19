@@ -6,7 +6,7 @@ const ADMIN_PROXY_ALLOWLIST = [
   ['GET', /^users\/\d+$/],
   ['GET', /^users\/\d+\/history$/],
   ['GET', /^stats$/],
-  ['POST', /^users\/\d+\/(?:extend|toggle-active|revoke-subscription|reduce-subscription)$/],
+  ['POST', /^users\/\d+\/(?:extend|toggle-active|revoke-subscription|reduce-subscription|reset-password)$/],
   ['DELETE', /^users\/\d+$/],
 ] as const;
 

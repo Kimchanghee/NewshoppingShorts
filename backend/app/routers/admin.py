@@ -10,8 +10,9 @@ Security:
 """
 import logging
 import ipaddress
+import re
 import secrets
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, Request, Query, HTTPException, Header
@@ -27,12 +28,13 @@ from app.models.login_attempt import LoginAttempt
 from app.models.registration_request import RegistrationRequest
 from app.models.user_log import UserLog
 from app.models.computer_use_job import ComputerUseJob
+from app.models.session import SessionModel
 from app.utils.subscription_utils import calculate_subscription_expiry
 from app.services.auth_service import AuthService
 from app.config.constants import FREE_TRIAL_WORK_COUNT
 from app.configuration import get_settings
 from app.models.admin_session import AdminSession, hash_admin_token
-from app.utils.password import verify_password
+from app.utils.password import hash_password, verify_password
 from app.utils.rate_limit import limiter
 from app.utils.ip_utils import get_client_ip
 
@@ -98,6 +100,32 @@ class ReduceSubscriptionRequest(BaseModel):
         if v <= 0 or v > 3650:
             raise ValueError("days must be between 1 and 3650")
         return v
+
+
+class ResetUserPasswordRequest(BaseModel):
+    """관리자 비밀번호 초기화 요청.
+
+    사용자 ID만 잘못 선택해도 다른 계정의 비밀번호가 바뀌지 않도록 사용자명과
+    프로그램을 함께 확인한다. 평문 비밀번호는 로그나 응답에 포함하지 않는다.
+    """
+
+    username_confirmation: str = Field(..., min_length=4, max_length=50)
+    program_type: Literal["ssmaker", "stmaker"]
+    new_password: str = Field(..., min_length=8, max_length=128)
+
+    @field_validator("username_confirmation")
+    @classmethod
+    def normalize_username_confirmation(cls, value: str) -> str:
+        return value.strip()
+
+    @field_validator("new_password")
+    @classmethod
+    def validate_new_password(cls, value: str) -> str:
+        if not re.search(r"[a-zA-Z]", value):
+            raise ValueError("비밀번호에 영문자를 1자 이상 포함해 주세요.")
+        if not re.search(r"[0-9]", value):
+            raise ValueError("비밀번호에 숫자를 1자 이상 포함해 주세요.")
+        return value
 
 
 class AdminActionResponse(BaseModel):
@@ -492,6 +520,103 @@ async def toggle_user_active(
         return AdminActionResponse(
             success=False,
             message="상태 변경 중 오류가 발생했습니다."
+        )
+
+
+@router.post("/users/{user_id}/reset-password", response_model=AdminActionResponse)
+@limiter.limit("30/hour")
+async def reset_user_password(
+    request: Request,
+    user_id: int,
+    data: ResetUserPasswordRequest,
+    db: Session = Depends(get_db),
+    _admin: bool = Depends(verify_admin_api_key),
+):
+    """관리자가 선택한 사용자 계정의 비밀번호를 안전하게 초기화한다."""
+    try:
+        user = (
+            db.query(User)
+            .filter(User.id == user_id)
+            .with_for_update()
+            .first()
+        )
+        if not user:
+            return AdminActionResponse(
+                success=False,
+                message="사용자를 찾을 수 없습니다.",
+            )
+
+        if data.username_confirmation != user.username:
+            return AdminActionResponse(
+                success=False,
+                message="사용자명이 일치하지 않습니다.",
+            )
+
+        user_program_type = getattr(user.program_type, "value", user.program_type)
+        if data.program_type != user_program_type:
+            return AdminActionResponse(
+                success=False,
+                message="프로그램이 일치하지 않습니다.",
+            )
+
+        user.password_hash = hash_password(data.new_password)
+        sessions_revoked = (
+            db.query(SessionModel)
+            .filter(
+                SessionModel.user_id == user_id,
+                SessionModel.is_active.is_(True),
+            )
+            .update({SessionModel.is_active: False}, synchronize_session=False)
+        )
+        rate_limit_cutoff = datetime.now(timezone.utc) - timedelta(
+            minutes=settings.LOGIN_ATTEMPT_WINDOW_MINUTES
+        )
+        login_attempts_cleared = (
+            db.query(LoginAttempt)
+            .filter(
+                LoginAttempt.username == user.username,
+                LoginAttempt.program_type == user_program_type,
+                LoginAttempt.attempted_at > rate_limit_cutoff,
+            )
+            .delete(synchronize_session=False)
+        )
+        db.add(
+            UserLog(
+                user_id=user_id,
+                level="WARNING",
+                action="admin_password_reset",
+                content=(
+                    f"program_type={user_program_type};"
+                    f"sessions_revoked={sessions_revoked};"
+                    f"login_attempts_cleared={login_attempts_cleared}"
+                ),
+            )
+        )
+        db.commit()
+
+        logger.warning(
+            "Admin password reset completed: user_id=%s, program_type=%s, "
+            "sessions_revoked=%s, login_attempts_cleared=%s",
+            user_id,
+            user_program_type,
+            sessions_revoked,
+            login_attempts_cleared,
+        )
+        return AdminActionResponse(
+            success=True,
+            message="비밀번호를 초기화하고 기존 로그인을 모두 종료했습니다.",
+            data={
+                "user_id": user_id,
+                "sessions_revoked": sessions_revoked,
+                "login_attempts_cleared": login_attempts_cleared,
+            },
+        )
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Database error during admin password reset: user_id=%s", user_id)
+        return AdminActionResponse(
+            success=False,
+            message="비밀번호를 초기화하지 못했습니다. 잠시 후 다시 시도해 주세요.",
         )
 
 
