@@ -202,6 +202,27 @@ def userSaveInfo(self, checkState, loginid, loginpw, version="1.0.0", autoLogin=
     return loginid, loginpw
 
 
+def clearRejectedAutoLogin(self, loginid: str = "") -> None:
+    """Forget a rejected saved password while keeping the remembered user ID."""
+    userSaveInfo(
+        self,
+        checkState=True,
+        loginid=(loginid or "").strip(),
+        loginpw="",
+        version=str(getattr(self, "version", "1.0.0") or "1.0.0"),
+        autoLogin=False,
+    )
+    self.auto_login_enabled = False
+    if hasattr(self, "autoLoginCheckbox"):
+        self.autoLoginCheckbox.setChecked(False)
+    if hasattr(self, "rememberCheckbox"):
+        self.rememberCheckbox.setChecked(True)
+    elif hasattr(self, "idpw_checkbox"):
+        self.idpw_checkbox.setChecked(True)
+    if hasattr(self, "pwEdit"):
+        self.pwEdit.setText("")
+
+
 def accountLoadInfo(self):
     pass  # logic as before but with PyQt6 safety
 

@@ -21,6 +21,7 @@ from PyQt6.QtGui import QIcon
 from caller import rest, ui_controller
 from ui.login_ui_modern import ModernLoginUi as Ui_LoginWindow
 from ui.components.custom_dialog import show_warning
+from user_facing_errors import sanitize_user_message
 from utils.logging_config import get_logger
 from startup.constants import DEFAULT_PROCESS_PORT
 
@@ -95,6 +96,26 @@ class Login(QMainWindow, Ui_LoginWindow):
             
             # Connect signals
             self.loginButton.clicked.connect(self._loginCheck)
+            self.idEdit.returnPressed.connect(self.pwEdit.setFocus)
+            self.pwEdit.returnPressed.connect(self._loginCheck)
+            self.idEdit.installEventFilter(self)
+            # Do not make the button the dialog default: otherwise Enter in the
+            # ID field submits an empty password before focus can move.
+            self.loginButton.setDefault(False)
+            self.loginButton.setAutoDefault(False)
+            self.setTabOrder(self.idEdit, self.pwEdit)
+            self.setTabOrder(self.pwEdit, self.rememberCheckbox)
+            self.setTabOrder(self.rememberCheckbox, self.autoLoginCheckbox)
+            self.setTabOrder(self.autoLoginCheckbox, self.loginButton)
+            self.idEdit.setAccessibleName("아이디 입력")
+            self.pwEdit.setAccessibleName("비밀번호 입력")
+            self.loginButton.setAccessibleName("로그인 실행")
+            self._focus_id_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Alt+I"), self)
+            self._focus_id_shortcut.activated.connect(self.idEdit.setFocus)
+            self._focus_password_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Alt+P"), self)
+            self._focus_password_shortcut.activated.connect(self.pwEdit.setFocus)
+            self._submit_login_shortcut = QtGui.QShortcut(QtGui.QKeySequence("Alt+L"), self)
+            self._submit_login_shortcut.activated.connect(self.loginButton.click)
             self.minimumButton.clicked.connect(self.showMinimized)
             self.exitButton.clicked.connect(self._closeWindow)
             self.registerRequestButton.clicked.connect(self._openRegistrationDialog)
@@ -106,6 +127,18 @@ class Login(QMainWindow, Ui_LoginWindow):
             code = self.startup_error_code or "STARTUP_SINGLE_INSTANCE_FAILED"
             context = self.startup_error_context or {"reason": "unknown"}
             raise StartupLockError(code, context)
+
+    def eventFilter(self, watched, event):
+        """Keep Enter in the ID field from submitting an empty password."""
+        if (
+            watched is getattr(self, "idEdit", None)
+            and event.type() == QtCore.QEvent.Type.KeyPress
+            and event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter)
+        ):
+            self.pwEdit.setFocus(Qt.FocusReason.TabFocusReason)
+            event.accept()
+            return True
+        return super().eventFilter(watched, event)
 
     def _center_on_active_screen(self) -> None:
         """Keep the frameless login window inside the monitor work area."""
@@ -317,8 +350,20 @@ class Login(QMainWindow, Ui_LoginWindow):
             return
 
         logger.info("Attempting saved auto login")
+        self._auto_login_in_progress = True
         self.loginButton.setText("자동 로그인 중...")
         self._loginCheck()
+
+    @staticmethod
+    def _is_definitive_invalid_credentials(res: dict) -> bool:
+        status = res.get("status")
+        error_code = str(res.get("error_code") or "").upper()
+        http_status = res.get("http_status")
+        return (
+            status in {"EU001", "EU004", "INVALID_CREDENTIALS", "AUTH_FAIL"}
+            or error_code == "LOGIN_INVALID_CREDENTIALS"
+            or http_status == 401
+        )
 
     def _get_local_ip(self) -> str:
         cached_ip = str(getattr(self, "_cached_local_ip", "") or "").strip()
@@ -397,28 +442,29 @@ class Login(QMainWindow, Ui_LoginWindow):
         self._login_worker.start()
 
     def _on_login_request_done(self, res: dict) -> None:
+        was_auto_login = bool(getattr(self, "_auto_login_in_progress", False))
+        self._auto_login_in_progress = False
         self.loginButton.setEnabled(True)
         if res.get("status") is True:
             self._handle_login_success(res)
             return
         if res.get("status") == "EU003":
             logger.info("Duplicate login detected (EU003)")
-            error_module = str(res.get("error_module") or "caller.rest")
-            error_code = str(res.get("error_code") or "LOGIN_ALREADY_ACTIVE")
             show_warning(
                 self,
                 "중복 로그인",
-                f"[{error_module}/{error_code}]\n"
                 "이 프로그램이 다른 기기에서 이미 로그인되어 있습니다.\n"
                 "기존 기기에서 로그아웃한 뒤 다시 시도해주세요.",
             )
             self.loginButton.setText("로그인")
             return
 
-        error_msg = rest._friendly_login_message(res)
+        error_msg = sanitize_user_message(
+            rest._friendly_login_message(res),
+            fallback="로그인하지 못했어요. 잠시 후 다시 시도해 주세요.",
+        )
         error_module = str(res.get("error_module") or "caller.rest")
         error_code = str(res.get("error_code") or "LOGIN_REJECTED")
-        display_msg = f"[{error_module}/{error_code}]\n{error_msg}"
         logger.warning(
             "Login failed: module=%s code=%s retryable=%s offline_allowed=%s status=%s",
             error_module,
@@ -427,7 +473,17 @@ class Login(QMainWindow, Ui_LoginWindow):
             bool(res.get("offline_allowed")),
             res.get("status"),
         )
-        self.showCustomMessageBox("로그인 실패", display_msg)
+        if self._is_definitive_invalid_credentials(res):
+            if was_auto_login:
+                ui_controller.clearRejectedAutoLogin(self, self.idEdit.text())
+                error_msg = (
+                    "저장된 비밀번호가 현재 계정과 맞지 않아 자동 로그인을 해제했어요.\n"
+                    "비밀번호를 다시 입력해 로그인해 주세요."
+                )
+            else:
+                self.pwEdit.clear()
+                self.pwEdit.setFocus()
+        self.showCustomMessageBox("로그인 실패", error_msg)
         self.loginButton.setText("로그인")
 
     def _handle_login_success(self, res):

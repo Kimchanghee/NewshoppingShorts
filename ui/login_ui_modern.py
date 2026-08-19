@@ -31,6 +31,7 @@ from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QPixmap
 from ui.design_system_v2 import get_design_system, ColorPalette
 from ui.components.custom_dialog import show_info, show_warning, show_error, show_success
 from ui.responsive import bounded_size
+from user_facing_errors import sanitize_user_message
 
 # Initialize design system and ALWAYS use light palette for login
 ds = get_design_system()
@@ -148,7 +149,14 @@ class UsernameCheckWorker(QThread):
                 str(result.get("message") or ""),
             )
         except Exception as e:
-            self.finished.emit(self.username, False, f"오류 발생 ({str(e)})")
+            logging.getLogger(__name__).warning(
+                "Username availability request failed: %s", e
+            )
+            self.finished.emit(
+                self.username,
+                False,
+                "서버와 연결하지 못했어요. 잠시 후 다시 확인해 주세요.",
+            )
 
 
 class RegistrationSubmitWorker(QThread):
@@ -1029,6 +1037,11 @@ class RegistrationRequestDialog(QWidget):
             self.usernameStatusLabel.setText("")
             self._validate_form()
             return
+
+        message = sanitize_user_message(
+            message,
+            fallback="아이디 사용 여부를 확인하지 못했어요. 잠시 후 다시 시도해 주세요.",
+        )
 
         if available:
             self._username_available = True

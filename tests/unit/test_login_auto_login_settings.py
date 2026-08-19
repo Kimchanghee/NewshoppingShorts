@@ -95,3 +95,26 @@ def test_user_load_disables_auto_login_without_saved_password(monkeypatch, tmp_p
     assert form.rememberCheckbox.isChecked() is True
     assert form.autoLoginCheckbox.isChecked() is False
     assert form.auto_login_enabled is False
+
+
+def test_rejected_auto_login_forgets_password_but_keeps_user_id(monkeypatch, tmp_path):
+    _patch_storage(monkeypatch, tmp_path)
+    original = _LoginForm()
+    ui_controller.userSaveInfo(
+        original,
+        checkState=True,
+        loginid="demo_user",
+        loginpw="OldPassword123",
+        autoLogin=True,
+    )
+
+    ui_controller.clearRejectedAutoLogin(original, "demo_user")
+
+    restored = _LoginForm()
+    ui_controller.userLoadInfo(restored)
+    assert restored.idEdit.text() == "demo_user"
+    assert restored.pwEdit.text() == ""
+    assert restored.rememberCheckbox.isChecked() is True
+    assert restored.autoLoginCheckbox.isChecked() is False
+    assert restored.auto_login_enabled is False
+    assert ui_controller.SAVED_LOGIN_PASSWORD_KEY not in _Secrets.store

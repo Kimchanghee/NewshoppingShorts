@@ -228,6 +228,19 @@ def test_login_http_failures_have_safe_recovery_classification(
     assert "token" not in result
 
 
+def test_login_rate_limit_message_is_localized_before_reaching_the_dialog():
+    payload = {
+        "status": "EU005",
+        "message": "Too many login attempts. Please try again later.",
+        "error_code": "LOGIN_RATE_LIMITED",
+    }
+
+    message = rest._friendly_login_message(payload)
+
+    assert "로그인 시도가 잠시 제한" in message
+    assert "Too many" not in message
+
+
 def _run_login_qt_script(script: str, tmp_path: Path) -> None:
     environment = os.environ.copy()
     environment.update(
@@ -276,7 +289,51 @@ window.close()
     )
 
 
-def test_login_failure_shows_module_and_code_and_keeps_window(tmp_path):
+def test_login_window_supports_keyboard_login_navigation(tmp_path):
+    _run_login_qt_script(
+        r'''
+from PyQt6.QtCore import Qt
+from PyQt6.QtTest import QTest
+from PyQt6.QtWidgets import QApplication
+from ui.windows import login_window
+login_window.Login.setPort = lambda _self: True
+login_window.ui_controller.userLoadInfo = lambda _self: None
+login_window.Login._preload_ip = lambda _self: None
+login_window.Login._warmup_server = lambda _self: None
+app = QApplication([])
+requested = []
+login_window.Login._loginCheck = lambda _self, *args, **kwargs: requested.append(True)
+window = login_window.Login()
+window.show()
+app.processEvents()
+window.idEdit.setFocus()
+app.processEvents()
+QTest.keyClick(window.idEdit, Qt.Key.Key_Return)
+app.processEvents()
+assert window.pwEdit.hasFocus()
+assert requested == []
+window.idEdit.setFocus()
+window.idEdit.returnPressed.emit()
+app.processEvents()
+assert window.pwEdit.hasFocus()
+window.pwEdit.returnPressed.emit()
+assert requested == [True]
+assert not window.loginButton.isDefault()
+window._focus_id_shortcut.activated.emit()
+assert window.idEdit.hasFocus()
+window._focus_password_shortcut.activated.emit()
+assert window.pwEdit.hasFocus()
+window._submit_login_shortcut.activated.emit()
+assert requested == [True, True]
+assert window.idEdit.accessibleName() == "아이디 입력"
+assert window.pwEdit.accessibleName() == "비밀번호 입력"
+window.close()
+''',
+        tmp_path,
+    )
+
+
+def test_login_failure_hides_module_and_code_and_keeps_window(tmp_path):
     _run_login_qt_script(
         r'''
 import time
@@ -310,8 +367,99 @@ while not shown and time.monotonic() < deadline:
     time.sleep(0.01)
 assert window.isVisible()
 assert shown
-assert "[caller.rest/LOGIN_CONNECTION_ERROR]" in shown[0][1]
+assert shown[0][0] == "로그인 실패"
+assert "caller.rest" not in shown[0][1]
+assert "LOGIN_CONNECTION_ERROR" not in shown[0][1]
+assert "server unavailable" not in shown[0][1]
+assert "로그인하지 못했어요" in shown[0][1]
 assert window.loginButton.isEnabled()
+window.close()
+''',
+        tmp_path,
+    )
+
+
+def test_rejected_saved_auto_login_is_disabled_and_password_is_cleared(tmp_path):
+    _run_login_qt_script(
+        r'''
+import time
+from PyQt6.QtWidgets import QApplication
+from ui.windows import login_window
+login_window.Login.setPort = lambda _self: True
+login_window.ui_controller.userLoadInfo = lambda self: (
+    self.idEdit.setText("saved_user"),
+    self.pwEdit.setText("RejectedPassword"),
+    self.rememberCheckbox.setChecked(True),
+    self.autoLoginCheckbox.setChecked(True),
+    setattr(self, "auto_login_enabled", True),
+)
+login_window.Login._preload_ip = lambda _self: None
+login_window.Login._warmup_server = lambda _self: None
+cleared = []
+def clear_rejected(self, login_id):
+    cleared.append(login_id)
+    self.auto_login_enabled = False
+    self.autoLoginCheckbox.setChecked(False)
+    self.pwEdit.clear()
+login_window.ui_controller.clearRejectedAutoLogin = clear_rejected
+login_window.rest.login = lambda **_kwargs: {
+    "status": "EU001",
+    "http_status": 401,
+    "error_code": "LOGIN_INVALID_CREDENTIALS",
+    "message": "invalid password",
+}
+app = QApplication([])
+window = login_window.Login()
+shown = []
+window.showCustomMessageBox = lambda title, message: shown.append((title, message))
+window._get_local_ip = lambda: "127.0.0.1"
+window._attempt_auto_login()
+deadline = time.monotonic() + 2
+while not shown and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
+assert cleared == ["saved_user"]
+assert window.pwEdit.text() == ""
+assert window.autoLoginCheckbox.isChecked() is False
+assert "자동 로그인" in shown[0][1]
+window.close()
+''',
+        tmp_path,
+    )
+
+
+def test_rejected_manual_login_clears_only_password_and_focuses_retry(tmp_path):
+    _run_login_qt_script(
+        r'''
+import time
+from PyQt6.QtWidgets import QApplication
+from ui.windows import login_window
+login_window.Login.setPort = lambda _self: True
+login_window.ui_controller.userLoadInfo = lambda _self: None
+login_window.Login._preload_ip = lambda _self: None
+login_window.Login._warmup_server = lambda _self: None
+login_window.rest.login = lambda **_kwargs: {
+    "status": "EU001",
+    "http_status": 401,
+    "error_code": "LOGIN_INVALID_CREDENTIALS",
+    "message": "invalid password",
+}
+app = QApplication([])
+window = login_window.Login()
+window.idEdit.setText("saved_user")
+window.pwEdit.setText("RejectedPassword")
+window._get_local_ip = lambda: "127.0.0.1"
+shown = []
+window.showCustomMessageBox = lambda title, message: shown.append((title, message))
+window._loginCheck()
+deadline = time.monotonic() + 2
+while not shown and time.monotonic() < deadline:
+    app.processEvents()
+    time.sleep(0.01)
+assert shown
+assert window.idEdit.text() == "saved_user"
+assert window.pwEdit.text() == ""
+assert window.focusWidget() is window.pwEdit
 window.close()
 ''',
         tmp_path,

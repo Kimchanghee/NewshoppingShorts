@@ -600,6 +600,31 @@ def _friendly_login_message(login_object: Dict[str, Any]) -> str:
     raw_message = str(login_object.get("message") or "").strip()
     error_code, error_message, request_id = _extract_error_fields(login_object)
 
+    client_error_map = {
+        "LOGIN_RATE_LIMITED": (
+            "로그인 시도가 잠시 제한됐습니다. 1분 정도 기다린 뒤 다시 시도해주세요."
+        ),
+        "LOGIN_NETWORK_ERROR": (
+            "로그인 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해주세요."
+        ),
+        "LOGIN_TIMEOUT": (
+            "로그인 서버 응답이 늦어지고 있습니다. 잠시 후 다시 시도해주세요."
+        ),
+        "LOGIN_SERVER_ERROR": (
+            "로그인 서버에 일시적인 문제가 생겼습니다. 잠시 후 다시 시도해주세요."
+        ),
+        "LOGIN_SERVICE_DISABLED": (
+            "로그인 서비스를 잠시 사용할 수 없습니다. 잠시 후 다시 시도해주세요."
+        ),
+        "LOGIN_INVALID_CREDENTIALS": "아이디 또는 비밀번호가 틀렸습니다.",
+        "LOGIN_ALREADY_ACTIVE": (
+            "이미 다른 기기에서 로그인 중입니다. 기존 기기에서 로그아웃한 뒤 다시 시도해주세요."
+        ),
+    }
+    client_error_code = str(login_object.get("error_code") or "").strip().upper()
+    if client_error_code in client_error_map:
+        return _append_request_id(client_error_map[client_error_code], request_id)
+
     backend_error_map = {
         "VALIDATION_ERROR": "입력값이 올바르지 않습니다.",
         "AUTH_ERROR": "인증에 실패했습니다. 다시 로그인해주세요.",
@@ -757,7 +782,7 @@ def login(**data) -> Dict[str, Any]:
 
     try:
         # Logging philosophy: INFO for important events, DEBUG for routine operations, WARNING for recoverable errors, ERROR for failures
-        logger.debug(f"[Login] Params: id={_sanitize_user_id_for_logging(user_id)}, ip={ip_address}, force={data.get('force', False)}")
+        logger.debug("[Login] Starting authentication request")
 
         candidate_servers = _candidate_login_servers()
         response: Optional[requests.Response] = None
@@ -820,25 +845,26 @@ def login(**data) -> Dict[str, Any]:
                 }
             )
 
-        # Raw response logged at TRACE level only (contains token)
-        logger.debug("[Login] Raw response received (length=%d)", len(response.text))
-        
         loginObject: Dict[str, Any] = {}
-        # Parse response body for logging (mask sensitive data)
+        # Parse the response for program use, but never log its body. Successful
+        # responses contain account, subscription and usage metadata in addition
+        # to the token, so field-by-field masking is too easy to get wrong.
         try:
             parsed_body = json.loads(response.text)
             if isinstance(parsed_body, dict):
                 loginObject = parsed_body
-
-            safe_log_obj = parsed_body.copy() if isinstance(parsed_body, dict) else {"raw": str(parsed_body)}
-            if "data" in safe_log_obj and isinstance(safe_log_obj["data"], dict):
-                data_part = safe_log_obj["data"].copy()
-                if "token" in data_part:
-                    data_part["token"] = "MASKED_TOKEN"
-                safe_log_obj["data"] = data_part
-            logger.info(f"[Login] Response body: {json.dumps(safe_log_obj, ensure_ascii=False)}")
+            _message, backend_code, request_id = _extract_error_fields(loginObject)
+            logger.info(
+                "[Login] Response summary: http_status=%s result=%s request_id=%s",
+                response.status_code,
+                backend_code or ("success" if loginObject.get("status") is True else "rejected"),
+                request_id or "none",
+            )
         except Exception:
-            logger.warning("[Login] Failed to parse response body for logging")
+            logger.warning(
+                "[Login] Response parsing failed: http_status=%s",
+                response.status_code,
+            )
             loginObject = {
                 "status": "error",
                 "message": _ERROR_MESSAGES["parse"],
@@ -866,7 +892,7 @@ def login(**data) -> Dict[str, Any]:
                     
                     # Log login success
                     try:
-                        log_user_action("로그인", f"로그인 성공 (IP: {ip_address})")
+                        log_user_action("로그인", "로그인 성공")
                     except Exception:
                         pass
                 else:
@@ -1268,30 +1294,22 @@ def submitRegistrationRequest(
     terms_version: str = "",
     privacy_version: str = "",
 ) -> Dict[str, Any]:
-    """
-    Submit a registration request to the server.
-    ?????????????
-
-    Args:
-        name: ?
- ?        username: ??????        password: ?
-        contact: ??
-        email: ???
-    Returns:
-        Response dict with 'success' boolean and optional 'message'
-    """
+    """Submit a registration request to the authentication server."""
     global main_server
 
     # HTTPS security check
     if not _check_https_security():
-        return {"success": False, "message": "Secure connection required."}
+        return {
+            "success": False,
+            "message": "안전한 서버 연결을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+        }
 
     # Input validation
     if not name or len(name.strip()) < 2:
-        return {"success": False, "message": "Name must be at least 2 characters."}
+        return {"success": False, "message": "이름은 2자 이상 입력해 주세요."}
 
     if not validate_user_id(username):
-        return {"success": False, "message": "Username format is invalid."}
+        return {"success": False, "message": "아이디 형식이 올바르지 않습니다."}
 
     if not password or len(password) < 8:
         return {"success": False, "message": "비밀번호는 8자 이상이어야 합니다."}
@@ -1393,10 +1411,9 @@ def submitRegistrationRequest(
             }
 
         if response.status_code == 409:
-            # Username already exists
             return {
                 "success": False,
-                "message": "Username already exists.",
+                "message": "이미 사용 중인 아이디입니다. 다른 아이디를 입력해 주세요.",
             }
 
         if response.status_code == 422:
@@ -1410,33 +1427,33 @@ def submitRegistrationRequest(
                     if details and isinstance(details, list):
                         # Extract message from first error detail
                         first_error = details[0]
-                        msg = first_error.get("msg", "")
                         loc = first_error.get("loc", [])
-                        field = loc[-1] if loc else ""
-                        
-                        # Translate Pydantic standard messages if needed
-                        if "at least" in msg:
-                            msg = "길이가 너무 짧습니다."
-                        
+                        field = str(loc[-1] if loc else "").lower()
+                        field_label = {
+                            "name": "이름",
+                            "username": "아이디",
+                            "password": "비밀번호",
+                            "contact": "연락처",
+                            "email": "이메일",
+                        }.get(field, "입력 항목")
                         return {
                             "success": False,
-                            "message": f"입력값이 올바르지 않습니다.\n({field}: {msg})",
+                            "message": f"{field_label} 입력값을 확인해 주세요.",
                         }
                     
                     # If message exists in error object
                     if error_obj.get("message"):
                         return {
                             "success": False,
-                            "message": error_obj.get("message"),
+                            "message": "회원가입 입력값을 확인해 주세요.",
                         }
 
                 # 2. Standard FastAPI format (detail list)
                 detail = data.get("detail", [])
                 if detail and isinstance(detail, list):
-                    msg = detail[0].get("msg", "")
                     return {
                         "success": False,
-                        "message": f"입력값이 올바르지 않습니다. {msg}",
+                        "message": "회원가입 입력값을 확인해 주세요.",
                     }
             except Exception:
                 pass
@@ -1450,17 +1467,21 @@ def submitRegistrationRequest(
             try:
                 error_data = response.json()
                 error_info = error_data.get("error", {})
-                retry_after = error_info.get(
-                    "retry_after", "1? ??? ???."
+                retry_after = error_info.get("retry_after")
+                retry_seconds = int(retry_after) if str(retry_after).isdigit() else 0
+                retry_hint = (
+                    f"약 {retry_seconds}초 뒤 다시 시도해 주세요."
+                    if retry_seconds > 0
+                    else "잠시 후 다시 시도해 주세요."
                 )
                 return {
                     "success": False,
-                    "message": f"??????? ?.\n{retry_after} ??? ???.",
+                    "message": f"회원가입 요청이 잠시 많습니다.\n{retry_hint}",
                 }
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, TypeError, ValueError):
                 return {
                     "success": False,
-                    "message": "??????? ?.\n?  ??? ???.",
+                    "message": "회원가입 요청이 잠시 많습니다.\n잠시 후 다시 시도해 주세요.",
                 }
 
         response.raise_for_status()
@@ -1478,21 +1499,19 @@ def submitRegistrationRequest(
             return result
         else:
             # Server-side error handling (SQL or validation issues)
-            server_message = result.get("message", "Registration failed.")
+            server_message = str(result.get("message") or "")
 
             if (
                 "Duplicate entry" in server_message
                 or "IntegrityError" in server_message
                 or "1062" in str(server_message)
             ):
-                server_message = (
-                    "Username or contact already exists. Please use different values."
-                )
-            elif "SQL" in server_message or "pymysql" in server_message:
-                server_message = "Server database error. Please try again later."
+                user_message = "아이디 또는 연락처가 이미 사용 중입니다. 다른 정보를 입력해 주세요."
+            else:
+                user_message = "회원가입을 완료하지 못했습니다. 입력 내용을 확인한 뒤 다시 시도해 주세요."
 
             logger.error(f"Registration failed: {server_message}")
-            return {"success": False, "message": server_message}
+            return {"success": False, "message": user_message}
 
     except requests.exceptions.Timeout:
         logger.error("Registration request timed out")
