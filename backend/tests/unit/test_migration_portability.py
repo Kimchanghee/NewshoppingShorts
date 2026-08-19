@@ -54,7 +54,7 @@ def test_empty_database_upgrades_to_current_head(tmp_path):
         assert (
             connection.execute(text("SELECT version_num FROM alembic_version")).scalar_one()
             == EXPECTED_ALEMBIC_REVISION
-            == "20260816_0007"
+            == "20260816_0008"
         )
         session_columns = {
             column["name"] for column in inspect(connection).get_columns("sessions")
