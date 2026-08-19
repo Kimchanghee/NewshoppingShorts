@@ -29,6 +29,7 @@ const baseRoutes = [
   { loc: "/", changefreq: "daily", priority: "1.0" },
   { loc: "/notice/index.html", changefreq: "weekly", priority: "0.8" },
   { loc: "/contact/index.html", changefreq: "monthly", priority: "0.6" },
+  { loc: "/privacy/index.html", changefreq: "monthly", priority: "0.7" },
 ];
 
 const noticeRoutes = NOTICE_SLUGS.map((slug) => ({

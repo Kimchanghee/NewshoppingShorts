@@ -10,6 +10,7 @@ import Analytics from "@/components/Analytics";
 import Index from "./pages/Index";
 import Notice from "./pages/Notice";
 import Contact from "./pages/Contact";
+import Privacy from "./pages/Privacy";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,8 @@ const App = () => (
               <Route path="/notice/:slug/index.html" element={<Notice />} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/contact/index.html" element={<Contact />} />
+              <Route path="/privacy" element={<Privacy />} />
+              <Route path="/privacy/index.html" element={<Privacy />} />
               {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
               <Route path="*" element={<NotFound />} />
             </Routes>

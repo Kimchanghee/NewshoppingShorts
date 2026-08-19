@@ -45,6 +45,9 @@ export default function Footer() {
               <Link to="/contact/index.html" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
                 문의하기
               </Link>
+              <Link to="/privacy/index.html" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+                개인정보처리방침
+              </Link>
             </div>
           </div>
 

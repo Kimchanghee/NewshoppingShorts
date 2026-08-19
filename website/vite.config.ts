@@ -8,7 +8,7 @@ function collectHtmlInputs() {
     main: path.resolve(__dirname, "index.html"),
   };
 
-  const routeRoots = ["notice", "contact"];
+  const routeRoots = ["notice", "contact", "privacy"];
   for (const routeRoot of routeRoots) {
     const rootPath = path.resolve(__dirname, routeRoot);
     if (!fs.existsSync(rootPath)) continue;
