@@ -11,6 +11,7 @@ from config.font_catalog import (
 
 block_cipher = None
 project_root = os.path.abspath('.')
+windows_version_info = os.path.join(project_root, 'build_staging', 'windows_version_info.txt')
 
 # Guardrail: shipping builds are validated only on Python 3.11.
 # Prevent accidental releases from unsupported interpreters (e.g. 3.14),
@@ -326,6 +327,7 @@ exe = EXE(
     # Windows release signing is enforced in scripts/build_exe.ps1 via signtool.
     # (codesign_identity is macOS-only and intentionally omitted.)
     icon='resource/app_icon.ico' if os.path.exists('resource/app_icon.ico') else None,
+    version=windows_version_info if os.path.exists(windows_version_info) else None,
     uac_admin=False,
     contents_directory='.',   # 모든 파일을 EXE와 같은 디렉토리에 배치 (flat 구조)
 )

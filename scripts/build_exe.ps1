@@ -288,6 +288,13 @@ try {
     "--licenses-dir", (Join-Path $Root "resources\licenses")
   )
 
+  $windowsVersionInfo = Join-Path $Root "build_staging\windows_version_info.txt"
+  Invoke-Native "[1.95/5] Generating Windows executable metadata..." $Python @(
+    (Join-Path $Root "scripts\generate_windows_version_info.py"),
+    "--version-json", $versionJson,
+    "--output", $windowsVersionInfo
+  )
+
   # ── PyInstaller: onedir build ──────────────────────────────────────────────
   Invoke-Native "[2/5] Building ssmaker (onedir)..." $Python @(
     "-m", "PyInstaller", "--noconfirm", "--clean",
