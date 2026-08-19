@@ -30,6 +30,7 @@ from utils.url_security import (
 )
 from utils.auth_helpers import extract_user_id
 from managers.work_quota import DurableWorkReservation
+from user_facing_errors import sanitize_user_message
 
 logger = get_logger(__name__)
 
@@ -179,7 +180,11 @@ class _StepIndicator(QFrame):
     def set_state(self, state: str, message: str = ""):
         self._apply_style(state)
         if message:
-            self.status_label.setText(message[:60])
+            safe_message = sanitize_user_message(
+                message,
+                fallback="상태를 확인해 주세요.",
+            )
+            self.status_label.setText(safe_message[:60])
 
     def _apply_style(self, state: str):
         if state == "completed":
@@ -1238,6 +1243,10 @@ class SourcingPanel(QWidget):
         best = getattr(pipeline, "best_similarity_score", None)
         product_name = ((pipeline.product_info or {}).get("name") or "상품")[:80]
         reason = getattr(pipeline, "match_error", None) or pipeline.error or "비슷한 상품을 찾지 못했어요."
+        safe_reason = sanitize_user_message(
+            reason,
+            fallback="조건에 맞는 영상을 찾지 못했어요.",
+        )
         message = (
             f"비슷한 상품을 찾지 못했어요.\n"
             f"상품: {product_name}\n"
@@ -1274,7 +1283,7 @@ class SourcingPanel(QWidget):
                 pass
             return
 
-        self.results_label.setText(message + f"\n\n자세히: {reason}")
+        self.results_label.setText(message + f"\n\n자세히: {safe_reason}")
         self.results_label.setStyleSheet(f"color: {get_color('error')};")
         try:
             from ui.components.custom_dialog import show_warning
@@ -1650,12 +1659,12 @@ class SourcingPanel(QWidget):
             self._safe_set_platform_failure({
                 "error": (
                     "상품 검색 처리 중 오류가 발생했어요.\n"
-                    f"원인: 내부 처리 오류 ({type(e).__name__})\n"
+                    "원인: 상품 검색을 완료하지 못했어요.\n"
                     "해결: 같은 상품을 다시 검색해 주세요. 계속 실패하면 다른 상품을 선택해 주세요."
                 ),
                 "failure": {
                     "code": "unexpected_search_error",
-                    "cause": f"내부 처리 오류 ({type(e).__name__})",
+                    "cause": "상품 검색을 완료하지 못했어요.",
                     "action": "같은 상품을 다시 검색하거나 다른 상품을 선택해 주세요.",
                     "retriable": True,
                     "can_choose_other_product": True,
@@ -1677,7 +1686,9 @@ class SourcingPanel(QWidget):
 
     def _safe_set_results(self, text: str):
         """Queue a platform result update onto the Qt UI thread."""
-        self.platform_result_ready.emit(str(text))
+        self.platform_result_ready.emit(
+            sanitize_user_message(text, fallback="작업 결과를 확인하지 못했어요.")
+        )
 
     def _safe_set_platform_failure(self, report: dict):
         """Queue a structured search failure onto the Qt UI thread."""
@@ -1685,7 +1696,9 @@ class SourcingPanel(QWidget):
 
     def _set_platform_result(self, text: str):
         self._set_search_recovery_visible(False)
-        self.results_label.setText(text)
+        self.results_label.setText(
+            sanitize_user_message(text, fallback="작업 결과를 확인하지 못했어요.")
+        )
         self.results_label.setStyleSheet(f"color: {get_color('text_secondary')};")
 
     def _set_platform_failure(self, report: dict):
@@ -1697,8 +1710,13 @@ class SourcingPanel(QWidget):
             message += f"\n해결: {failure.get('action') or '다시 시도해 주세요.'}"
         report_path = str((report or {}).get("report_path") or "").strip()
         if report_path:
-            message += f"\n오류 기록: {report_path}"
-        self.results_label.setText(message)
+            logger.info("[SourcingPanel] failure report: %s", report_path)
+        self.results_label.setText(
+            sanitize_user_message(
+                message,
+                fallback="상품 검색을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.",
+            )
+        )
         self.results_label.setStyleSheet(f"color: {get_color('error')};")
         self._set_search_recovery_visible(True)
 
@@ -1804,6 +1822,14 @@ class SourcingPanel(QWidget):
         """Update the (hidden) in-page indicator and mirror progress to the
         unified left-bottom progress panel (풀 자동화 진행 표시 통일)."""
         is_error = (pct <= 0 and any(kw in message for kw in ["실패", "오류", "없습니다", "못"]))
+        safe_message = sanitize_user_message(
+            message,
+            fallback=(
+                "이 단계를 완료하지 못했어요."
+                if is_error
+                else "작업을 진행하고 있어요."
+            ),
+        )
         if pct >= 1.0:
             state = "completed"
         elif is_error:
@@ -1813,7 +1839,7 @@ class SourcingPanel(QWidget):
 
         indicator = self._step_indicators.get(step_id)
         if indicator:
-            indicator.set_state(state, message)
+            indicator.set_state(state, safe_message)
 
         pp = getattr(self.gui, "progress_panel", None) if self.gui else None
         if pp is not None:
@@ -1822,9 +1848,9 @@ class SourcingPanel(QWidget):
                 if hasattr(pp, "update_step_status"):
                     pp.update_step_status(step_id, panel_status,
                                           int(max(0.0, min(pct, 1.0)) * 100))
-                if hasattr(pp, "set_current_task") and message:
+                if hasattr(pp, "set_current_task") and safe_message:
                     pp.set_current_task(
-                        message,
+                        safe_message,
                         panel_status if panel_status in ("completed", "error") else "active")
             except Exception:
                 pass

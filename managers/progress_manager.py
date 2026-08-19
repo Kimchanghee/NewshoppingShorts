@@ -14,6 +14,7 @@ from urllib.parse import urlparse
 
 from PyQt6.QtCore import QTimer
 from utils.logging_config import get_logger
+from user_facing_errors import sanitize_user_message
 
 logger = get_logger(__name__)
 
@@ -670,6 +671,14 @@ class ProgressManager(ProgressObserver):
             # ★ ProgressPanel 직접 업데이트 (가장 확실한 경로)
             # Direct ProgressPanel update (most reliable path)
             progress_panel = getattr(self.gui, 'progress_panel', None)
+            ui_highlight_message = sanitize_user_message(
+                highlight_message,
+                fallback="작업 상태를 확인해 주세요.",
+            )
+            ui_stage_message = sanitize_user_message(
+                stage_message,
+                fallback="작업을 진행하고 있어요.",
+            )
             if progress_panel is not None and hasattr(progress_panel, 'update_step_status'):
                 # ProgressManager status -> ProgressPanel status 매핑
                 panel_status_map = {
@@ -695,13 +704,13 @@ class ProgressManager(ProgressObserver):
                 }
                 try:
                     progress_panel.set_current_task(
-                        highlight_message,
+                        ui_highlight_message,
                         panel_task_status_map.get(status, 'pending'),
                     )
                 except Exception as e:
                     logger.debug(f"[ProgressManager] panel.set_current_task error: {e}")
             elif hasattr(self.gui, 'current_task_label'):
-                self.gui.current_task_label.setText(highlight_message)
+                self.gui.current_task_label.setText(ui_highlight_message)
 
             # Update state for heartbeat
             # For heartbeat: use short status for error (don't send full error details to server)
@@ -724,9 +733,9 @@ class ProgressManager(ProgressObserver):
             status_bar = getattr(self.gui, 'status_bar', None)
             if status_bar is not None:
                 if hasattr(status_bar, 'update_status'):
-                    status_bar.update_status(stage_message)
+                    status_bar.update_status(ui_stage_message)
                 elif hasattr(status_bar, 'showMessage'):
-                    status_bar.showMessage(stage_message)
+                    status_bar.showMessage(ui_stage_message)
 
             # 깜빡임 효과 처리
             if progress_panel is not None:
@@ -1036,6 +1045,7 @@ class ProgressManager(ProgressObserver):
 
     def _update_task_display(self, message: str) -> None:
         """Update the current task label / variable."""
+        message = sanitize_user_message(message, fallback="작업 상태를 확인해 주세요.")
         ctl = getattr(self.gui, 'current_task_label', None)
         if ctl is not None and hasattr(ctl, 'setText'):
             ctl.setText(message)
@@ -1050,6 +1060,7 @@ class ProgressManager(ProgressObserver):
 
     def _update_status_bar(self, message: str) -> None:
         """Update the status bar with a message."""
+        message = sanitize_user_message(message, fallback="작업을 진행하고 있어요.")
         bar = getattr(self.gui, 'status_bar', None)
         if bar is None:
             return

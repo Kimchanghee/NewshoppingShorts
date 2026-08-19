@@ -1968,9 +1968,17 @@ def _process_single_video(app, url, current_number, total_urls):
                                         )
                                 video_desc += f"\n\n🛒 쿠팡 상품 보기: {coupang_link}"
 
-                                # Update Inpock if link generated/configured.
+                                # Inpock remains disabled until a real registration
+                                # flow is implemented and verified. Never treat an
+                                # unverified browser visit as a successful publish.
                                 inpock_mgr = getattr(app, "inpock_manager", None)
-                                if inpock_mgr:
+                                is_inpock_available = bool(
+                                    inpock_mgr
+                                    and hasattr(inpock_mgr, "is_available")
+                                    and callable(inpock_mgr.is_available)
+                                    and inpock_mgr.is_available()
+                                )
+                                if is_inpock_available:
                                     try:
                                         is_inpock_connected = False
                                         if hasattr(inpock_mgr, "is_connected") and callable(inpock_mgr.is_connected):
@@ -1989,7 +1997,6 @@ def _process_single_video(app, url, current_number, total_urls):
                                             )
                                             if success:
                                                 logger.info("[Automation] Added to Inpock Link")
-                                                video_desc += "\n📂 모든 제품 보기: https://inpock.co.kr/..."
                                     except Exception as inpock_err:
                                         # Inpock 연동 실패가 YouTube 업로드 큐 추가를 막지 않도록 분리 처리
                                         logger.warning("[Automation] Inpock link update skipped: %s", inpock_err)

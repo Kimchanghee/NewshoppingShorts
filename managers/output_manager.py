@@ -32,7 +32,11 @@ class OutputManager:
     def select_output_folder(self):
         """Open a PyQt6 folder picker and update GUI state."""
         old_folder = getattr(self.gui, "output_folder_path", "")
-        selected = QFileDialog.getExistingDirectory(self.gui, "Select Output Folder", old_folder or os.getcwd())
+        selected = QFileDialog.getExistingDirectory(
+            self.gui,
+            "출력 폴더 선택",
+            old_folder or os.getcwd(),
+        )
         if not selected:
             return
         selected = os.path.abspath(selected)

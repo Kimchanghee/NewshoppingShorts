@@ -622,7 +622,11 @@ class BatchHandler:
                                     dialog.exec()
                                 except Exception as e:
                                     logger.error(f"Failed to show subscription dialog: {e}")
-                                    show_warning(self.app, "오류", f"구독 신청 창을 열 수 없습니다: {e}")
+                                    show_warning(
+                                        self.app,
+                                        "구독 안내 오류",
+                                        "구독 신청 화면을 열지 못했어요. 앱을 다시 실행해 주세요.",
+                                    )
 
                             QTimer.singleShot(0, show_sub_dialog)
                         else:

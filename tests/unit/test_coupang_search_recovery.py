@@ -140,8 +140,8 @@ def test_structured_failure_shows_cause_solution_and_recovery_controls():
 
     assert "원인: 검색 서버 시간초과" in result_label.text()
     assert "해결: 다시 검색해 주세요" in result_label.text()
-    assert "오류 기록:" in result_label.text()
-    assert "report_platform_failed.json" in result_label.text()
+    assert "오류 기록:" not in result_label.text()
+    assert "report_platform_failed.json" not in result_label.text()
     assert recovery.isHidden() is False
 
 

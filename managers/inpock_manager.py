@@ -3,9 +3,7 @@ Inpock Link Manager
 인포크링크 자동화 및 링크 관리자 (Selenium 기반)
 """
 
-import os
-import time
-from typing import Optional, Dict
+from typing import Optional
 
 from utils.logging_config import get_logger
 from managers.settings_manager import get_settings_manager
@@ -21,6 +19,11 @@ class InpockManager:
     BASE_URL = "https://inpock.co.kr"
     LOGIN_URL = "https://inpock.co.kr/login"
     ADMIN_URL = "https://inpock.co.kr/admin/link" # 추후 확인 필요, 일반적인 관리 페이지
+    SUPPORTED = False
+    UNAVAILABLE_MESSAGE = (
+        "인포크 자동 등록은 현재 지원 준비 중입니다. "
+        "실제 등록이 검증되기 전에는 성공으로 처리하지 않습니다."
+    )
 
     def __init__(self):
         self.settings = get_settings_manager()
@@ -94,17 +97,20 @@ class InpockManager:
         logger.info("[Inpock] Cookies saved")
 
     def is_connected(self) -> bool:
-        """Check whether Inpock cookies are available."""
-        try:
-            cookies = self.settings.get_inpock_cookies()
-            return bool(cookies)
-        except Exception:
-            return False
+        """Return False while the unverified integration is disabled."""
+        return False
+
+    def is_available(self) -> bool:
+        """Whether production Inpock registration is implemented and verified."""
+        return self.SUPPORTED
 
     def login_manual(self):
         """
         Open browser for manual login and save cookies.
         """
+        if not self.is_available():
+            raise RuntimeError(self.UNAVAILABLE_MESSAGE)
+
         self._init_driver(headless=False)
         self.driver.get(self.LOGIN_URL)
         
@@ -127,37 +133,15 @@ class InpockManager:
 
     def add_link(self, title: str, url: str) -> bool:
         """
-        Add a new link to Inpock Link profile.
-        NOTE: This is a placeholder implementation. The exact DOM structure 
-        needs to be verified as Inpock doesn't verify public API docs.
+        Register a link only after a production implementation is verified.
+
+        Returning False is deliberate: the previous placeholder opened an
+        assumed admin URL, waited two seconds, and reported success without
+        changing Inpock. A false negative is safer than telling users that an
+        external registration succeeded when it did not.
         """
-        if not self.settings.get_inpock_cookies():
-            logger.warning("[Inpock] Login required first")
-            return False
-            
-        try:
-            self._init_driver(headless=False) # Headless might trigger security checks
-            self.driver.get(self.ADMIN_URL)
-            
-            # TODO: Implement actual element interaction
-            # 1. Find "Add Link" button
-            # 2. Input Title
-            # 3. Input URL
-            # 4. Save
-            
-            # Mock success for now until we can inspect the page
-            logger.info(f"[Inpock] (Mock) Adding link: {title} -> {url}")
-            time.sleep(2)
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"[Inpock] Failed to add link: {e}")
-            return False
-        finally:
-            # Keep browser open for debugging if needed, or close
-            # self.close()
-            pass
+        logger.warning("[Inpock] Registration skipped: integration is not available")
+        return False
 
     def close(self):
         if self.driver:

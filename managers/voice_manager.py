@@ -232,7 +232,11 @@ class VoiceManager:
                 show_info(self.gui, "안내", "재생 모듈이 없습니다.")
         except Exception as exc:
             logger.error("[VoiceManager] 샘플 재생 실패: %s", exc)
-            show_error(self.gui, "재생 오류", str(exc))
+            show_error(
+                self.gui,
+                "재생 오류",
+                "음성 샘플을 재생하지 못했어요. 다른 음성을 선택하거나 앱을 다시 실행해 주세요.",
+            )
 
     # --------- utility placeholders ---------
     def ensure_voice_vars(self):

@@ -386,7 +386,15 @@ class URLInputPanel(QWidget):
             queue_manager.add_mix_job(urls)
         except Exception as exc:
             from ui.components.custom_dialog import show_warning
-            show_warning(self, "목록에 담지 못했어요", str(exc))
+            from user_facing_errors import sanitize_user_message
+            show_warning(
+                self,
+                "목록에 담지 못했어요",
+                sanitize_user_message(
+                    exc,
+                    fallback="영상 링크를 목록에 담지 못했어요. 입력 내용을 확인해 주세요.",
+                ),
+            )
             return
 
         from ui.components.custom_dialog import show_success

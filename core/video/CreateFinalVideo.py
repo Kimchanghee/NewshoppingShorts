@@ -76,7 +76,7 @@ def create_final_video_thread(app):
 
         app.update_overall_progress("video", "processing", 0)
 
-        app.update_status("理쒖쥌 鍮꾨뵒???앹꽦 以?..")
+        app.update_status("최종 영상을 만드는 중...")
 
         selected_voice = app.fixed_tts_voice
 
@@ -604,13 +604,13 @@ def create_final_video_thread(app):
     except Exception as e:
         ui_controller.write_error_log(e)
 
-        app.update_status("鍮꾨뵒???앹꽦 ?ㅻ쪟")
+        app.update_status("영상을 만들지 못했어요")
 
         app.update_progress_state("video", "error", 0)
 
         app.update_overall_progress("video", "error", 0)
 
-        error_msg = f"理쒖쥌 鍮꾨뵒???앹꽦 ?ㅽ뙣:\n{str(e)}"
+        error_msg = "최종 영상을 만들지 못했어요. 잠시 후 다시 시도해 주세요."
 
         logger.error("\n[?ㅻ쪟] %s", error_msg)
 
@@ -637,7 +637,7 @@ def create_final_video_thread(app):
         except Exception as cleanup_err:
             logger.warning("[Cleanup] Failed to close final_video: %s", cleanup_err)
 
-        show_error(app.root, "???ㅻ쪟", error_msg)
+        show_error(app.root, "영상 만들기 실패", error_msg)
 
 
 def combine_tts_files(app, target_duration=None):

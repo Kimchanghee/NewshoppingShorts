@@ -6,6 +6,7 @@ Provides backward-compatible method stubs that delegate to various managers.
 Extracted from main.py for cleaner separation.
 """
 from utils.logging_config import get_logger
+from user_facing_errors import sanitize_user_message
 
 logger = get_logger(__name__)
 
@@ -33,7 +34,9 @@ class DelegationMixin:
         """Update status bar text."""
         bar = getattr(self, "status_bar", None)
         if bar and hasattr(bar, "update_status"):
-            bar.update_status(status_text)
+            bar.update_status(
+                sanitize_user_message(status_text, fallback="작업 상태를 확인해 주세요.")
+            )
 
     def update_url_listbox(self):
         """Update URL list display."""
