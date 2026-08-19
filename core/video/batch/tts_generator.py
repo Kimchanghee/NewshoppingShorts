@@ -613,10 +613,16 @@ def _generate_tts_for_batch_legacy(app, voice):
 
                     if "429" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                         from core.video.batch.api_key_recovery import handle_api_error_with_rotation
-                        handle_api_error_with_rotation(app, error_str, "429", step_name="TTS")
+                        if not handle_api_error_with_rotation(
+                            app, error_str, "429", step_name="TTS"
+                        ):
+                            break
                     elif "403" in error_str or "PERMISSION_DENIED" in error_str:
                         from core.video.batch.api_key_recovery import handle_api_error_with_rotation
-                        handle_api_error_with_rotation(app, error_str, "403", step_name="TTS")
+                        if not handle_api_error_with_rotation(
+                            app, error_str, "403", step_name="TTS"
+                        ):
+                            break
                         time.sleep(2)
                     else:
                         app.add_log(f"[TTS] 오류 ({tts_retry}/{max_tts_retry}): {error_str[:60]}")

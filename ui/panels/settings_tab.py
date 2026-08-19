@@ -11,6 +11,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional
@@ -20,7 +21,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QPushButton, QScrollArea, QFileDialog, QCheckBox, QTextEdit,
     QTabWidget
 )
-from PyQt6.QtCore import Qt, QTimer, QUrl
+from PyQt6.QtCore import Qt, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QFont, QDesktopServices
 from ui.design_system_v2 import get_design_system
 from ui.components.base_widget import ThemedMixin
@@ -158,6 +159,8 @@ class SettingsSection(QFrame):
 
 class SettingsTab(QWidget, ThemedMixin):
     """Settings page with API keys, output folder, theme, and app info"""
+    api_probe_finished = pyqtSignal(object)
+
     SETUP_STEP_DEFS: Dict[str, Dict[str, str]] = {
         "precheck": {"title": "사전 점검", "actor": "auto"},
         "youtube_prepare": {"title": "YouTube OAuth 준비", "actor": "auto"},
@@ -210,6 +213,8 @@ class SettingsTab(QWidget, ThemedMixin):
         self._codex_status_summary = "Codex 상태: 미확인"
         self._computer_use_paid_cache_value = False
         self._computer_use_paid_cache_ts = 0.0
+        self._api_probe_running = False
+        self.api_probe_finished.connect(self._on_api_probe_finished)
         self._create_widgets()
         self._apply_theme()
         self._setup_clipboard_timer.start()
@@ -4286,9 +4291,105 @@ class SettingsTab(QWidget, ThemedMixin):
             self._apply_work_community_ui(None, "작업량 조회 중 오류가 발생했습니다.")
 
     def _show_api_status(self):
-        """Show API status dialog"""
-        if self.gui and hasattr(self.gui, 'show_api_status'):
-            self.gui.show_api_status()
+        """Validate saved keys against Google's live Gemini models endpoint."""
+        from ui.components.custom_dialog import show_warning
+
+        if self._api_probe_running:
+            return
+
+        keys = {}
+        for idx in range(1, 9):
+            value = str(
+                SecretsManager.get_api_key(f"gemini_api_{idx}") or ""
+            ).strip()
+            if not value and idx == 1:
+                value = str(SecretsManager.get_api_key("gemini") or "").strip()
+            if value:
+                keys[f"api_{idx}"] = value
+
+        if not keys:
+            show_warning(
+                self,
+                "Gemini API 키가 필요해요",
+                "저장된 Gemini API 키가 없습니다. 키를 저장한 뒤 다시 확인해 주세요.",
+            )
+            return
+
+        self._api_probe_running = True
+        self.api_status_btn.setEnabled(False)
+        self.api_status_btn.setText("Google에서 확인 중...")
+        self.api_count_label.setText(
+            f"저장된 키: {len(keys)}개 · 실제 사용 권한 확인 중"
+        )
+
+        def _worker():
+            from utils.gemini_key_probe import probe_gemini_keys
+
+            result = probe_gemini_keys(
+                keys,
+                timeout_seconds=12.0,
+                model=config.GEMINI_TEXT_MODEL,
+            )
+            try:
+                self.api_probe_finished.emit(result)
+            except RuntimeError:
+                logger.debug("[Settings] API key probe finished after view closed")
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    def _on_api_probe_finished(self, result):
+        """Render a secret-safe result from the live API key probe."""
+        from ui.components.custom_dialog import show_error, show_info, show_warning
+
+        self._api_probe_running = False
+        self.api_status_btn.setEnabled(True)
+        self.api_status_btn.setText("API 상태 확인")
+
+        result = result if isinstance(result, dict) else {}
+        valid_count = len(result.get("valid") or [])
+        rejected_count = len(result.get("rejected") or [])
+        quota_count = len(result.get("quota") or [])
+        unreachable_count = len(result.get("unreachable") or [])
+        total = valid_count + rejected_count + quota_count + unreachable_count
+
+        if valid_count:
+            self.api_count_label.setText(
+                f"저장된 키: {total}개 · 사용 가능 {valid_count}개"
+            )
+            detail = f"Google에서 실제 사용 가능한 Gemini API 키 {valid_count}개를 확인했습니다."
+            if rejected_count:
+                detail += f"\n사용 권한이 거절된 키는 {rejected_count}개입니다."
+            if quota_count:
+                detail += f"\n사용량 한도에 도달한 키는 {quota_count}개입니다."
+            if unreachable_count:
+                detail += f"\n네트워크 문제로 확인하지 못한 키는 {unreachable_count}개입니다."
+            show_info(self, "Gemini API 연결 정상", detail)
+            return
+
+        self.api_count_label.setText(f"저장된 키: {total}개 · 사용 가능 키 없음")
+        if rejected_count:
+            show_error(
+                self,
+                "Gemini API 키를 사용할 수 없어요",
+                "저장된 키가 Google에서 거절되었습니다.\n"
+                "Google AI Studio에서 새 키를 발급해 교체하거나 현재 프로젝트의 API 제한과 결제 상태를 확인해 주세요.",
+            )
+            return
+
+        if quota_count:
+            show_warning(
+                self,
+                "API 사용량이 잠시 꽉 찼어요",
+                "저장된 키는 확인됐지만 현재 사용량 한도에 도달했습니다.\n"
+                "잠시 후 다시 시도하거나 다른 Gemini API 키를 추가해 주세요.",
+            )
+            return
+
+        show_warning(
+            self,
+            "API 상태를 확인하지 못했어요",
+            "Google 서버에 연결하지 못했습니다. 인터넷 연결을 확인한 뒤 다시 시도해 주세요.",
+        )
 
     def _toggle_key_visibility(self, input_field: QLineEdit):
         """API 키 보기/숨기기 토글"""

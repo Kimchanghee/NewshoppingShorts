@@ -417,10 +417,17 @@ class VideoAnalyzerGUI(
                     try:
                         key = mgr.get_available_key()
                         key_name = getattr(mgr, "current_key", "unknown")
-                    except Exception:
-                        key = None
+                    except Exception as key_err:
+                        # The manager may have deliberately blocked every key
+                        # after a 403/429. Falling back to config here would
+                        # immediately reuse the same rejected key.
+                        logger.warning(
+                            "[init_client] API 키 관리자가 사용 가능한 키를 찾지 못했습니다: %s",
+                            key_err,
+                        )
+                        return False
 
-            if not key:
+            if not key and getattr(self, "api_key_manager", None) is None:
                 key = self.model_provider._get_first_api_key()
                 key_name = "config_fallback"
 

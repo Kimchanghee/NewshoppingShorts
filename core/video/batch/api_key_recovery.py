@@ -17,6 +17,30 @@ RETRY_WAIT_MULTIPLIER_SECONDS = 15
 SERVER_OVERLOAD_WAIT_MINUTES = 5
 
 
+def is_google_drive_permission_error(error_msg: str) -> bool:
+    """Return True only for file-sharing failures that actually mention Drive."""
+    lowered = str(error_msg or "").lower()
+    drive_context = any(
+        marker in lowered
+        for marker in (
+            "google drive",
+            "drive.google.com",
+            "file id",
+            "shared file",
+        )
+    )
+    file_access_failure = any(
+        marker in lowered
+        for marker in (
+            "you do not have permission to access the file",
+            "file not found",
+            "request access",
+            "sharing settings",
+        )
+    )
+    return drive_context and file_access_failure
+
+
 def show_api_key_error_and_wait(app, step_name, key_name, error_msg, error_type="quota"):
     """
     Show an API key error popup on the main thread and wait for user response.
@@ -156,15 +180,8 @@ def wait_for_user_key_retry(app, step_name, key_name, error_msg, error_type="quo
     # Detect Google Drive permission errors (file sharing issue, not API key issue)
     is_gdrive_permission_error = False
     if error_type == "permission":
-        lowered_msg = error_msg.lower()
-        gdrive_indicators = [
-            "you do not have permission to access the file",
-            "file not found",
-            "permission denied"
-        ]
-        # Check if it's a Google Drive file ID pattern (alphanumeric, ~33 chars)
-        if any(indicator in lowered_msg for indicator in gdrive_indicators):
-            is_gdrive_permission_error = True
+        is_gdrive_permission_error = is_google_drive_permission_error(error_msg)
+        if is_gdrive_permission_error:
             app.add_log(
                 "[WARN] 구글 드라이브 파일 접근 권한 오류가 감지되었습니다. "
                 "이는 API 키 문제가 아니라 파일 공유 설정 문제일 수 있습니다."

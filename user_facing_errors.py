@@ -104,6 +104,8 @@ def classify_error(value: Any) -> str:
     if (
         "gemini_api_keys_rejected" in combined
         or "all configured gemini api keys" in combined
+        or "your project has been denied access" in combined
+        or "dunning decision is deny for project" in combined
         or ("permission_denied" in combined and ("gemini" in combined or "generative language" in combined))
         or ("http_status" in combined and "403" in combined and "gemini" in combined)
     ):

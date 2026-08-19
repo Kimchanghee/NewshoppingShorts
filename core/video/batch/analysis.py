@@ -409,6 +409,11 @@ def _analyze_video_for_batch(app):
                     else:
                         logger.warning("[배치 분석] API Key Manager가 없어 키 교체를 수행할 수 없습니다.")
 
+                    # Do not call Gemini again with the client that still holds
+                    # the rejected key. The caller can now use its non-AI
+                    # fallback or surface one actionable error.
+                    break
+
                 # Gemini 서버 오류인지 확인
                 if is_gemini_server_error(last_error):
                     is_server_error = True
