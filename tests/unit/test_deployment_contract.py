@@ -50,8 +50,7 @@ def test_admin_dashboard_uses_its_own_vercel_build_contract():
         (ROOT / "program-admin-dashboard/vercel.json").read_text(encoding="utf-8")
     )
     assert config["framework"] == "nextjs"
-    assert config["buildCommand"] == "npm run build"
-    assert config["installCommand"].startswith("npm ci")
+    assert set(config) == {"$schema", "framework"}
     assert "backend/" not in json.dumps(config)
     assert "website/" not in json.dumps(config)
 
