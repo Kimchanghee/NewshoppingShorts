@@ -84,6 +84,7 @@ def test_vercel_function_bundles_runtime_source_without_build_virtualenv():
 def test_vercel_ignores_desktop_root_requirements():
     ignored = (ROOT / ".vercelignore").read_text(encoding="utf-8").splitlines()
     assert "/requirements.txt" in ignored
+    assert "/program-admin-dashboard" not in ignored
 
 
 def test_vercel_python_runtime_is_pinned_to_supported_dependency_abi():
