@@ -85,6 +85,25 @@ def test_question_buttons_keep_secondary_then_primary_order(qapp):
     dialog.close()
 
 
+def test_continue_action_is_rendered_as_the_default_primary_button(qapp):
+    dialog = CustomDialog(
+        None,
+        "작업을 계속할까요?",
+        "입력 링크와 업로드 채널을 확인해 주세요.",
+        "question",
+        buttons=[("취소", lambda: None), ("계속하기", lambda: None)],
+    )
+    continue_button = next(
+        button for button in dialog.findChildren(QPushButton)
+        if button.text() == "계속하기"
+    )
+
+    assert continue_button.objectName() == "dialogPrimaryButton"
+    assert continue_button.isDefault()
+    assert continue_button.minimumWidth() >= 112
+    dialog.close()
+
+
 def test_enter_confirms_and_escape_closes(qapp):
     confirm = CustomDialog(None, "확인", "Enter 키로 확인합니다.", "info")
     confirm.show()

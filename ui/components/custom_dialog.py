@@ -8,10 +8,11 @@ from PyQt6.QtWidgets import (
     QPushButton, QFrame, QApplication, QGraphicsDropShadowEffect,
     QAbstractScrollArea, QScrollArea,
 )
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QSize, Qt
 from PyQt6.QtGui import QColor, QMouseEvent
 
 from ..design_system_v2 import get_design_system, get_color
+from ..responsive import fit_window_to_available
 from user_facing_errors import sanitize_user_message, sanitize_user_title
 
 
@@ -301,6 +302,7 @@ class CustomDialog(QDialog):
         )
         screen = self.screen() or QApplication.primaryScreen()
         available_height = screen.availableGeometry().height() if screen else 720
+        available_width = screen.availableGeometry().width() if screen else 520
         message_scroll.setMaximumHeight(min(320, max(140, available_height - 340)))
         message_scroll.setStyleSheet(f"""
             QScrollArea#dialogMessageScroll {{
@@ -333,9 +335,12 @@ class CustomDialog(QDialog):
         body_layout.addWidget(message_scroll)
         
         # Buttons
-        button_layout = QHBoxLayout()
+        button_layout = (
+            QVBoxLayout() if available_width < 480 else QHBoxLayout()
+        )
         button_layout.setSpacing(10)
-        button_layout.addStretch()
+        if isinstance(button_layout, QHBoxLayout):
+            button_layout.addStretch()
         
         if buttons is None:
             buttons = [("확인", lambda: self.done_with_result(True))]
@@ -345,14 +350,17 @@ class CustomDialog(QDialog):
         self._default_button = None
         for text, callback in buttons:
             btn = QPushButton(text)
-            is_primary = text in {"확인", "예", "다시 시도", "계속"}
+            is_primary = text in {
+                "확인", "예", "다시 시도", "계속", "계속하기",
+                "구독 신청하기", "구독 관리 열기", "작업 계속",
+            }
             btn.setObjectName(
                 "dialogPrimaryButton" if is_primary else "dialogSecondaryButton"
             )
             
             # Get button size from design system
             btn_size = self.ds.get_button_size('md')
-            btn.setMinimumSize(88, max(44, btn_size.height))
+            btn.setMinimumSize(112 if is_primary else 96, max(44, btn_size.height))
             btn.setAccessibleName(text)
             
             if is_primary:
@@ -395,9 +403,11 @@ class CustomDialog(QDialog):
         
         # Resize based on content
         self.adjustSize()
-        screen = self.screen() or QApplication.primaryScreen()
-        available_width = screen.availableGeometry().width() if screen else 520
-        self.setFixedWidth(min(520, max(390, available_width - 48)))
+        fit_window_to_available(
+            self,
+            QSize(520, min(640, self.sizeHint().height())),
+            QSize(280, 240),
+        )
         if self._default_button is not None:
             self._default_button.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
 
