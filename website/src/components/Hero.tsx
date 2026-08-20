@@ -1,13 +1,11 @@
 import { Button } from "@/components/ui/button";
-import { Download, Play } from "lucide-react";
+import { Play } from "lucide-react";
 import { motion } from "framer-motion";
 import heroBg from "@/assets/hero-bg.jpg";
-import { DOWNLOAD_URL } from "@/constants/release";
-import { gaEvent } from "@/lib/ga4";
+import { DownloadChoices } from "@/components/DownloadChoices";
 export default function Hero() {
-  const downloadUrl = DOWNLOAD_URL;
   return (
-    <section className="relative flex min-h-screen items-center justify-center overflow-hidden">
+    <section id="download" className="relative flex min-h-screen scroll-mt-20 items-center justify-center overflow-hidden">
       <div className="absolute inset-0 bg-cover bg-center opacity-40" style={{ backgroundImage: `url(${heroBg})` }} />
       <div className="hero-glow absolute inset-0" />
       <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-transparent to-background" />
@@ -37,20 +35,10 @@ export default function Hero() {
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.7, duration: 0.8 }}
-          className="mt-10 flex flex-col items-center gap-4 sm:flex-row sm:justify-center"
+          className="mt-10 flex flex-col items-center gap-4"
         >
-          <Button variant="hero" size="xl" asChild>
-            <a
-              href={downloadUrl}
-              className="gap-2"
-              rel="noopener noreferrer"
-              onClick={() => gaEvent("download_click", { placement: "hero" })}
-            >
-              <Download className="h-5 w-5" />
-              Microsoft Store에서 무료 설치
-            </a>
-          </Button>
-          <Button variant="outline" size="xl" asChild className="border-primary/20 bg-primary/5 hover:bg-primary/10">
+          <DownloadChoices placement="hero" />
+          <Button variant="ghost" size="lg" asChild className="text-muted-foreground hover:text-foreground">
             <a href="#demo-video" className="gap-2">
               <Play className="h-5 w-5" />
               데모 영상 보기

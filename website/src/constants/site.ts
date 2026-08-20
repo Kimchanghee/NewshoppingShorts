@@ -1,3 +1,5 @@
+import { DIRECT_DOWNLOAD_URL, MS_STORE_URL } from "@/constants/release";
+
 export const SITE_URL = "https://shoppingshorts.store";
 export const SITE_NAME = "SSMaker";
 export const SITE_LOCALE = "ko_KR";
@@ -28,7 +30,8 @@ export const SITE_SUPPORT_EMAIL = "support@ssmaker.co.kr";
 export const SITE_KAKAO_OPENCHAT_URL = "https://open.kakao.com/o/sVkZPsfi";
 export const SITE_REPOSITORY_URL = "https://github.com/Kimchanghee/NewshoppingShorts";
 export const DEFAULT_OG_IMAGE_URL = `${SITE_URL}/og.jpg`;
-export const DEFAULT_DOWNLOAD_URL = "https://apps.microsoft.com/detail/9P43TQHLP8WH?hl=ko-KR&gl=KR";
+export const DEFAULT_DOWNLOAD_URL = DIRECT_DOWNLOAD_URL;
+export const DEFAULT_INSTALL_URL = MS_STORE_URL;
 export const BUSINESS_NAME = "와이엠";
 export const BUSINESS_REPRESENTATIVE = "최길자";
 export const BUSINESS_REGISTRATION_NUMBER = "367-07-03291";

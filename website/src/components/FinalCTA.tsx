@@ -1,11 +1,7 @@
 import { FadeIn } from "@/components/FadeIn";
-import { Button } from "@/components/ui/button";
-import { Download } from "lucide-react";
-import { DOWNLOAD_URL } from "@/constants/release";
-import { gaEvent } from "@/lib/ga4";
+import { DownloadChoices } from "@/components/DownloadChoices";
 
 export default function FinalCTA() {
-  const downloadUrl = DOWNLOAD_URL;
   return (
     <section className="relative overflow-hidden py-24 md:py-32">
       <div className="container relative mx-auto px-6 text-center">
@@ -18,20 +14,10 @@ export default function FinalCTA() {
           </p>
 
           <div className="mt-10">
-            <Button variant="hero" size="xl" asChild>
-              <a
-                href={downloadUrl}
-                className="gap-2"
-                rel="noopener noreferrer"
-                onClick={() => gaEvent("download_click", { placement: "final_cta" })}
-              >
-                <Download className="h-5 w-5" />
-                Microsoft Store에서 받기
-              </a>
-            </Button>
+            <DownloadChoices placement="final_cta" />
           </div>
 
-          <p className="mt-4 text-sm text-muted-foreground">Windows 전용 · Microsoft Store 공식 배포</p>
+          <p className="mt-5 text-sm text-muted-foreground">Windows 10/11 전용</p>
         </FadeIn>
       </div>
     </section>

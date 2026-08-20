@@ -2,8 +2,6 @@ import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Download, Menu, X } from "lucide-react";
 import { Link } from "react-router-dom";
-import { DOWNLOAD_URL } from "@/constants/release";
-import { gaEvent } from "@/lib/ga4";
 
 const navLinks = [
   { label: "기능", href: "#features" },
@@ -18,8 +16,6 @@ const navLinks = [
 export default function Navigation() {
   const [scrolled, setScrolled] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const downloadUrl = DOWNLOAD_URL;
-
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 20);
     window.addEventListener("scroll", onScroll);
@@ -48,9 +44,9 @@ export default function Navigation() {
             );
           })}
           <Button variant="hero" size="sm" asChild>
-            <a href={downloadUrl} rel="noopener noreferrer" onClick={() => gaEvent("download_click", { placement: "nav_desktop" })}>
+            <a href="#download">
               <Download className="mr-1 h-4 w-4" />
-              Store에서 받기
+              다운로드
             </a>
           </Button>
         </div>
@@ -83,9 +79,9 @@ export default function Navigation() {
               );
             })}
             <Button variant="hero" size="sm" asChild>
-              <a href={downloadUrl} rel="noopener noreferrer" onClick={() => gaEvent("download_click", { placement: "nav_mobile" })}>
+              <a href="#download" onClick={() => setMobileOpen(false)}>
                 <Download className="mr-1 h-4 w-4" />
-                Store에서 받기
+                다운로드
               </a>
             </Button>
           </div>

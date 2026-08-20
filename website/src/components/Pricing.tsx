@@ -1,8 +1,8 @@
 import { FadeIn } from "@/components/FadeIn";
 import { Button } from "@/components/ui/button";
 import { Check, Download, Zap } from "lucide-react";
-import { DOWNLOAD_URL } from "@/constants/release";
 import { gaEvent } from "@/lib/ga4";
+import { DownloadChoices } from "@/components/DownloadChoices";
 
 const plans = [
   {
@@ -16,9 +16,9 @@ const plans = [
       "AI 스크립트 생성",
       "TTS 음성 합성",
     ],
-    cta: "Microsoft Store에서 무료 설치",
+    cta: "설치 방법 선택",
     ctaIcon: Download,
-    href: DOWNLOAD_URL,
+    href: "#download",
     popular: false,
   },
   {
@@ -41,7 +41,6 @@ const plans = [
 ];
 
 export default function Pricing() {
-  const downloadUrl = DOWNLOAD_URL;
   return (
     <section id="pricing" className="relative py-24 md:py-32">
       <div className="section-glow absolute inset-0" />
@@ -88,25 +87,24 @@ export default function Pricing() {
                   ))}
                 </ul>
 
-                <Button
-                  asChild
-                  variant={plan.popular ? "default" : "outline"}
-                  className={plan.popular ? "bg-gradient-primary-hover w-full shadow-glow-sm" : "w-full"}
-                >
-                  <a
-                    href={plan.href === DOWNLOAD_URL ? downloadUrl : plan.href}
-                    rel="noopener noreferrer"
-                    onClick={() =>
-                      gaEvent(plan.href === DOWNLOAD_URL ? "download_click" : "contact_click", {
-                        placement: "pricing",
-                        plan: plan.name,
-                      })
-                    }
+                {plan.name === "무료 체험" ? (
+                  <DownloadChoices placement="pricing" size="default" showHint={false} stacked />
+                ) : (
+                  <Button
+                    asChild
+                    variant="default"
+                    className="bg-gradient-primary-hover w-full shadow-glow-sm"
                   >
-                    <plan.ctaIcon className="mr-2 h-4 w-4" />
-                    {plan.cta}
-                  </a>
-                </Button>
+                    <a
+                      href={plan.href}
+                      rel="noopener noreferrer"
+                      onClick={() => gaEvent("contact_click", { placement: "pricing", plan: plan.name })}
+                    >
+                      <plan.ctaIcon className="mr-2 h-4 w-4" />
+                      {plan.cta}
+                    </a>
+                  </Button>
+                )}
               </div>
             </FadeIn>
           ))}

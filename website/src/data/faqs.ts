@@ -7,7 +7,7 @@ export const FAQS: FAQItem[] = [
   {
     question: "프로그램 설치는 어떻게 하나요?",
     answer:
-      "Microsoft Store에서 SSMaker 페이지를 열고 설치 버튼을 누르면 됩니다. Microsoft Store가 서명·배포하므로 별도 보안 경고 없이 설치되며, FFmpeg, Tesseract 등 필요한 도구는 프로그램 내에서 자동으로 안내해 드립니다.",
+      "공식 웹사이트에서 Microsoft Store 설치 또는 일반 설치 파일(.exe) 중 하나를 선택할 수 있습니다. 자동 업데이트가 편리한 Microsoft Store 방식을 권장하며, 기존 일반 설치판 사용자는 일반 설치 파일을 이용하세요. 두 설치 방식은 업데이트 경로가 다르므로 한 PC에서는 하나만 사용해 주세요.",
   },
   {
     question: "제작된 숏폼 영상의 저작권은 어떻게 되나요?",

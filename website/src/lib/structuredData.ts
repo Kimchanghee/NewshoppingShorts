@@ -1,5 +1,6 @@
 import {
   DEFAULT_DOWNLOAD_URL,
+  DEFAULT_INSTALL_URL,
   DEFAULT_OG_IMAGE_URL,
   BUSINESS_ADDRESS,
   BUSINESS_NAME,
@@ -157,7 +158,7 @@ export function buildSoftwareApplicationSchema(): SchemaObject {
     applicationSubCategory: "AI video editing automation",
     operatingSystem: "Windows",
     downloadUrl: DEFAULT_DOWNLOAD_URL,
-    installUrl: DEFAULT_DOWNLOAD_URL,
+    installUrl: DEFAULT_INSTALL_URL,
     screenshot: DEFAULT_OG_IMAGE_URL,
     description:
       "중국 쇼핑 영상을 한국어 쇼핑 숏폼으로 자동 변환하는 Windows 데스크톱 AI 솔루션. 자막 감지, 중국어 자막 블러, 번역, 한국어 TTS 합성, 일괄 처리, YouTube Shorts 업로드, Linktree 상품 링크 검수 흐름을 제공합니다.",
@@ -191,7 +192,7 @@ export function buildSoftwareApplicationSchema(): SchemaObject {
         price: "0",
         priceCurrency: "KRW",
         availability: "https://schema.org/InStock",
-        url: DEFAULT_DOWNLOAD_URL,
+        url: DEFAULT_INSTALL_URL,
       },
       {
         "@type": "Offer",

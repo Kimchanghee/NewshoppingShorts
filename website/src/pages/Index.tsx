@@ -95,7 +95,7 @@ const Index = () => {
         description="SSMaker는 중국 쇼핑 영상을 한국어 쇼핑 숏폼으로 자동 변환하고 쿠팡 파트너스 단축 링크, YouTube Shorts 업로드, Linktree 검수 흐름까지 연결하는 Windows용 AI 영상 자동화 프로그램입니다."
         path="/"
         keywords={SITE_KEYWORDS}
-        modifiedTime="2026-08-15"
+        modifiedTime="2026-08-20"
         structuredData={HOME_STRUCTURED_DATA}
       />
       <Navigation />
@@ -122,8 +122,9 @@ const Index = () => {
         </p>
         <h2>SSMaker 무료 다운로드 방법</h2>
         <p>
-          SSMaker는 Microsoft Store에서 무료로 설치할 수 있습니다. Microsoft Store의 SSMaker 페이지에서 설치 버튼을 누르면 바로 사용
-          가능합니다. 로그인 후 제공되는 무료 체험 횟수로 주요 기능을 확인할 수 있습니다.
+          SSMaker는 공식 웹사이트에서 Microsoft Store 설치와 일반 설치 파일 다운로드를 모두 제공합니다. 자동 업데이트를 원하는
+          사용자는 Microsoft Store 방식을 권장하며, 기존 일반 설치판 사용자는 일반 설치 파일을 이용할 수 있습니다. 두 방식은 업데이트
+          경로가 다르므로 한 PC에서는 하나만 선택해야 합니다.
         </p>
         <h2>중국 쇼핑 영상을 한국어로 변환하는 방법</h2>
         <p>
