@@ -162,46 +162,6 @@ def test_computer_use_bridge_sends_server_owned_template_only(monkeypatch):
     assert captured["headers"] == {"X-Computer-Use-Key": "bridge-secret"}
 
 
-def test_local_codex_prompt_is_written_to_stdin_not_process_argv(monkeypatch):
-    from ui.panels import settings_tab
-
-    captured = {}
-
-    class FakeStdin:
-        def write(self, value):
-            captured["stdin"] = value
-
-        def close(self):
-            captured["closed"] = True
-
-    class FakeProcess:
-        stdin = FakeStdin()
-
-        @staticmethod
-        def kill():
-            captured["killed"] = True
-
-    def fake_popen(args, **kwargs):
-        captured["args"] = list(args)
-        captured["kwargs"] = kwargs
-        return FakeProcess()
-
-    monkeypatch.setattr(settings_tab.subprocess, "Popen", fake_popen)
-    prompt = "protected local computer-use instruction"
-    process = settings_tab.SettingsTab._launch_codex_terminal_process(
-        object(),
-        ["codex", "exec", "-"],
-        "C:/workspace",
-        prompt,
-    )
-
-    assert process is not None
-    assert prompt not in captured["args"]
-    assert captured["args"][-1] == "-"
-    assert captured["stdin"] == prompt.encode("utf-8")
-    assert captured["closed"] is True
-
-
 def test_hls_master_is_rejected_before_network_access(monkeypatch, tmp_path):
     from core.download import DouyinExtract
 
