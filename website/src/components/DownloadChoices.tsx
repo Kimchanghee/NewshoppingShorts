@@ -1,5 +1,10 @@
 import { Button } from "@/components/ui/button";
-import { DIRECT_DOWNLOAD_URL, DIRECT_INSTALLER_CHANNEL, MS_STORE_URL } from "@/constants/release";
+import {
+  DIRECT_DOWNLOAD_URL,
+  DIRECT_INSTALLER_CHANNEL,
+  DIRECT_INSTALLER_VERSION,
+  MS_STORE_URL,
+} from "@/constants/release";
 import { gaEvent } from "@/lib/ga4";
 import { cn } from "@/lib/utils";
 import { Download, Store } from "lucide-react";
@@ -53,12 +58,13 @@ export function DownloadChoices({
               href={DIRECT_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label="최신 안정판 일반 설치 파일 받기(새 창)"
+              aria-label={`SSMaker v${DIRECT_INSTALLER_VERSION} 일반 설치 파일 받기(새 창)`}
               onClick={() =>
                 gaEvent("download_click", {
                   placement,
                   channel: "direct_installer",
-                  version: DIRECT_INSTALLER_CHANNEL,
+                  distribution: DIRECT_INSTALLER_CHANNEL,
+                  version: DIRECT_INSTALLER_VERSION,
                 })
               }
             >
@@ -67,14 +73,15 @@ export function DownloadChoices({
             </a>
           </Button>
           <span className="text-center text-xs text-muted-foreground">
-            기존 일반판 사용자용 · 최신 안정판 .exe 자동 연결
+            v{DIRECT_INSTALLER_VERSION} · 기존 일반판 사용자용 .exe
           </span>
         </div>
       </div>
 
       {showHint && (
         <p className="mt-4 text-center text-xs leading-relaxed text-muted-foreground">
-          두 설치 방식 중 하나만 선택하세요. Store판과 일반 설치판의 업데이트 경로는 서로 분리됩니다.
+          두 설치 방식 중 하나만 선택하세요. 일반 설치판은 Windows 보호 화면이 표시되면 추가 정보를 눌러 실행할 수
+          있습니다.
         </p>
       )}
     </div>

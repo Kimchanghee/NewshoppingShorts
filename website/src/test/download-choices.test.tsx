@@ -15,6 +15,7 @@ describe("download choices", () => {
       MS_STORE_URL,
     );
     expect(screen.getByRole("link", { name: /일반 설치 파일 받기/ })).toHaveAttribute("href", DIRECT_DOWNLOAD_URL);
+    expect(screen.getByText(/v1\.5\.70/)).toBeInTheDocument();
     expect(screen.getByText("권장 · 자동 업데이트")).toBeInTheDocument();
     expect(screen.getByText(/두 설치 방식 중 하나만 선택하세요/)).toBeInTheDocument();
   });
@@ -34,7 +35,8 @@ describe("download choices", () => {
     expect(gtag).toHaveBeenCalledWith("event", "download_click", {
       placement: "hero",
       channel: "direct_installer",
-      version: "latest-stable",
+      distribution: "manual-direct",
+      version: "1.5.70",
     });
   });
 });
