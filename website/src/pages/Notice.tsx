@@ -861,17 +861,17 @@ function NoticeDetail({ notice }: { notice: NoticeItem }) {
         structuredData={structuredData}
       />
       <Navigation />
-      <div className="container mx-auto px-6 pt-32 pb-20">
+      <div className="container mx-auto px-4 pb-20 pt-28 sm:px-6 sm:pt-32">
         <FadeIn>
           <button
             onClick={() => navigate(NOTICE_LIST_PATH)}
-            className="mb-8 flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="mb-8 flex min-h-11 items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" />
             목록으로 돌아가기
           </button>
 
-          <div className="glass-card rounded-xl p-8 md:p-12">
+          <div className="glass-card rounded-xl p-5 sm:p-8 md:p-12">
             <div className="mb-6 flex items-center gap-3">
               {notice.pinned && (
                 <span className="inline-flex items-center gap-1 rounded bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
@@ -972,7 +972,7 @@ function ReleaseDetail({ tagName }: { tagName: string }) {
     return (
       <div className="min-h-screen bg-background">
         <Navigation />
-        <div className="container mx-auto px-6 pt-32 pb-20">
+        <div className="container mx-auto px-4 pb-20 pt-28 sm:px-6 sm:pt-32">
           <Skeleton className="mb-4 h-8 w-48" />
           <Skeleton className="mb-2 h-6 w-full" />
           <Skeleton className="h-6 w-3/4" />
@@ -992,7 +992,7 @@ function ReleaseDetail({ tagName }: { tagName: string }) {
           noIndex
         />
         <Navigation />
-        <div className="container mx-auto px-6 pt-32 pb-20 text-center">
+        <div className="container mx-auto px-4 pb-20 pt-28 text-center sm:px-6 sm:pt-32">
           <p className="text-muted-foreground">해당 업데이트 정보를 찾을 수 없습니다.</p>
           <button onClick={() => navigate(NOTICE_LIST_PATH)} className="mt-4 text-primary hover:underline">
             목록으로 돌아가기
@@ -1048,17 +1048,17 @@ function ReleaseDetail({ tagName }: { tagName: string }) {
         structuredData={structuredData}
       />
       <Navigation />
-      <div className="container mx-auto px-6 pt-32 pb-20">
+      <div className="container mx-auto px-4 pb-20 pt-28 sm:px-6 sm:pt-32">
         <FadeIn>
           <button
             onClick={() => navigate(NOTICE_LIST_PATH)}
-            className="mb-8 flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="mb-8 flex min-h-11 items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" />
             목록으로 돌아가기
           </button>
 
-          <div className="glass-card rounded-xl p-8 md:p-12">
+          <div className="glass-card rounded-xl p-5 sm:p-8 md:p-12">
             <div className="mb-6 flex items-center gap-3">
               <span className="inline-flex items-center gap-1 rounded bg-green-500/10 px-2 py-0.5 text-xs font-medium text-green-600 dark:text-green-400">
                 <Package className="h-3 w-3" />
@@ -1136,11 +1136,11 @@ function NoticeList() {
         structuredData={structuredData}
       />
       <Navigation />
-      <div className="container mx-auto px-6 pt-32 pb-20">
+      <div className="container mx-auto px-4 pb-20 pt-28 sm:px-6 sm:pt-32">
         <FadeIn>
           <Link
             to="/"
-            className="mb-6 inline-flex items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
+            className="mb-6 inline-flex min-h-11 items-center gap-2 text-sm text-muted-foreground transition-colors hover:text-foreground"
           >
             <ArrowLeft className="h-4 w-4" />
             홈으로 돌아가기
@@ -1156,7 +1156,7 @@ function NoticeList() {
               </span>
             </div>
             <div className="glass-card overflow-hidden rounded-xl">
-              <div className="hidden items-center gap-4 border-b border-border/50 bg-muted/20 px-6 py-3 md:grid md:grid-cols-[auto_1fr_140px]">
+              <div className="hidden items-center gap-4 border-b border-border/50 bg-muted/20 px-4 py-3 sm:px-6 md:grid md:grid-cols-[auto_minmax(0,1fr)_minmax(7rem,auto)]">
                 <span className="w-20 text-center text-xs font-medium uppercase tracking-wider text-muted-foreground">
                   단계
                 </span>
@@ -1171,7 +1171,7 @@ function NoticeList() {
                   key={`setup-${notice.id}`}
                   data-notice-slug={notice.slug}
                   onClick={() => navigate(noticeDetailPath(notice.slug))}
-                  className={`group grid w-full grid-cols-1 items-center gap-2 bg-primary/[0.03] px-6 py-4 text-left transition-colors hover:bg-primary/[0.06] md:grid-cols-[auto_1fr_140px] md:gap-4 ${
+                  className={`group grid min-h-11 w-full grid-cols-1 items-center gap-2 bg-primary/[0.03] px-4 py-4 text-left transition-colors hover:bg-primary/[0.06] sm:px-6 md:grid-cols-[auto_minmax(0,1fr)_minmax(7rem,auto)] md:gap-4 ${
                     index < setupManualNotices.length - 1 ? "border-b border-border/50" : ""
                   }`}
                 >
@@ -1180,7 +1180,7 @@ function NoticeList() {
                       {index + 1}단계
                     </span>
                   </span>
-                  <span className="flex items-center gap-2">
+                  <span className="flex min-w-0 items-center gap-2">
                     <span className="font-medium text-foreground transition-colors group-hover:text-primary">
                       {notice.title}
                     </span>
@@ -1197,7 +1197,7 @@ function NoticeList() {
           </div>
 
           <div className="glass-card overflow-hidden rounded-xl">
-            <div className="hidden items-center gap-4 border-b border-border/50 bg-muted/20 px-6 py-3 md:grid md:grid-cols-[auto_1fr_140px]">
+            <div className="hidden items-center gap-4 border-b border-border/50 bg-muted/20 px-4 py-3 sm:px-6 md:grid md:grid-cols-[auto_minmax(0,1fr)_minmax(7rem,auto)]">
               <span className="w-16 text-center text-xs font-medium uppercase tracking-wider text-muted-foreground">
                 분류
               </span>
@@ -1212,14 +1212,14 @@ function NoticeList() {
                 key={`list-${notice.id}`}
                 data-notice-slug={notice.slug}
                 onClick={() => navigate(noticeDetailPath(notice.slug))}
-                className={`group grid w-full grid-cols-1 items-center gap-2 px-6 py-4 text-left transition-colors hover:bg-muted/30 md:grid-cols-[auto_1fr_140px] md:gap-4 ${
+                className={`group grid min-h-11 w-full grid-cols-1 items-center gap-2 px-4 py-4 text-left transition-colors hover:bg-muted/30 sm:px-6 md:grid-cols-[auto_minmax(0,1fr)_minmax(7rem,auto)] md:gap-4 ${
                   index < otherNotices.length - 1 || releaseList.length > 0 ? "border-b border-border/50" : ""
                 }`}
               >
                 <span className="flex w-16 justify-center">
                   <span className="text-sm text-muted-foreground">{notice.id}</span>
                 </span>
-              <span className="flex items-center gap-2">
+              <span className="flex min-w-0 items-center gap-2">
                 <span className="font-medium text-foreground transition-colors group-hover:text-primary">
                   {notice.title}
                 </span>
@@ -1261,14 +1261,14 @@ function NoticeList() {
               <button
                 key={`release-${release.id}`}
                 onClick={() => navigate(releaseDetailPath(release.tag_name))}
-                className={`group grid w-full grid-cols-1 items-center gap-2 px-6 py-4 text-left transition-colors hover:bg-muted/30 md:grid-cols-[auto_1fr_140px] md:gap-4 ${
+                className={`group grid min-h-11 w-full grid-cols-1 items-center gap-2 px-4 py-4 text-left transition-colors hover:bg-muted/30 sm:px-6 md:grid-cols-[auto_minmax(0,1fr)_minmax(7rem,auto)] md:gap-4 ${
                   idx < releaseList.length - 1 ? "border-b border-border/50" : ""
                 }`}
               >
                 <span className="flex w-16 justify-center">
                   <span className="text-sm text-muted-foreground">{staticCount + idx + 1}</span>
                 </span>
-                <span className="flex items-center gap-2">
+                <span className="flex min-w-0 items-center gap-2">
                   <span className="font-medium text-foreground transition-colors group-hover:text-primary">
                     {release.tag_name} 업데이트 안내
                   </span>

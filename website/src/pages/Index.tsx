@@ -95,7 +95,7 @@ const Index = () => {
         description="SSMaker는 중국 쇼핑 영상을 한국어 쇼핑 숏폼으로 자동 변환하고 쿠팡 파트너스 단축 링크, YouTube Shorts 업로드, Linktree 검수 흐름까지 연결하는 Windows용 AI 영상 자동화 프로그램입니다."
         path="/"
         keywords={SITE_KEYWORDS}
-        modifiedTime="2026-08-20"
+        modifiedTime="2026-08-21"
         structuredData={HOME_STRUCTURED_DATA}
       />
       <Navigation />

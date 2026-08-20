@@ -5,17 +5,17 @@ import heroBg from "@/assets/hero-bg.jpg";
 import { DownloadChoices } from "@/components/DownloadChoices";
 export default function Hero() {
   return (
-    <section id="download" className="relative flex min-h-screen scroll-mt-20 items-center justify-center overflow-hidden">
+    <section id="download" className="relative flex min-h-[100svh] scroll-mt-20 items-center justify-center overflow-x-clip py-24 sm:py-28">
       <div className="absolute inset-0 bg-cover bg-center opacity-40" style={{ backgroundImage: `url(${heroBg})` }} />
       <div className="hero-glow absolute inset-0" />
       <div className="absolute inset-0 bg-gradient-to-b from-background/30 via-transparent to-background" />
 
-      <div className="container relative z-10 mx-auto px-6 pt-20 text-center">
+      <div className="container relative z-10 mx-auto px-4 pt-8 text-center sm:px-6 sm:pt-12">
         <motion.h1
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.3, duration: 0.8 }}
-          className="mx-auto max-w-4xl text-balance text-5xl font-extrabold leading-tight tracking-tight text-foreground md:text-7xl"
+          className="mx-auto max-w-4xl text-balance text-[clamp(2.25rem,11vw,3.5rem)] font-extrabold leading-[1.12] tracking-tight text-foreground md:text-7xl"
         >
           쿠팡 파트너스 링크를 <br className="hidden md:block" /> <span className="text-gradient">쇼츠 영상</span>으로 자동 제작
         </motion.h1>
@@ -24,7 +24,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.5, duration: 0.8 }}
-          className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-muted-foreground md:text-xl"
+          className="mx-auto mt-6 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg md:text-xl"
         >
           link.coupang.com 단축 링크를 넣으면 상품 파악, 쇼핑 숏폼 생성,
           <br className="hidden md:block" />
@@ -35,7 +35,7 @@ export default function Hero() {
           initial={{ opacity: 0, y: 30 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.7, duration: 0.8 }}
-          className="mt-10 flex flex-col items-center gap-4"
+          className="mt-8 flex flex-col items-center gap-4 sm:mt-10"
         >
           <DownloadChoices placement="hero" />
           <Button variant="ghost" size="lg" asChild className="text-muted-foreground hover:text-foreground">
@@ -50,9 +50,9 @@ export default function Hero() {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 1.0, duration: 0.8 }}
-          className="mt-10 flex justify-center"
+          className="mt-8 flex justify-center sm:mt-10"
         >
-          <div className="inline-flex flex-col items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 px-6 py-4 backdrop-blur-sm">
+          <div className="inline-flex max-w-full flex-col items-center gap-3 rounded-2xl border border-primary/30 bg-primary/5 px-4 py-4 backdrop-blur-sm sm:px-6">
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-widest text-primary">
               <span className="h-px w-8 bg-primary/50" />
               지원 플랫폼

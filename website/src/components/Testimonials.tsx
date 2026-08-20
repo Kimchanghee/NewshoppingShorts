@@ -59,7 +59,7 @@ const duplicated = [...testimonials, ...testimonials];
 
 function TestimonialCard({ item }: { item: Testimonial }) {
   return (
-    <div className="glass-card relative flex h-full min-h-[260px] w-[340px] shrink-0 flex-col rounded-2xl p-8 sm:w-[380px]">
+    <div className="glass-card relative flex h-full min-h-[260px] w-[calc(100vw-2rem)] max-w-[380px] shrink-0 flex-col rounded-2xl p-5 sm:p-8">
       <Quote className="absolute right-8 top-8 h-8 w-8 text-primary/10" />
 
       <p className="mb-6 flex-1 leading-relaxed text-foreground/90">{item.content}</p>
@@ -83,6 +83,9 @@ export default function Testimonials() {
   useEffect(() => {
     const track = trackRef.current;
     if (!track) return;
+
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (reducedMotion) return;
 
     let raf: number;
     let pos = 0;
@@ -128,6 +131,9 @@ export default function Testimonials() {
         className="relative"
         onMouseEnter={() => setPaused(true)}
         onMouseLeave={() => setPaused(false)}
+        onFocusCapture={() => setPaused(true)}
+        onBlurCapture={() => setPaused(false)}
+        aria-label="SSMaker 활용 사례 자동 슬라이드"
       >
         {/* Fade edges */}
         <div className="pointer-events-none absolute inset-y-0 left-0 z-10 w-24 bg-gradient-to-r from-background to-transparent md:w-40" />

@@ -62,10 +62,45 @@
       system-ui,
       -apple-system,
       sans-serif;
+    min-width: 0;
+    overflow-x: clip;
   }
 
   html {
     scroll-behavior: smooth;
+    overflow-wrap: anywhere;
+  }
+
+  button,
+  a,
+  p,
+  li,
+  h1,
+  h2,
+  h3,
+  h4 {
+    min-width: 0;
+  }
+
+  img,
+  video,
+  iframe {
+    max-width: 100%;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      scroll-behavior: auto !important;
+      transition-duration: 0.01ms !important;
+    }
   }
 }
 

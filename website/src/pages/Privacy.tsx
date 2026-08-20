@@ -91,7 +91,7 @@ export default function Privacy() {
       />
       <Navigation />
 
-      <main className="container mx-auto px-6 pb-20 pt-32">
+      <main className="container mx-auto px-4 pb-20 pt-28 sm:px-6 sm:pt-32">
         <FadeIn>
           <Link
             to="/"
@@ -106,7 +106,7 @@ export default function Privacy() {
           <FadeIn delay={0.05}>
             <header className="mb-10 border-b border-border/70 pb-8">
               <p className="mb-3 text-sm font-semibold text-primary">PRIVACY</p>
-              <h1 className="text-3xl font-bold tracking-tight text-foreground md:text-4xl">SSMaker 개인정보처리방침</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-foreground sm:text-3xl md:text-4xl">SSMaker 개인정보처리방침</h1>
               <p className="mt-4 text-sm text-muted-foreground">시행일: 2026년 8월 6일</p>
               <p className="mt-5 leading-7 text-muted-foreground">
                 YMcompany(이하 “회사”)는 SSMaker 데스크톱 앱과 인증·구독 서비스를 제공하면서 이용자의 개인정보를
@@ -118,7 +118,7 @@ export default function Privacy() {
           <div className="space-y-5">
             {sections.map((section, index) => (
               <FadeIn key={section.title} delay={0.08 + index * 0.025}>
-                <section className="glass-card rounded-2xl p-6 md:p-8">
+                <section className="glass-card rounded-2xl p-5 sm:p-6 md:p-8">
                   <h2 className="mb-4 text-xl font-semibold text-foreground">{section.title}</h2>
                   {section.paragraphs?.map((paragraph) => (
                     <p key={paragraph} className="leading-7 text-muted-foreground">

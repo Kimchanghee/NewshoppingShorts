@@ -39,7 +39,7 @@ export default function Contact() {
       />
       <Navigation />
 
-      <div className="container mx-auto px-6 pb-20 pt-32">
+      <div className="container mx-auto px-4 pb-20 pt-28 sm:px-6 sm:pt-32">
         <FadeIn>
           <Link
             to="/"
@@ -58,7 +58,7 @@ export default function Contact() {
 
           <FadeIn delay={0.1}>
             <div className="mx-auto max-w-lg">
-              <div className="glass-card rounded-xl p-8 text-center">
+              <div className="glass-card rounded-xl p-5 text-center sm:p-8">
                 <div className="mb-6 flex justify-center">
                   <div className="flex h-16 w-16 items-center justify-center rounded-full bg-yellow-400/20">
                     <MessageCircle className="h-8 w-8 text-yellow-400" />
@@ -75,7 +75,7 @@ export default function Contact() {
                   target="_blank"
                   rel="noopener noreferrer"
                   onClick={() => gaEvent("contact_click", { placement: "contact_page", channel: "kakao" })}
-                  className="inline-flex items-center gap-2 rounded-lg bg-yellow-400 px-8 py-3 font-semibold text-black transition-colors hover:bg-yellow-500"
+                  className="inline-flex min-h-11 max-w-full items-center justify-center gap-2 rounded-lg bg-yellow-400 px-5 py-3 text-center font-semibold leading-snug text-black transition-colors hover:bg-yellow-500 sm:px-8"
                 >
                   <MessageCircle className="h-5 w-5" />
                   카카오톡으로 문의하기
