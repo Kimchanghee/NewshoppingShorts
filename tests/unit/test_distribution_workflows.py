@@ -45,3 +45,15 @@ def test_store_artifact_is_retained_for_manual_partner_center_fallback():
 
     assert "path: dist/store/*.msix" in workflow
     assert "retention-days: 30" in workflow
+
+
+def test_store_credentials_can_be_validated_without_building_or_submitting():
+    workflow = (ROOT / ".github" / "workflows" / "build-msix-store.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "validate_store_access:" in workflow
+    assert "validate-store-access:" in workflow
+    assert "inputs.validate_store_access == true" in workflow
+    assert "inputs.validate_store_access != true" in workflow
+    assert "msstore apps get 9P43TQHLP8WH" in workflow
