@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit
 QT_APP = QApplication.instance() or QApplication([])
 
 
-def test_search_failure_explains_access_block_and_recovery():
+def test_search_failure_hides_provider_diagnostics_from_customer_copy():
     from core.sourcing.platform_pipeline import (
         describe_platform_search_failure,
         format_failure_message,
@@ -24,9 +24,13 @@ def test_search_failure_explains_access_block_and_recovery():
     assert failure["retriable"] is True
     assert "로그인" in failure["cause"]
     message = format_failure_message("상품 영상 검색에 실패했어요.", failure)
-    assert "원인:" in message
-    assert "해결:" in message
-    assert "다시 검색" in message
+    assert message == (
+        "상품 영상을 찾지 못했어요.\n"
+        "잠시 후 다시 시도하거나 다른 상품 링크를 사용해 주세요."
+    )
+    assert "로그인" not in message
+    assert "안티봇" not in message
+    assert "douyin" not in message.lower()
 
 
 def test_search_failure_distinguishes_network_relevance_and_download():
@@ -89,6 +93,23 @@ def test_platform_start_normalizes_invisible_clipboard_prefix_before_validation(
     assert panel.results_label.text() == ""
 
 
+def test_full_automation_accepts_all_reported_links_from_decorated_paste():
+    from ui.panels.sourcing_panel import SourcingPanel
+
+    expected = [
+        "https://link.coupang.com/a/f8i3PuVSqi",
+        "https://link.coupang.com/a/f8i6WhHkK4",
+        "https://link.coupang.com/a/f8jcQoPoke",
+        "https://link.coupang.com/a/f8jex1jVcG",
+        "https://link.coupang.com/a/f8jkHwLWaO",
+    ]
+    pasted = "\n".join(
+        f"{index}. 상품 링크: [{url}]" for index, url in enumerate(expected, 1)
+    )
+
+    assert SourcingPanel._extract_partner_links(pasted) == expected
+
+
 def test_recovery_actions_retry_same_or_select_next_product():
     from ui.panels.sourcing_panel import SourcingPanel
 
@@ -115,7 +136,7 @@ def test_recovery_actions_retry_same_or_select_next_product():
     assert "다음 상품" in result_label.text()
 
 
-def test_structured_failure_shows_cause_solution_and_recovery_controls():
+def test_structured_failure_hides_internal_cause_and_shows_recovery_controls():
     from ui.panels.sourcing_panel import SourcingPanel
 
     result_label = QLabel()
@@ -138,8 +159,9 @@ def test_structured_failure_shows_cause_solution_and_recovery_controls():
         },
     )
 
-    assert "원인: 검색 서버 시간초과" in result_label.text()
-    assert "해결: 다시 검색해 주세요" in result_label.text()
+    assert "상품 영상을 찾지 못했어요" in result_label.text()
+    assert "검색 서버 시간초과" not in result_label.text()
+    assert "다시 검색해 주세요" not in result_label.text()
     assert "오류 기록:" not in result_label.text()
     assert "report_platform_failed.json" not in result_label.text()
     assert recovery.isHidden() is False

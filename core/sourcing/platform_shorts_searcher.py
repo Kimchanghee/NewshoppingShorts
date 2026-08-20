@@ -321,10 +321,8 @@ _WARMUP_URL = {
     "xiaohongshu": "https://www.xiaohongshu.com/",
 }
 
-# 외부 검색엔진 폴백 — 플랫폼 '검색'만 게이트일 뿐 영상 페이지는 비로그인 시청 가능
-# (실측: 도우인 검색=셸만 렌더, 콰이쇼우 검색=홈 리다이렉트). 그래서 검색은
-# 일반 Chrome/로그인 프로필에서 성공률이 가장 높았던 Google 색인 검색을
-# 먼저 사용하고, DuckDuckGo/Bing/Brave를 순차 폴백한다. 다운로드는 기존
+# 외부 검색엔진 폴백. 검색 결과 HTML은 백그라운드 HTTP로만 읽어 사용자의
+# Chrome에 CAPTCHA/로그인 창을 띄우지 않는다. 영상 페이지 다운로드는 기존
 # yt-dlp+쿠키 경로를 그대로 쓴다.
 _EXTERNAL_SITE_FILTER = {
     "douyin": "douyin.com/video",
@@ -332,7 +330,14 @@ _EXTERNAL_SITE_FILTER = {
     "xiaohongshu": "xiaohongshu.com/explore",
     "bilibili": "bilibili.com/video",
 }
-_EXTERNAL_SEARCH_PROVIDERS = ("google", "duckduckgo", "bing", "brave")
+_EXTERNAL_SEARCH_PROVIDERS = ("bing", "google", "duckduckgo", "brave")
+_HTTP_EXTERNAL_SEARCH_HOSTS = {
+    "bing": "www.bing.com",
+    "google": "www.google.com",
+    "duckduckgo": "html.duckduckgo.com",
+    "brave": "search.brave.com",
+}
+_CHROME_INDEX_SEARCH_ENV = "SSMAKER_ALLOW_CHROME_INDEX_SEARCH"
 
 
 def _external_search_url(provider: str, query: str) -> str:
@@ -376,8 +381,14 @@ def _page_links_from_html(platform: str, page_html: str) -> List[str]:
 def _http_external_search_links(
     provider: str, platform: str, url: str
 ) -> List[str]:
-    """Read server-rendered search HTML when an automated browser is challenged."""
-    if provider != "brave" or not url.startswith("https://search.brave.com/"):
+    """Read public search HTML without opening a CAPTCHA tab in Chrome."""
+    expected_host = _HTTP_EXTERNAL_SEARCH_HOSTS.get(provider)
+    parsed = urllib.parse.urlparse(str(url or ""))
+    if (
+        not expected_host
+        or parsed.scheme.lower() != "https"
+        or (parsed.hostname or "").lower() != expected_host
+    ):
         return []
     import html as html_module
     import requests
@@ -427,52 +438,51 @@ async def _external_search_links(
             if provider_name not in stored:
                 stored.append(provider_name)
 
-    # A paired extension uses the user's already-running Chrome profile. This
-    # avoids copying cookies and still gives SSMaker the indexed public page
-    # links that were visible in a normal logged-in Chrome session.
-    try:
-        from core.sourcing.chrome_extension_bridge import get_chrome_extension_bridge
+    # The paired extension creates an inactive Google tab. It is retained only
+    # as an explicit diagnostic opt-in because search engines can still attach
+    # a CAPTCHA page to the user's normal Chrome session. Full automation must
+    # never create that tab by default.
+    if str(os.environ.get(_CHROME_INDEX_SEARCH_ENV, "")).strip() == "1":
+        try:
+            from core.sourcing.chrome_extension_bridge import get_chrome_extension_bridge
 
-        extension_bridge = get_chrome_extension_bridge()
-        # App startup normally owns the bridge. Starting lazily as well keeps
-        # queue-only and diagnostic entrypoints able to use the paired Chrome
-        # profile without requiring the full GUI process.
-        extension_bridge.start()
-        if extension_bridge.is_connected():
-            extension_links = await asyncio.wait_for(
-                asyncio.to_thread(
-                    extension_bridge.search_index,
-                    platform,
-                    intent_query,
-                    35.0,
-                ),
-                timeout=40.0,
-            )
-            if extension_links:
-                logger.info(
-                    "[PlatformSearch] %s: 로그인된 Chrome 색인 링크 %d개",
-                    platform,
-                    len(extension_links),
+            extension_bridge = get_chrome_extension_bridge()
+            extension_bridge.start()
+            if extension_bridge.is_connected():
+                extension_links = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        extension_bridge.search_index,
+                        platform,
+                        intent_query,
+                        35.0,
+                    ),
+                    timeout=40.0,
                 )
-                return extension_links
+                if extension_links:
+                    logger.info(
+                        "[PlatformSearch] %s: 로그인된 Chrome 색인 링크 %d개",
+                        platform,
+                        len(extension_links),
+                    )
+                    return extension_links
+                _diagnostic_event(
+                    diagnostics,
+                    "no_results",
+                    platform="search:chrome_extension",
+                )
+        except asyncio.TimeoutError:
             _diagnostic_event(
                 diagnostics,
-                "no_results",
+                "page_open_timeout",
                 platform="search:chrome_extension",
             )
-    except asyncio.TimeoutError:
-        _diagnostic_event(
-            diagnostics,
-            "page_open_timeout",
-            platform="search:chrome_extension",
-        )
-    except Exception as exc:
-        _diagnostic_event(
-            diagnostics,
-            "page_open_error",
-            platform="search:chrome_extension",
-            detail=type(exc).__name__,
-        )
+        except Exception as exc:
+            _diagnostic_event(
+                diagnostics,
+                "page_open_error",
+                platform="search:chrome_extension",
+                detail=type(exc).__name__,
+            )
 
     for provider in _EXTERNAL_SEARCH_PROVIDERS:
         if provider in blocked_providers:
@@ -481,49 +491,12 @@ async def _external_search_links(
         if not url:
             continue
         diagnostic_platform = f"search:{provider}"
-        if provider == "brave":
-            try:
-                links = await asyncio.wait_for(
-                    asyncio.to_thread(
-                        _http_external_search_links, provider, platform, url
-                    ),
-                    timeout=PAGE_OPEN_TIMEOUT,
-                )
-            except asyncio.TimeoutError:
-                _diagnostic_event(
-                    diagnostics, "page_open_timeout", platform=diagnostic_platform
-                )
-                continue
-            except Exception as exc:
-                status_code = getattr(
-                    getattr(exc, "response", None), "status_code", None
-                )
-                code = "rate_limited" if status_code == 429 else "page_open_error"
-                detail = f"HTTP {status_code}" if status_code else type(exc).__name__
-                if code == "rate_limited":
-                    block_provider(provider)
-                _diagnostic_event(
-                    diagnostics,
-                    code,
-                    platform=diagnostic_platform,
-                    detail=detail,
-                )
-                continue
-            if links:
-                logger.info(
-                    "[PlatformSearch] %s: 외부검색(%s HTTP) 링크 %d개",
-                    platform,
-                    provider,
-                    len(links),
-                )
-                return links
-            _diagnostic_event(
-                diagnostics, "no_results", platform=diagnostic_platform
-            )
-            continue
         try:
-            tab = await asyncio.wait_for(
-                browser.get(url, new_tab=True), timeout=PAGE_OPEN_TIMEOUT
+            links = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _http_external_search_links, provider, platform, url
+                ),
+                timeout=PAGE_OPEN_TIMEOUT,
             )
         except asyncio.TimeoutError:
             _diagnostic_event(
@@ -531,64 +504,31 @@ async def _external_search_links(
             )
             continue
         except Exception as exc:
-            if _is_browser_session_error(exc):
-                _diagnostic_event(
-                    diagnostics,
-                    "browser_session_failed",
-                    platform=diagnostic_platform,
-                    detail=type(exc).__name__,
-                )
-                return []
+            status_code = getattr(
+                getattr(exc, "response", None), "status_code", None
+            )
+            code = "rate_limited" if status_code == 429 else "page_open_error"
+            detail = f"HTTP {status_code}" if status_code else type(exc).__name__
+            if code == "rate_limited":
+                block_provider(provider)
             _diagnostic_event(
                 diagnostics,
-                "page_open_error",
+                code,
                 platform=diagnostic_platform,
-                detail=type(exc).__name__,
+                detail=detail,
             )
             continue
-        if tab is None:
-            _diagnostic_event(diagnostics, "empty_page", platform=diagnostic_platform)
-            continue
-        try:
-            await asyncio.sleep(2.5)
-            if await asyncio.wait_for(
-                _page_has_access_challenge(tab), timeout=EVAL_TIMEOUT
-            ):
-                logger.info(
-                    "[PlatformSearch] 외부검색 %s 봇 확인 화면 — 다음 검색엔진으로",
-                    provider,
-                )
-                _diagnostic_event(
-                    diagnostics,
-                    "access_challenge",
-                    platform=diagnostic_platform,
-                    detail="bot or login challenge",
-                )
-                block_provider(provider)
-                continue
-            links = await _extract_video_page_links(
-                tab,
+        if links:
+            logger.info(
+                "[PlatformSearch] %s: 외부검색(%s HTTP) 링크 %d개",
                 platform,
-                output_dir,
-                f"{provider}:{query}",
-                diagnostics=diagnostics,
+                provider,
+                len(links),
             )
-            if links:
-                logger.info(
-                    "[PlatformSearch] %s: 외부검색(%s) 링크 %d개",
-                    platform,
-                    provider,
-                    len(links),
-                )
-                return links
-            _diagnostic_event(
-                diagnostics, "no_results", platform=diagnostic_platform
-            )
-        finally:
-            try:
-                await asyncio.wait_for(tab.close(), timeout=5)
-            except Exception:
-                pass
+            return links
+        _diagnostic_event(
+            diagnostics, "no_results", platform=diagnostic_platform
+        )
     return []
 
 _DEBUG_DUMP_ENV = "SSMAKER_PLATFORM_DEBUG_DUMP"
@@ -754,10 +694,8 @@ async def start_browser() -> Any:
                 )
                 await asyncio.to_thread(_kill_orphan_profile_chrome, profile)
                 await asyncio.sleep(2.0)
-    raise RuntimeError(
-        "자동화 브라우저를 시작할 수 없어요. 이전 자동화 Chrome 창이 남아 있으면 모두 닫은 뒤 "
-        f"다시 시도해 주세요. (원인: {str(last_err)[:120]})"
-    )
+    logger.error("[PlatformSearch] 브라우저 시작 재시도 실패: %s", last_err)
+    raise RuntimeError("상품 영상 검색을 시작하지 못했습니다.")
 
 
 async def _extract_platform_videos(

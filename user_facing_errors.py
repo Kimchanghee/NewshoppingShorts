@@ -174,6 +174,26 @@ def classify_error(value: Any) -> str:
         )
     ).lower()
 
+    sourcing_failure_codes = (
+        "browser_start_failed",
+        "browser_session_failed",
+        "platform_access_blocked",
+        "platform_search_unavailable",
+        "platform_search_failed",
+        "no_search_results",
+        "no_relevant_video",
+        "candidate_download_failed",
+        "all_sources_already_used",
+        "unexpected_search_error",
+    )
+    if (
+        "상품 영상 검색에 실패" in combined
+        or "상품 영상을 찾지 못" in combined
+        or "검색 내역:" in combined
+        or any(code in combined for code in sourcing_failure_codes)
+    ):
+        return "sourcing_video_not_found"
+
     if (
         "only one active job is allowed" in combined
         or "finish or clear the current" in combined
@@ -282,6 +302,7 @@ def classify_error(value: Any) -> str:
 def friendly_error_title(value: Any, fallback: str = "잠시 문제가 생겼어요") -> str:
     category = classify_error(value)
     return {
+        "sourcing_video_not_found": "상품 영상을 찾지 못했어요",
         "gemini_key_missing": "Gemini API 키가 필요해요",
         "gemini_key_rejected": "Gemini API 키를 사용할 수 없어요",
         "quota_exhausted": "API 사용량이 잠시 꽉 찼어요",
@@ -311,6 +332,10 @@ def friendly_error_title(value: Any, fallback: str = "잠시 문제가 생겼어
 def friendly_error_message(value: Any, fallback: str = "잠시 후 다시 시도해 주세요.") -> str:
     category = classify_error(value)
     return {
+        "sourcing_video_not_found": (
+            "상품 영상을 찾지 못했어요.\n"
+            "잠시 후 다시 시도하거나 다른 상품 링크를 사용해 주세요."
+        ),
         "gemini_key_missing": (
             "저장된 Gemini API 키가 없어서 작업을 시작할 수 없어요.\n"
             "설정 > API 키에서 새 키를 저장한 뒤 다시 실행해 주세요."
@@ -512,6 +537,8 @@ def sanitize_user_message(value: Any, fallback: str = "잠시 후 다시 시도�
         return simple_status
 
     category = classify_error(value)
+    if category == "sourcing_video_not_found":
+        return friendly_error_message(value, fallback=fallback)
     if category != "unknown" and not _has_readable_korean(text):
         return friendly_error_message(value, fallback=fallback)
 

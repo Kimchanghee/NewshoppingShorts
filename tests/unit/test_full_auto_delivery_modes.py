@@ -100,6 +100,55 @@ def test_file_only_is_safe_default_and_upload_mode_explains_blocker(monkeypatch)
     assert "테스트 채널" in panel.delivery_status_label.text()
 
 
+def test_full_auto_ui_accepts_multiple_partner_links_without_internal_controls(monkeypatch):
+    panel = _build_panel(monkeypatch, _Settings(youtube_connected=False))
+    first = "https://link.coupang.com/a/first"
+    second = "https://link.coupang.com/a/second"
+
+    panel.partner_links_input.setPlainText(f"{first}\n{first}\n{second}")
+    QT_APP.processEvents()
+
+    assert panel.url_input.text() == first
+    assert panel._extract_next_links() == [second]
+    assert panel.next_links_count_label.text() == "2개"
+    assert not hasattr(panel, "match_threshold_spin")
+    assert not hasattr(panel, "chk_auto_skip_low_similarity")
+    assert not hasattr(panel, "radio_method_platform")
+    assert "한 줄에 하나씩" in panel.partner_links_input.accessibleDescription()
+
+
+def test_partner_link_batch_advances_to_the_next_item_automatically(monkeypatch):
+    panel = _build_panel(monkeypatch, _Settings(youtube_connected=False))
+    links = [
+        "https://link.coupang.com/a/first",
+        "https://link.coupang.com/a/second",
+        "https://link.coupang.com/a/third",
+    ]
+    panel.partner_links_input.setPlainText("\n".join(links))
+    QT_APP.processEvents()
+    panel._partner_batch_active = True
+    panel._partner_batch_total = len(links)
+    panel._partner_batch_completed = 0
+    panel._platform_batch_can_continue = True
+    panel._platform_item_succeeded = True
+    panel.partner_links_input.setEnabled(False)
+    starts = []
+    monkeypatch.setattr(panel, "_on_start_clicked", lambda: starts.append(True))
+    monkeypatch.setattr(
+        "ui.panels.sourcing_panel.QTimer.singleShot",
+        lambda _delay, callback: callback(),
+    )
+
+    panel._reset_platform_controls()
+
+    assert starts == [True]
+    assert panel.url_input.text() == links[1]
+    assert panel._extract_next_links() == [links[2]]
+    assert panel.partner_links_input.toPlainText() == "\n".join(links[1:])
+    assert panel._partner_batch_completed == 1
+    assert panel._partner_batch_active is True
+
+
 def test_file_only_still_starts_final_batch_render(monkeypatch, tmp_path):
     settings = _Settings(youtube_connected=False)
     panel = _build_panel(monkeypatch, settings)

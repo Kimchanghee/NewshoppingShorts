@@ -112,6 +112,7 @@ def test_explicit_platform_video_threshold_fails_closed(required):
 
 def test_partner_short_link_resolves_only_to_official_product_url(monkeypatch):
     class Response:
+        status_code = 302
         headers = {
             "Location": "https://www.coupang.com/vp/products/9411394523?itemId=1"
         }
@@ -128,6 +129,44 @@ def test_partner_short_link_resolves_only_to_official_product_url(monkeypatch):
     )
 
     assert resolved.startswith("https://www.coupang.com/vp/products/9411394523")
+
+
+def test_partner_short_link_scrapes_resolved_product_url_not_short_link(
+    monkeypatch, tmp_path
+):
+    from core.sourcing import coupang_scraper, pipeline as sourcing_pipeline
+    from core.sourcing import report_cache
+
+    short_link = "https://link.coupang.com/a/f8i6WhHkK4"
+    product_url = (
+        "https://www.coupang.com/vp/products/8065952183"
+        "?itemId=22684060132&lptag=AF6328806"
+    )
+    scraped = []
+
+    monkeypatch.setattr(report_cache, "find_cached_product_info", lambda _url: None)
+    monkeypatch.setattr(
+        sourcing_pipeline, "find_cached_publish_safe_video", lambda **_kwargs: None
+    )
+    monkeypatch.setattr(pp, "_resolve_partner_product_url", lambda _url: product_url)
+
+    async def fake_scrape(_browser, url):
+        scraped.append(url)
+        return None
+
+    monkeypatch.setattr(coupang_scraper, "scrape_product", fake_scrape)
+
+    report = asyncio.run(
+        pp.run_platform_sourcing(
+            short_link,
+            output_dir=str(tmp_path),
+            browser=object(),
+        )
+    )
+
+    assert scraped == [product_url]
+    assert report["failure"]["code"] == "coupang_product_unavailable"
+    assert "잘못된" not in report["error"]
 
 
 @pytest.mark.parametrize(
@@ -549,99 +588,65 @@ def test_access_challenge_detection_covers_platform_login_and_search_bot_pages(p
 
 
 def test_external_search_skips_blocked_and_empty_providers(monkeypatch, tmp_path):
-    opened = []
     http_opened = []
-    # This test exercises the legacy fallback chain. Google has its own
-    # regression below so the provider-specific assertions stay focused.
     monkeypatch.setattr(
         searcher, "_EXTERNAL_SEARCH_PROVIDERS", ("duckduckgo", "bing", "brave")
     )
 
-    class Tab:
-        def __init__(self, provider):
-            self.provider = provider
-
-        async def close(self):
-            return None
-
     class Browser:
-        async def get(self, url, **_kwargs):
-            if "duckduckgo" in url:
-                provider = "duckduckgo"
-            elif "bing.com" in url:
-                provider = "bing"
-            else:
-                provider = "unexpected"
-            opened.append(provider)
-            return Tab(provider)
-
-    async def fake_challenge(tab):
-        return tab.provider == "duckduckgo"
-
-    async def fake_extract(tab, *_args, **_kwargs):
-        return []
+        async def get(self, *_args, **_kwargs):
+            raise AssertionError("검색엔진 CAPTCHA 탭을 열면 안 됩니다")
 
     def fake_http_search(provider, platform, _url):
         http_opened.append((provider, platform))
-        return ["https://www.douyin.com/video/7351234567890123456"]
-
-    async def no_sleep(_seconds):
-        return None
+        if provider == "brave":
+            return ["https://www.douyin.com/video/7351234567890123456"]
+        return []
 
     diagnostics = {}
-    monkeypatch.setattr(searcher, "_page_has_access_challenge", fake_challenge)
-    monkeypatch.setattr(searcher, "_extract_video_page_links", fake_extract)
     monkeypatch.setattr(
         searcher, "_http_external_search_links", fake_http_search, raising=False
     )
-    monkeypatch.setattr(searcher.asyncio, "sleep", no_sleep)
 
     links = asyncio.run(searcher._external_search_links(
         Browser(), "douyin", "电动奶泡器", str(tmp_path), diagnostics=diagnostics
     ))
 
     assert links == ["https://www.douyin.com/video/7351234567890123456"]
-    assert opened == ["duckduckgo", "bing"]
-    assert http_opened == [("brave", "douyin")]
-    assert diagnostics["counts"]["access_challenge"] == 1
-    assert diagnostics["platforms"]["search:duckduckgo"]["access_challenge"] == 1
+    assert http_opened == [
+        ("duckduckgo", "douyin"),
+        ("bing", "douyin"),
+        ("brave", "douyin"),
+    ]
+    assert diagnostics["platforms"]["search:duckduckgo"]["no_results"] == 1
     assert diagnostics["platforms"]["search:bing"]["no_results"] == 1
 
     second_links = asyncio.run(searcher._external_search_links(
         Browser(), "douyin", "手持奶泡器", str(tmp_path), diagnostics=diagnostics
     ))
     assert second_links == links
-    assert opened == ["duckduckgo", "bing", "bing"]
-    assert http_opened == [("brave", "douyin"), ("brave", "douyin")]
+    assert http_opened[-3:] == [
+        ("duckduckgo", "douyin"),
+        ("bing", "douyin"),
+        ("brave", "douyin"),
+    ]
 
 
-def test_google_index_search_is_first_and_returns_platform_video_links(
+def test_search_index_uses_http_without_opening_browser_tabs(
     monkeypatch, tmp_path
 ):
-    opened = []
-
-    class Tab:
-        async def close(self):
-            return None
-
     class Browser:
-        async def get(self, url, **_kwargs):
-            opened.append(url)
-            return Tab()
+        async def get(self, *_args, **_kwargs):
+            raise AssertionError("검색엔진 페이지를 브라우저로 열면 안 됩니다")
 
-    async def no_challenge(_tab):
-        return False
+    calls = []
 
-    async def google_links(_tab, platform, *_args, **_kwargs):
-        assert platform == "douyin"
+    def fake_http(provider, platform, url):
+        calls.append((provider, platform, url))
         return ["https://www.douyin.com/video/7658326682089144783"]
 
-    async def no_sleep(_seconds):
-        return None
-
-    monkeypatch.setattr(searcher, "_page_has_access_challenge", no_challenge)
-    monkeypatch.setattr(searcher, "_extract_video_page_links", google_links)
-    monkeypatch.setattr(searcher.asyncio, "sleep", no_sleep)
+    monkeypatch.setattr(searcher, "_EXTERNAL_SEARCH_PROVIDERS", ("bing",))
+    monkeypatch.setattr(searcher, "_http_external_search_links", fake_http)
 
     links = asyncio.run(
         searcher._external_search_links(
@@ -650,9 +655,9 @@ def test_google_index_search_is_first_and_returns_platform_video_links(
     )
 
     assert links == ["https://www.douyin.com/video/7658326682089144783"]
-    assert len(opened) == 1
-    assert opened[0].startswith("https://www.google.com/search?")
-    assert "site%3Adouyin.com/video" in opened[0]
+    assert calls[0][0:2] == ("bing", "douyin")
+    assert calls[0][2].startswith("https://www.bing.com/search?")
+    assert "site%3Adouyin.com/video" in calls[0][2]
 
 
 def test_paired_chrome_extension_precedes_automated_browser(monkeypatch, tmp_path):
@@ -677,6 +682,7 @@ def test_paired_chrome_extension_precedes_automated_browser(monkeypatch, tmp_pat
     monkeypatch.setattr(
         bridge_module, "get_chrome_extension_bridge", lambda: Bridge()
     )
+    monkeypatch.setenv("SSMAKER_ALLOW_CHROME_INDEX_SEARCH", "1")
 
     links = asyncio.run(
         searcher._external_search_links(
@@ -684,6 +690,28 @@ def test_paired_chrome_extension_precedes_automated_browser(monkeypatch, tmp_pat
         )
     )
     assert links == ["https://www.douyin.com/video/7658326682089144783"]
+
+
+def test_paired_chrome_extension_is_disabled_by_default(monkeypatch, tmp_path):
+    from core.sourcing import chrome_extension_bridge as bridge_module
+
+    class Bridge:
+        def start(self):
+            raise AssertionError("기본 자동화가 사용자 Chrome 검색 탭을 열면 안 됩니다")
+
+    monkeypatch.delenv("SSMAKER_ALLOW_CHROME_INDEX_SEARCH", raising=False)
+    monkeypatch.setattr(
+        bridge_module, "get_chrome_extension_bridge", lambda: Bridge()
+    )
+    monkeypatch.setattr(searcher, "_EXTERNAL_SEARCH_PROVIDERS", ())
+
+    links = asyncio.run(
+        searcher._external_search_links(
+            object(), "douyin", "전동 우유거품기", str(tmp_path), diagnostics={}
+        )
+    )
+
+    assert links == []
 
 
 def test_http_external_search_extracts_direct_platform_links(monkeypatch):
@@ -705,7 +733,7 @@ def test_http_external_search_extracts_direct_platform_links(monkeypatch):
     monkeypatch.setitem(sys.modules, "requests", types.SimpleNamespace(get=fake_get))
 
     links = searcher._http_external_search_links(
-        "brave", "douyin", "https://search.brave.com/search?q=test"
+        "bing", "douyin", "https://www.bing.com/search?q=test"
     )
 
     assert links == ["https://www.douyin.com/video/7351234567890123456"]
@@ -781,8 +809,14 @@ def test_platform_failure_report_preserves_block_reason_and_skipped_delivery(
     assert report["ok"] is False
     assert report["failure"]["code"] == "platform_access_blocked"
     assert report["blocked_stages"] == ["video_edit", "youtube_upload", "linktree_publish"]
-    assert "DuckDuckGo" in report["error"]
-    assert "YouTube 업로드" in report["error"]
+    assert report["error"] == (
+        "상품 영상을 찾지 못했어요.\n"
+        "잠시 후 다시 시도하거나 다른 상품 링크를 사용해 주세요."
+    )
+    for internal_detail in (
+        "DuckDuckGo", "Douyin", "YouTube", "Linktree", "검색 내역", "후속 단계"
+    ):
+        assert internal_detail not in report["error"]
     report_path = report["report_path"]
     assert os.path.exists(report_path)
     persisted = json.loads(open(report_path, encoding="utf-8").read())

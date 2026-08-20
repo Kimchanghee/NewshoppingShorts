@@ -6,7 +6,6 @@ from __future__ import annotations
 
 import asyncio
 import os
-import re
 import threading
 from typing import List, Optional
 
@@ -14,16 +13,16 @@ from PyQt6.QtWidgets import (
     QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QFrame, QWidget, QCheckBox, QScrollArea,
     QTextEdit, QSpinBox, QRadioButton, QButtonGroup,
-    QApplication,
 )
 from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 from ui.components.automation_readiness import AutomationReadinessCard
-from ui.components.custom_dialog import show_info, show_warning
+from ui.components.custom_dialog import show_warning
 from utils.logging_config import get_logger
 from utils.url_security import (
+    extract_coupang_partner_links,
     is_coupang_partner_link,
     is_official_coupang_url,
     normalize_coupang_partner_link,
@@ -258,7 +257,7 @@ class SourcingPanel(QWidget):
         outer_layout.setSpacing(0)
 
         # Wrap all content in a scroll area so tall content scrolls instead of
-        # compressing the flexible widgets (소싱 방식 카드/하단 진행·결과가 눌리던 문제).
+        # compressing the flexible widgets.
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -289,7 +288,7 @@ class SourcingPanel(QWidget):
         # ── Input Section ──
         input_frame = QFrame()
         input_frame.setObjectName("SourcingInputFrame")
-        input_frame.setMinimumHeight(520)
+        input_frame.setMinimumHeight(330)
         input_frame.setStyleSheet(f"""
             QFrame#SourcingInputFrame {{
                 background-color: {get_color('surface')};
@@ -301,41 +300,69 @@ class SourcingPanel(QWidget):
         input_layout.setContentsMargins(ds.spacing.space_4, ds.spacing.space_4, ds.spacing.space_4, ds.spacing.space_4)
         input_layout.setSpacing(ds.spacing.space_3)
 
-        # ── 소싱 방식 선택 (풀자동화 전용) ──
-        input_layout.addWidget(self._build_sourcing_method_card())
-
-        # URL input
-        url_label = QLabel("쿠팡 파트너스 상품 링크")
+        # 사용자는 내부 검색 방식을 고를 필요 없이 파트너스 링크만 넣는다.
+        links_header = QHBoxLayout()
+        url_label = QLabel("2. 쿠팡 파트너스 상품 링크")
         url_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
-        input_layout.addWidget(url_label)
+        links_header.addWidget(url_label)
+        links_header.addStretch()
+        self.next_links_count_label = QLabel("0개")
+        self.next_links_count_label.setFont(QFont(
+            ds.typography.font_family_primary,
+            ds.typography.size_xs,
+            QFont.Weight.Bold,
+        ))
+        self.next_links_count_label.setStyleSheet(f"color: {get_color('text_secondary')};")
+        links_header.addWidget(self.next_links_count_label)
+        input_layout.addLayout(links_header)
 
-        url_row = QHBoxLayout()
-        self.url_input = QLineEdit()
-        self.url_input.setPlaceholderText("https://link.coupang.com/a/...")
-        self.url_input.setToolTip(
-            "쿠팡 파트너스에서 생성한 추적 링크만 사용할 수 있습니다. "
-            "일반 www.coupang.com 상품 링크는 수익 추적이 되지 않아 차단합니다."
+        links_help = QLabel("쿠팡 파트너스에서 만든 상품 링크를 한 줄에 하나씩 붙여넣으세요.")
+        links_help.setWordWrap(True)
+        links_help.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
+        links_help.setStyleSheet(f"color: {get_color('text_muted')};")
+        input_layout.addWidget(links_help)
+
+        self.partner_links_input = QTextEdit()
+        self.partner_links_input.setAcceptRichText(False)
+        self.partner_links_input.setAccessibleName("쿠팡 파트너스 상품 링크 목록")
+        self.partner_links_input.setAccessibleDescription(
+            "쿠팡 파트너스 상품 링크를 한 줄에 하나씩 여러 개 입력하세요."
         )
-        self.url_input.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
-        self.url_input.setMinimumHeight(36)
-        self.url_input.setStyleSheet(f"""
-            QLineEdit {{
+        self.partner_links_input.setPlaceholderText(
+            "https://link.coupang.com/a/...\n"
+            "https://link.coupang.com/a/...\n"
+            "https://link.coupang.com/a/..."
+        )
+        self.partner_links_input.setToolTip(
+            "쿠팡 파트너스에서 생성한 link.coupang.com 상품 링크만 입력해 주세요."
+        )
+        self.partner_links_input.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
+        self.partner_links_input.setMinimumHeight(132)
+        self.partner_links_input.setMaximumHeight(240)
+        self.partner_links_input.setStyleSheet(f"""
+            QTextEdit {{
                 background-color: {get_color('background')};
                 color: {get_color('text_primary')};
                 border: 1px solid {get_color('border_light')};
                 border-radius: {ds.radius.sm}px;
-                padding: 4px 8px;
+                padding: 10px 12px;
             }}
-            QLineEdit:focus {{
+            QTextEdit:focus {{
                 border-color: {get_color('primary')};
             }}
         """)
-        url_row.addWidget(self.url_input, 1)
-        input_layout.addLayout(url_row)
+        input_layout.addWidget(self.partner_links_input)
 
-        # 다크 테마에서 기본 팔레트(검정 텍스트)로 렌더링되면 라벨이 보이지 않으므로
-        # 공통 체크박스 스타일(외곽선 박스 + 빨간 체크 표시)을 사용한다.
-        checkbox_style = checkbox_qss()
+        # 기존 단일 링크 처리 코드와 외부 통합을 위한 숨은 호환 상태다.
+        self.url_input = QLineEdit(input_frame)
+        self.url_input.setVisible(False)
+        self.next_links_input = QTextEdit(input_frame)
+        self.next_links_input.setVisible(False)
+        self._partner_batch_active = False
+        self._partner_batch_total = 0
+        self._partner_batch_completed = 0
+        self._platform_batch_can_continue = False
+        self._platform_item_succeeded = False
 
         timer_frame = QFrame()
         self.upload_timer_frame = timer_frame
@@ -390,92 +417,12 @@ class SourcingPanel(QWidget):
 
         input_layout.addWidget(timer_frame)
 
-        # Product match guard
-        match_policy = self._load_match_policy()
-        match_header = QHBoxLayout()
-        match_header.setSpacing(ds.spacing.space_2)
-
-        match_label = QLabel("상품이 얼마나 비슷해야 통과")
-        match_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
-        match_header.addWidget(match_label)
-
-        self.match_threshold_spin = QSpinBox()
-        self.match_threshold_spin.setRange(90, 100)
-        self.match_threshold_spin.setSingleStep(5)
-        self.match_threshold_spin.setSuffix("%")
-        self.match_threshold_spin.setValue(int(match_policy.get("min_similarity_percent", 90)))
-        self.match_threshold_spin.setFixedWidth(84)
-        self.match_threshold_spin.setToolTip("이 기준보다 덜 비슷한 영상은 자동 업로드와 Linktree 등록을 막아요.")
-        self.match_threshold_spin.setStyleSheet(f"""
-            QSpinBox {{
-                background-color: {get_color('background')};
-                color: {get_color('text_primary')};
-                border: 1px solid {get_color('border_light')};
-                border-radius: {ds.radius.sm}px;
-                padding: 4px 6px;
-            }}
-            QSpinBox:focus {{
-                border-color: {get_color('primary')};
-            }}
-        """)
-        match_header.addWidget(self.match_threshold_spin)
-
-        self.chk_auto_skip_low_similarity = QCheckBox("기준에 못 미치면 다음 링크로 자동 넘어가기")
-        self.chk_auto_skip_low_similarity.setChecked(bool(match_policy.get("auto_skip_low_similarity", False)))
-        self.chk_auto_skip_low_similarity.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self.chk_auto_skip_low_similarity.setStyleSheet(checkbox_style)
-        self.chk_auto_skip_low_similarity.setToolTip("켜면 상품을 못 찾았을 때 알림창을 띄우지 않고, 아래 '다음 쿠팡 링크 목록'의 첫 링크로 자동으로 넘어가요.")
-        match_header.addWidget(self.chk_auto_skip_low_similarity)
-        match_header.addStretch()
-        input_layout.addLayout(match_header)
-
-        match_hint = QLabel("기준을 통과하지 못하면 영상 만들기, YouTube 올리기, Linktree 등록을 멈춰요.")
-        match_hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        match_hint.setStyleSheet(f"color: {get_color('text_muted')}; padding-bottom: 3px;")
-        match_hint.setWordWrap(True)
-        input_layout.addWidget(match_hint)
-
-        next_links_label = QLabel("다음 쿠팡 링크 목록")
-        next_links_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
-        next_links_header = QHBoxLayout()
-        next_links_header.addWidget(next_links_label)
-        next_links_header.addStretch()
-        self.next_links_count_label = QLabel("총 0개 · 다음 0개")
-        self.next_links_count_label.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs, QFont.Weight.Bold))
-        self.next_links_count_label.setStyleSheet(f"color: {get_color('text_secondary')};")
-        next_links_header.addWidget(self.next_links_count_label)
-        input_layout.addLayout(next_links_header)
-
-        self.next_links_input = QTextEdit()
-        self.next_links_input.setPlaceholderText("자동으로 넘어갈 때 쓸 링크를 한 줄에 하나씩 적어 주세요.")
-        self.next_links_input.setAcceptRichText(False)
-        self.next_links_input.setMinimumHeight(150)
-        self.next_links_input.setMaximumHeight(220)
-        self.next_links_input.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self._next_links_input_style = f"""
-            QTextEdit {{
-                background-color: {get_color('background')};
-                color: {get_color('text_primary')};
-                border: 1px solid {get_color('border_light')};
-                border-radius: {ds.radius.sm}px;
-                padding: 6px 8px;
-            }}
-            QTextEdit:focus {{
-                border-color: {get_color('primary')};
-            }}
-        """
-        self.next_links_input.setStyleSheet(self._next_links_input_style)
-        input_layout.addWidget(self.next_links_input)
-        self._sync_next_links_enabled()
+        self._sync_partner_links_from_input()
         self._sync_upload_timer_enabled()
         self._update_next_links_count()
 
-        self.url_input.textChanged.connect(lambda _text: self._update_next_links_count())
-        self.next_links_input.textChanged.connect(self._update_next_links_count)
+        self.partner_links_input.textChanged.connect(self._sync_partner_links_from_input)
         self.upload_interval_spin.valueChanged.connect(self._on_upload_interval_changed)
-        self.match_threshold_spin.valueChanged.connect(self._save_match_policy)
-        self.chk_auto_skip_low_similarity.toggled.connect(self._save_match_policy)
-        self.chk_auto_skip_low_similarity.toggled.connect(lambda _checked: self._sync_next_links_enabled())
 
         # Start button
         self.btn_start = QPushButton("자동 만들기 시작")
@@ -808,180 +755,6 @@ class SourcingPanel(QWidget):
             self.btn_start.setToolTip("" if ready else message)
             self._apply_button_style(disabled=not ready)
 
-    def _build_sourcing_method_card(self) -> QWidget:
-        """풀자동화 3플랫폼 영상 소싱 카드."""
-        ds = self.ds
-        try:
-            from managers.settings_manager import get_settings_manager
-            current = get_settings_manager().get_automation_sourcing_method()
-        except Exception:
-            current = "platform_video"
-
-        card = QFrame()
-        card.setObjectName("SourcingMethodCard")
-        card.setStyleSheet(f"""
-            QFrame#SourcingMethodCard {{
-                background-color: {get_color('background')};
-                border: 1px solid {get_color('border_light')};
-                border-radius: {ds.radius.sm}px;
-            }}
-        """)
-        lay = QVBoxLayout(card)
-        lay.setContentsMargins(ds.spacing.space_3, ds.spacing.space_3, ds.spacing.space_3, ds.spacing.space_3)
-        lay.setSpacing(ds.spacing.space_2)
-
-        title = QLabel("소싱 방식")
-        title.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_base, QFont.Weight.Bold))
-        lay.addWidget(title)
-
-        radio_style = f"""
-            QRadioButton {{ color: {get_color('text_primary')}; background: transparent; padding: 3px 0; }}
-            QRadioButton::indicator {{ width: 15px; height: 15px; }}
-            QRadioButton::indicator:checked {{
-                border: 2px solid {get_color('primary')};
-                border-radius: 8px; background-color: {get_color('primary')};
-            }}
-            QRadioButton::indicator:unchecked {{
-                border: 2px solid {get_color('border_light')};
-                border-radius: 8px; background-color: {get_color('background')};
-            }}
-        """
-
-        self._method_group = QButtonGroup(card)
-
-        self.radio_method_coupang = QRadioButton("기존 마켓 영상 방식")
-        self.radio_method_coupang.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
-        self.radio_method_coupang.setStyleSheet(radio_style)
-        self.radio_method_coupang.setChecked(current == "coupang")
-        self._method_group.addButton(self.radio_method_coupang)
-        lay.addWidget(self.radio_method_coupang)
-        self.radio_method_coupang.setVisible(False)
-
-        self.radio_method_platform = QRadioButton(
-            "중국 숏폼 방식 — 샤오홍슈·도우인·콰이쇼우 영상 다운로드"
-        )
-        self.radio_method_platform.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
-        self.radio_method_platform.setStyleSheet(radio_style)
-        self.radio_method_platform.setChecked(current == "platform_video")
-        self._method_group.addButton(self.radio_method_platform)
-        lay.addWidget(self.radio_method_platform)
-
-        self._method_hint = QLabel("")
-        self._method_hint.setWordWrap(True)
-        self._method_hint.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_xs))
-        self._method_hint.setStyleSheet(f"color: {get_color('text_muted')}; background: transparent;")
-        lay.addWidget(self._method_hint)
-
-        chrome_row = QHBoxLayout()
-        chrome_row.setSpacing(ds.spacing.space_2)
-        self.chrome_bridge_status_label = QLabel("○ Chrome 확장 미연결")
-        self.chrome_bridge_status_label.setFont(
-            QFont(ds.typography.font_family_primary, ds.typography.size_xs)
-        )
-        self.chrome_bridge_status_label.setStyleSheet(
-            f"color: {get_color('text_muted')}; background: transparent;"
-        )
-        chrome_row.addWidget(self.chrome_bridge_status_label, 1)
-
-        self.btn_chrome_bridge_pair = QPushButton("Chrome 연결")
-        self.btn_chrome_bridge_pair.setAccessibleName("Chrome 확장프로그램 연결")
-        self.btn_chrome_bridge_pair.setToolTip(
-            "로그인된 Chrome에서 공개 영상 검색 결과를 확인하도록 연결합니다."
-        )
-        self.btn_chrome_bridge_pair.setFixedHeight(30)
-        self.btn_chrome_bridge_pair.clicked.connect(self._show_chrome_bridge_pairing)
-        chrome_row.addWidget(self.btn_chrome_bridge_pair)
-        lay.addLayout(chrome_row)
-
-        self._chrome_bridge_timer = QTimer(self)
-        self._chrome_bridge_timer.setInterval(3000)
-        self._chrome_bridge_timer.timeout.connect(self._refresh_chrome_bridge_status)
-        self._chrome_bridge_timer.start()
-        QTimer.singleShot(0, self._refresh_chrome_bridge_status)
-
-        self.radio_method_coupang.toggled.connect(self._on_sourcing_method_changed)
-        self.radio_method_platform.toggled.connect(self._on_sourcing_method_changed)
-        self._update_method_hint(current)
-        return card
-
-    def _refresh_chrome_bridge_status(self) -> None:
-        label = getattr(self, "chrome_bridge_status_label", None)
-        if label is None:
-            return
-        try:
-            from core.sourcing.chrome_extension_bridge import (
-                get_chrome_extension_bridge,
-            )
-
-            connected = get_chrome_extension_bridge().is_connected()
-        except Exception:
-            connected = False
-        if connected:
-            label.setText("● Chrome 연결됨 · 로그인 검색 사용")
-            label.setStyleSheet(
-                f"color: {get_color('success')}; background: transparent;"
-            )
-        else:
-            label.setText("○ Chrome 확장 미연결")
-            label.setStyleSheet(
-                f"color: {get_color('text_muted')}; background: transparent;"
-            )
-
-    def _show_chrome_bridge_pairing(self) -> None:
-        try:
-            from core.sourcing.chrome_extension_bridge import (
-                get_chrome_extension_bridge,
-            )
-
-            bridge = get_chrome_extension_bridge()
-            if not bridge.start():
-                raise RuntimeError("local bridge unavailable")
-            code = bridge.pairing_code
-            QApplication.clipboard().setText(code)
-            show_info(
-                self,
-                "Chrome 연결",
-                "Chrome의 'SSMaker Chrome 연결' 확장프로그램을 연 뒤 "
-                f"연결 코드 {code}를 입력해 주세요.\n\n"
-                "연결 코드는 클립보드에 복사했습니다. "
-                "쿠키와 비밀번호는 프로그램으로 전송하지 않습니다.",
-            )
-        except Exception:
-            logger.warning("[Sourcing] Chrome 연결 코드 준비 실패", exc_info=True)
-            show_warning(
-                self,
-                "Chrome 연결",
-                "Chrome 연결을 준비하지 못했습니다. 프로그램을 다시 실행한 뒤 시도해 주세요.",
-            )
-
-    def _update_method_hint(self, method: str) -> None:
-        if not hasattr(self, "_method_hint"):
-            return
-        if method == "platform_video":
-            self._method_hint.setText(
-                "쿠팡 상품명과 핵심 사양을 중국어로 정확히 변환한 뒤 "
-                "도우인→샤오홍슈→콰이쇼우에서 실제 영상 제목·설명을 대조해 최적 후보를 고릅니다. "
-                "자동화 브라우저에 한 번 로그인해 두면(scripts/open_platform_login.py) 성공률이 올라갑니다. "
-                "재사용 전에는 각 플랫폼의 저작권·이용 조건을 확인하세요."
-            )
-        else:
-            self._method_hint.setText("쿠팡 상품 정보로 영상을 생성합니다. (현재 기본 방식)")
-
-    def _on_sourcing_method_changed(self, _checked: bool = False) -> None:
-        """라디오 변경 시 설정 저장."""
-        method = "platform_video" if getattr(self, "radio_method_platform", None) and self.radio_method_platform.isChecked() else "coupang"
-        try:
-            from managers.settings_manager import get_settings_manager
-            get_settings_manager().set_automation_sourcing_method(method)
-        except Exception as exc:
-            logger.warning("[Sourcing] 소싱 방식 저장 실패: %s", exc)
-        self._update_method_hint(method)
-        if hasattr(self, "gui") and self.gui is not None:
-            try:
-                self.gui.state.automation_sourcing_method = method
-            except Exception:
-                pass
-
     def _navigate_to_setup(self, target: str) -> None:
         """Jump to the settings/upload step (or guided dialog) that fixes a gap.
 
@@ -1056,58 +829,18 @@ class SourcingPanel(QWidget):
         super().showEvent(event)
         self._sync_delivery_ui()
 
-    def _load_match_policy(self) -> dict:
-        try:
-            from managers.settings_manager import get_settings_manager
-
-            return get_settings_manager().get_sourcing_match_policy()
-        except Exception as exc:
-            logger.warning("[SourcingPanel] Failed to load match policy: %s", exc)
-            return {
-                "min_similarity_percent": 90,
-                "min_similarity_score": 0.9,
-                "auto_skip_low_similarity": False,
-            }
-
     def _save_match_policy(self, *_args):
-        if not hasattr(self, "match_threshold_spin"):
-            return
-        try:
-            from managers.settings_manager import get_settings_manager
-
-            get_settings_manager().set_sourcing_match_policy(
-                min_similarity_percent=self.match_threshold_spin.value(),
-                auto_skip_low_similarity=self.chk_auto_skip_low_similarity.isChecked(),
-            )
-        except Exception as exc:
-            logger.warning("[SourcingPanel] Failed to save match policy: %s", exc)
+        """Compatibility no-op: product verification is automatic, not a UI setting."""
+        return None
 
     def refresh_match_policy(self):
-        """Reload match controls after account settings sync."""
-        if not hasattr(self, "match_threshold_spin"):
-            return
-        policy = self._load_match_policy()
-        try:
-            self.match_threshold_spin.blockSignals(True)
-            self.chk_auto_skip_low_similarity.blockSignals(True)
-            self.match_threshold_spin.setValue(
-                int(policy.get("min_similarity_percent", 90))
-            )
-            self.chk_auto_skip_low_similarity.setChecked(
-                bool(policy.get("auto_skip_low_similarity", False))
-            )
-        finally:
-            self.match_threshold_spin.blockSignals(False)
-            self.chk_auto_skip_low_similarity.blockSignals(False)
-        self._sync_next_links_enabled()
+        """Compatibility no-op retained for settings synchronization callers."""
+        return None
 
     def _match_threshold_score(self) -> float:
-        if hasattr(self, "match_threshold_spin"):
-            return max(0.9, min(1.0, self.match_threshold_spin.value() / 100.0))
-        return max(
-            0.9,
-            min(1.0, float(self._load_match_policy().get("min_similarity_score", 0.9))),
-        )
+        # Keep the safety gate internal. Users expect the correct product and
+        # should not have to understand or tune a model-specific percentage.
+        return 0.9
 
     def _load_upload_interval_hours(self) -> int:
         try:
@@ -1154,15 +887,16 @@ class SourcingPanel(QWidget):
         self._update_upload_timer_summary()
 
     def _current_coupang_link_count(self) -> int:
+        if hasattr(self, "partner_links_input"):
+            return len(self._extract_partner_links(self.partner_links_input.toPlainText()))
         if not hasattr(self, "url_input"):
             return 0
         return 1 if is_coupang_partner_link(self.url_input.text().strip()) else 0
 
     def _update_next_links_count(self):
-        next_count = len(self._extract_next_links())
-        total_count = self._current_coupang_link_count() + next_count
+        total_count = self._current_coupang_link_count()
         if hasattr(self, "next_links_count_label"):
-            self.next_links_count_label.setText(f"총 {total_count}개 · 다음 {next_count}개")
+            self.next_links_count_label.setText(f"{total_count}개")
         self._update_upload_timer_summary()
 
     def _update_upload_timer_summary(self):
@@ -1173,8 +907,7 @@ class SourcingPanel(QWidget):
             if hasattr(self, "upload_interval_spin")
             else self._load_upload_interval_hours()
         )
-        next_count = len(self._extract_next_links())
-        total_count = self._current_coupang_link_count() + next_count
+        total_count = self._current_coupang_link_count()
         if not (hasattr(self, "chk_upload") and self.chk_upload.isChecked()):
             self.upload_timer_summary.setText("YouTube 자동 업로드를 켜면 링크마다 타이머가 적용됩니다.")
             return
@@ -1190,28 +923,34 @@ class SourcingPanel(QWidget):
         )
 
     def _sync_next_links_enabled(self):
-        enabled = bool(
-            hasattr(self, "chk_auto_skip_low_similarity")
-            and self.chk_auto_skip_low_similarity.isChecked()
-        )
-        if hasattr(self, "next_links_input"):
-            self.next_links_input.setEnabled(enabled)
-            if hasattr(self, "_next_links_input_style"):
-                self.next_links_input.setStyleSheet(self._next_links_input_style)
+        """Compatibility wrapper for callers from older settings screens."""
+        self._update_next_links_count()
+
+    @staticmethod
+    def _extract_partner_links(raw: str) -> List[str]:
+        return extract_coupang_partner_links(raw)
+
+    def _sync_partner_links_from_input(self) -> None:
+        if not hasattr(self, "partner_links_input"):
+            return
+        links = self._extract_partner_links(self.partner_links_input.toPlainText())
+        if not self._running and not getattr(self, "_partner_batch_active", False):
+            self.url_input.setText(links[0] if links else "")
+            self.next_links_input.setPlainText("\n".join(links[1:]))
+        self._update_next_links_count()
+
+    def _set_partner_links_display(self, links: List[str]) -> None:
+        if not hasattr(self, "partner_links_input"):
+            return
+        self.partner_links_input.blockSignals(True)
+        self.partner_links_input.setPlainText("\n".join(links))
+        self.partner_links_input.blockSignals(False)
         self._update_next_links_count()
 
     def _extract_next_links(self) -> List[str]:
         if not hasattr(self, "next_links_input"):
             return []
-        raw = self.next_links_input.toPlainText()
-        links = []
-        seen = set()
-        for token in re.split(r"[\s,]+", raw):
-            url = normalize_coupang_partner_link(token)
-            if url and url not in seen and is_coupang_partner_link(url):
-                seen.add(url)
-                links.append(url)
-        return links
+        return self._extract_partner_links(self.next_links_input.toPlainText())
 
     def _pop_next_sourcing_url(self) -> Optional[str]:
         links = self._extract_next_links()
@@ -1223,72 +962,43 @@ class SourcingPanel(QWidget):
             self.next_links_input.blockSignals(True)
             self.next_links_input.setPlainText("\n".join(remaining))
             self.next_links_input.blockSignals(False)
+        self.url_input.setText(next_url)
+        self._set_partner_links_display([next_url, *remaining])
         self._update_next_links_count()
         return next_url
-
-    @staticmethod
-    def _format_similarity(score: Optional[float]) -> str:
-        if score is None:
-            return "없음"
-        try:
-            return f"{float(score):.1%}"
-        except (TypeError, ValueError):
-            return "없음"
 
     def _is_match_gate_failure(self, pipeline) -> bool:
         return getattr(pipeline, "match_status", "") in {"below_threshold", "not_found"}
 
     def _handle_match_gate_failure(self, pipeline, report: dict):
-        threshold = getattr(pipeline, "min_similarity_score", self._match_threshold_score())
-        best = getattr(pipeline, "best_similarity_score", None)
-        product_name = ((pipeline.product_info or {}).get("name") or "상품")[:80]
-        reason = getattr(pipeline, "match_error", None) or pipeline.error or "비슷한 상품을 찾지 못했어요."
-        safe_reason = sanitize_user_message(
-            reason,
-            fallback="조건에 맞는 영상을 찾지 못했어요.",
-        )
         message = (
-            f"비슷한 상품을 찾지 못했어요.\n"
-            f"상품: {product_name}\n"
-            f"통과 기준: {threshold:.0%}\n"
-            f"가장 비슷했던 정도: {self._format_similarity(best)}\n\n"
-            "자동 업로드와 Linktree 등록을 멈췄어요."
+            "상품 영상을 찾지 못했어요.\n"
+            "잠시 후 다시 시도하거나 다른 상품 링크를 사용해 주세요."
+        )
+
+        logger.info(
+            "[SourcingPanel] match gate stopped the run: status=%s best=%s threshold=%s",
+            getattr(pipeline, "match_status", ""),
+            getattr(pipeline, "best_similarity_score", None),
+            getattr(pipeline, "min_similarity_score", None),
         )
 
         if hasattr(self.gui, "state"):
             self.gui.state.sourcing_result = report
 
-        if self.chk_auto_skip_low_similarity.isChecked():
-            next_url = self._pop_next_sourcing_url()
-            if next_url:
-                self.results_label.setText(
-                    message
-                    + "\n\n다음 링크로 자동으로 넘어갈게요.\n"
-                    + next_url
-                )
-                self.results_label.setStyleSheet(f"color: {get_color('warning')};")
-                self.url_input.setText(next_url)
-                QTimer.singleShot(800, self._on_start_clicked)
-                return
-
-            self.results_label.setText(
-                message + "\n\n자동으로 넘어가기가 켜져 있지만, 다음 링크 목록이 비어 있어 멈췄어요."
-            )
+        next_url = self._pop_next_sourcing_url()
+        if next_url:
+            self.results_label.setText(message + "\n\n다음 상품으로 자동으로 넘어갈게요.")
             self.results_label.setStyleSheet(f"color: {get_color('warning')};")
-            try:
-                from ui.components.custom_dialog import show_warning
-
-                show_warning(self, "비슷한 상품을 찾지 못했어요", message + "\n\n다음 링크 목록이 비어 있어요.")
-            except Exception:
-                pass
+            QTimer.singleShot(800, self._on_start_clicked)
             return
 
-        self.results_label.setText(message + f"\n\n자세히: {safe_reason}")
+        self.results_label.setText(message)
         self.results_label.setStyleSheet(f"color: {get_color('error')};")
         try:
             from ui.components.custom_dialog import show_warning
 
-            show_warning(self, "비슷한 상품을 찾지 못했어요", message)
+            show_warning(self, "상품 영상을 찾지 못했어요", message)
         except Exception:
             pass
 
@@ -1344,11 +1054,9 @@ class SourcingPanel(QWidget):
         return False
 
     def _current_sourcing_method(self) -> str:
-        try:
-            from managers.settings_manager import get_settings_manager
-            return get_settings_manager().get_automation_sourcing_method()
-        except Exception:
-            return "platform_video"
+        # Full automation has one automatic sourcing path. The implementation
+        # choice is deliberately not exposed as a customer-facing mode.
+        return "platform_video"
 
     def _on_start_clicked(self):
         if bool(getattr(self.gui, "offline_mode", False)):
@@ -1357,54 +1065,37 @@ class SourcingPanel(QWidget):
             )
             self.results_label.setStyleSheet(f"color: {get_color('warning')};")
             return
-        # 3플랫폼 방식이면 별도 흐름(영상 다운로드→재편집→업로드)으로 분기.
-        if self._current_sourcing_method() == "platform_video":
-            self._on_start_platform_video()
-            return
-
-        raw_url = self.url_input.text()
-        if not raw_url.strip():
-            self.results_label.setText("쿠팡 파트너스 상품 링크를 붙여넣어 주세요.")
-            self.results_label.setStyleSheet(f"color: {get_color('error')};")
-            return
-        url = normalize_coupang_partner_link(raw_url)
-        if not url:
-            self.results_label.setText(self._partner_link_error_message(raw_url))
-            self.results_label.setStyleSheet(f"color: {get_color('error')};")
-            return
-        self.url_input.setText(url)
-        if self._running:
-            return
-
-        min_similarity_score = self._match_threshold_score()
-        self._save_match_policy()
-        if not self._validate_youtube_upload_ready():
-            return
-        self._running = True
-        self._set_search_recovery_visible(False)
-        self.btn_start.setEnabled(False)
-        self.btn_start.setText(
-            "영상 만들고 업로드 준비 중..." if self._is_upload_mode() else "영상 파일 만드는 중..."
-        )
-        self._apply_button_style(disabled=True)
-
-        self._reset_step_indicators()
-        self.results_label.setText("자동 만들기를 시작할게요...")
-        self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
-
-        # Run in background thread
-        thread = threading.Thread(
-            target=self._run_pipeline,
-            args=(url, min_similarity_score),
-            daemon=True,
-        )
-        thread.start()
+        self._on_start_platform_video()
 
     def _on_start_platform_video(self):
-        """숏폼 플랫폼 방식: 상품명으로 지원 플랫폼을 순차 검색·다운로드·재편집·업로드."""
+        """Create videos for the entered partner links in sequence."""
+        if not getattr(self, "_partner_batch_active", False):
+            raw_links = (
+                self.partner_links_input.toPlainText()
+                if hasattr(self, "partner_links_input")
+                else self.url_input.text()
+            )
+            links = SourcingPanel._extract_partner_links(raw_links)
+            if not links:
+                self.results_label.setText(
+                    self._partner_link_error_message(raw_links)
+                    if str(raw_links or "").strip()
+                    else "쿠팡 파트너스 상품 링크를 한 줄에 하나씩 붙여넣어 주세요."
+                )
+                self.results_label.setStyleSheet(f"color: {get_color('error')};")
+                return
+            if hasattr(self, "partner_links_input") and hasattr(self, "next_links_input"):
+                self._partner_batch_active = True
+                self._partner_batch_total = len(links)
+                self._partner_batch_completed = 0
+                self.url_input.setText(links[0])
+                self.next_links_input.setPlainText("\n".join(links[1:]))
+                self._set_partner_links_display(links)
+
         raw_url = self.url_input.text()
         url = normalize_coupang_partner_link(raw_url)
         if not url:
+            self._partner_batch_active = False
             self.results_label.setText(self._partner_link_error_message(raw_url))
             self.results_label.setStyleSheet(f"color: {get_color('error')};")
             return
@@ -1414,16 +1105,21 @@ class SourcingPanel(QWidget):
         # YouTube 모드에서만 채널 연결을 필수로 검증한다. Linktree는 선택이며
         # 연결/발행 실패가 제작이나 업로드를 막지 않는다.
         if not self._validate_youtube_upload_ready():
+            self._partner_batch_active = False
             return
 
         self._running = True
+        self._platform_batch_can_continue = False
+        self._platform_item_succeeded = False
+        if hasattr(self, "partner_links_input"):
+            self.partner_links_input.setEnabled(False)
         self._set_search_recovery_visible(False)
         self.btn_start.setEnabled(False)
         self.btn_start.setText("영상 찾아 만드는 중...")
         self._apply_button_style(disabled=True)
         self._reset_step_indicators()
         self.results_label.setText(
-            "상품명을 중국어로 번역해 샤오홍슈·도우인·콰이쇼우의 최적 영상을 고를게요..."
+            "상품 영상을 찾고 있어요..."
         )
         self.results_label.setStyleSheet(f"color: {get_color('text_muted')};")
 
@@ -1499,6 +1195,8 @@ class SourcingPanel(QWidget):
                 return
             if reservation.get("reservation_status") == "completed":
                 work_finalized = True
+                self._platform_batch_can_continue = True
+                self._platform_item_succeeded = True
                 if reservation.get("recovered_pending_delivery"):
                     work_reserved = False
                     self._safe_set_results(
@@ -1540,6 +1238,9 @@ class SourcingPanel(QWidget):
                 allow_image_fallback=False,
             ))
             if not report.get("ok"):
+                self._platform_batch_can_continue = bool(
+                    (report.get("failure") or {}).get("can_choose_other_product", True)
+                )
                 self._safe_set_platform_failure(report)
                 return
 
@@ -1572,11 +1273,8 @@ class SourcingPanel(QWidget):
             )
             review_only = not publish_safe
             if review_only:
-                fallback = str(
-                    report.get("fallback_reason")
-                    or report.get("sourcing_route")
-                    or "review_required"
-                ).strip()
+                self._platform_batch_can_continue = True
+                self._platform_item_succeeded = True
                 progress(
                     "review_only",
                     "검토용 영상 파일 완료 · 자동 게시 건너뜀",
@@ -1584,10 +1282,8 @@ class SourcingPanel(QWidget):
                 )
                 work_reservation.complete_delivery()
                 self._safe_set_results(
-                    "검토용 영상 파일을 만들었습니다. YouTube 업로드와 Linktree 등록은 "
-                    "안전 확인을 위해 자동으로 건너뛰었습니다.\n"
-                    f"파일: {edited}\n"
-                    f"검토 사유: {fallback}"
+                    "검토가 필요한 영상 파일을 만들었어요. 자동 게시는 진행하지 않았습니다.\n"
+                    f"파일: {edited}"
                 )
                 return
 
@@ -1651,8 +1347,10 @@ class SourcingPanel(QWidget):
                 result_tail = "재편집을 완료했어요. YouTube 자동 업로드는 꺼져 있어요."
 
             work_reservation.complete_delivery()
+            self._platform_batch_can_continue = True
+            self._platform_item_succeeded = True
             self._safe_set_results(
-                f"3플랫폼 방식 완료 — '{product_name[:20]}' 영상을 {hit.get('platform', '?')}에서 받아 {result_tail}"
+                f"'{product_name[:20]}' 상품 영상 제작을 완료했어요. {result_tail}"
             )
         except Exception as e:
             logger.warning("[Sourcing] platform pipeline 실패: %s", e)
@@ -1703,18 +1401,22 @@ class SourcingPanel(QWidget):
 
     def _set_platform_failure(self, report: dict):
         failure = dict((report or {}).get("failure") or {})
-        message = str((report or {}).get("error") or "상품 검색에 실패했어요.").strip()
-        if "원인:" not in message:
-            message += f"\n원인: {failure.get('cause') or '확인되지 않은 오류'}"
-        if "해결:" not in message:
-            message += f"\n해결: {failure.get('action') or '다시 시도해 주세요.'}"
         report_path = str((report or {}).get("report_path") or "").strip()
         if report_path:
             logger.info("[SourcingPanel] failure report: %s", report_path)
+        if failure:
+            logger.info(
+                "[SourcingPanel] search failure details: code=%s diagnostics=%s",
+                failure.get("code"),
+                failure.get("diagnostics"),
+            )
         self.results_label.setText(
             sanitize_user_message(
-                message,
-                fallback="상품 검색을 완료하지 못했어요. 잠시 후 다시 시도해 주세요.",
+                {
+                    "reason": failure.get("code") or "no_search_results",
+                    "message": (report or {}).get("error") or "",
+                },
+                fallback="상품 영상을 찾지 못했어요. 잠시 후 다시 시도해 주세요.",
             )
         )
         self.results_label.setStyleSheet(f"color: {get_color('error')};")
@@ -1748,7 +1450,10 @@ class SourcingPanel(QWidget):
             return
         next_url = self._pop_next_sourcing_url()
         self.url_input.setText(next_url or "")
-        self.url_input.setFocus()
+        if hasattr(self, "partner_links_input"):
+            self.partner_links_input.setFocus()
+        else:
+            self.url_input.setFocus()
         self._set_search_recovery_visible(False)
         if next_url:
             self.results_label.setText(
@@ -1766,6 +1471,45 @@ class SourcingPanel(QWidget):
 
     def _reset_platform_controls(self):
         self._running = False
+        if getattr(self, "_partner_batch_active", False):
+            self._partner_batch_completed += 1
+            pending = self._extract_next_links()
+            if self._platform_batch_can_continue and pending:
+                self._pop_next_sourcing_url()
+                self._update_delivery_status()
+                self.btn_start.setEnabled(False)
+                self.btn_start.setText(
+                    f"다음 상품 준비 중 ({self._partner_batch_completed + 1}/{self._partner_batch_total})"
+                )
+                QTimer.singleShot(500, self._on_start_clicked)
+                return
+
+            completed = self._partner_batch_completed
+            total = self._partner_batch_total
+            self._partner_batch_active = False
+            if hasattr(self, "partner_links_input"):
+                self.partner_links_input.setEnabled(True)
+
+            if self._platform_batch_can_continue and not pending and self._platform_item_succeeded:
+                self.url_input.clear()
+                self.next_links_input.clear()
+                self._set_partner_links_display([])
+                summary = f"입력한 상품 {total}개의 처리를 마쳤어요."
+            elif self._platform_batch_can_continue and not pending:
+                summary = (
+                    f"입력한 상품 {total}개를 모두 확인했어요. "
+                    "영상을 찾지 못한 상품은 링크를 남겨 두었습니다."
+                )
+            else:
+                summary = (
+                    f"상품 {completed}/{total} 처리 후 멈췄어요. "
+                    "안내 내용을 확인한 뒤 다시 시작해 주세요."
+                )
+            current_text = self.results_label.text().strip()
+            if summary not in current_text:
+                self.results_label.setText(
+                    f"{current_text}\n\n{summary}" if current_text else summary
+                )
         self._update_delivery_status()
 
     def _run_pipeline(self, coupang_url: str, min_similarity_score: float):
@@ -1867,25 +1611,14 @@ class SourcingPanel(QWidget):
             return
 
         if success and pipeline.sourced_products:
-            # Build results text
-            lines = []
             pi = pipeline.product_info or {}
-            lines.append(f"[원본 상품] {pi.get('name', 'N/A')[:50]}")
-            lines.append(f"  링크: {pipeline.coupang_url}")
-            if pipeline.deep_link:
-                lines.append(f"  수수료 추적 링크: {pipeline.deep_link}")
-            lines.append("")
+            lines = [
+                "상품 영상을 찾았어요.",
+                f"상품: {pi.get('name', '상품')[:50]}",
+                f"영상: {len(pipeline.sourced_products)}개",
+            ]
             for i, sp in enumerate(pipeline.sourced_products):
-                p = sp["product"]
-                lines.append(f"[찾은 영상 {i+1}] ({sp['source'].upper()}) 비슷한 정도: {p.get('score', 0):.1%}")
-                lines.append(f"  제목: {p.get('title', 'N/A')[:50]}")
-                lines.append(f"  링크: {p.get('url', 'N/A')}")
-                lines.append(f"  영상 파일: {sp['video_file']}")
-                lines.append(f"  크기: {sp['size_mb']}MB")
-                lines.append("")
-
-            if pipeline.description:
-                lines.append(f"[설명] {pipeline.description[:100]}")
+                lines.append(f"저장 파일 {i + 1}: {sp['video_file']}")
 
             self.results_label.setText("\n".join(lines))
             self.results_label.setStyleSheet(f"color: {get_color('text_primary')};")
@@ -1903,11 +1636,12 @@ class SourcingPanel(QWidget):
             self.sourcing_completed.emit(report)
         else:
             error_msg = pipeline.error or "자동 만들기에 실패했어요."
+            logger.warning("[SourcingPanel] automatic sourcing failed: %s", error_msg)
             self._set_platform_failure({
-                "error": f"자동 만들기 실패: {error_msg}",
+                "error": "상품 영상을 찾지 못했어요.",
                 "failure": {
+                    "code": "no_search_results",
                     "cause": error_msg,
-                    "action": "같은 상품을 다시 검색하거나 다른 상품을 선택해 주세요.",
                     "retriable": True,
                     "can_choose_other_product": True,
                 },

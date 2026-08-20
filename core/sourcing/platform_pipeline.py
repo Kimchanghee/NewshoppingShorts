@@ -234,6 +234,11 @@ def _resolve_partner_product_url(coupang_url: str) -> str:
         )
         try:
             location = urljoin(source, str(response.headers.get("Location") or ""))
+            logger.info(
+                "[PlatformPipeline] 파트너스 링크 확인: status=%s location=%s",
+                getattr(response, "status_code", "unknown"),
+                location[:500],
+            )
         finally:
             response.close()
     except Exception as exc:
@@ -262,52 +267,6 @@ def _failure(
         "diagnostics": dict(diagnostics or {}),
         "blocked_stages": list(_BLOCKED_DELIVERY_STAGES),
     }
-
-
-_DIAGNOSTIC_PLATFORM_LABELS = {
-    "douyin": "Douyin",
-    "xiaohongshu": "Xiaohongshu",
-    "kuaishou": "Kuaishou",
-    "search:duckduckgo": "DuckDuckGo",
-    "search:bing": "Bing",
-    "search:brave": "Brave Search",
-}
-_DIAGNOSTIC_REASON_LABELS = {
-    "browser_session_failed": "브라우저 연결 종료",
-    "access_challenge": "로그인/봇 차단",
-    "page_open_timeout": "페이지 시간초과",
-    "page_open_error": "페이지 열기 실패",
-    "rate_limited": "요청 제한",
-    "query_error": "검색 처리 오류",
-    "no_results": "검색 결과 없음",
-    "no_video_url": "재생 URL 없음",
-    "download_timeout": "다운로드 시간초과",
-    "download_failed": "다운로드 실패",
-    "technical_rejected": "재생 조건 미달",
-    "relevance_rejected": "상품 연관성 미달",
-    "missing_candidate_metadata": "상품 확인 정보 없음",
-    "duplicate_source": "이미 사용한 영상",
-    "time_budget_exceeded": "검색 시간 예산 초과",
-}
-
-
-def _diagnostic_summary(diagnostics: Optional[Dict[str, Any]]) -> str:
-    diagnostics = dict(diagnostics or {})
-    per_platform = dict(diagnostics.get("platforms") or {})
-    requested = [str(value) for value in diagnostics.get("requested_platforms") or []]
-    ordered = list(dict.fromkeys(requested + sorted(per_platform)))
-    parts: List[str] = []
-    for platform in ordered:
-        platform_counts = dict(per_platform.get(platform) or {})
-        reasons = []
-        for code, label in _DIAGNOSTIC_REASON_LABELS.items():
-            count = int(platform_counts.get(code, 0) or 0)
-            if count:
-                reasons.append(f"{label} {count}회")
-        if reasons:
-            platform_label = _DIAGNOSTIC_PLATFORM_LABELS.get(platform, platform)
-            parts.append(f"{platform_label}: {', '.join(reasons[:4])}")
-    return " / ".join(parts[:6])
 
 
 def _persist_platform_run_report(output_dir: str, report: Dict[str, Any]) -> str:
@@ -397,21 +356,22 @@ def describe_platform_search_failure(diagnostics: Optional[Dict[str, Any]]) -> D
     )
 
 
-def format_failure_message(title: str, failure: Dict[str, Any]) -> str:
-    message = (
-        f"{title}\n"
-        f"원인: {failure.get('cause') or '확인되지 않은 오류'}\n"
-        f"해결: {failure.get('action') or '다시 시도해 주세요.'}"
-    )
-    summary = _diagnostic_summary(failure.get("diagnostics"))
-    if summary:
-        message += f"\n검색 내역: {summary}"
-    if failure.get("blocked_stages"):
-        message += (
-            "\n후속 단계: 영상을 확보하지 못해 편집, YouTube 업로드, "
-            "Linktree 등록을 시작하지 않았습니다."
+def format_failure_message(_title: str, failure: Dict[str, Any]) -> str:
+    """Return concise customer copy while keeping diagnostics in the report.
+
+    Search providers, blocker counters and delivery-stage names are operational
+    diagnostics.  They are deliberately persisted in ``failure`` but must never
+    be rendered in the app UI.
+    """
+    if str(failure.get("code") or "") == "coupang_product_unavailable":
+        return (
+            "상품 정보를 확인하지 못했어요.\n"
+            "다른 상품 링크를 사용하거나 잠시 후 다시 시도해 주세요."
         )
-    return message
+    return (
+        "상품 영상을 찾지 못했어요.\n"
+        "잠시 후 다시 시도하거나 다른 상품 링크를 사용해 주세요."
+    )
 
 
 async def run_platform_sourcing(
@@ -457,6 +417,7 @@ async def run_platform_sourcing(
 
     own_browser = False
     product: Dict[str, Any] = {}
+    scrape_target_url = coupang_url
 
     async def ensure_browser(step: str) -> bool:
         """Start the owned browser lazily and report one structured failure."""
@@ -576,6 +537,7 @@ async def run_platform_sourcing(
             ).strip()
             resolved_product_url = _resolve_partner_product_url(coupang_url)
             if resolved_product_url and resolved_product_url != coupang_url:
+                scrape_target_url = resolved_product_url
                 try:
                     resolved_product = dict(
                         find_cached_product_info(resolved_product_url) or {}
@@ -645,6 +607,7 @@ async def run_platform_sourcing(
             # full browser merely to learn the stable Coupang product id.
             resolved_product_url = _resolve_partner_product_url(coupang_url)
             if resolved_product_url and resolved_product_url != coupang_url:
+                scrape_target_url = resolved_product_url
                 try:
                     from core.sourcing.report_cache import find_cached_product_info
 
@@ -666,7 +629,7 @@ async def run_platform_sourcing(
             if not await ensure_browser("product_analysis"):
                 return report
             try:
-                product = await scrape_product(browser, coupang_url) or {}
+                product = await scrape_product(browser, scrape_target_url) or {}
             except Exception as exc:
                 logger.warning("[PlatformPipeline] 상품 스크랩 실패: %s", exc)
                 product_error = type(exc).__name__
@@ -724,8 +687,7 @@ async def run_platform_sourcing(
             reference_name=product_name,
             keyword_cn=str(keywords.get("chinese") or ""),
         )
-        _emit(progress, "keyword_convert",
-              f"검색어: {' / '.join(q[:14] for q in queries[:3])}", 1.0)
+        _emit(progress, "keyword_convert", "상품 영상 검색 준비 완료", 1.0)
 
         # ── 4) 안전 캐시 → 3채널 검색·다운로드(소스 중복 스킵) ──
         _emit(progress, "overseas_search", "검증된 이전 영상 확인 중...", 0.05)
@@ -734,7 +696,13 @@ async def run_platform_sourcing(
             from managers.uploaded_registry import get_uploaded_registry
             skip_ids = get_uploaded_registry().used_source_ids()
         except Exception as exc:
-            report["error"] = f"중복 업로드 기록을 확인할 수 없어 자동 제작을 중단했어요: {exc}"
+            logger.warning(
+                "[PlatformPipeline] 중복 업로드 기록 확인 실패: %s",
+                exc,
+            )
+            report["error"] = (
+                "영상 제작 준비에 실패했어요. 잠시 후 다시 시도해 주세요."
+            )
             _emit(progress, "overseas_search", report["error"], 0.0)
             return report
         relevance_threshold = _platform_relevance_threshold(
@@ -772,7 +740,7 @@ async def run_platform_sourcing(
             _emit(
                 progress,
                 "overseas_search",
-                f"'{product_name[:20]}' 중국어로 3채널 검색 중...",
+                "상품 영상을 찾는 중...",
                 0.1,
             )
             search_diagnostics: Dict[str, Any] = {}
@@ -845,8 +813,8 @@ async def run_platform_sourcing(
         report["selected_source_id"] = normalize_source_id(
             report["selected_source_url"]
         )
-        _emit(progress, "overseas_search", f"{hit['platform']}에서 영상 확보", 1.0)
-        _emit(progress, "video_download", f"{hit['platform']} 영상 {hit.get('size_mb', 0)}MB", 1.0)
+        _emit(progress, "overseas_search", "상품 영상 확보 완료", 1.0)
+        _emit(progress, "video_download", "영상 다운로드 완료", 1.0)
 
         # 실검색 점검은 원본 파일·소스 URL·관련도만 확인한다.
         # 일반 UI/풀자동화는 기본값 False로 재편집을 계속한다.

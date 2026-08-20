@@ -113,7 +113,7 @@ class SourcingPipeline:
         ("product_analysis", "상품 분석"),
         ("deep_link", "파트너스 딥링크 생성"),
         ("keyword_convert", "키워드 변환"),
-        ("overseas_search", "해외 상품 검색"),
+        ("overseas_search", "상품 영상 찾기"),
         ("video_download", "영상 다운로드"),
         ("description_gen", "상품 설명 생성"),
         ("video_create", "영상 제작"),
@@ -294,10 +294,7 @@ class SourcingPipeline:
             return True
 
         self.match_status = "below_threshold"
-        self.match_error = (
-            f"상품 유사도 {best:.0%}가 설정 기준 "
-            f"{self.min_similarity_score:.0%}보다 낮아 자동 업로드를 중지했습니다."
-        )
+        self.match_error = "상품 영상을 찾지 못했어요."
         if mark_unsafe:
             for item in marketplace_items:
                 item["auto_publish_safe"] = False
@@ -552,7 +549,7 @@ class SourcingPipeline:
             platforms = get_settings_manager().get_platform_video_sources()
             self._progress(
                 "video_download",
-                "마켓 영상 없음 — 샤오홍슈·도우인·콰이쇼우 검색 중...",
+                "사용할 수 있는 상품 영상을 찾는 중...",
                 0.82,
             )
             hit = await asyncio.wait_for(
@@ -764,7 +761,7 @@ class SourcingPipeline:
             )
 
             # ── Step 4: Overseas search ──
-            self._progress("overseas_search", "해외 상품 검색 중...", 0.0)
+            self._progress("overseas_search", "상품 영상을 찾는 중...", 0.0)
             search_reference_name = self.product_info["name"]
             if fallback_keyword_name and fallback_keyword_name.lower() not in search_reference_name.lower():
                 search_reference_name = f"{search_reference_name} {fallback_keyword_name}".strip()
@@ -1196,11 +1193,11 @@ class SourcingPipeline:
                     logger.warning("[Pipeline] %s; continuing to platform fallback", marketplace_blocker)
                     self._progress(
                         "overseas_search",
-                        "마켓플레이스 접근 제한 — 숏폼 플랫폼 폴백으로 계속합니다.",
+                        "다른 방법으로 상품 영상을 계속 찾고 있어요.",
                         1.0,
                     )
                 else:
-                    msg = "후보 0개 — 검색을 종료하고 폴백 단계로 진행합니다."
+                    msg = "다른 방법으로 상품 영상을 계속 찾고 있어요."
                     logger.warning("[Pipeline] %s", msg)
                     self._progress("overseas_search", msg, 1.0)
             else:
@@ -1214,7 +1211,8 @@ class SourcingPipeline:
 
                 used_marketplace_source_ids = get_uploaded_registry().used_source_ids()
             except Exception as exc:
-                self.error = f"중복 소스 기록을 확인할 수 없어 자동 소싱을 중단했습니다: {exc}"
+                logger.error("[Pipeline] 중복 소스 기록 확인 실패: %s", exc, exc_info=True)
+                self.error = "상품 영상 준비 상태를 확인하지 못했어요."
                 self._progress("video_download", self.error, 0.0)
                 return False
 
@@ -1582,8 +1580,8 @@ class SourcingPipeline:
             return True
 
         except Exception as e:
-            self.error = f"소싱 파이프라인 오류: {e}"
-            logger.error("[Pipeline] %s", self.error, exc_info=True)
+            self.error = "상품 영상을 준비하지 못했어요."
+            logger.error("[Pipeline] 소싱 파이프라인 오류: %s", e, exc_info=True)
             return False
         finally:
             if browser:

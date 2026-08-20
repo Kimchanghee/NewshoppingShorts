@@ -2,14 +2,19 @@
 from __future__ import annotations
 
 import ipaddress
+import re
 import socket
-from typing import Collection, Optional
+from typing import Collection, List, Optional
 from urllib.parse import ParseResult, urlparse
 
 
 COUPANG_HOSTS = frozenset({"coupang.com", "coupa.ng"})
 COUPANG_PARTNER_LINK_HOSTS = frozenset({"link.coupang.com", "link.coupa.ng"})
 _URL_EDGE_FORMAT_CHARS = "\ufeff\u200b\u200c\u200d\u2060"
+_COUPANG_PARTNER_LINK_PATTERN = re.compile(
+    r"https://(?:link\.coupang\.com|link\.coupa\.ng)/a/[A-Za-z0-9_-]+",
+    re.IGNORECASE,
+)
 
 
 def _normalized_url_input(url: str) -> str:
@@ -86,16 +91,46 @@ def is_coupang_partner_link(url: str) -> bool:
             or parsed.port not in (None, 443)
         ):
             return False
-        path = str(parsed.path or "").strip("/")
-        return bool(path)
+        return re.fullmatch(
+            r"/a/[A-Za-z0-9_-]+/?",
+            str(parsed.path or ""),
+        ) is not None
     except (TypeError, ValueError):
         return False
 
 
 def normalize_coupang_partner_link(url: str) -> str:
-    """Return one canonical clipboard-safe partner link, or an empty string."""
+    """Return one clipboard-safe partner link, or an empty string.
+
+    A copied link is often wrapped in a messenger label, Markdown, brackets,
+    or punctuation.  Accept that common single-link form while continuing to
+    reject input containing more than one URL.  The short-link code is never
+    lower-cased or rewritten because it is case-sensitive.
+    """
     normalized = _normalized_url_input(url)
-    return normalized if normalized and is_coupang_partner_link(normalized) else ""
+    if normalized and is_coupang_partner_link(normalized):
+        return normalized
+    links = extract_coupang_partner_links(url)
+    return links[0] if len(links) == 1 else ""
+
+
+def extract_coupang_partner_links(value: str) -> List[str]:
+    """Extract valid Partners links from pasted plain or decorated text.
+
+    This intentionally recognizes only the official ``/a/{code}`` short-link
+    shape.  It is suitable for multi-line clipboard input and preserves both
+    input order and the exact case of every link code.
+    """
+    links: List[str] = []
+    seen = set()
+    text = str(value or "")
+    for match in _COUPANG_PARTNER_LINK_PATTERN.finditer(text):
+        candidate = match.group(0)
+        if candidate in seen or not is_coupang_partner_link(candidate):
+            continue
+        seen.add(candidate)
+        links.append(candidate)
+    return links
 
 
 def is_public_http_url(

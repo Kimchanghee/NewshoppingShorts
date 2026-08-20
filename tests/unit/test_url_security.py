@@ -4,6 +4,7 @@
 import pytest
 
 from utils.url_security import (
+    extract_coupang_partner_links,
     is_coupang_partner_link,
     is_official_coupang_url,
     is_public_http_url,
@@ -26,6 +27,7 @@ def test_coupang_partner_link_validator_rejects_normal_product_urls():
     assert not is_coupang_partner_link("https://www.coupang.com/vp/products/123")
     assert not is_coupang_partner_link("https://coupang.com/vp/products/123")
     assert not is_coupang_partner_link("https://link.coupang.com/")
+    assert not is_coupang_partner_link("https://link.coupang.com/not-a-partner/code")
     assert not is_coupang_partner_link("https://link.coupang.com.evil.example/a/x")
     assert not is_coupang_partner_link("http://link.coupang.com/a/example")
 
@@ -42,6 +44,22 @@ def test_real_coupang_partner_links_are_normalized_and_accepted():
     for url in urls:
         assert normalize_coupang_partner_link(f"\ufeff\u200b  {url}  \u200b") == url
         assert is_coupang_partner_link(f"\ufeff\u200b{url}")
+
+
+def test_partner_links_are_extracted_from_decorated_clipboard_text_in_order():
+    raw = (
+        "첫 번째: [상품 보기](https://link.coupang.com/a/f8i3PuVSqi)\n"
+        "두 번째 https://link.coupang.com/a/f8i6WhHkK4, 그리고 중복 "
+        "https://link.coupang.com/a/f8i3PuVSqi"
+    )
+
+    assert extract_coupang_partner_links(raw) == [
+        "https://link.coupang.com/a/f8i3PuVSqi",
+        "https://link.coupang.com/a/f8i6WhHkK4",
+    ]
+    assert normalize_coupang_partner_link(
+        "상품 링크: https://link.coupang.com/a/f8jcQoPoke."
+    ) == "https://link.coupang.com/a/f8jcQoPoke"
 
 
 def test_coupang_partner_link_rejects_multiple_urls_in_single_input():
@@ -142,6 +160,46 @@ def test_computer_use_bridge_sends_server_owned_template_only(monkeypatch):
     assert captured["json"]["template_id"] == "setup_target_youtube"
     assert "prompt" not in captured["json"]
     assert captured["headers"] == {"X-Computer-Use-Key": "bridge-secret"}
+
+
+def test_local_codex_prompt_is_written_to_stdin_not_process_argv(monkeypatch):
+    from ui.panels import settings_tab
+
+    captured = {}
+
+    class FakeStdin:
+        def write(self, value):
+            captured["stdin"] = value
+
+        def close(self):
+            captured["closed"] = True
+
+    class FakeProcess:
+        stdin = FakeStdin()
+
+        @staticmethod
+        def kill():
+            captured["killed"] = True
+
+    def fake_popen(args, **kwargs):
+        captured["args"] = list(args)
+        captured["kwargs"] = kwargs
+        return FakeProcess()
+
+    monkeypatch.setattr(settings_tab.subprocess, "Popen", fake_popen)
+    prompt = "protected local computer-use instruction"
+    process = settings_tab.SettingsTab._launch_codex_terminal_process(
+        object(),
+        ["codex", "exec", "-"],
+        "C:/workspace",
+        prompt,
+    )
+
+    assert process is not None
+    assert prompt not in captured["args"]
+    assert captured["args"][-1] == "-"
+    assert captured["stdin"] == prompt.encode("utf-8")
+    assert captured["closed"] is True
 
 
 def test_hls_master_is_rejected_before_network_access(monkeypatch, tmp_path):

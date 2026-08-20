@@ -159,3 +159,36 @@ def test_safe_product_names_and_output_path_are_not_removed():
 def test_developer_facing_title_is_replaced():
     assert sanitize_user_title("PermissionError: Access denied", fallback="오류") == "오류"
     assert sanitize_user_title("???ㅻ쪟", fallback="오류") == "오류"
+
+
+def test_sourcing_failure_hides_search_providers_and_internal_workflow():
+    raw = (
+        "상품 영상 검색에 실패했어요.\n"
+        "원인: 검색 사이트가 로그인 또는 안티봇 확인 화면을 표시했습니다.\n"
+        "해결: 열린 Chrome에서 해당 사이트에 로그인한 뒤 다시 검색해 주세요.\n"
+        "검색 내역: Douyin: 로그인/차단 1회 / Xiaohongshu: 결과 없음 1회 / "
+        "Kuaishou: 재생 URL 없음 1회 / Bing: 결과 없음 3회 / "
+        "Brave Search: 요청 제한 1회 / DuckDuckGo: 봇 차단 1회\n"
+        "후속 단계: 편집, YouTube 업로드, Linktree 등록을 시작하지 않았습니다."
+    )
+
+    message = sanitize_user_message(raw)
+
+    assert message == (
+        "상품 영상을 찾지 못했어요.\n"
+        "잠시 후 다시 시도하거나 다른 상품 링크를 사용해 주세요."
+    )
+    for internal_detail in (
+        "Douyin",
+        "Xiaohongshu",
+        "Kuaishou",
+        "Bing",
+        "Brave",
+        "DuckDuckGo",
+        "검색 내역",
+        "후속 단계",
+        "안티봇",
+        "YouTube",
+        "Linktree",
+    ):
+        assert internal_detail not in message
