@@ -31,9 +31,8 @@ class ModeCard(QFrame):
                   icon: str, features: list):
         ds = self.ds
 
-        self.setMinimumSize(210, 300)
+        self.setMinimumSize(210, 440)
         self.setMaximumWidth(360)
-        self.setMaximumHeight(350)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         layout = QVBoxLayout(self)
@@ -46,8 +45,8 @@ class ModeCard(QFrame):
         # Icon + title block. Keep each text row in its own reserved lane so
         # Windows emoji font fallback cannot paint over the title at odd DPI.
         self.header_frame = QFrame()
-        self.header_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.header_frame.setMinimumHeight(88)
+        self.header_frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        self.header_frame.setMinimumHeight(124)
         self.header_frame.setStyleSheet("background: transparent; border: none;")
         header_layout = QVBoxLayout(self.header_frame)
         header_layout.setContentsMargins(0, 0, 0, 0)
@@ -77,23 +76,23 @@ class ModeCard(QFrame):
         self.title_label = QLabel(title)
         self.title_label.setFont(QFont(
             ds.typography.font_family_primary,
-            ds.typography.size_xl,
+            ds.typography.size_lg,
             QFont.Weight.Bold
         ))
         self.title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.title_label.setWordWrap(True)
-        self.title_label.setMinimumHeight(24)
+        self.title_label.setMinimumHeight(30)
         header_layout.addWidget(self.title_label)
 
         # Subtitle
         self.subtitle_label = QLabel(subtitle)
         self.subtitle_label.setFont(QFont(
             ds.typography.font_family_primary,
-            ds.typography.size_sm
+            ds.typography.size_xs
         ))
         self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.subtitle_label.setWordWrap(True)
-        self.subtitle_label.setMinimumHeight(28)
+        self.subtitle_label.setMinimumHeight(38)
         header_layout.addWidget(self.subtitle_label)
 
         layout.addWidget(self.header_frame)
@@ -108,7 +107,7 @@ class ModeCard(QFrame):
         self.desc_label = QLabel(description)
         self.desc_label.setFont(QFont(
             ds.typography.font_family_primary,
-            ds.typography.size_sm
+            ds.typography.size_xs
         ))
         self.desc_label.setWordWrap(True)
         self.desc_label.setStyleSheet("padding-bottom: 3px;")
@@ -134,7 +133,7 @@ class ModeCard(QFrame):
             feature_label = QLabel(feature)
             feature_label.setFont(QFont(
                 ds.typography.font_family_primary,
-                ds.typography.size_xs
+                ds.typography.size_2xs
             ))
             feature_label.setStyleSheet(f"color: {get_color('text_secondary')}; padding-bottom: 3px;")
             feature_label.setWordWrap(True)
@@ -149,7 +148,7 @@ class ModeCard(QFrame):
         self.select_label = QLabel("클릭하여 선택")
         self.select_label.setFont(QFont(
             ds.typography.font_family_primary,
-            ds.typography.size_sm,
+            ds.typography.size_xs,
             QFont.Weight.Medium
         ))
         self.select_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -161,10 +160,10 @@ class ModeCard(QFrame):
         super().mousePressEvent(event)
 
     def sizeHint(self) -> QSize:
-        return QSize(280, 330)
+        return QSize(280, 450)
 
     def minimumSizeHint(self) -> QSize:
-        return QSize(170, 170) if self._compact_mode else QSize(210, 300)
+        return QSize(170, 170) if self._compact_mode else QSize(210, 440)
 
     def set_compact_mode(self, compact: bool) -> None:
         compact = bool(compact)
@@ -179,8 +178,8 @@ class ModeCard(QFrame):
             self.layout().setContentsMargins(10, 10, 10, 10)
             self.layout().setSpacing(6)
         else:
-            self.setMinimumSize(210, 300)
-            self.setMaximumHeight(350)
+            self.setMinimumSize(210, 440)
+            self.setMaximumHeight(16777215)
             self.layout().setContentsMargins(12, 12, 12, 12)
             self.layout().setSpacing(self.ds.spacing.space_2)
         self.updateGeometry()
@@ -271,8 +270,7 @@ class ModeSelectionPanel(QWidget):
         self._compact_mode = False
         self._cards: Dict[str, ModeCard] = {}
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        self.setMinimumHeight(324)
-        self.setMaximumHeight(390)
+        self.setMinimumHeight(470)
         self._setup_ui()
 
     def set_compact_mode(self, compact: bool) -> None:
@@ -286,8 +284,8 @@ class ModeSelectionPanel(QWidget):
             self.setMinimumHeight(200)
             self.setMaximumHeight(240)
         else:
-            self.setMinimumHeight(324)
-            self.setMaximumHeight(390)
+            self.setMinimumHeight(470)
+            self.setMaximumHeight(16777215)
         self._card_columns = 0
         self._relayout_cards(3 if self.width() >= (540 if compact else 670) else 2)
         self.updateGeometry()
@@ -316,7 +314,9 @@ class ModeSelectionPanel(QWidget):
         self.cards_layout = QGridLayout()
         self.cards_layout.setHorizontalSpacing(ds.spacing.space_3)
         self.cards_layout.setVerticalSpacing(ds.spacing.space_3)
-        self.cards_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.cards_layout.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignHCenter
+        )
 
         # Single Video Mode Card
         single_card = ModeCard(
@@ -398,10 +398,10 @@ class ModeSelectionPanel(QWidget):
         self._card_columns = columns
 
     def sizeHint(self) -> QSize:
-        return QSize(720, 220) if self._compact_mode else QSize(900, 324)
+        return QSize(720, 220) if self._compact_mode else QSize(900, 470)
 
     def minimumSizeHint(self) -> QSize:
-        return QSize(540, 200) if self._compact_mode else QSize(670, 324)
+        return QSize(540, 200) if self._compact_mode else QSize(670, 470)
 
     def resizeEvent(self, event):
         super().resizeEvent(event)

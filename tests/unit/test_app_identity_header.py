@@ -55,11 +55,14 @@ def test_topbar_displays_product_name_version_and_update_date(monkeypatch):
     panel = TopBarPanel(Gui(), DesignSystem())
 
     assert panel.app_title.text() == "쇼핑 쇼츠 헬퍼"
+    assert panel.app_title.minimumWidth() >= panel.app_title.sizeHint().width()
     assert panel.app_meta.text() == "v2.3.4 · 업데이트 2026.08.11"
     assert "현재 버전 2.3.4" in panel.app_meta.accessibleDescription()
 
     panel.set_compact_mode(True)
-    assert panel.brand_group.isHidden()
+    assert not panel.brand_group.isHidden()
+    assert panel.app_meta.text() == "v2.3.4 · 업데이트 2026.08.11"
+    assert panel.minimumHeight() >= 112
     panel.close()
 
 

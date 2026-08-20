@@ -2,8 +2,9 @@
 Queue Panel for PyQt6
 """
 from PyQt6.QtWidgets import (
-    QVBoxLayout, QHBoxLayout, QLabel, QFrame, 
-    QTreeWidget, QTreeWidgetItem, QHeaderView, QAbstractItemView
+    QVBoxLayout, QHBoxLayout, QBoxLayout, QLabel, QFrame,
+    QTreeWidget, QTreeWidgetItem, QTreeWidgetItemIterator,
+    QHeaderView, QAbstractItemView
 )
 from PyQt6.QtCore import Qt, QTimer
 from ui.components.rounded_widgets import create_rounded_button
@@ -30,12 +31,14 @@ class QueuePanel(QFrame, ThemedMixin):
         
         self.subtitle_label = QLabel("대기 | 완료 | 실패 건수를 자동으로 추적합니다.")
         self.subtitle_label.setStyleSheet("font-size: 11px;")
+        self.subtitle_label.setWordWrap(True)
         self.main_layout.addWidget(self.subtitle_label)
 
         self.title_label.setText("제작 대기열")
         self.subtitle_label.setText("풀자동화 예약, YouTube 연결, 다음 업로드 시간을 실제 큐 기준으로 표시합니다.")
 
         status_layout = QHBoxLayout()
+        self._status_layout = status_layout
         status_layout.setSpacing(8)
         self.gui.summer_status_interval = QLabel("자동 업로드\n확인 중")
         self.gui.summer_status_youtube = QLabel("YouTube\n확인 중")
@@ -56,6 +59,7 @@ class QueuePanel(QFrame, ThemedMixin):
         
         # Control Buttons
         control_layout = QHBoxLayout()
+        self._control_layout = control_layout
         self.gui.start_batch_button = create_rounded_button(self, "▶ 작업 시작", self.gui.start_batch_processing)
         control_layout.addWidget(self.gui.start_batch_button)
         
@@ -103,6 +107,7 @@ class QueuePanel(QFrame, ThemedMixin):
         
         # Action Buttons
         action_layout = QHBoxLayout()
+        self._action_layout = action_layout
         self.remove_btn = create_rounded_button(self, "선택 삭제 (0)", self.gui.remove_selected_url, style="danger")
         self.remove_btn.setAccessibleName("선택한 대기열 항목 삭제")
         self.remove_btn.setToolTip("표에서 삭제할 항목을 하나 이상 선택해 주세요.")
@@ -125,6 +130,7 @@ class QueuePanel(QFrame, ThemedMixin):
         
         # Status Counts
         count_layout = QHBoxLayout()
+        self._count_layout = count_layout
         self.gui.count_processing = QLabel("🔄 진행 0")
         self.gui.count_waiting = QLabel("⏸ 대기 0")
         self.gui.count_completed = QLabel("✅ 완료 0")
@@ -142,6 +148,22 @@ class QueuePanel(QFrame, ThemedMixin):
         self.gui.count_failed.setStyleSheet(self.gui.count_failed.styleSheet() + "background-color: #991B1B;")
         
         self.main_layout.addLayout(count_layout)
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        """Stack dense rows before their button text is squeezed."""
+        super().resizeEvent(event)
+        direction = (
+            QBoxLayout.Direction.TopToBottom
+            if event.size().width() < 720
+            else QBoxLayout.Direction.LeftToRight
+        )
+        for layout in (
+            self._status_layout,
+            self._control_layout,
+            self._action_layout,
+            self._count_layout,
+        ):
+            layout.setDirection(direction)
 
     def sync_delete_controls(self, summer_snapshot=None):
         status = getattr(self.gui, "url_status", {})
@@ -231,6 +253,7 @@ class QueuePanel(QFrame, ThemedMixin):
         if callable(updater):
             try:
                 updater()
+                QTimer.singleShot(0, self._apply_item_tooltips)
                 return
             except Exception:
                 pass
@@ -240,8 +263,18 @@ class QueuePanel(QFrame, ThemedMixin):
         if callable(update):
             try:
                 update()
+                QTimer.singleShot(0, self._apply_item_tooltips)
             except Exception:
                 pass
+
+    def _apply_item_tooltips(self) -> None:
+        """Expose every elided table value without changing compact columns."""
+        iterator = QTreeWidgetItemIterator(self.gui.url_listbox)
+        while iterator.value() is not None:
+            item = iterator.value()
+            for column in range(self.gui.url_listbox.columnCount()):
+                item.setToolTip(column, item.text(column))
+            iterator += 1
 
     def apply_theme(self):
         bg = self.get_color("bg_card")

@@ -32,23 +32,24 @@ def test_initial_window_geometry_never_exceeds_available_desktop():
         assert available.contains(result)
         assert result.width() <= 1280
         assert result.height() <= 800
-        assert abs((result.width() / result.height()) - 1.6) < 0.01
 
 
-def test_fixed_window_profile_disables_resize_and_maximize():
+def test_window_profile_stays_resizable_and_maximizable():
     window = QMainWindow()
     target = apply_fixed_window_geometry(window, QRect(0, 0, 1920, 1040))
 
     assert target.size() == QSize(1280, 800)
     assert window.size() == target.size()
-    assert window.minimumSize() == target.size()
-    assert window.maximumSize() == target.size()
-    assert not (window.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint)
+    assert window.minimumSize() == QSize(760, 520)
+    assert window.maximumWidth() > target.width()
+    assert window.maximumHeight() > target.height()
+    assert window.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
 
     compact = apply_fixed_window_geometry(window, QRect(0, 0, 1280, 680))
-    assert compact.size() == QSize(1024, 640)
-    assert window.minimumSize() == compact.size()
-    assert window.maximumSize() == compact.size()
+    assert compact.size() == QSize(1256, 656)
+    assert window.minimumSize() == QSize(760, 520)
+    window.resize(900, 560)
+    assert window.size() == QSize(900, 560)
     window.close()
 
 
@@ -66,7 +67,7 @@ def test_shell_breakpoints_preserve_content_on_short_and_narrow_windows():
     compact = layout_profile(QSize(1200, 720))
     assert compact.navigation_mode == "compact"
 
-    large = layout_profile(QSize(1440, 900))
+    large = layout_profile(QSize(1600, 900))
     assert large.navigation_mode == "full"
     assert large.show_progress_panel is True
     assert large.compact_mode_page is False

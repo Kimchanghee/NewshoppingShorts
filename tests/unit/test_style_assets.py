@@ -129,7 +129,7 @@ def test_selection_panels_adapt_without_icon_text_overlap():
     mode_scroll = QScrollArea()
     mode_scroll.setWidgetResizable(True)
     mode_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-    mode_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+    mode_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
     compact_mode_panel = ModeSelectionPanel(None, gui)
     mode_scroll.setWidget(compact_mode_panel)
     mode_scroll.resize(780, 430)
@@ -137,7 +137,9 @@ def test_selection_panels_adapt_without_icon_text_overlap():
     app.processEvents()
     assert compact_mode_panel._card_columns == 3
     assert mode_scroll.horizontalScrollBar().maximum() == 0
-    assert mode_scroll.verticalScrollBar().maximum() == 0
+    # A short viewport must keep every card reachable instead of clipping the
+    # lower content.  The production shell follows the same AsNeeded policy.
+    assert mode_scroll.verticalScrollBar().maximum() > 0
     for card in compact_mode_panel._cards.values():
         assert card.select_label.geometry().bottom() <= card.contentsRect().bottom()
 

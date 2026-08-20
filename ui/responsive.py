@@ -2,30 +2,29 @@
 
 Qt works in device-independent pixels, so every calculation in this module is
 based on the screen's ``availableGeometry`` rather than physical resolution.
-This keeps windows inside the usable desktop at mixed DPI settings as well as
-on short or portrait displays.
+Windows receive a useful initial size, but remain resizable and maximizable so
+OS text scaling never has to fight a rigid 16:10 canvas.
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QEvent, QObject, QRect, QSize, Qt
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtGui import QCursor
+from PyQt6.QtWidgets import QApplication, QWIDGETSIZE_MAX
 
 
 WINDOW_MARGIN = 12
 REGULAR_WINDOW_SIZE = QSize(1280, 800)
-COMPACT_WINDOW_SIZE = QSize(1024, 640)
-WINDOW_ASPECT_RATIO = REGULAR_WINDOW_SIZE.width() / REGULAR_WINDOW_SIZE.height()
+MINIMUM_WINDOW_SIZE = QSize(760, 520)
 
 
 def calculate_window_rect(available: QRect) -> QRect:
-    """Return a centered, fixed-profile rect contained in *available*.
+    """Return a centered initial rect fully contained in *available*.
 
-    Most displays receive the same 1280x800 logical workspace. Smaller work
-    areas use the same 16:10 compact profile, and only very small desktops fall
-    back to an aspect-preserving fit. This keeps the composition stable across
-    resolutions and per-monitor DPI settings without letting users resize it.
+    Width and height are clamped independently. On short laptop work areas this
+    uses the available width instead of shrinking both dimensions just to keep
+    a decorative aspect ratio, leaving more room for wrapped Korean text.
     """
     if available.isEmpty():
         return QRect(0, 0, REGULAR_WINDOW_SIZE.width(), REGULAR_WINDOW_SIZE.height())
@@ -33,22 +32,8 @@ def calculate_window_rect(available: QRect) -> QRect:
     usable_width = max(1, available.width() - WINDOW_MARGIN * 2)
     usable_height = max(1, available.height() - WINDOW_MARGIN * 2)
 
-    if (
-        usable_width >= REGULAR_WINDOW_SIZE.width()
-        and usable_height >= REGULAR_WINDOW_SIZE.height()
-    ):
-        width, height = REGULAR_WINDOW_SIZE.width(), REGULAR_WINDOW_SIZE.height()
-    elif (
-        usable_width >= COMPACT_WINDOW_SIZE.width()
-        and usable_height >= COMPACT_WINDOW_SIZE.height()
-    ):
-        width, height = COMPACT_WINDOW_SIZE.width(), COMPACT_WINDOW_SIZE.height()
-    else:
-        width = usable_width
-        height = max(1, round(width / WINDOW_ASPECT_RATIO))
-        if height > usable_height:
-            height = usable_height
-            width = max(1, round(height * WINDOW_ASPECT_RATIO))
+    width = min(REGULAR_WINDOW_SIZE.width(), usable_width)
+    height = min(REGULAR_WINDOW_SIZE.height(), usable_height)
 
     x = available.x() + (available.width() - width) // 2
     y = available.y() + (available.height() - height) // 2
@@ -56,17 +41,29 @@ def calculate_window_rect(available: QRect) -> QRect:
 
 
 def apply_fixed_window_geometry(window, available: QRect) -> QRect:
-    """Apply the monitor profile and disable user resizing/maximizing."""
+    """Apply a safe initial geometry while keeping the window responsive.
+
+    The historical name is retained for compatibility with existing callers.
+    Any fixed minimum/maximum left by an older UI setup is cleared here.
+    """
     target = calculate_window_rect(available)
-    if window.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint:
-        window.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)
-    window.setFixedSize(target.size())
+    window.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
+    minimum = QSize(
+        min(MINIMUM_WINDOW_SIZE.width(), target.width()),
+        min(MINIMUM_WINDOW_SIZE.height(), target.height()),
+    )
+    window.setMinimumSize(minimum)
+    window.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+    window.resize(target.size())
     window.move(target.topLeft())
     return target
 
 
 class FixedWindowController(QObject):
-    """Re-fit the fixed shell only when it moves to another monitor."""
+    """Keep the resizable shell inside the monitor when screens change.
+
+    The class name is a compatibility alias used throughout the existing app.
+    """
 
     def __init__(self, window):
         super().__init__(window)
@@ -85,7 +82,19 @@ class FixedWindowController(QObject):
         screen = screen or self.window.screen() or QApplication.primaryScreen()
         if screen is None:
             return QRect(self.window.geometry())
-        return apply_fixed_window_geometry(self.window, screen.availableGeometry())
+        available = screen.availableGeometry()
+        target = calculate_window_rect(available)
+        current = self.window.frameGeometry()
+        if current.width() > target.width() or current.height() > target.height():
+            self.window.resize(
+                min(current.width(), target.width()),
+                min(current.height(), target.height()),
+            )
+        frame = self.window.frameGeometry()
+        x = min(max(frame.x(), available.left()), available.right() - frame.width() + 1)
+        y = min(max(frame.y(), available.top()), available.bottom() - frame.height() + 1)
+        self.window.move(x, y)
+        return QRect(self.window.geometry())
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self.window and event.type() == QEvent.Type.Show:
@@ -109,6 +118,33 @@ def bounded_size(
     return QSize(width, height)
 
 
+def fit_window_to_available(
+    window,
+    preferred: QSize,
+    minimum: QSize = QSize(320, 240),
+    margin: int = WINDOW_MARGIN,
+) -> QSize:
+    """Resize and center a dialog without imposing an impossible minimum."""
+    screen = (
+        window.screen()
+        or QApplication.screenAt(QCursor.pos())
+        or QApplication.primaryScreen()
+    )
+    available = screen.availableGeometry() if screen else QRect(0, 0, 1280, 800)
+    size = bounded_size(available, preferred, minimum, margin)
+    window.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX)
+    window.setMinimumSize(
+        min(minimum.width(), size.width()),
+        min(minimum.height(), size.height()),
+    )
+    window.resize(size)
+    window.move(
+        available.x() + (available.width() - size.width()) // 2,
+        available.y() + (available.height() - size.height()) // 2,
+    )
+    return size
+
+
 @dataclass(frozen=True)
 class LayoutProfile:
     """Responsive shell values selected from the current window size."""
@@ -126,9 +162,9 @@ def layout_profile(size: QSize) -> LayoutProfile:
     width = size.width()
     height = size.height()
 
-    if width < 1120:
+    if width < 1100:
         navigation_mode = "icons"
-    elif width < 1240:
+    elif width < 1500:
         navigation_mode = "compact"
     else:
         navigation_mode = "full"
@@ -138,8 +174,8 @@ def layout_profile(size: QSize) -> LayoutProfile:
         show_progress_panel=height >= 740 and width >= 1200,
         content_margin_x=8 if width < 1000 else 14,
         content_margin_y=6 if height < 720 else 10,
-        compact_topbar=width < 1120,
-        compact_mode_page=height < 700 or width < 1100,
+        compact_topbar=width < 1400,
+        compact_mode_page=height < 720 or width < 1100,
     )
 
 

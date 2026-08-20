@@ -11,7 +11,17 @@ from datetime import datetime
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QFont
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
+from PyQt6.QtWidgets import (
+    QAbstractScrollArea,
+    QBoxLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QWidget,
+)
 
 from caller import rest
 from ui.components.custom_dialog import show_warning
@@ -42,7 +52,8 @@ class TopBarPanel(QFrame):
         c = d.colors
 
         self.setObjectName("TopBar")
-        self.setFixedHeight(68)
+        self.setMinimumHeight(68)
+        self.setMaximumHeight(68)
         self.setStyleSheet(f"""
             #TopBar {{
                 background-color: {c.bg_header};
@@ -50,9 +61,9 @@ class TopBarPanel(QFrame):
             }}
         """)
 
-        layout = QHBoxLayout(self)
-        layout.setContentsMargins(24, 12, 24, 12)
-        layout.setSpacing(16)
+        self._root_layout = QBoxLayout(QBoxLayout.Direction.LeftToRight, self)
+        self._root_layout.setContentsMargins(24, 10, 24, 10)
+        self._root_layout.setSpacing(14)
 
         # Product identity. Version metadata comes from the installed
         # version.json so it automatically changes with every update.
@@ -71,6 +82,11 @@ class TopBarPanel(QFrame):
         ))
         self.app_title.setStyleSheet(f"color: {c.text_primary}; letter-spacing: -0.5px;")
         self.app_title.setAccessibleName(identity.name)
+        self.app_title.setMinimumWidth(self.app_title.sizeHint().width())
+        self.app_title.setSizePolicy(
+            QSizePolicy.Policy.Fixed,
+            QSizePolicy.Policy.Fixed,
+        )
         brand_layout.addWidget(self.app_title)
 
         self.app_meta = QLabel(identity.display_metadata)
@@ -91,13 +107,52 @@ class TopBarPanel(QFrame):
         """)
         self.app_meta.setAccessibleName("앱 버전과 업데이트 날짜")
         self.app_meta.setAccessibleDescription(identity.accessible_description)
+        self.app_meta.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         brand_layout.addWidget(self.app_meta)
 
         self.brand_group.setAccessibleName(identity.name)
         self.brand_group.setAccessibleDescription(identity.accessible_description)
-        layout.addWidget(self.brand_group)
+        self.brand_group.setSizePolicy(
+            QSizePolicy.Policy.Preferred,
+            QSizePolicy.Policy.Fixed,
+        )
+        self._root_layout.addWidget(self.brand_group)
 
-        layout.addStretch()
+        # Account controls live in a horizontal safety scroller. On ordinary
+        # screens it behaves like a plain row; at high text scaling every label
+        # and button remains reachable instead of being painted outside bounds.
+        self.account_scroll = QScrollArea(self)
+        self.account_scroll.setObjectName("TopBarAccountScroll")
+        self.account_scroll.setWidgetResizable(True)
+        self.account_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.account_scroll.setVerticalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        self.account_scroll.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAsNeeded
+        )
+        self.account_scroll.setSizeAdjustPolicy(
+            QAbstractScrollArea.SizeAdjustPolicy.AdjustIgnored
+        )
+        self.account_scroll.setMinimumHeight(46)
+        self.account_scroll.setStyleSheet(
+            "#TopBarAccountScroll { background: transparent; border: none; }"
+            "#TopBarAccountScroll > QWidget > QWidget { background: transparent; }"
+            "#TopBarAccountScroll QScrollBar:horizontal { height: 6px; }"
+        )
+        self.account_group = QWidget(self.account_scroll)
+        self.account_group.setObjectName("TopBarAccountGroup")
+        self.account_group.setStyleSheet(
+            "#TopBarAccountGroup { background: transparent; border: none; }"
+        )
+        layout = QHBoxLayout(self.account_group)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        layout.addStretch(1)
+        self.account_scroll.setWidget(self.account_group)
 
         # Credits Button
         self.gui.credits_label = QPushButton("")
@@ -230,13 +285,25 @@ class TopBarPanel(QFrame):
         self.gui.logout_button.clicked.connect(self.request_logout)
         layout.addWidget(self.gui.logout_button)
 
+        self._root_layout.addWidget(self.account_scroll, 1)
+
     def set_compact_mode(self, compact: bool) -> None:
-        """Keep primary account actions visible on narrow windows."""
-        self.brand_group.setVisible(not compact)
-        self.gui.last_login_label.setVisible(not compact)
-        self.gui.connection_label.setVisible(not compact)
-        self.layout().setContentsMargins(12 if compact else 24, 12, 12 if compact else 24, 12)
-        self.layout().setSpacing(8 if compact else 16)
+        """Use a two-row header before any account text can be clipped."""
+        self._root_layout.setDirection(
+            QBoxLayout.Direction.TopToBottom
+            if compact
+            else QBoxLayout.Direction.LeftToRight
+        )
+        self.setMinimumHeight(112 if compact else 68)
+        self.setMaximumHeight(124 if compact else 68)
+        self._root_layout.setContentsMargins(
+            12 if compact else 24,
+            7 if compact else 10,
+            12 if compact else 24,
+            7 if compact else 10,
+        )
+        self._root_layout.setSpacing(3 if compact else 14)
+        self.account_scroll.setMinimumHeight(48 if compact else 46)
 
     def update_connection_status(self, connected: bool):
         """Update connection status dot and label."""

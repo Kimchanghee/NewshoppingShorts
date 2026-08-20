@@ -179,15 +179,16 @@ class UIInitializer:
         if os.path.exists(icon_path):
             gui.setWindowIcon(QIcon(icon_path))
 
-        # Screen-aware window sizing in logical pixels. Prefer the monitor where
-        # the user launched the app and clamp to availableGeometry *last*.
+        # Screen-aware initial sizing in logical pixels. The shell remains
+        # resizable/maximizable so high Windows text scaling can request more
+        # space instead of clipping controls inside a fixed canvas.
         screen = QApplication.screenAt(QCursor.pos()) or QApplication.primaryScreen()
         if screen:
             available = screen.availableGeometry()
             apply_fixed_window_geometry(gui, available)
         else:
-            gui.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)
-            gui.setFixedSize(1280, 800)
+            gui.setMinimumSize(760, 520)
+            gui.resize(1280, 800)
         gui.fixed_window_controller = FixedWindowController(gui)
 
         central = QWidget()
@@ -346,13 +347,16 @@ class UIInitializer:
 
         def sync_content_scroll(page_index_value: int) -> None:
             is_mode_page = page_index_value == page_index["mode"]
-            policy = (
+            content_scroll.setHorizontalScrollBarPolicy(
                 Qt.ScrollBarPolicy.ScrollBarAlwaysOff
                 if is_mode_page
                 else Qt.ScrollBarPolicy.ScrollBarAsNeeded
             )
-            content_scroll.setHorizontalScrollBarPolicy(policy)
-            content_scroll.setVerticalScrollBarPolicy(policy)
+            # The first page used to disable scrolling entirely, which made
+            # its buttons unreachable on short/high-DPI desktops.
+            content_scroll.setVerticalScrollBarPolicy(
+                Qt.ScrollBarPolicy.ScrollBarAsNeeded
+            )
             if is_mode_page:
                 content_scroll.horizontalScrollBar().setValue(0)
                 content_scroll.verticalScrollBar().setValue(0)
@@ -459,6 +463,11 @@ class UIInitializer:
         subtitle_font_size = max(9, int(round(d.typography.size_sm * 0.7)))
 
         title_lbl = QLabel(title)
+        title_lbl.setWordWrap(True)
+        title_lbl.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         title_lbl.setFont(QFont(
             d.typography.font_family_heading,
             title_font_size,
@@ -470,6 +479,11 @@ class UIInitializer:
         """)
 
         sub_lbl = QLabel(subtitle)
+        sub_lbl.setWordWrap(True)
+        sub_lbl.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Fixed,
+        )
         sub_lbl.setFont(QFont(
             d.typography.font_family_body,
             subtitle_font_size

@@ -622,7 +622,7 @@ window.close()
     )
 
 
-def test_main_window_is_fixed_and_first_page_has_no_scroll(tmp_path):
+def test_main_window_is_resizable_and_first_page_keeps_overflow_reachable(tmp_path):
     _run_login_qt_script(
         r'''
 from PyQt6.QtCore import Qt
@@ -634,13 +634,15 @@ window.show()
 for _ in range(10):
     app.processEvents()
 scroll = window.content_scroll
-assert window.minimumSize() == window.size()
-assert window.maximumSize() == window.size()
-assert not (window.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint)
+assert window.minimumWidth() <= window.width()
+assert window.minimumHeight() <= window.height()
+assert window.maximumWidth() > window.width()
+assert window.maximumHeight() > window.height()
+assert window.windowFlags() & Qt.WindowType.WindowMaximizeButtonHint
 assert window.stack.currentIndex() == window.page_index["mode"]
 assert window.mode_selection_panel._card_columns == 3
 assert scroll.horizontalScrollBar().maximum() == 0
-assert scroll.verticalScrollBar().maximum() == 0
+assert scroll.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAsNeeded
 window.close()
 ''',
         tmp_path,

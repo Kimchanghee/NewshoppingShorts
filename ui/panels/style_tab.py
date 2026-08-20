@@ -3,7 +3,7 @@ Style Tab for PyQt6 - Redesigned with side-by-side Voice & CTA, compact Font pan
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
-    QFrame, QSplitter
+    QFrame, QSplitter, QScrollArea
 )
 from PyQt6.QtCore import Qt
 from config.font_catalog import DEFAULT_FONT_ID, normalize_font_id, ui_font_options
@@ -91,9 +91,25 @@ class StyleTab(QWidget):
         
         # Font panel (compact)
         self.font_panel = CompactFontPanel(self, gui=self.gui, theme_manager=self.theme_manager)
-        font_layout.addWidget(self.font_panel)
+        self.font_scroll = QScrollArea(font_container)
+        self.font_scroll.setWidgetResizable(True)
+        self.font_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self.font_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.font_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.font_scroll.setWidget(self.font_panel)
+        font_layout.addWidget(self.font_scroll)
         
         main_layout.addWidget(font_container)
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        super().resizeEvent(event)
+        narrow = event.size().width() < 760
+        self.splitter.setOrientation(
+            Qt.Orientation.Vertical if narrow else Qt.Orientation.Horizontal
+        )
+        minimum = 0 if narrow else 300
+        self.voice_panel.setMinimumWidth(minimum)
+        self.cta_panel.setMinimumWidth(minimum)
 
     def apply_theme(self):
         """Apply theme to all child panels."""
