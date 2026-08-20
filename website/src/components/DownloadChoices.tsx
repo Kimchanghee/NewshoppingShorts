@@ -3,6 +3,8 @@ import {
   DIRECT_DOWNLOAD_URL,
   DIRECT_INSTALLER_CHANNEL,
   DIRECT_INSTALLER_VERSION,
+  LATEST_VERIFIED_BUILD_VERSION,
+  LATEST_VERIFIED_RELEASE_URL,
   MS_STORE_URL,
 } from "@/constants/release";
 import { gaEvent } from "@/lib/ga4";
@@ -26,6 +28,17 @@ export function DownloadChoices({
 }: DownloadChoicesProps) {
   return (
     <div className={cn("mx-auto w-full max-w-2xl", className)}>
+      <p className="mb-4 text-center text-sm leading-relaxed text-muted-foreground">
+        최신 검증 빌드{" "}
+        <a
+          href={LATEST_VERIFIED_RELEASE_URL}
+          className="font-semibold text-primary underline-offset-4 hover:underline"
+          aria-label={`v${LATEST_VERIFIED_BUILD_VERSION} 릴리스 정보`}
+        >
+          v{LATEST_VERIFIED_BUILD_VERSION}
+        </a>
+        <span> · Windows 빌드 완료 · Microsoft Store 제출 준비 중</span>
+      </p>
       <div
         className={cn("grid w-full gap-3", !stacked && "sm:grid-cols-2")}
         role="group"
@@ -80,8 +93,8 @@ export function DownloadChoices({
 
       {showHint && (
         <p className="mt-4 text-center text-xs leading-relaxed text-muted-foreground">
-          두 설치 방식 중 하나만 선택하세요. 일반 설치판은 Windows 보호 화면이 표시되면 추가 정보를 눌러 실행할 수
-          있습니다.
+          현재 안전하게 공개된 일반 설치 파일은 v{DIRECT_INSTALLER_VERSION}입니다. 두 설치 방식 중 하나만 선택하세요.
+          일반 설치판은 Windows 보호 화면이 표시되면 추가 정보를 눌러 실행할 수 있습니다.
         </p>
       )}
     </div>

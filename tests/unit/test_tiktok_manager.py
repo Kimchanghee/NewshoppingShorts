@@ -35,6 +35,32 @@ class _FakeResponse:
         return self._payload
 
 
+class _MemoryCredentialStore:
+    def __init__(self):
+        self.values = {}
+
+    def set_credential(self, key, value):
+        self.values[key] = value
+        return True
+
+    def get_credential(self, key):
+        return self.values.get(key)
+
+    def delete_credential(self, key):
+        self.values.pop(key, None)
+        return True
+
+
+@pytest.fixture(autouse=True)
+def secure_store(monkeypatch):
+    store = _MemoryCredentialStore()
+    monkeypatch.setattr(
+        "utils.secrets_manager.get_secrets_manager",
+        lambda: store,
+    )
+    return store
+
+
 @pytest.fixture
 def manager(tmp_path):
     return _TestTikTokManager(tmp_path)

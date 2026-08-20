@@ -1,7 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 import sys
 import os
+from pathlib import Path
 from PyInstaller.utils.hooks import collect_all, copy_metadata, collect_submodules, collect_data_files
+from scripts.release_protection_policy import PROTECTED_MODULES, protected_hidden_imports
 from config.font_catalog import (
     DEFAULT_FONTS_DIR,
     DEFAULT_LICENSES_DIR,
@@ -88,6 +90,10 @@ hidden_imports = [
     'managers.inpock_manager',
     'managers.sourcing_manager',
 ]
+# Native protected modules are opaque to PyInstaller's import scanner.  Derive
+# their direct imports from checked-in source so compiled releases keep the same
+# dependency graph as source builds.
+hidden_imports += protected_hidden_imports(Path(project_root))
 datas = [
     ('resource', 'resource'),
     ('version.json', '.'),
@@ -107,11 +113,10 @@ def append_data_unique(data_list, src, dst):
 #     datas.append((_env_file, '.'))
 #     print("[spec] Including .env file for API key configuration")
 
-# Bundle encrypted secure config (if present at build time)
-_secure_config = os.path.join(project_root, 'utils', '.secure_config.enc')
-if os.path.exists(_secure_config):
-    datas.append((_secure_config, '.'))
-    print("[spec] Including .secure_config.enc for encrypted API keys")
+# Never bundle local credentials, even in an encrypted container.  Any key that
+# a client can decrypt is recoverable by an attacker controlling that client.
+# End-user credentials are provisioned through the OS credential store at run
+# time, and the post-build gate independently rejects secure-config artifacts.
 
 for _font_choice in FONT_CHOICES:
     _font_path = DEFAULT_FONTS_DIR / _font_choice.asset.filename
@@ -303,6 +308,49 @@ a = Analysis(
     cipher=block_cipher,
     noarchive=False,
 )
+
+# Release confidentiality gate: protected modules must resolve to temporary
+# native extensions created by scripts/build_protected_modules.py.  If any of
+# them enter PYZ as Python bytecode, fail the build before an artifact exists.
+_protected_in_pyz = sorted(
+    module_name
+    for module_name, *_rest in a.pure
+    if module_name in PROTECTED_MODULES
+)
+if _protected_in_pyz:
+    raise SystemExit(
+        "[spec] ERROR: protected modules resolved as Python bytecode: "
+        + ", ".join(_protected_in_pyz)
+    )
+
+_protected_binary_destinations = {
+    destination.replace("\\", "/")
+    for destination, *_rest in a.binaries
+}
+
+
+def _has_protected_binary(module_name):
+    module_path = module_name.replace(".", "/")
+    return any(
+        destination == module_path + ".pyd"
+        or (
+            destination.startswith(module_path + ".")
+            and destination.endswith(".pyd")
+        )
+        for destination in _protected_binary_destinations
+    )
+
+
+_missing_protected_binaries = sorted(
+    module_name
+    for module_name in PROTECTED_MODULES
+    if not _has_protected_binary(module_name)
+)
+if _missing_protected_binaries:
+    raise SystemExit(
+        "[spec] ERROR: protected native modules missing from Analysis binaries: "
+        + ", ".join(_missing_protected_binaries)
+    )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. PYZ & EXE + COLLECT (One-Dir 모드 — Inno Setup 인스톨러와 함께 배포)

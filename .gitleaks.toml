@@ -1,0 +1,20 @@
+title = "SSMaker source secret policy"
+
+[extend]
+useDefault = true
+
+# The release gate scans the working tree, including untracked files, so local
+# build outputs and downloaded runtimes must be excluded explicitly. Source,
+# configuration, tests, and documentation remain in scope.
+[[allowlists]]
+description = "Generated, vendored, and local-only build trees"
+paths = [
+  '''(?i)(^|[\\/])\.git([\\/]|$)''',
+  '''(?i)(^|[\\/])(?:\.claude|\.omc|\.omx)([\\/]|$)''',
+  '''(?i)(^|[\\/])(?:\.venv|venv\d*|node_modules)([\\/]|$)''',
+  '''(?i)(^|[\\/])\.next([\\/]|$)''',
+  '''(?i)(^|[\\/])(?:build|dist|build_staging|build_candidate|output|outputs|artifacts|release_assets)([\\/]|$)''',
+  '''(?i)(^|[\\/])(?:faster_whisper_models|tts_output|temp|tmp|logs)([\\/]|$)''',
+  '''(?i)(^|[\\/])__pycache__([\\/]|$)''',
+  '''(?i)(^|[\\/])cloud-sql-proxy\.exe$''',
+]

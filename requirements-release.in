@@ -9,3 +9,4 @@
 -r backend/requirements.txt
 
 PyInstaller==6.19.0
+Cython==3.2.9

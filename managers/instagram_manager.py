@@ -127,6 +127,8 @@ class InstagramManager:
     ]
     OAUTH_FLOW_TIMEOUT_SECONDS = 180
     APP_CREDENTIALS_KEY = "instagram_app_credentials_v1"
+    USER_ACCESS_TOKEN_KEY = "instagram_user_access_token_v1"
+    PAGE_ACCESS_TOKEN_KEY = "instagram_page_access_token_v1"
     TOKEN_REFRESH_MARGIN_SECONDS = 10 * 24 * 3600  # refresh when <10 days left
 
     def __init__(self, gui=None, settings_file: str = "instagram_settings.json"):
@@ -162,20 +164,8 @@ class InstagramManager:
         return os.path.join(self._get_user_data_dir(), self.settings_file)
 
     @staticmethod
-    def _encrypt_secret(value: str) -> str:
-        """Encrypt sensitive token value for local persistence."""
-        if not value:
-            return value
-        try:
-            from utils.secrets_manager import SecretsManager
-            return SecretsManager._simple_encrypt(value)
-        except Exception as e:
-            logger.warning(f"[Instagram] Token encryption failed, storing plaintext: {e}")
-            return value
-
-    @staticmethod
     def _decrypt_secret(value: str) -> str:
-        """Decrypt persisted token value. Returns plaintext for legacy values."""
+        """Read a legacy file token only long enough to migrate it."""
         if not value:
             return value
         if value.startswith("fernet:"):
@@ -186,6 +176,93 @@ class InstagramManager:
                 logger.warning(f"[Instagram] Token decryption failed: {e}")
                 return ""
         return value
+
+    @classmethod
+    def _read_oauth_tokens(cls) -> tuple[str, str]:
+        from utils.secrets_manager import get_secrets_manager
+
+        try:
+            store = get_secrets_manager()
+            return (
+                str(store.get_credential(cls.USER_ACCESS_TOKEN_KEY) or ""),
+                str(store.get_credential(cls.PAGE_ACCESS_TOKEN_KEY) or ""),
+            )
+        except Exception as exc:
+            logger.error(
+                "[Instagram] OAuth credential-store read failed: %s",
+                type(exc).__name__,
+            )
+            return "", ""
+
+    @classmethod
+    def _store_oauth_tokens(cls, user_token: str, page_token: str) -> bool:
+        """Transactionally store OAuth tokens outside the settings JSON."""
+
+        from utils.secrets_manager import get_secrets_manager
+
+        values = {
+            cls.USER_ACCESS_TOKEN_KEY: str(user_token or ""),
+            cls.PAGE_ACCESS_TOKEN_KEY: str(page_token or ""),
+        }
+        touched: list[str] = []
+        try:
+            store = get_secrets_manager()
+            previous = {
+                key: str(store.get_credential(key) or "")
+                for key in values
+            }
+            for key, value in values.items():
+                touched.append(key)
+                if value:
+                    if not store.set_credential(key, value):
+                        raise RuntimeError("OS credential write failed")
+                    verified = str(store.get_credential(key) or "")
+                    if not _secrets.compare_digest(verified, value):
+                        raise RuntimeError("OS credential verification failed")
+                else:
+                    store.delete_credential(key)
+                    if store.get_credential(key):
+                        raise RuntimeError("OS credential deletion failed")
+            return True
+        except Exception as exc:
+            logger.error(
+                "[Instagram] OAuth credential-store update failed: %s",
+                type(exc).__name__,
+            )
+            for key in reversed(touched):
+                old_value = previous.get(key, "")
+                try:
+                    if old_value:
+                        store.set_credential(key, old_value)
+                    else:
+                        store.delete_credential(key)
+                except Exception:
+                    logger.error("[Instagram] OAuth credential rollback failed")
+            return False
+
+    @staticmethod
+    def _write_settings_payload(settings_path: str, data: Dict[str, Any]) -> bool:
+        """Atomically replace non-secret settings metadata."""
+
+        temp_path = f"{settings_path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+            with open(temp_path, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, settings_path)
+            return True
+        except Exception as exc:
+            logger.error(
+                "[Instagram] Atomic settings write failed: %s",
+                type(exc).__name__,
+            )
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            return False
 
     def _load_settings(self) -> None:
         """Load account/credentials/upload settings from file."""
@@ -209,9 +286,38 @@ class InstagramManager:
 
             if "credentials" in data:
                 cred = data["credentials"]
+                user_token, page_token = self._read_oauth_tokens()
+                legacy_present = (
+                    "user_access_token" in cred or "page_access_token" in cred
+                )
+                if legacy_present:
+                    candidate_user = (
+                        self._decrypt_secret(str(cred.get("user_access_token", "") or ""))
+                        if "user_access_token" in cred else user_token
+                    )
+                    candidate_page = (
+                        self._decrypt_secret(str(cred.get("page_access_token", "") or ""))
+                        if "page_access_token" in cred else page_token
+                    )
+                    cred.pop("user_access_token", None)
+                    cred.pop("page_access_token", None)
+                    stored = self._store_oauth_tokens(candidate_user, candidate_page)
+                    scrubbed = self._write_settings_payload(settings_path, data)
+                    if stored and scrubbed:
+                        user_token, page_token = candidate_user, candidate_page
+                        logger.info(
+                            "[Instagram] Migrated legacy OAuth tokens to OS credential storage"
+                        )
+                    else:
+                        self._store_oauth_tokens("", "")
+                        user_token = page_token = ""
+                        self._last_error_message = (
+                            "기존 Instagram 인증 정보를 안전하게 이전하지 못했습니다. "
+                            "계정을 다시 연결해 주세요."
+                        )
                 self._credentials = InstagramCredentials(
-                    user_access_token=self._decrypt_secret(str(cred.get("user_access_token", "") or "")),
-                    page_access_token=self._decrypt_secret(str(cred.get("page_access_token", "") or "")),
+                    user_access_token=user_token,
+                    page_access_token=page_token,
                     expires_at=float(cred.get("expires_at", 0.0) or 0.0),
                     scope=str(cred.get("scope", "") or ""),
                 )
@@ -231,10 +337,14 @@ class InstagramManager:
             logger.error(f"[Instagram] 설정 로드 실패: {e}")
 
     def _save_settings(self) -> bool:
-        """Save account/credentials/upload settings to file."""
+        """Store OAuth tokens in the OS store and metadata in JSON."""
         settings_path = self._get_settings_path()
         try:
-            os.makedirs(os.path.dirname(settings_path), exist_ok=True)
+            previous_user, previous_page = self._read_oauth_tokens()
+            user_token = self._credentials.user_access_token if self._credentials else ""
+            page_token = self._credentials.page_access_token if self._credentials else ""
+            if not self._store_oauth_tokens(user_token, page_token):
+                return False
             data = {
                 "account": {
                     "ig_user_id": self._account.ig_user_id if self._account else "",
@@ -245,14 +355,6 @@ class InstagramManager:
                     "connected_at": self._account.connected_at if self._account else "",
                 },
                 "credentials": {
-                    "user_access_token": (
-                        self._encrypt_secret(self._credentials.user_access_token)
-                        if self._credentials else ""
-                    ),
-                    "page_access_token": (
-                        self._encrypt_secret(self._credentials.page_access_token)
-                        if self._credentials else ""
-                    ),
                     "expires_at": self._credentials.expires_at if self._credentials else 0.0,
                     "scope": self._credentials.scope if self._credentials else "",
                 },
@@ -263,8 +365,9 @@ class InstagramManager:
                     "max_retries": self._upload_settings.max_retries,
                 },
             }
-            with open(settings_path, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            if not self._write_settings_payload(settings_path, data):
+                self._store_oauth_tokens(previous_user, previous_page)
+                return False
             logger.debug("[Instagram] 설정 저장 완료")
             return True
         except Exception as e:

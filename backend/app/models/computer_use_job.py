@@ -37,7 +37,12 @@ class ComputerUseJob(Base):
     scope = Column(String(64), nullable=False, default="all")
     step_id = Column(String(96), nullable=True)
     step_title = Column(String(200), nullable=True)
+    # Legacy physical column name retained to avoid a destructive migration.
+    # New rows store only a server template identifier, never prompt plaintext.
     prompt = Column(Text, nullable=False)
+    # Bind the queued job to the exact server-side template revision that was
+    # authorized at enqueue time. The worker refuses a changed or missing hash.
+    template_sha256 = Column(String(64), nullable=True)
 
     status = Column(
         SQLEnum(ComputerUseJobStatus, values_callable=lambda x: [e.value for e in x]),
@@ -54,4 +59,3 @@ class ComputerUseJob(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
     started_at = Column(DateTime(timezone=True), nullable=True)
     finished_at = Column(DateTime(timezone=True), nullable=True)
-

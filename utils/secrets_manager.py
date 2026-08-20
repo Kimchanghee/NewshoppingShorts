@@ -196,6 +196,28 @@ class SecretsManager:
         return bool(cls._KEY_NAME_PATTERN.match(key_name))
 
     @classmethod
+    def _allow_file_fallback(cls) -> bool:
+        """Allow recoverable file storage only in an unfrozen dev runtime."""
+
+        return not (
+            sys.platform == "win32"
+            and bool(getattr(sys, "frozen", False))
+        )
+
+    @classmethod
+    def _record_os_store_required(cls) -> None:
+        cls._record_startup_issue(
+            code="ST-G003",
+            component="settings.secure_storage",
+            source_path="",
+            recovery_path="",
+            message=(
+                "Windows 보안 자격 증명 저장소를 사용할 수 없어 인증 정보를 "
+                "파일에 저장하지 않았습니다."
+            ),
+        )
+
+    @classmethod
     def store_api_key(cls, key_name: str, key_value: str) -> bool:
         """
         Store API key securely (thread-safe).
@@ -240,7 +262,17 @@ class SecretsManager:
                     logger.debug("Keyring storage failed: %s", type(e).__name__)
                     cls._use_keyring = False
 
-            # Fallback to file-based storage
+            # A packaged Windows client must fail closed.  A file encryption
+            # key stored beside its ciphertext is recoverable by the same
+            # local attacker who can inspect the application.
+            if not cls._allow_file_fallback():
+                cls._record_os_store_required()
+                logger.error(
+                    "OS credential store unavailable; refusing file fallback for %s",
+                    key_name,
+                )
+                return False
+
             return cls._store_to_file(key_name, key_value)
 
     @classmethod
@@ -277,11 +309,29 @@ class SecretsManager:
                     value = keyring.get_password(cls.SERVICE_NAME, key_name)
                     if value:
                         return value
+
+                    # Migrate older packaged releases only while a verified OS
+                    # store is available, then remove the recoverable file copy.
+                    if not cls._allow_file_fallback():
+                        legacy_value = cls._read_from_file(key_name)
+                        if legacy_value:
+                            keyring.set_password(cls.SERVICE_NAME, key_name, legacy_value)
+                            verify_value = keyring.get_password(cls.SERVICE_NAME, key_name)
+                            if verify_value == legacy_value:
+                                cls._delete_from_file(key_name)
+                                return legacy_value
+                            logger.error(
+                                "OS credential migration verification failed for %s",
+                                key_name,
+                            )
                 except Exception as e:
                     logger.debug("Keyring retrieval failed: %s", type(e).__name__)
                     cls._use_keyring = False
 
-            # Fallback to file-based storage
+            if not cls._allow_file_fallback():
+                cls._record_os_store_required()
+                return None
+
             return cls._read_from_file(key_name)
 
     @classmethod

@@ -102,8 +102,8 @@ def _verify_optional_bridge_key(x_bridge_api_key: Optional[str]) -> None:
         raise HTTPException(status_code=401, detail="Invalid bridge API key")
 
 
-def resolve_computer_use_prompt(payload: ComputerUseJobCreate) -> str:
-    """Resolve a server-owned template, or explicitly enabled freeform text."""
+def resolve_computer_use_prompt(payload: ComputerUseJobCreate) -> tuple[str, str]:
+    """Validate a server-owned template and return its identifier and text."""
     try:
         templates = json.loads(settings.COMPUTER_USE_PROMPT_TEMPLATES_JSON or "{}")
     except json.JSONDecodeError as exc:
@@ -116,12 +116,11 @@ def resolve_computer_use_prompt(payload: ComputerUseJobCreate) -> str:
         template = templates.get(template_id)
         if not isinstance(template, str) or len(template.strip()) < 20:
             raise HTTPException(status_code=400, detail="Unknown Computer Use template")
-        return template.strip()
+        return template_id, template.strip()
 
-    if settings.COMPUTER_USE_ALLOW_FREEFORM_PROMPTS:
-        prompt = str(payload.prompt or "").strip()
-        if len(prompt) >= 20:
-            return prompt
+    # Freeform prompt persistence would put proprietary instructions back into
+    # the database. Keep the legacy configuration field for compatibility, but
+    # fail closed regardless of its value.
     raise HTTPException(status_code=400, detail="A permitted server template is required")
 
 
@@ -170,7 +169,7 @@ async def create_computer_use_job(
 
     job_id = str(uuid4())
     now = datetime.now(timezone.utc)
-    prompt_text = resolve_computer_use_prompt(payload)
+    template_id, prompt_text = resolve_computer_use_prompt(payload)
     prompt_hash = hashlib.sha256(prompt_text.encode("utf-8")).hexdigest()
 
     log_body = {
@@ -179,6 +178,7 @@ async def create_computer_use_job(
         "scope": str(payload.scope or "all"),
         "step_id": str(payload.step_id or ""),
         "step_title": str(payload.step_title or ""),
+        "template_id": template_id,
         "prompt_sha256": prompt_hash,
         "prompt_length": len(prompt_text),
         "queued_at": now.isoformat(),
@@ -191,7 +191,10 @@ async def create_computer_use_job(
             scope=str(payload.scope or "all"),
             step_id=str(payload.step_id or ""),
             step_title=str(payload.step_title or ""),
-            prompt=prompt_text,
+            # Keep the legacy column name for schema compatibility; only the
+            # non-secret server template identifier is persisted.
+            prompt=template_id,
+            template_sha256=prompt_hash,
             status=ComputerUseJobStatus.QUEUED,
             attempt_count=0,
         )

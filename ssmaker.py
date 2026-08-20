@@ -7,6 +7,28 @@ import os
 import time
 import logging
 import traceback
+
+
+def _refuse_interrupted_protected_overlay() -> None:
+    """Prevent stale native overlays from shadowing source after a hard stop."""
+
+    if getattr(sys, "frozen", False):
+        return
+    project_root = os.path.dirname(os.path.abspath(__file__))
+    manifest = os.path.join(
+        project_root,
+        "build_staging",
+        "protected_modules_manifest.json",
+    )
+    if os.path.isfile(manifest):
+        raise RuntimeError(
+            "Interrupted protected build detected. Run "
+            "scripts/build_protected_modules.py cleanup before source execution."
+        )
+
+
+_refuse_interrupted_protected_overlay()
+
 from PyQt6 import QtCore, QtWidgets, QtGui
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
@@ -251,6 +273,121 @@ def run_optional_manager_runtime_smoke() -> int:
             return 2
     return 0 if report["ok"] else 1
 
+
+def run_protected_runtime_smoke() -> int:
+    """Exercise protected native modules without UI, credentials, or network."""
+    import hashlib
+    import importlib
+    import json
+
+    protected_modules = (
+        "prompts.audio_analysis",
+        "prompts.subtitle_split",
+        "prompts.translation",
+        "prompts.video_analysis",
+        "prompts.video_validation",
+        "core.providers",
+        "core.audio.pipeline",
+        "core.video.batch.analysis",
+        "core.video.batch.encoder",
+        "core.video.batch.processor",
+        "core.video.batch.subtitle_handler",
+        "core.video.batch.tts_generator",
+        "core.video.batch.tts_speed",
+        "core.video.batch.utils",
+        "core.video.batch.whisper_analyzer",
+        # Import the batch package before CreateFinalVideo to match application
+        # startup order and avoid their intentional compatibility re-export cycle.
+        "core.video.CreateFinalVideo",
+        "core.video.reeditor",
+        "core.video.render_integrity",
+        "core.video.video_validator",
+        "core.sourcing.coupang_scraper",
+        "core.sourcing.gemini_computer_use",
+        "core.sourcing.keyword_converter",
+        "core.sourcing.pipeline",
+        "core.sourcing.platform_pipeline",
+        "core.sourcing.platform_shorts_searcher",
+        "core.sourcing.platform_video_collector",
+        "core.sourcing.product_searcher",
+        "processors.subtitle_detector",
+        "processors.subtitle_processor",
+        "processors.tts_processor",
+        "processors.video_composer",
+        "managers.settings_manager",
+        "ui.panels.settings_tab",
+        "ui.panels.upload_panel",
+    )
+    report = {"ok": True, "modules": {}, "prompt_contract": False}
+    for module_name in protected_modules:
+        try:
+            importlib.import_module(module_name)
+            report["modules"][module_name] = {"ok": True}
+        except Exception as exc:
+            report["ok"] = False
+            report["modules"][module_name] = {
+                "ok": False,
+                # Never serialize exception text from a protected module; it
+                # can contain user data or decoded implementation strings.
+                "error_type": type(exc).__name__,
+            }
+
+    try:
+        from prompts import (
+            get_audio_analysis_prompt,
+            get_subtitle_split_prompt,
+            get_translation_prompt,
+            get_video_analysis_prompt,
+            get_video_validation_prompt,
+        )
+
+        outputs = (
+            get_audio_analysis_prompt(["segment-a", "segment-b"]),
+            get_subtitle_split_prompt("sample subtitle text"),
+            get_translation_prompt(
+                "source-script",
+                30.0,
+                27.0,
+                90,
+                "concise",
+                ["cta-one", "cta-two", "cta-three"],
+            ),
+            get_video_analysis_prompt(["cta-one", "cta-two", "cta-three"]),
+            get_video_validation_prompt(),
+        )
+        expected_hashes = (
+            "0179e8657e4a66471f04e1ede604305cf79ca78f8f60be1a97d1aa2472786aff",
+            "aa2e69f4dbd585f855bd1af7198e468dd94c64e2d38842500dcf6f1eda4c4f0c",
+            "e50f2db746d6692bc7f2eeb253e57b84e2dd5d8ae5fc3882365511ec46406062",
+            "15348082411fa07c4cb8c8d939a17052ad3bd161fdbe976ea3cfe5e4145289e6",
+            "c2085933106bbd46b156e8e5a677f1ab8803406988e1bbc9a1b5f34b1654cb0d",
+        )
+        actual_hashes = tuple(
+            hashlib.sha256(output.encode("utf-8")).hexdigest()
+            for output in outputs
+        )
+        report["prompt_contract"] = actual_hashes == expected_hashes
+        if not report["prompt_contract"]:
+            report["ok"] = False
+    except Exception as exc:
+        report["ok"] = False
+        report["prompt_error_type"] = type(exc).__name__
+
+    report_path = os.environ.get(
+        "SSMAKER_PROTECTED_RUNTIME_REPORT",
+        "",
+    ).strip()
+    if report_path:
+        try:
+            report_dir = os.path.dirname(os.path.abspath(report_path))
+            if report_dir:
+                os.makedirs(report_dir, exist_ok=True)
+            with open(report_path, "w", encoding="utf-8") as report_file:
+                json.dump(report, report_file, ensure_ascii=False, indent=2)
+        except OSError:
+            return 2
+    return 0 if report["ok"] else 1
+
 class StartupWorker(QtCore.QThread):
     progress = QtCore.pyqtSignal(int)
     status = QtCore.pyqtSignal(str)
@@ -316,6 +453,8 @@ if __name__ == "__main__":
         sys.exit(run_youtube_runtime_smoke())
     if "--optional-manager-runtime-smoke" in sys.argv:
         sys.exit(run_optional_manager_runtime_smoke())
+    if "--protected-runtime-smoke" in sys.argv:
+        sys.exit(run_protected_runtime_smoke())
 
     # Setup logging first
     log_file = setup_logging()

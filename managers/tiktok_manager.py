@@ -13,6 +13,7 @@ Handles:
 import json
 import os
 import re
+import secrets as _secrets
 import threading
 import time
 import requests
@@ -101,6 +102,8 @@ class TikTokManager:
         "video.upload"
     ]
     APP_CREDENTIALS_KEY = "tiktok_app_credentials_v1"
+    ACCESS_TOKEN_KEY = "tiktok_access_token_v1"
+    REFRESH_TOKEN_KEY = "tiktok_refresh_token_v1"
     DEFAULT_REDIRECT_URI = "http://localhost:8080/callback"
 
     def __init__(self, gui=None, settings_file: str = "tiktok_settings.json"):
@@ -162,20 +165,8 @@ class TikTokManager:
         return os.path.join(base_dir, self.settings_file)
 
     @staticmethod
-    def _encrypt_secret(value: str) -> str:
-        """Encrypt sensitive token value for local persistence."""
-        if not value:
-            return value
-        try:
-            from utils.secrets_manager import SecretsManager
-            return SecretsManager._simple_encrypt(value)
-        except Exception as e:
-            logger.warning(f"[TikTok] Token encryption failed, storing plaintext: {e}")
-            return value
-
-    @staticmethod
     def _decrypt_secret(value: str) -> str:
-        """Decrypt persisted token value. Returns plaintext for legacy values."""
+        """Read a legacy file token only long enough to migrate it."""
         if not value:
             return value
         if value.startswith("fernet:"):
@@ -186,6 +177,95 @@ class TikTokManager:
                 logger.warning(f"[TikTok] Token decryption failed: {e}")
                 return ""
         return value
+
+    @classmethod
+    def _read_oauth_tokens(cls) -> tuple[str, str]:
+        from utils.secrets_manager import get_secrets_manager
+
+        try:
+            store = get_secrets_manager()
+            return (
+                str(store.get_credential(cls.ACCESS_TOKEN_KEY) or ""),
+                str(store.get_credential(cls.REFRESH_TOKEN_KEY) or ""),
+            )
+        except Exception as exc:
+            logger.error(
+                "[TikTok] OAuth credential-store read failed: %s",
+                type(exc).__name__,
+            )
+            return "", ""
+
+    @classmethod
+    def _store_oauth_tokens(cls, access_token: str, refresh_token: str) -> bool:
+        """Transactionally store OAuth tokens outside the settings JSON."""
+
+        from utils.secrets_manager import get_secrets_manager
+
+        values = {
+            cls.ACCESS_TOKEN_KEY: str(access_token or ""),
+            cls.REFRESH_TOKEN_KEY: str(refresh_token or ""),
+        }
+        touched: list[str] = []
+        try:
+            store = get_secrets_manager()
+            previous = {
+                key: str(store.get_credential(key) or "")
+                for key in values
+            }
+            for key, value in values.items():
+                touched.append(key)
+                if value:
+                    if not store.set_credential(key, value):
+                        raise RuntimeError("OS credential write failed")
+                    verified = str(store.get_credential(key) or "")
+                    if not _secrets.compare_digest(verified, value):
+                        raise RuntimeError("OS credential verification failed")
+                else:
+                    store.delete_credential(key)
+                    if store.get_credential(key):
+                        raise RuntimeError("OS credential deletion failed")
+            return True
+        except Exception as exc:
+            logger.error(
+                "[TikTok] OAuth credential-store update failed: %s",
+                type(exc).__name__,
+            )
+            for key in reversed(touched):
+                old_value = previous.get(key, "")
+                try:
+                    if old_value:
+                        store.set_credential(key, old_value)
+                    else:
+                        store.delete_credential(key)
+                except Exception:
+                    logger.error("[TikTok] OAuth credential rollback failed")
+            return False
+
+    @staticmethod
+    def _write_settings_payload(settings_path: str, data: Dict[str, Any]) -> bool:
+        """Atomically replace non-secret settings metadata."""
+
+        temp_path = f"{settings_path}.{os.getpid()}.{threading.get_ident()}.tmp"
+        try:
+            parent = os.path.dirname(settings_path)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            with open(temp_path, "w", encoding="utf-8") as stream:
+                json.dump(data, stream, ensure_ascii=False, indent=2)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, settings_path)
+            return True
+        except Exception as exc:
+            logger.error(
+                "[TikTok] Atomic settings write failed: %s",
+                type(exc).__name__,
+            )
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+            return False
 
     # ============ App credentials (Client Key / Secret / Redirect) ============
 
@@ -268,7 +348,6 @@ class TikTokManager:
     def _load_settings(self) -> None:
         """Load settings from file"""
         settings_path = self._get_settings_path()
-        migrated_plaintext = False
 
         try:
             if os.path.exists(settings_path):
@@ -291,15 +370,41 @@ class TikTokManager:
                 # Load credentials
                 if "credentials" in data:
                     cred = data["credentials"]
-                    raw_access_token = str(cred.get("access_token", "") or "")
-                    raw_refresh_token = str(cred.get("refresh_token", "") or "")
-                    access_token = self._decrypt_secret(raw_access_token)
-                    refresh_token = self._decrypt_secret(raw_refresh_token)
-
-                    if raw_access_token and not raw_access_token.startswith("fernet:"):
-                        migrated_plaintext = True
-                    if raw_refresh_token and not raw_refresh_token.startswith("fernet:"):
-                        migrated_plaintext = True
+                    access_token, refresh_token = self._read_oauth_tokens()
+                    legacy_present = (
+                        "access_token" in cred or "refresh_token" in cred
+                    )
+                    if legacy_present:
+                        candidate_access = (
+                            self._decrypt_secret(str(cred.get("access_token", "") or ""))
+                            if "access_token" in cred else access_token
+                        )
+                        candidate_refresh = (
+                            self._decrypt_secret(str(cred.get("refresh_token", "") or ""))
+                            if "refresh_token" in cred else refresh_token
+                        )
+                        cred.pop("access_token", None)
+                        cred.pop("refresh_token", None)
+                        stored = self._store_oauth_tokens(
+                            candidate_access,
+                            candidate_refresh,
+                        )
+                        scrubbed = self._write_settings_payload(settings_path, data)
+                        if stored and scrubbed:
+                            access_token, refresh_token = (
+                                candidate_access,
+                                candidate_refresh,
+                            )
+                            logger.info(
+                                "[TikTok] Migrated legacy OAuth tokens to OS credential storage"
+                            )
+                        else:
+                            self._store_oauth_tokens("", "")
+                            access_token = refresh_token = ""
+                            self._last_error_message = (
+                                "기존 TikTok 인증 정보를 안전하게 이전하지 못했습니다. "
+                                "계정을 다시 연결해 주세요."
+                            )
 
                     self._credentials = TikTokCredentials(
                         access_token=access_token,
@@ -323,19 +428,20 @@ class TikTokManager:
                         max_video_length=us.get("max_video_length", 180)
                     )
 
-                if migrated_plaintext and self._credentials:
-                    logger.info("[TikTok] Migrating plaintext OAuth tokens to encrypted storage")
-                    self._save_settings()
-
                 logger.debug("[TikTok] 설정 로드 완료")
         except Exception as e:
             logger.error(f"[TikTok] 설정 로드 실패: {e}")
 
     def _save_settings(self) -> bool:
-        """Save settings to file"""
+        """Store OAuth tokens in the OS store and metadata in JSON."""
         settings_path = self._get_settings_path()
 
         try:
+            previous_access, previous_refresh = self._read_oauth_tokens()
+            access_token = self._credentials.access_token if self._credentials else ""
+            refresh_token = self._credentials.refresh_token if self._credentials else ""
+            if not self._store_oauth_tokens(access_token, refresh_token):
+                return False
             data = {
                 "channel": {
                     "open_id": self._channel.open_id if self._channel else "",
@@ -347,14 +453,6 @@ class TikTokManager:
                     "connected_at": self._channel.connected_at if self._channel else ""
                 },
                 "credentials": {
-                    "access_token": (
-                        self._encrypt_secret(self._credentials.access_token)
-                        if self._credentials else ""
-                    ),
-                    "refresh_token": (
-                        self._encrypt_secret(self._credentials.refresh_token)
-                        if self._credentials else ""
-                    ),
                     "open_id": self._credentials.open_id if self._credentials else "",
                     "expires_at": self._credentials.expires_at if self._credentials else 0.0,
                     "scope": self._credentials.scope if self._credentials else ""
@@ -371,8 +469,9 @@ class TikTokManager:
                 }
             }
 
-            with open(settings_path, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            if not self._write_settings_payload(settings_path, data):
+                self._store_oauth_tokens(previous_access, previous_refresh)
+                return False
 
             logger.debug("[TikTok] 설정 저장 완료")
             return True

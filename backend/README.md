@@ -86,8 +86,9 @@ Computer Use 작업은 기본적으로 비활성화되어 있으며, 전용 브�
 - `setup_step_<단계 ID>` (예: `setup_step_youtube`)
 
 운영 서버의 `COMPUTER_USE_PROMPT_TEMPLATES_JSON`에는 실제 사용하는 모든 ID와
-20자 이상의 프롬프트를 등록해야 합니다. 자유 형식 프롬프트는 명시적으로
-`COMPUTER_USE_ALLOW_FREEFORM_PROMPTS=true`를 설정하지 않는 한 거부됩니다.
+20자 이상의 프롬프트를 등록해야 합니다. 자유 형식 프롬프트는 항상 거부되며,
+DB에는 템플릿 ID만 저장됩니다. 워커는 실행 직전에 서버 설정에서 템플릿을
+해석하고 Codex CLI 표준입력으로 전달하므로 프로세스 인자에도 남지 않습니다.
 
 ## 운영 배포 순서
 

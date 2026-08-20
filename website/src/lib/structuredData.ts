@@ -16,6 +16,7 @@ import {
   SITE_URL,
 } from "@/constants/site";
 import type { FAQItem } from "@/data/faqs";
+import { LATEST_VERIFIED_BUILD_VERSION } from "@/constants/release";
 
 type SchemaObject = Record<string, unknown>;
 
@@ -157,6 +158,7 @@ export function buildSoftwareApplicationSchema(): SchemaObject {
     applicationCategory: "BusinessApplication",
     applicationSubCategory: "AI video editing automation",
     operatingSystem: "Windows",
+    softwareVersion: LATEST_VERIFIED_BUILD_VERSION,
     downloadUrl: DEFAULT_DOWNLOAD_URL,
     installUrl: DEFAULT_INSTALL_URL,
     screenshot: DEFAULT_OG_IMAGE_URL,

@@ -31,7 +31,10 @@ from app.configuration import get_settings
 from app.database import SessionLocal, init_db, verify_database_revision
 from app.utils.billing_crypto import validate_billing_crypto_startup
 from app.scheduler.auth_maintenance import cleanup_auth_records_once, run_auth_cleanup_loop
-from app.scheduler.computer_use_worker import run_computer_use_worker_loop
+from app.scheduler.computer_use_worker import (
+    run_computer_use_worker_loop,
+    scrub_legacy_job_prompts,
+)
 from app.public_pages import render_privacy_policy, render_terms_of_service
 from app.showcase_page import render_ocr_showcase
 
@@ -78,6 +81,9 @@ async def startup_event():
         )
         # 5. Run one cleanup at startup + periodic cleanup loop.
         cleanup_auth_records_once()
+        # Remove any prompt plaintext written by older bridge releases before
+        # the API starts serving traffic, even when the optional worker is off.
+        scrub_legacy_job_prompts()
         global _auth_cleanup_task
         global _auth_cleanup_stop_event
         if _auth_cleanup_stop_event is None:

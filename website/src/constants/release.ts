@@ -1,4 +1,6 @@
 export const MS_STORE_URL = "https://apps.microsoft.com/detail/9P43TQHLP8WH?hl=ko-KR&gl=KR";
+export const LATEST_VERIFIED_BUILD_VERSION = "1.5.71";
+export const LATEST_VERIFIED_RELEASE_URL = "/notice/release-source-v1.5.71/index.html";
 export const DIRECT_INSTALLER_VERSION = "1.5.70";
 export const DIRECT_INSTALLER_CHANNEL = "manual-direct";
 export const DIRECT_DOWNLOAD_URL =

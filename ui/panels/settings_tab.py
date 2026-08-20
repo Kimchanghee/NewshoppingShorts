@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import os
 import re
-import shlex
 import shutil
 import subprocess
 import sys
@@ -3608,46 +3607,33 @@ class SettingsTab(QWidget, ThemedMixin):
             "url": url,
         }
 
-    @staticmethod
-    def _escape_for_applescript(raw_text: str) -> str:
-        """Escape shell command text for AppleScript string literal."""
-        return str(raw_text or "").replace("\\", "\\\\").replace("\"", "\\\"")
+    def _launch_codex_terminal_process(
+        self,
+        args: List[str],
+        workspace: str,
+        prompt: str,
+    ) -> Optional[subprocess.Popen]:
+        """Launch Codex with its prompt on stdin, never in process argv."""
 
-    def _launch_codex_terminal_process(self, args: List[str], workspace: str) -> Optional[subprocess.Popen]:
-        """
-        Launch Codex in a new terminal window according to host OS.
-
-        - Windows: new cmd console (/k keeps session open)
-        - macOS: Terminal via AppleScript
-        - Linux/other: best-effort x-terminal-emulator fallback
-        """
-        if os.name == "nt":
-            windows_cmd = subprocess.list2cmdline(args)
-            creation_flags = int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
-            return subprocess.Popen(
-                ["cmd.exe", "/k", windows_cmd],
-                cwd=workspace,
-                creationflags=creation_flags,
-            )
-
-        posix_cmd = " ".join(shlex.quote(part) for part in args)
-        if sys.platform == "darwin":
-            apple_script_lines = [
-                'tell application "Terminal"',
-                "activate",
-                f'do script "{self._escape_for_applescript(posix_cmd)}"',
-                "end tell",
-            ]
-            osa_args: List[str] = []
-            for line in apple_script_lines:
-                osa_args.extend(["-e", line])
-            subprocess.run(["osascript", *osa_args], check=True, timeout=8)
-            return None
-
-        return subprocess.Popen(
-            ["x-terminal-emulator", "-e", "bash", "-lc", posix_cmd],
-            cwd=workspace,
+        creation_flags = (
+            int(getattr(subprocess, "CREATE_NEW_CONSOLE", 0))
+            if os.name == "nt" else 0
         )
+        process = subprocess.Popen(
+            args,
+            cwd=workspace,
+            creationflags=creation_flags,
+            stdin=subprocess.PIPE,
+        )
+        try:
+            if process.stdin is None:
+                raise RuntimeError("Codex stdin pipe unavailable")
+            process.stdin.write(str(prompt or "").encode("utf-8"))
+            process.stdin.close()
+        except Exception:
+            process.kill()
+            raise
+        return process
 
     def _build_computer_use_prompt_for_target(self, target: str) -> str:
         """Build a Computer Use handoff prompt scoped to a single integration."""
@@ -3827,19 +3813,23 @@ class SettingsTab(QWidget, ThemedMixin):
         model_name = str(cli_settings.get("model", "") or "").strip()
         workspace = os.path.abspath(os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
 
-        args = [codex_path, "--cd", workspace]
+        args = [codex_path, "exec", "--cd", workspace]
         if model_name:
             args.extend(["--model", model_name])
-        args.append(prompt)
+        args.append("-")
 
         try:
-            process = self._launch_codex_terminal_process(args=args, workspace=workspace)
+            process = self._launch_codex_terminal_process(
+                args=args,
+                workspace=workspace,
+                prompt=prompt,
+            )
             self._append_setup_log(f"Codex Computer Use 실행: {label}")
             self._start_local_computer_use_process_monitor(process, label)
             show_info(
                 self,
                 "Codex 실행 완료",
-                "새 터미널에서 Codex가 시작되었습니다.\n"
+                "Codex 자동 설정 작업이 시작되었습니다.\n"
                 "로그인/2FA/CAPTCHA/API 키 발급만 직접 처리하고, 나머지는 Codex가 진행하도록 맡기세요.",
             )
         except Exception as exc:

@@ -197,6 +197,14 @@ try {
     (Join-Path $Root "scripts\dist") `
     -Recurse -Force -ErrorAction SilentlyContinue
 
+  # Scan the current source tree before downloading models or creating build
+  # outputs. The pinned OSS binary is hash-verified and always redacts findings.
+  Invoke-Native "[1.1/5] Scanning source for embedded secrets (Gitleaks)..." "pwsh" @(
+    "-NoProfile",
+    "-File", (Join-Path $Root "scripts\run_gitleaks.ps1"),
+    "-ProjectRoot", $Root
+  )
+
   Invoke-Native "[1.5/5] Materializing faster-whisper models (dereference HF cache symlinks)..." $Python @(
     (Join-Path $Root "scripts\materialize_whisper_models.py")
   )
@@ -295,13 +303,35 @@ try {
     "--output", $windowsVersionInfo
   )
 
+  # Compile prompt templates and proprietary pipeline modules to native
+  # extensions from a string-obfuscated staging tree.  The extensions are
+  # installed beside their sources only for PyInstaller module resolution and
+  # are removed in the finally block even when packaging fails.
+  $protectionScript = Join-Path $Root "scripts\build_protected_modules.py"
+  $protectionManifest = Join-Path $Root "build_staging\protected_modules_manifest.json"
   # ── PyInstaller: onedir build ──────────────────────────────────────────────
-  Invoke-Native "[2/5] Building ssmaker (onedir)..." $Python @(
-    "-m", "PyInstaller", "--noconfirm", "--clean",
-    "--distpath", (Join-Path $Root "dist"),
-    "--workpath", (Join-Path $Root "build"),
-    (Join-Path $Root "ssmaker.spec")
-  )
+  try {
+    Invoke-Native "[1.97/5] Compiling protected native modules..." $Python @(
+      $protectionScript,
+      "prepare",
+      "--project-root", $Root,
+      "--manifest", $protectionManifest
+    )
+
+    Invoke-Native "[2/5] Building ssmaker (onedir)..." $Python @(
+      "-m", "PyInstaller", "--noconfirm", "--clean",
+      "--distpath", (Join-Path $Root "dist"),
+      "--workpath", (Join-Path $Root "build"),
+      (Join-Path $Root "ssmaker.spec")
+    )
+  } finally {
+    Invoke-Native "[2.05/5] Removing protected build overlay..." $Python @(
+      $protectionScript,
+      "cleanup",
+      "--project-root", $Root,
+      "--manifest", $protectionManifest
+    )
+  }
 
   $distDir = Join-Path $Root "dist\ssmaker"
   $ssmakerExe = Join-Path $distDir "ssmaker.exe"
@@ -309,6 +339,25 @@ try {
   if (-not (Test-Path $ssmakerExe)) {
     throw "Build output missing: ${ssmakerExe}"
   }
+
+  # Fail closed if a protected module entered PYZ as bytecode, if a native
+  # module is absent, or if source prompt/algorithm literals are recoverable
+  # from the executable payload.
+  Invoke-Native "[2.1/5] Verifying release confidentiality..." $Python @(
+    (Join-Path $Root "scripts\verify_release_confidentiality.py"),
+    "--project-root", $Root,
+    "--dist-dir", $distDir
+  )
+
+  # Validate exploit-mitigation flags in the app bootloader and every
+  # SSMaker-authored native extension. This is a security gate, not a claim of
+  # anti-decompilation: it checks CFG, ASLR, DEP/NX, and PE section policy.
+  Invoke-Native "[2.15/5] Verifying first-party PE hardening (BinSkim)..." "pwsh" @(
+    "-NoProfile",
+    "-File", (Join-Path $Root "scripts\run_binskim.ps1"),
+    "-ProjectRoot", $Root,
+    "-DistDir", $distDir
+  )
 
   Invoke-Native "[2.2/5] Verifying packaged font assets and license notices..." $Python @(
     (Join-Path $Root "scripts\verify_font_assets.py"),
@@ -506,6 +555,34 @@ try {
   if (-not $imageioMeta) {
     throw "imageio package metadata (dist-info/METADATA) not found in build output."
   }
+
+  # Import every native protected module and compare fixed-input prompt hashes.
+  # This catches extension initialization failures and semantic changes that
+  # source-mode tests cannot see after Cython compilation.
+  $protectedRuntimeReport = Join-Path $Root "build\protected_runtime_frozen.json"
+  Remove-Item -LiteralPath $protectedRuntimeReport -Force -ErrorAction SilentlyContinue
+  $previousProtectedRuntimeReport = $env:SSMAKER_PROTECTED_RUNTIME_REPORT
+  try {
+    $env:SSMAKER_PROTECTED_RUNTIME_REPORT = $protectedRuntimeReport
+    Invoke-Native "[3.4/5] Running frozen protected-module runtime smoke test..." $ssmakerExe @(
+      "--protected-runtime-smoke"
+    )
+  } finally {
+    $env:SSMAKER_PROTECTED_RUNTIME_REPORT = $previousProtectedRuntimeReport
+  }
+  if (-not (Test-Path $protectedRuntimeReport)) {
+    throw "Frozen protected-module runtime smoke report was not created: $protectedRuntimeReport"
+  }
+  $protectedRuntimeData = Get-Content -LiteralPath $protectedRuntimeReport -Raw | ConvertFrom-Json
+  if (-not $protectedRuntimeData.ok) {
+    $failedProtectedModules = @(
+      $protectedRuntimeData.modules.PSObject.Properties |
+        Where-Object { -not $_.Value.ok } |
+        ForEach-Object { "$($_.Name): $($_.Value.error_type)" }
+    ) -join "; "
+    throw "Frozen protected-module runtime validation failed: $failedProtectedModules"
+  }
+  Write-Host "OK: frozen protected-module runtime smoke test passed."
 
   # Execute the frozen EXE itself in a non-UI, non-network diagnostic mode.
   # This proves PyInstaller included all dynamic OAuth imports and YouTube v3

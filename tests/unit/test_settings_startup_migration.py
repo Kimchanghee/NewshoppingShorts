@@ -7,6 +7,32 @@ import pytest
 from managers.settings_manager import SettingsManager
 
 
+class _MemoryCredentialStore:
+    def __init__(self):
+        self.values = {}
+
+    def set_credential(self, key, value):
+        self.values[key] = value
+        return True
+
+    def get_credential(self, key):
+        return self.values.get(key)
+
+    def delete_credential(self, key):
+        self.values.pop(key, None)
+        return True
+
+
+@pytest.fixture
+def memory_credentials(monkeypatch):
+    store = _MemoryCredentialStore()
+    monkeypatch.setattr(
+        "managers.settings_manager.get_secrets_manager",
+        lambda: store,
+    )
+    return store
+
+
 def _isolated_locations(monkeypatch, tmp_path):
     home = tmp_path / "home"
     current_dir = home / ".ssmaker"
@@ -37,7 +63,11 @@ def _write_json(path, value):
     path.write_text(json.dumps(value, ensure_ascii=False), encoding="utf-8")
 
 
-def test_current_settings_win_and_v1552_types_migrate_idempotently(monkeypatch, tmp_path):
+def test_current_settings_win_and_v1552_types_migrate_idempotently(
+    monkeypatch,
+    tmp_path,
+    memory_credentials,
+):
     paths = _isolated_locations(monkeypatch, tmp_path)
     _write_json(paths["install"], {"cta_id": "legacy-cta", "youtube_upload_interval": 60})
     _write_json(
@@ -66,7 +96,8 @@ def test_current_settings_win_and_v1552_types_migrate_idempotently(monkeypatch, 
     assert settings["platform_video_sources"] == ["douyin", "xiaohongshu"]
     assert settings["linktree_profile_url"] == ""
     assert settings["linktree_auto_publish"] is False
-    assert settings["cookies_inpock"] == {"session": "cookie-value"}
+    assert settings["cookies_inpock"] == {}
+    assert manager.get_inpock_cookies() == {"session": "cookie-value"}
     assert settings["cookies_1688"] == {}
     assert settings["future_plugin_setting"] == {"kept": [1, True, None]}
     assert settings["settings_schema_version"] == SettingsManager.CURRENT_SETTINGS_SCHEMA_VERSION
@@ -174,7 +205,11 @@ def test_saves_replace_a_same_directory_temporary_file(monkeypatch, tmp_path):
     assert json.loads(paths["current"].read_text(encoding="utf-8"))["theme"] == "dark"
 
 
-def test_corrupt_linktree_cipher_isolated_without_blocking_startup(monkeypatch, tmp_path):
+def test_corrupt_linktree_cipher_isolated_without_blocking_startup(
+    monkeypatch,
+    tmp_path,
+    memory_credentials,
+):
     paths = _isolated_locations(monkeypatch, tmp_path)
     _write_json(
         paths["current"],

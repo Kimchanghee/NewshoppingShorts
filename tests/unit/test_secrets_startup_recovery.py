@@ -46,3 +46,38 @@ def test_bad_gemini_cipher_isolated_without_exception(monkeypatch, tmp_path):
     issue = SecretsManager.get_startup_issues()[0]
     assert issue["code"] == "ST-G002"
     assert issue["component"] == "settings.gemini"
+
+
+def test_frozen_windows_refuses_recoverable_file_fallback(monkeypatch):
+    _reset_issues()
+    monkeypatch.setattr("utils.secrets_manager.sys.frozen", True, raising=False)
+    monkeypatch.setattr(SecretsManager, "_use_keyring", True)
+    monkeypatch.setattr(
+        SecretsManager,
+        "_init_keyring",
+        classmethod(lambda cls: False),
+    )
+
+    def _unexpected_store(cls, _name, _value):
+        raise AssertionError("packaged Windows must not use file fallback")
+
+    def _unexpected_read(cls, _name):
+        raise AssertionError("packaged Windows must not read fallback without keyring")
+
+    monkeypatch.setattr(
+        SecretsManager,
+        "_store_to_file",
+        classmethod(_unexpected_store),
+    )
+    monkeypatch.setattr(
+        SecretsManager,
+        "_read_from_file",
+        classmethod(_unexpected_read),
+    )
+
+    assert SecretsManager.store_api_key("gemini_api_1", "secret-value") is False
+    assert SecretsManager.get_api_key("gemini_api_1") is None
+    assert any(
+        issue["code"] == "ST-G003"
+        for issue in SecretsManager.get_startup_issues()
+    )

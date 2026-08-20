@@ -10,6 +10,27 @@
     <name>SSMaker</name>
   </author>
   <entry>
+    <id>https://shoppingshorts.store/notice/release-source-v1.5.71/index.html</id>
+    <title>SSMaker v1.5.71 소스 프리뷰</title>
+    <link href="https://shoppingshorts.store/notice/release-source-v1.5.71/index.html" />
+    <updated>2026-08-20T07:20:15.000Z</updated>
+    <summary>SSMaker v1.5.71 쿠팡 파트너스 링크 기반 전체 자동화의 입력과 검색 실패 처리를 안정화한 소스 프리릴리스입니다. 주요 수정 정상 파트너스 단축 링크를 일관되게 인식하고 대소문자를 그대로 유지 메신저·마크다운이 섞인 여러 링크를 순서대로 추출 쿠팡 접근 차단과 잘못된 링크를 구분 검색엔진 CAPTCHA 탭을 기본적으로 열지 않는 백그라운드 검색 검색 제공자·내부 오류·진단 정보를…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-website-downloads-20260820/index.html</id>
+    <title>SSMaker 웹사이트 다운로드 경로 개선</title>
+    <link href="https://shoppingshorts.store/notice/release-website-downloads-20260820/index.html" />
+    <updated>2026-08-20T03:31:10.000Z</updated>
+    <summary>공식 웹사이트에서 Microsoft Store 설치와 일반 Windows 설치 파일 다운로드를 모두 제공합니다. 최신 검증 빌드 v1.5.71 및 소스 프리릴리스 안내 공개 안정판 v1.5.70 일반 설치 파일 직접 다운로드 제공 v1.5.71 일반 설치 파일은 신뢰 가능한 코드서명 정책이 준비될 때까지 비공개 유지 Microsoft Store 패키지는 Windows 빌드 검증 완료, Pa…</summary>
+  </entry>
+  <entry>
+    <id>https://shoppingshorts.store/notice/release-source-v1.5.70/index.html</id>
+    <title>SSMaker v1.5.70 수동 설치판</title>
+    <link href="https://shoppingshorts.store/notice/release-source-v1.5.70/index.html" />
+    <updated>2026-08-19T20:35:13.000Z</updated>
+    <summary>SSMaker v1.5.70을 바로 설치할 수 있는 Windows 일반 설치 파일입니다. 설치 방법 SSMaker Setup v1.5.70.exe를 내려받아 실행하세요. 기존 일반 설치판을 사용 중이면 같은 위치에 그대로 업데이트 설치할 수 있습니다. 이 수동 설치판은 기존 SSMaker 자체 서명 인증서를 사용합니다. Windows 보호 화면이 표시되면 추가 정보 → 실행 을 선택하세요.…</summary>
+  </entry>
+  <entry>
     <id>https://shoppingshorts.store/notice/release-source-v1.5.69/index.html</id>
     <title>SSMaker v1.5.69 소스 프리뷰</title>
     <link href="https://shoppingshorts.store/notice/release-source-v1.5.69/index.html" />
@@ -127,27 +148,6 @@
     <link href="https://shoppingshorts.store/notice/release-v1.5.56/index.html" />
     <updated>2026-08-11T06:39:25.000Z</updated>
     <summary>SSMaker v1.5.56 Rename header and show installed release metadata 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 5982db8bad92cced5eb8aa65fa0591b749bd…</summary>
-  </entry>
-  <entry>
-    <id>https://shoppingshorts.store/notice/release-v1.5.55/index.html</id>
-    <title>Release v1.5.55</title>
-    <link href="https://shoppingshorts.store/notice/release-v1.5.55/index.html" />
-    <updated>2026-08-11T05:45:10.000Z</updated>
-    <summary>SSMaker v1.5.55 Verify updater and release metadata end to end 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 a0b720429089fb9d43fbe1611fc8865593d51bb…</summary>
-  </entry>
-  <entry>
-    <id>https://shoppingshorts.store/notice/release-v1.5.54/index.html</id>
-    <title>Release v1.5.54</title>
-    <link href="https://shoppingshorts.store/notice/release-v1.5.54/index.html" />
-    <updated>2026-08-11T05:13:48.000Z</updated>
-    <summary>SSMaker v1.5.54 Verify automatic updater end to end 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 ac2b304cb7d364c27391e8e8265ced2d6b291b7acd5c1eaf46…</summary>
-  </entry>
-  <entry>
-    <id>https://shoppingshorts.store/notice/release-v1.5.53/index.html</id>
-    <title>Release v1.5.53</title>
-    <link href="https://shoppingshorts.store/notice/release-v1.5.53/index.html" />
-    <updated>2026-08-11T04:38:04.000Z</updated>
-    <summary>SSMaker v1.5.53 Fix GitHub release asset redirect validation 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 f059b108b8ae92d5de11f1c838cfb21b6957be5de…</summary>
   </entry>
   <entry>
     <id>https://shoppingshorts.store/notice/spring-2026-new-subscriber-extra-month/index.html</id>

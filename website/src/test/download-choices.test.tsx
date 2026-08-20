@@ -1,7 +1,12 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DownloadChoices } from "@/components/DownloadChoices";
-import { DIRECT_DOWNLOAD_URL, MS_STORE_URL } from "@/constants/release";
+import {
+  DIRECT_DOWNLOAD_URL,
+  LATEST_VERIFIED_BUILD_VERSION,
+  LATEST_VERIFIED_RELEASE_URL,
+  MS_STORE_URL,
+} from "@/constants/release";
 
 afterEach(() => cleanup());
 
@@ -15,9 +20,13 @@ describe("download choices", () => {
       MS_STORE_URL,
     );
     expect(screen.getByRole("link", { name: /일반 설치 파일 받기/ })).toHaveAttribute("href", DIRECT_DOWNLOAD_URL);
-    expect(screen.getByText(/v1\.5\.70/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: `v${LATEST_VERIFIED_BUILD_VERSION} 릴리스 정보` })).toHaveAttribute(
+      "href",
+      LATEST_VERIFIED_RELEASE_URL,
+    );
+    expect(screen.getAllByText(/v1\.5\.70/).length).toBeGreaterThan(0);
     expect(screen.getByText("권장 · 자동 업데이트")).toBeInTheDocument();
-    expect(screen.getByText(/두 설치 방식 중 하나만 선택하세요/)).toBeInTheDocument();
+    expect(screen.getByText(/현재 안전하게 공개된 일반 설치 파일은 v1\.5\.70/)).toBeInTheDocument();
   });
 
   it("records the selected distribution channel without changing the existing event name", () => {

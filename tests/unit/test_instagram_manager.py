@@ -39,6 +39,35 @@ class _FakeResponse:
         return self._payload
 
 
+class _MemoryCredentialStore:
+    def __init__(self):
+        self.values = {}
+        self.fail_writes = False
+
+    def set_credential(self, key, value):
+        if self.fail_writes:
+            return False
+        self.values[key] = value
+        return True
+
+    def get_credential(self, key):
+        return self.values.get(key)
+
+    def delete_credential(self, key):
+        self.values.pop(key, None)
+        return True
+
+
+@pytest.fixture(autouse=True)
+def secure_store(monkeypatch):
+    store = _MemoryCredentialStore()
+    monkeypatch.setattr(
+        "utils.secrets_manager.get_secrets_manager",
+        lambda: store,
+    )
+    return store
+
+
 @pytest.fixture
 def manager(tmp_path):
     return _TestInstagramManager(tmp_path / "user")
@@ -64,7 +93,11 @@ def connected_manager(manager):
 
 # ============ Settings persistence ============
 
-def test_settings_round_trip_with_encrypted_tokens(tmp_path, connected_manager):
+def test_settings_round_trip_with_os_stored_tokens(
+    tmp_path,
+    connected_manager,
+    secure_store,
+):
     assert connected_manager._save_settings()
 
     reloaded = _TestInstagramManager(Path(connected_manager._test_user_dir))
@@ -73,15 +106,58 @@ def test_settings_round_trip_with_encrypted_tokens(tmp_path, connected_manager):
     assert reloaded._credentials.user_access_token == "user-token"
     assert reloaded._credentials.page_access_token == "page-token"
 
-    # Tokens must not be persisted as plaintext when encryption is available.
+    # OAuth tokens must never be present in the JSON, even as ciphertext whose
+    # key could be copied from the same user profile.
     raw = json.loads(
         (Path(connected_manager._test_user_dir) / "instagram_settings_test.json").read_text(
             encoding="utf-8"
         )
     )
-    stored_token = raw["credentials"]["user_access_token"]
-    if stored_token.startswith("fernet:"):
-        assert "user-token" not in stored_token
+    assert "user_access_token" not in raw["credentials"]
+    assert "page_access_token" not in raw["credentials"]
+    assert secure_store.values[InstagramManager.USER_ACCESS_TOKEN_KEY] == "user-token"
+    assert secure_store.values[InstagramManager.PAGE_ACCESS_TOKEN_KEY] == "page-token"
+
+
+def test_settings_refuses_json_write_when_os_credential_store_fails(
+    connected_manager,
+    secure_store,
+):
+    secure_store.fail_writes = True
+
+    assert connected_manager._save_settings() is False
+    settings_path = (
+        Path(connected_manager._test_user_dir) / "instagram_settings_test.json"
+    )
+    assert not settings_path.exists()
+
+
+def test_legacy_plaintext_tokens_migrate_and_are_scrubbed(tmp_path, secure_store):
+    user_dir = tmp_path / "legacy-user"
+    user_dir.mkdir(parents=True)
+    settings_path = user_dir / "instagram_settings_test.json"
+    settings_path.write_text(
+        json.dumps({
+            "account": {"ig_user_id": "ig-1", "username": "legacy"},
+            "credentials": {
+                "user_access_token": "legacy-user-token",
+                "page_access_token": "legacy-page-token",
+                "expires_at": 123.0,
+                "scope": "instagram_basic",
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    manager = _TestInstagramManager(user_dir)
+
+    assert manager._credentials.user_access_token == "legacy-user-token"
+    assert manager._credentials.page_access_token == "legacy-page-token"
+    scrubbed = json.loads(settings_path.read_text(encoding="utf-8"))
+    assert "user_access_token" not in scrubbed["credentials"]
+    assert "page_access_token" not in scrubbed["credentials"]
+    assert secure_store.values[InstagramManager.USER_ACCESS_TOKEN_KEY] == "legacy-user-token"
+    assert secure_store.values[InstagramManager.PAGE_ACCESS_TOKEN_KEY] == "legacy-page-token"
 
 
 # ============ App credentials validation ============

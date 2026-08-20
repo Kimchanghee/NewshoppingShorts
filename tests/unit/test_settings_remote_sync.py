@@ -1,7 +1,39 @@
+import pytest
+
 from managers.settings_manager import SettingsManager
 
 
-def test_remote_sync_seeds_account_with_portable_secret_values(monkeypatch, tmp_path):
+class _MemoryCredentialStore:
+    def __init__(self):
+        self.values = {}
+
+    def set_credential(self, key, value):
+        self.values[key] = value
+        return True
+
+    def get_credential(self, key):
+        return self.values.get(key)
+
+    def delete_credential(self, key):
+        self.values.pop(key, None)
+        return True
+
+
+@pytest.fixture
+def memory_credentials(monkeypatch):
+    store = _MemoryCredentialStore()
+    monkeypatch.setattr(
+        "managers.settings_manager.get_secrets_manager",
+        lambda: store,
+    )
+    return store
+
+
+def test_remote_sync_omits_device_local_secret_values(
+    monkeypatch,
+    tmp_path,
+    memory_credentials,
+):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
@@ -30,8 +62,8 @@ def test_remote_sync_seeds_account_with_portable_secret_values(monkeypatch, tmp_
     monkeypatch.setattr(rest, "save_user_settings", _fake_save)
 
     assert manager.sync_with_remote({}) is True
-    assert captured["linktree_webhook_url"] == "https://example.com/linktree-hook"
-    assert captured["linktree_api_key"] == "secret-token"
+    assert "linktree_webhook_url" not in captured
+    assert "linktree_api_key" not in captured
     assert captured["linktree_profile_url"] == "https://linktr.ee/example"
     assert captured["linktree_account_email"] == "k931103@gmail.com"
     assert captured["linktree_expected_account_email"] == "k931103@gmail.com"
@@ -40,7 +72,11 @@ def test_remote_sync_seeds_account_with_portable_secret_values(monkeypatch, tmp_
     assert captured["youtube_expected_account_email"] == "ympartners.uk@gmail.com"
 
 
-def test_remote_sync_loads_account_settings_and_reencrypts_locally(monkeypatch, tmp_path):
+def test_remote_sync_migrates_legacy_server_secrets_to_device_store(
+    monkeypatch,
+    tmp_path,
+    memory_credentials,
+):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setenv("USERPROFILE", str(tmp_path))
 
@@ -82,4 +118,6 @@ def test_remote_sync_loads_account_settings_and_reencrypts_locally(monkeypatch, 
     assert manager.get_linktree_auto_publish() is True
     assert manager.get_youtube_account_verification()["ok"] is True
     assert manager.get_1688_cookies() == {"session": "abc"}
-    assert manager.get_all_settings()["linktree_webhook_url"].startswith("fernet:")
+    assert manager.get_all_settings()["linktree_webhook_url"] == ""
+    assert manager.get_all_settings()["linktree_api_key"] == ""
+    assert manager.get_all_settings()["cookies_1688"] == {}

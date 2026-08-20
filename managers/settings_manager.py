@@ -5,6 +5,7 @@ Saves and loads user preferences (CTA, voice selection, font) to a JSON file.
 """
 
 import json
+import hmac
 import os
 import shutil
 import tempfile
@@ -41,6 +42,16 @@ class SettingsManager:
     REMOTE_SECRET_JSON_KEYS = {
         "cookies_inpock",
         "cookies_1688",
+    }
+
+    SECURE_CREDENTIAL_KEYS = {
+        "coupang_access_key": "settings_coupang_access_v1",
+        "coupang_secret_key": "settings_coupang_secret_v1",
+        "linktree_webhook_url": "settings_linktree_webhook_v1",
+        "linktree_api_key": "settings_linktree_api_v1",
+        "computer_use_bridge_api_key": "settings_computer_use_bridge_v1",
+        "cookies_inpock": "settings_cookies_inpock_v1",
+        "cookies_1688": "settings_cookies_1688_v1",
     }
 
     DEFAULT_PLATFORM_PROMPTS = {
@@ -463,9 +474,14 @@ class SettingsManager:
             code = item.get("code")
             component = item.get("component")
             source_path = item.get("source_path")
-            if code not in {"ST-S001", "ST-S002"}:
+            if code not in {"ST-S001", "ST-S002", "ST-S003"}:
                 continue
-            if component not in {"settings.core", "settings.youtube", "settings.linktree"}:
+            if component not in {
+                "settings.core",
+                "settings.youtube",
+                "settings.linktree",
+                "settings.secure_storage",
+            }:
                 continue
             if not isinstance(source_path, str):
                 continue
@@ -484,6 +500,9 @@ class SettingsManager:
                 ),
                 ("ST-S001", "settings.linktree"): (
                     "Linktree secure settings could not be decrypted and were reset."
+                ),
+                ("ST-S003", "settings.secure_storage"): (
+                    "The OS credential store was unavailable, so local credentials were cleared."
                 ),
             }
             safe_issue = {
@@ -556,6 +575,165 @@ class SettingsManager:
             "recovered_at": recovered_at.isoformat(),
         }
         return metadata
+
+    @classmethod
+    def _empty_secure_setting_value(cls, setting_key: str) -> Any:
+        return {} if setting_key in cls.REMOTE_SECRET_JSON_KEYS else ""
+
+    @staticmethod
+    def _decrypt_legacy_value(value: str) -> str:
+        """Decode an older local Fernet value only for one-time migration."""
+        if not value:
+            return ""
+        if not value.startswith("fernet:"):
+            return value
+        try:
+            from utils.secrets_manager import SecretsManager
+
+            return SecretsManager._simple_decrypt(value)
+        except Exception as error:
+            logger.warning(
+                "[SettingsManager] Legacy secure setting could not be decrypted: %s",
+                type(error).__name__,
+            )
+            return ""
+
+    @classmethod
+    def _legacy_secret_text(cls, setting_key: str, raw_value: Any) -> str:
+        if setting_key in cls.REMOTE_SECRET_JSON_KEYS:
+            if isinstance(raw_value, dict):
+                return json.dumps(raw_value, ensure_ascii=False) if raw_value else ""
+            if not isinstance(raw_value, str) or not raw_value:
+                return ""
+            decoded = cls._decrypt_legacy_value(raw_value)
+            try:
+                parsed = json.loads(decoded) if decoded else {}
+            except (TypeError, ValueError):
+                return ""
+            return json.dumps(parsed, ensure_ascii=False) if isinstance(parsed, dict) and parsed else ""
+
+        if not isinstance(raw_value, str):
+            return ""
+        return cls._decrypt_legacy_value(raw_value).strip()
+
+    @classmethod
+    def _store_secure_credential(cls, setting_key: str, value: str) -> bool:
+        credential_key = cls.SECURE_CREDENTIAL_KEYS[setting_key]
+        normalized = str(value or "").strip()
+        manager = get_secrets_manager()
+        try:
+            if not normalized:
+                manager.delete_credential(credential_key)
+                return not bool(manager.get_credential(credential_key))
+            if not manager.set_credential(credential_key, normalized):
+                return False
+            persisted = str(manager.get_credential(credential_key) or "")
+            return hmac.compare_digest(persisted, normalized)
+        except Exception as error:
+            logger.warning(
+                "[SettingsManager] OS credential operation failed for %s: %s",
+                setting_key,
+                type(error).__name__,
+            )
+            return False
+
+    @classmethod
+    def _read_secure_credential(cls, setting_key: str) -> str:
+        try:
+            return str(
+                get_secrets_manager().get_credential(
+                    cls.SECURE_CREDENTIAL_KEYS[setting_key]
+                )
+                or ""
+            )
+        except Exception as error:
+            logger.warning(
+                "[SettingsManager] OS credential read failed for %s: %s",
+                setting_key,
+                type(error).__name__,
+            )
+            return ""
+
+    def _record_secure_storage_issue(self) -> None:
+        with self._lock:
+            self._recovery_issues.append(
+                {
+                    "code": "ST-S003",
+                    "component": "settings.secure_storage",
+                    "message": (
+                        "OS credential storage was unavailable. Local credentials were "
+                        "cleared and must be connected again."
+                    ),
+                    "source_path": os.path.abspath(self._get_settings_path()),
+                }
+            )
+            self._recovery_issues = self._deduplicate_recovery_issues(
+                self._recovery_issues
+            )
+            self._settings["settings_recovery_issues"] = deepcopy(
+                self._recovery_issues
+            )
+
+    def _migrate_legacy_secret_settings(self) -> None:
+        """Move every legacy JSON/Fernet secret to the OS credential store."""
+        changed = False
+        storage_failed = False
+        corrupt_linktree_value = False
+
+        for setting_key in self.SECURE_CREDENTIAL_KEYS:
+            with self._lock:
+                raw_value = deepcopy(
+                    self._settings.get(
+                        setting_key,
+                        self._empty_secure_setting_value(setting_key),
+                    )
+                )
+            if raw_value in (None, "", {}):
+                continue
+
+            secret_text = self._legacy_secret_text(setting_key, raw_value)
+            stored = False
+            if secret_text:
+                stored = self._store_secure_credential(setting_key, secret_text)
+                storage_failed = storage_failed or not stored
+            elif setting_key in {"linktree_webhook_url", "linktree_api_key"}:
+                corrupt_linktree_value = True
+            else:
+                storage_failed = True
+            with self._lock:
+                self._settings[setting_key] = self._empty_secure_setting_value(
+                    setting_key
+                )
+                if setting_key in {"linktree_webhook_url", "linktree_api_key"} and not stored:
+                    self._settings["linktree_auto_publish"] = False
+                if setting_key == "computer_use_bridge_api_key" and not stored:
+                    self._settings["computer_use_bridge_enabled"] = False
+            changed = True
+
+        if corrupt_linktree_value:
+            with self._lock:
+                self._recovery_issues.append(
+                    {
+                        "code": "ST-S001",
+                        "component": "settings.linktree",
+                        "message": (
+                            "Linktree secure settings could not be decrypted and "
+                            "were reset."
+                        ),
+                        "source_path": os.path.abspath(self._get_settings_path()),
+                    }
+                )
+                self._recovery_issues = self._deduplicate_recovery_issues(
+                    self._recovery_issues
+                )
+                self._settings["settings_recovery_issues"] = deepcopy(
+                    self._recovery_issues
+                )
+
+        if storage_failed:
+            self._record_secure_storage_issue()
+        if changed or storage_failed:
+            self._save_settings(sync_remote=False)
 
     def _load_settings(self) -> None:
         """Load settings from file (thread-safe)"""
@@ -637,6 +815,10 @@ class SettingsManager:
             if not self._save_settings(sync_remote=False):
                 logger.warning("[SettingsManager] Could not persist normalized settings from %s", source_path)
 
+        # Secret-bearing settings from older releases must never remain in the
+        # JSON preferences file, even when OS credential storage is unavailable.
+        self._migrate_legacy_secret_settings()
+
     def _save_settings(self, sync_remote: bool = True) -> bool:
         """Save settings to file (thread-safe)"""
         settings_path = self._get_settings_path()
@@ -688,8 +870,9 @@ class SettingsManager:
         """
         Build a portable settings snapshot for account sync.
 
-        Sensitive values are decrypted before upload so another logged-in device can
-        re-encrypt them with its local secure-storage key after download.
+        Credentials and browser cookies are device-local and intentionally omitted.
+        This prevents the account-settings snapshot from becoming a second secret
+        store and causes a successful push to scrub legacy server-side copies.
         """
         with self._lock:
             snapshot = self._settings.copy()
@@ -700,27 +883,9 @@ class SettingsManager:
                 # Diagnostics contain local file paths and are intentionally
                 # device-local rather than part of account settings sync.
                 continue
-            if key in self.REMOTE_SECRET_STRING_KEYS:
-                if isinstance(value, str) and value:
-                    try:
-                        exported[key] = self._decrypt_value(value)
-                    except Exception:
-                        exported[key] = ""
-                else:
-                    exported[key] = str(value or "")
-            elif key in self.REMOTE_SECRET_JSON_KEYS:
-                if isinstance(value, str):
-                    try:
-                        decrypted = self._decrypt_value(value)
-                        exported[key] = json.loads(decrypted) if decrypted else {}
-                    except Exception:
-                        exported[key] = {}
-                elif isinstance(value, dict):
-                    exported[key] = value.copy()
-                else:
-                    exported[key] = {}
-            else:
-                exported[key] = value
+            if key in self.REMOTE_SECRET_STRING_KEYS or key in self.REMOTE_SECRET_JSON_KEYS:
+                continue
+            exported[key] = value
         return exported
 
     def _prepare_remote_settings_for_local(self, remote_settings: Dict[str, Any]) -> Dict[str, Any]:
@@ -728,27 +893,41 @@ class SettingsManager:
         if not isinstance(remote_settings, dict):
             remote_settings = {}
 
-        prepared = self._normalize_settings(remote_settings)
+        remote_copy = deepcopy(remote_settings)
+        legacy_secret_values = {
+            key: remote_copy.pop(key)
+            for key in self.SECURE_CREDENTIAL_KEYS
+            if key in remote_copy
+        }
+
+        prepared = self._normalize_settings(remote_copy)
         prepared.pop("settings_recovery_issues", None)
 
-        for key in self.REMOTE_SECRET_STRING_KEYS:
-            value = prepared.get(key, "")
-            if isinstance(value, str) and value.startswith("fernet:"):
-                # Legacy server payload from older client. Keep as-is; current
-                # machine may still be able to decrypt if the key matches.
+        storage_failed = False
+        for key in self.SECURE_CREDENTIAL_KEYS:
+            prepared[key] = self._empty_secure_setting_value(key)
+            raw_value = legacy_secret_values.get(key)
+            if raw_value in (None, "", {}):
                 continue
-            prepared[key] = self._encrypt_value(str(value or "").strip())
+            secret_text = self._legacy_secret_text(key, raw_value)
+            if not secret_text or not self._store_secure_credential(key, secret_text):
+                storage_failed = True
 
-        for key in self.REMOTE_SECRET_JSON_KEYS:
-            value = prepared.get(key, {})
-            if isinstance(value, str) and value.startswith("fernet:"):
-                continue
-            if not isinstance(value, dict):
-                value = {}
-            prepared[key] = (
-                self._encrypt_value(json.dumps(value, ensure_ascii=False))
-                if value
-                else {}
+        if storage_failed:
+            issue = {
+                "code": "ST-S003",
+                "component": "settings.secure_storage",
+                "message": (
+                    "OS credential storage was unavailable. Synced credentials "
+                    "were rejected and must be connected again."
+                ),
+                "source_path": os.path.abspath(self._get_settings_path()),
+            }
+            self._recovery_issues = self._deduplicate_recovery_issues(
+                [*self._recovery_issues, issue]
+            )
+            prepared["settings_recovery_issues"] = deepcopy(
+                self._recovery_issues
             )
 
         return prepared
@@ -1392,6 +1571,8 @@ class SettingsManager:
 
     def get_upload_settings(self) -> Dict[str, Any]:
         """Get all upload-related settings"""
+        coupang_keys = self.get_coupang_keys()
+        linktree_settings = self.get_linktree_settings()
         return {
             "youtube_connected": self.get_youtube_connected(),
             "youtube_channel_info": self.get_youtube_channel_info(),
@@ -1402,10 +1583,12 @@ class SettingsManager:
             "instagram_connected": self._settings.get("instagram_connected", False),
             "threads_connected": self._settings.get("threads_connected", False),
             "x_connected": self._settings.get("x_connected", False),
-            "coupang_connected": bool(self._settings.get("coupang_access_key") and self._settings.get("coupang_secret_key")),
-            "linktree_connected": bool(self._settings.get("linktree_webhook_url")),
+            "coupang_connected": bool(
+                coupang_keys.get("access_key") and coupang_keys.get("secret_key")
+            ),
+            "linktree_connected": bool(linktree_settings.get("webhook_url")),
             "linktree_account_verification": self.get_linktree_account_verification(),
-            "inpock_connected": bool(self._settings.get("cookies_inpock")),
+            "inpock_connected": bool(self.get_inpock_cookies()),
         }
 
     # ============ Codex CLI Bridge Settings ============
@@ -1440,7 +1623,9 @@ class SettingsManager:
     def get_computer_use_settings(self) -> Dict[str, Any]:
         """Get computer-use policy and optional server-bridge settings."""
         bridge_url = str(self._settings.get("computer_use_bridge_url", "") or "").strip()
-        bridge_api_key = self._decrypt_value(str(self._settings.get("computer_use_bridge_api_key", "") or "")).strip()
+        bridge_api_key = self._read_secure_credential(
+            "computer_use_bridge_api_key"
+        ).strip()
         paid_only = bool(self._settings.get("computer_use_paid_only", True))
         bridge_enabled = bool(self._settings.get("computer_use_bridge_enabled", False))
         return {
@@ -1459,6 +1644,12 @@ class SettingsManager:
         bridge_api_key: Optional[str] = None,
     ) -> bool:
         """Save computer-use policy and optional server-bridge settings."""
+        if bridge_api_key is not None and not self._store_secure_credential(
+            "computer_use_bridge_api_key",
+            str(bridge_api_key or "").strip(),
+        ):
+            self._record_secure_storage_issue()
+            return False
         with self._lock:
             if paid_only is not None:
                 self._settings["computer_use_paid_only"] = bool(paid_only)
@@ -1467,7 +1658,7 @@ class SettingsManager:
             if bridge_url is not None:
                 self._settings["computer_use_bridge_url"] = str(bridge_url or "").strip()
             if bridge_api_key is not None:
-                self._settings["computer_use_bridge_api_key"] = self._encrypt_value(str(bridge_api_key or "").strip())
+                self._settings["computer_use_bridge_api_key"] = ""
         return self._save_settings()
 
     def get_sourcing_ai_policy(self) -> Dict[str, Any]:
@@ -1655,59 +1846,32 @@ class SettingsManager:
 
     # ============ Automation Settings ============
 
-    @staticmethod
-    def _encrypt_value(value: str) -> str:
-        """Encrypt a sensitive string using SecretsManager's Fernet encryption."""
-        if not value:
-            return value
-        try:
-            from utils.secrets_manager import SecretsManager
-            return SecretsManager._simple_encrypt(value)
-        except Exception as e:
-            logger.warning(f"[SettingsManager] Encryption failed, storing as-is: {e}")
-            return value
-
-    @staticmethod
-    def _decrypt_value(value: str) -> str:
-        """Decrypt a value. If it's plaintext (legacy), return as-is and flag for migration."""
-        if not value:
-            return value
-        # Encrypted values start with 'fernet:' prefix
-        if value.startswith("fernet:"):
-            try:
-                from utils.secrets_manager import SecretsManager
-                return SecretsManager._simple_decrypt(value)
-            except Exception as e:
-                logger.warning(f"[SettingsManager] Decryption failed: {e}")
-                return ""
-        # Legacy plaintext value -- return as-is (will be re-encrypted on next save)
-        return value
-
     def get_coupang_keys(self) -> Dict[str, str]:
-        """Get Coupang Partners API keys (auto-decrypts, migrates plaintext on read)"""
-        raw_access = self._settings.get("coupang_access_key", "")
-        raw_secret = self._settings.get("coupang_secret_key", "")
-        access_key = self._decrypt_value(raw_access)
-        secret_key = self._decrypt_value(raw_secret)
-        # Auto-migrate: if stored as plaintext, re-encrypt and save
-        if raw_access and not raw_access.startswith("fernet:") and access_key:
-            self.set_coupang_keys(access_key, secret_key)
+        """Get device-local Coupang Partners API keys from OS storage."""
         return {
-            "access_key": access_key,
-            "secret_key": secret_key,
+            "access_key": self._read_secure_credential("coupang_access_key"),
+            "secret_key": self._read_secure_credential("coupang_secret_key"),
         }
 
     def set_coupang_keys(self, access_key: str, secret_key: str) -> bool:
-        """Save Coupang Partners API keys (encrypted)"""
+        """Save Coupang Partners API keys in the OS credential store."""
+        values = {
+            "coupang_access_key": str(access_key or "").strip(),
+            "coupang_secret_key": str(secret_key or "").strip(),
+        }
+        if not all(
+            self._store_secure_credential(key, value)
+            for key, value in values.items()
+        ):
+            self._record_secure_storage_issue()
+            return False
         with self._lock:
-            self._settings["coupang_access_key"] = self._encrypt_value(access_key)
-            self._settings["coupang_secret_key"] = self._encrypt_value(secret_key)
+            self._settings["coupang_access_key"] = ""
+            self._settings["coupang_secret_key"] = ""
         return self._save_settings()
 
     def get_linktree_settings(self) -> Dict[str, Any]:
         """Get Linktree webhook integration settings."""
-        raw_webhook = self._settings.get("linktree_webhook_url", "")
-        raw_api_key = self._settings.get("linktree_api_key", "")
         profile_url = str(self._settings.get("linktree_profile_url", "") or "").strip()
         account_email = self._normalize_account_email(self._settings.get("linktree_account_email", ""))
         expected_account_email = self._normalize_account_email(
@@ -1715,55 +1879,9 @@ class SettingsManager:
         )
         auto_publish = bool(self._settings.get("linktree_auto_publish", False))
 
-        webhook_url = self._decrypt_value(raw_webhook).strip()
-        api_key = self._decrypt_value(raw_api_key).strip()
-
-        corrupt_secure_value = (
-            bool(raw_webhook)
-            and str(raw_webhook).startswith("fernet:")
-            and not webhook_url
-        ) or (
-            bool(raw_api_key)
-            and str(raw_api_key).startswith("fernet:")
-            and not api_key
-        )
-        if corrupt_secure_value:
-            with self._lock:
-                self._settings["linktree_webhook_url"] = ""
-                self._settings["linktree_api_key"] = ""
-                self._settings["linktree_auto_publish"] = False
-                self._recovery_issues.append(
-                    {
-                        "code": "ST-S001",
-                        "component": "settings.linktree",
-                        "message": "Linktree 보안 설정을 해독하지 못해 해당 설정만 초기화했습니다.",
-                        "source_path": os.path.abspath(self._get_settings_path()),
-                    }
-                )
-                self._recovery_issues = self._deduplicate_recovery_issues(
-                    self._recovery_issues
-                )
-                self._settings["settings_recovery_issues"] = deepcopy(
-                    self._recovery_issues
-                )
-            self._save_settings(sync_remote=False)
-            raw_webhook = ""
-            raw_api_key = ""
-            auto_publish = False
-
-        migrated = False
-        if raw_webhook and not str(raw_webhook).startswith("fernet:") and webhook_url:
-            migrated = True
-        if raw_api_key and not str(raw_api_key).startswith("fernet:") and api_key:
-            migrated = True
-
-        if migrated:
-            self.set_linktree_settings(
-                webhook_url=webhook_url,
-                api_key=api_key,
-                profile_url=profile_url,
-                auto_publish=auto_publish,
-            )
+        webhook_url = self._read_secure_credential("linktree_webhook_url").strip()
+        api_key = self._read_secure_credential("linktree_api_key").strip()
+        auto_publish = auto_publish and bool(webhook_url)
 
         return {
             "webhook_url": webhook_url,
@@ -1783,10 +1901,20 @@ class SettingsManager:
         account_email: Optional[str] = None,
         expected_account_email: Optional[str] = None,
     ) -> bool:
-        """Save Linktree webhook integration settings."""
+        """Save Linktree secrets in OS storage and non-secrets in preferences."""
+        secret_values = {
+            "linktree_webhook_url": str(webhook_url or "").strip(),
+            "linktree_api_key": str(api_key or "").strip(),
+        }
+        if not all(
+            self._store_secure_credential(key, value)
+            for key, value in secret_values.items()
+        ):
+            self._record_secure_storage_issue()
+            return False
         with self._lock:
-            self._settings["linktree_webhook_url"] = self._encrypt_value(str(webhook_url or "").strip())
-            self._settings["linktree_api_key"] = self._encrypt_value(str(api_key or "").strip())
+            self._settings["linktree_webhook_url"] = ""
+            self._settings["linktree_api_key"] = ""
             self._settings["linktree_profile_url"] = str(profile_url or "").strip()
             if account_email is not None:
                 self._settings["linktree_account_email"] = self._normalize_account_email(account_email)
@@ -1856,51 +1984,43 @@ class SettingsManager:
         return self._save_settings()
 
     def get_inpock_cookies(self) -> Dict[str, str]:
-        """Get Inpock Link cookies (auto-decrypts)"""
-        raw = self._settings.get("cookies_inpock", {})
-        if isinstance(raw, str):
-            decrypted = self._decrypt_value(raw)
-            if decrypted:
-                try:
-                    import json as _json
-                    return _json.loads(decrypted)
-                except Exception:
-                    return {}
+        """Get device-local Inpock Link cookies from OS storage."""
+        raw = self._read_secure_credential("cookies_inpock")
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
             return {}
-        # Legacy plaintext dict -- migrate on next save
-        if raw and isinstance(raw, dict):
-            self.set_inpock_cookies(raw)
-        return raw if isinstance(raw, dict) else {}
+        return parsed if isinstance(parsed, dict) else {}
 
     def set_inpock_cookies(self, cookies: Dict[str, str]) -> bool:
-        """Save Inpock Link cookies (encrypted as JSON string)"""
-        import json as _json
+        """Save Inpock Link cookies in the OS credential store."""
+        normalized = cookies if isinstance(cookies, dict) else {}
+        serialized = json.dumps(normalized, ensure_ascii=False) if normalized else ""
+        if not self._store_secure_credential("cookies_inpock", serialized):
+            self._record_secure_storage_issue()
+            return False
         with self._lock:
-            self._settings["cookies_inpock"] = self._encrypt_value(_json.dumps(cookies, ensure_ascii=False))
+            self._settings["cookies_inpock"] = {}
         return self._save_settings()
 
     def get_1688_cookies(self) -> Dict[str, str]:
-        """Get 1688 cookies (auto-decrypts)"""
-        raw = self._settings.get("cookies_1688", {})
-        if isinstance(raw, str):
-            decrypted = self._decrypt_value(raw)
-            if decrypted:
-                try:
-                    import json as _json
-                    return _json.loads(decrypted)
-                except Exception:
-                    return {}
+        """Get device-local 1688 cookies from OS storage."""
+        raw = self._read_secure_credential("cookies_1688")
+        try:
+            parsed = json.loads(raw) if raw else {}
+        except (TypeError, ValueError):
             return {}
-        # Legacy plaintext dict -- migrate on next save
-        if raw and isinstance(raw, dict):
-            self.set_1688_cookies(raw)
-        return raw if isinstance(raw, dict) else {}
+        return parsed if isinstance(parsed, dict) else {}
 
     def set_1688_cookies(self, cookies: Dict[str, str]) -> bool:
-        """Save 1688 cookies (encrypted as JSON string)"""
-        import json as _json
+        """Save 1688 cookies in the OS credential store."""
+        normalized = cookies if isinstance(cookies, dict) else {}
+        serialized = json.dumps(normalized, ensure_ascii=False) if normalized else ""
+        if not self._store_secure_credential("cookies_1688", serialized):
+            self._record_secure_storage_issue()
+            return False
         with self._lock:
-            self._settings["cookies_1688"] = self._encrypt_value(_json.dumps(cookies, ensure_ascii=False))
+            self._settings["cookies_1688"] = {}
         return self._save_settings()
 
     # ============ Bulk Operations ============
@@ -1924,7 +2044,13 @@ class SettingsManager:
         Returns:
             True if save was successful
         """
-        self._settings.update(updates)
+        if any(key in self.SECURE_CREDENTIAL_KEYS for key in updates):
+            logger.warning(
+                "[SettingsManager] Bulk update rejected device-local secret fields"
+            )
+            return False
+        with self._lock:
+            self._settings.update(updates)
         return self._save_settings()
 
 

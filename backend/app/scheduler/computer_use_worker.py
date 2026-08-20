@@ -4,6 +4,9 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
+import json
 import logging
 import os
 import socket
@@ -37,8 +40,8 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def build_codex_cli_args(prompt: str) -> List[str]:
-    """Build Codex CLI argv from worker settings."""
+def build_codex_cli_args() -> List[str]:
+    """Build Codex CLI argv without placing the prompt in process metadata."""
     settings = get_settings()
     cli_path = str(settings.COMPUTER_USE_WORKER_CLI_PATH or "codex").strip() or "codex"
     workdir = str(settings.COMPUTER_USE_WORKER_WORKDIR or "").strip()
@@ -50,35 +53,79 @@ def build_codex_cli_args(prompt: str) -> List[str]:
         args.extend(["--cd", workdir])
     if model_name:
         args.extend(["--model", model_name])
-    args.append(str(prompt or ""))
+    # Official Codex CLI contract: PROMPT='-' reads the instruction from stdin.
+    args.append("-")
     return args
 
 
+def _prompt_templates() -> Dict[str, str]:
+    settings = get_settings()
+    try:
+        raw = json.loads(settings.COMPUTER_USE_PROMPT_TEMPLATES_JSON or "{}")
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Computer Use templates are invalid") from exc
+    if not isinstance(raw, dict):
+        raise RuntimeError("Computer Use templates are invalid")
+    return {
+        str(key): value.strip()
+        for key, value in raw.items()
+        if isinstance(key, str)
+        and isinstance(value, str)
+        and len(value.strip()) >= 20
+    }
+
+
+def resolve_template_prompt(template_id: str) -> str:
+    """Resolve prompt text from server configuration at execution time only."""
+
+    template = _prompt_templates().get(str(template_id or "").strip())
+    if not template:
+        raise RuntimeError("Unknown Computer Use template")
+    return template
+
+
+def scrub_legacy_job_prompts() -> int:
+    """Replace historical DB prompt plaintext with IDs or a redacted marker."""
+
+    db = SessionLocal()
+    try:
+        templates = _prompt_templates()
+        reverse = {value: key for key, value in templates.items()}
+        rows = db.query(ComputerUseJob).all()
+        changed = 0
+        for row in rows:
+            stored = str(row.prompt or "")
+            if stored in templates or stored == "__redacted__":
+                continue
+            row.prompt = reverse.get(stored, "__redacted__")
+            changed += 1
+        if changed:
+            db.commit()
+            logger.warning(
+                "[ComputerUseWorker] Scrubbed %d legacy prompt values from the job table",
+                changed,
+            )
+        return changed
+    except Exception:
+        db.rollback()
+        logger.exception("[ComputerUseWorker] Failed to scrub legacy prompt values")
+        raise
+    finally:
+        db.close()
+
+
 def summarize_process_output(stdout_bytes: bytes, stderr_bytes: bytes, limit_chars: int) -> str:
-    """Return compact output summary from worker subprocess result."""
-    stdout_text = (stdout_bytes or b"").decode("utf-8", errors="replace").strip()
-    stderr_text = (stderr_bytes or b"").decode("utf-8", errors="replace").strip()
+    """Return metadata only; raw model output is never retained or exposed."""
 
-    parts: List[str] = []
-    if stdout_text:
-        parts.append(f"stdout:\n{stdout_text}")
-    if stderr_text:
-        parts.append(f"stderr:\n{stderr_text}")
-    merged = "\n\n".join(parts).strip()
-    if not merged:
-        merged = "(no output)"
-
-    max_chars = max(256, int(limit_chars or 4000))
-    if len(merged) > max_chars and stdout_text and stderr_text:
-        # Preserve both stream labels even when truncating aggressively.
-        fixed_overhead = len("stdout:\n\n\nstderr:\n")
-        per_stream_budget = max(64, (max_chars - fixed_overhead) // 2)
-        clipped_stdout = stdout_text[: max(0, per_stream_budget - 3)] + "..."
-        clipped_stderr = stderr_text[: max(0, per_stream_budget - 3)] + "..."
-        merged = f"stdout:\n{clipped_stdout}\n\nstderr:\n{clipped_stderr}"
-    if len(merged) > max_chars:
-        return merged[: max_chars - 3] + "..."
-    return merged
+    del limit_chars  # Retained in the call contract for configuration compatibility.
+    stdout_len = len((stdout_bytes or b"").decode("utf-8", errors="replace"))
+    stderr_len = len((stderr_bytes or b"").decode("utf-8", errors="replace"))
+    if stdout_len == 0 and stderr_len == 0:
+        return "Worker completed without retained output"
+    return (
+        "Worker output captured securely and discarded "
+        f"(stdout_chars={stdout_len}, stderr_chars={stderr_len})"
+    )
 
 
 def _claim_next_job(worker_id: str) -> Optional[Dict[str, str]]:
@@ -130,7 +177,8 @@ def _claim_next_job(worker_id: str) -> Optional[Dict[str, str]]:
                 "id": str(claimed.id),
                 "job_id": str(claimed.job_id),
                 "user_id": str(claimed.user_id),
-                "prompt": str(claimed.prompt or ""),
+                "template_id": str(claimed.prompt or ""),
+                "template_sha256": str(claimed.template_sha256 or ""),
             }
         return None
     except Exception:
@@ -201,9 +249,46 @@ async def _execute_codex_job(job: Dict[str, str], worker_id: str) -> None:
     output_limit_chars = max(512, int(settings.COMPUTER_USE_WORKER_OUTPUT_LIMIT_CHARS or 4000))
     job_id = str(job.get("job_id") or "")
     user_id = int(job.get("user_id") or 0)
-    prompt = str(job.get("prompt") or "")
+    template_id = str(job.get("template_id") or "")
+    queued_template_hash = str(job.get("template_sha256") or "")
 
-    args = build_codex_cli_args(prompt)
+    try:
+        prompt = resolve_template_prompt(template_id)
+    except Exception:
+        _mark_job_result(
+            job_id=job_id,
+            status=ComputerUseJobStatus.FAILED,
+            summary=None,
+            error="Unknown or unavailable server template",
+        )
+        _append_user_log(
+            user_id,
+            "ERROR",
+            "computer_use_bridge_job_failed",
+            f"job_id={job_id} worker={worker_id} error=invalid_template",
+        )
+        return
+
+    resolved_template_hash = hashlib.sha256(prompt.encode("utf-8")).hexdigest()
+    if not queued_template_hash or not hmac.compare_digest(
+        resolved_template_hash,
+        queued_template_hash,
+    ):
+        _mark_job_result(
+            job_id=job_id,
+            status=ComputerUseJobStatus.FAILED,
+            summary=None,
+            error="Server template changed after the job was queued",
+        )
+        _append_user_log(
+            user_id,
+            "ERROR",
+            "computer_use_bridge_job_failed",
+            f"job_id={job_id} worker={worker_id} error=template_revision_mismatch",
+        )
+        return
+
+    args = build_codex_cli_args()
     workdir = str(settings.COMPUTER_USE_WORKER_WORKDIR or "").strip() or None
     if workdir and not os.path.isdir(workdir):
         _mark_job_result(
@@ -224,17 +309,23 @@ async def _execute_codex_job(job: Dict[str, str], worker_id: str) -> None:
     try:
         proc = await asyncio.create_subprocess_exec(
             *args,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=workdir,
             env=build_worker_env(),
         )
     except Exception as exc:
+        logger.warning(
+            "[ComputerUseWorker] Worker process failed to start for job_id=%s: %s",
+            job_id,
+            type(exc).__name__,
+        )
         _mark_job_result(
             job_id=job_id,
             status=ComputerUseJobStatus.FAILED,
             summary=None,
-            error=f"Failed to start codex CLI: {exc}",
+            error="Worker process failed to start",
         )
         _append_user_log(
             user_id,
@@ -245,7 +336,10 @@ async def _execute_codex_job(job: Dict[str, str], worker_id: str) -> None:
         return
 
     try:
-        stdout_bytes, stderr_bytes = await asyncio.wait_for(proc.communicate(), timeout=timeout_seconds)
+        stdout_bytes, stderr_bytes = await asyncio.wait_for(
+            proc.communicate(input=prompt.encode("utf-8")),
+            timeout=timeout_seconds,
+        )
     except asyncio.TimeoutError:
         proc.kill()
         try:
@@ -286,7 +380,7 @@ async def _execute_codex_job(job: Dict[str, str], worker_id: str) -> None:
         job_id=job_id,
         status=ComputerUseJobStatus.FAILED,
         summary=summary,
-        error=f"Codex CLI exit code {proc.returncode}",
+        error=f"Worker process exit code {proc.returncode}",
     )
     _append_user_log(
         user_id,
@@ -302,6 +396,9 @@ async def run_computer_use_worker_loop(stop_event: asyncio.Event) -> None:
     if not bool(settings.COMPUTER_USE_WORKER_ENABLED):
         logger.info("[ComputerUseWorker] Disabled by COMPUTER_USE_WORKER_ENABLED=false")
         return
+
+    # Scrub historical plaintext before accepting or executing another job.
+    scrub_legacy_job_prompts()
 
     poll_seconds = max(1, int(settings.COMPUTER_USE_WORKER_POLL_SECONDS or 3))
     worker_id = f"{socket.gethostname()}:{os.getpid()}"

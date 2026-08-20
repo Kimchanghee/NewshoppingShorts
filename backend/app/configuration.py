@@ -126,6 +126,15 @@ class Settings(BaseSettings):
     COMPUTER_USE_ALLOW_FREEFORM_PROMPTS: bool = False
     COMPUTER_USE_PROMPT_TEMPLATES_JSON: str = "{}"
 
+    @field_validator("COMPUTER_USE_ALLOW_FREEFORM_PROMPTS")
+    @classmethod
+    def reject_computer_use_freeform_prompts(cls, v):
+        if bool(v):
+            raise ValueError(
+                "Computer Use freeform prompts are disabled; use server templates"
+            )
+        return False
+
     @field_validator(
         "COMPUTER_USE_WORKER_POLL_SECONDS",
         "COMPUTER_USE_WORKER_TIMEOUT_SECONDS",
@@ -209,8 +218,8 @@ class Settings(BaseSettings):
                 raise ValueError("COMPUTER_USE_PROMPT_TEMPLATES_JSON must be valid JSON") from exc
             if not isinstance(templates, dict):
                 raise ValueError("Computer Use prompt templates must be a JSON object")
-            if not self.COMPUTER_USE_ALLOW_FREEFORM_PROMPTS and not templates:
-                raise ValueError("Computer Use requires server templates or explicit freeform opt-in")
+            if not templates:
+                raise ValueError("Computer Use requires server-owned prompt templates")
 
         env = (self.ENVIRONMENT or "development").lower().strip()
         if env != "production":

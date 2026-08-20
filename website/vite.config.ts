@@ -5,12 +5,12 @@ import fs from "fs";
 
 function collectHtmlInputs() {
   const inputs: Record<string, string> = {
-    main: path.resolve(__dirname, "index.html"),
+    main: path.resolve(import.meta.dirname, "index.html"),
   };
 
   const routeRoots = ["notice", "contact", "privacy"];
   for (const routeRoot of routeRoots) {
-    const rootPath = path.resolve(__dirname, routeRoot);
+    const rootPath = path.resolve(import.meta.dirname, routeRoot);
     if (!fs.existsSync(rootPath)) continue;
 
     const rootIndex = path.join(rootPath, "index.html");
@@ -33,8 +33,9 @@ function collectHtmlInputs() {
 // https://vitejs.dev/config/
 export default defineConfig(() => ({
   server: {
-    host: "::",
+    host: "127.0.0.1",
     port: 8080,
+    strictPort: true,
     hmr: {
       overlay: false,
     },
@@ -48,7 +49,7 @@ export default defineConfig(() => ({
   plugins: [react()],
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "./src"),
+      "@": path.resolve(import.meta.dirname, "./src"),
     },
   },
 }));
