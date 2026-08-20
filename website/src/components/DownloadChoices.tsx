@@ -2,7 +2,9 @@ import { Button } from "@/components/ui/button";
 import {
   DIRECT_DOWNLOAD_URL,
   DIRECT_INSTALLER_CHANNEL,
+  DIRECT_INSTALLER_RELEASE_DATE,
   DIRECT_INSTALLER_VERSION,
+  LATEST_VERIFIED_BUILD_DATE,
   LATEST_VERIFIED_BUILD_VERSION,
   LATEST_VERIFIED_RELEASE_URL,
   MS_STORE_URL,
@@ -37,7 +39,7 @@ export function DownloadChoices({
         >
           v{LATEST_VERIFIED_BUILD_VERSION}
         </a>
-        <span> · Windows 빌드 완료 · Microsoft Store 제출 준비 중</span>
+        <span> · {LATEST_VERIFIED_BUILD_DATE} 업데이트 · Windows 빌드 완료 · Microsoft Store 제출 준비 중</span>
       </p>
       <div
         className={cn("grid w-full gap-3", !stacked && "sm:grid-cols-2")}
@@ -45,7 +47,7 @@ export function DownloadChoices({
         aria-label="SSMaker 다운로드 방법"
       >
         <div className="flex min-w-0 flex-col gap-2">
-          <Button variant="hero" size={size} asChild className="h-auto min-h-12 w-full px-5 py-3">
+          <Button variant="hero" size={size} asChild className="h-auto min-h-12 w-full px-4 py-3">
             <a
               href={MS_STORE_URL}
               target="_blank"
@@ -58,15 +60,17 @@ export function DownloadChoices({
                 })
               }
             >
-              <Store aria-hidden="true" className="h-5 w-5" />
-              Microsoft Store에서 설치
+              <Store aria-hidden="true" className="h-5 w-5 shrink-0" />
+              <span className="min-w-0 text-center leading-snug">Microsoft Store에서 설치</span>
             </a>
           </Button>
-          <span className="text-center text-xs font-medium text-primary">권장 · 자동 업데이트</span>
+          <span className="text-center text-xs font-medium leading-relaxed text-primary">
+            권장 · 자동 업데이트 · 앱 최신 v{LATEST_VERIFIED_BUILD_VERSION} ({LATEST_VERIFIED_BUILD_DATE})
+          </span>
         </div>
 
         <div className="flex min-w-0 flex-col gap-2">
-          <Button variant="hero-outline" size={size} asChild className="h-auto min-h-12 w-full px-5 py-3">
+          <Button variant="hero-outline" size={size} asChild className="h-auto min-h-12 w-full px-4 py-3">
             <a
               href={DIRECT_DOWNLOAD_URL}
               target="_blank"
@@ -81,12 +85,12 @@ export function DownloadChoices({
                 })
               }
             >
-              <Download aria-hidden="true" className="h-5 w-5" />
-              일반 설치 파일 받기
+              <Download aria-hidden="true" className="h-5 w-5 shrink-0" />
+              <span className="min-w-0 text-center leading-snug">일반 설치 파일 받기</span>
             </a>
           </Button>
           <span className="text-center text-xs text-muted-foreground">
-            v{DIRECT_INSTALLER_VERSION} · 기존 일반판 사용자용 .exe
+            v{DIRECT_INSTALLER_VERSION} · {DIRECT_INSTALLER_RELEASE_DATE} 공개 · 기존 일반판 사용자용 .exe
           </span>
         </div>
       </div>

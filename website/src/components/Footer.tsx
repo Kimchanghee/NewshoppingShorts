@@ -7,6 +7,10 @@ import {
   BUSINESS_REPRESENTATIVE,
   BUSINESS_TYPE,
 } from "@/constants/site";
+import {
+  LATEST_VERIFIED_BUILD_DATE,
+  LATEST_VERIFIED_BUILD_VERSION,
+} from "@/constants/release";
 
 export default function Footer() {
   return (
@@ -23,6 +27,9 @@ export default function Footer() {
             </div>
             <p className="text-sm text-muted-foreground leading-relaxed">
               중국 쇼핑 영상을 AI로 자동 변환하는 스마트 솔루션
+            </p>
+            <p className="mt-3 text-xs leading-relaxed text-muted-foreground">
+              앱 최신 버전 v{LATEST_VERIFIED_BUILD_VERSION} · 업데이트 {LATEST_VERIFIED_BUILD_DATE}
             </p>
           </div>
 

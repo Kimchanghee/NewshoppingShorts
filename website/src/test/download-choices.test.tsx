@@ -3,6 +3,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DownloadChoices } from "@/components/DownloadChoices";
 import {
   DIRECT_DOWNLOAD_URL,
+  DIRECT_INSTALLER_RELEASE_DATE,
+  LATEST_VERIFIED_BUILD_DATE,
   LATEST_VERIFIED_BUILD_VERSION,
   LATEST_VERIFIED_RELEASE_URL,
   MS_STORE_URL,
@@ -25,7 +27,9 @@ describe("download choices", () => {
       LATEST_VERIFIED_RELEASE_URL,
     );
     expect(screen.getAllByText(/v1\.5\.70/).length).toBeGreaterThan(0);
-    expect(screen.getByText("권장 · 자동 업데이트")).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(`권장 · 자동 업데이트 · 앱 최신 v${LATEST_VERIFIED_BUILD_VERSION}`))).toBeInTheDocument();
+    expect(screen.getAllByText(new RegExp(LATEST_VERIFIED_BUILD_DATE.replaceAll(".", "\\."))).length).toBeGreaterThan(0);
+    expect(screen.getByText(new RegExp(DIRECT_INSTALLER_RELEASE_DATE.replaceAll(".", "\\.")))).toBeInTheDocument();
     expect(screen.getByText(/현재 안전하게 공개된 일반 설치 파일은 v1\.5\.70/)).toBeInTheDocument();
   });
 

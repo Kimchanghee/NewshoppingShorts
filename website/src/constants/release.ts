@@ -1,7 +1,9 @@
 export const MS_STORE_URL = "https://apps.microsoft.com/detail/9P43TQHLP8WH?hl=ko-KR&gl=KR";
-export const LATEST_VERIFIED_BUILD_VERSION = "1.5.71";
-export const LATEST_VERIFIED_RELEASE_URL = "/notice/release-source-v1.5.71/index.html";
+export const LATEST_VERIFIED_BUILD_VERSION = "1.5.72";
+export const LATEST_VERIFIED_BUILD_DATE = "2026.08.21";
+export const LATEST_VERIFIED_RELEASE_URL = "/notice/release-source-v1.5.72/index.html";
 export const DIRECT_INSTALLER_VERSION = "1.5.70";
+export const DIRECT_INSTALLER_RELEASE_DATE = "2026.08.20";
 export const DIRECT_INSTALLER_CHANNEL = "manual-direct";
 export const DIRECT_DOWNLOAD_URL =
   "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/source-v1.5.70/SSMaker_Setup_v1.5.70.exe";
