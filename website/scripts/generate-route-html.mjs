@@ -21,6 +21,19 @@ const KEYWORDS = [
 
 const staticRoutes = [
   {
+    path: "/notice/release-source-v1.5.72",
+    title: "SSMaker v1.5.72 반응형 UI 프리뷰 | SSMaker",
+    description:
+      "SSMaker v1.5.72는 다양한 모니터 크기와 Windows 화면 배율에서 텍스트와 버튼이 가려지지 않도록 데스크톱 앱과 공식 웹사이트의 반응형 레이아웃을 전면 개선한 소스 프리릴리스입니다.",
+    type: "article",
+    h1: "SSMaker v1.5.72 반응형 UI 프리뷰",
+    paragraphs: [
+      "공개일: 2026년 8월 21일. 앱 상단, 로그인, 시작 화면과 공식 웹사이트 다운로드 영역에 버전과 업데이트 날짜를 함께 표시합니다.",
+      "작은 모니터, 고해상도 화면, Windows 배율 확대, 모바일과 브라우저 확대에서도 주요 텍스트와 버튼에 도달할 수 있도록 스크롤, 줄바꿈, 패널 전환과 대화상자 크기 제한을 정비했습니다.",
+      "일반 Windows 설치 파일은 코드서명 안정판 v1.5.70을 계속 제공하며, v1.5.72 소스는 GitHub 릴리스에서 내려받을 수 있습니다.",
+    ],
+  },
+  {
     path: "/notice",
     title: "공지사항 | SSMaker",
     description: "SSMaker 업데이트, 초기 세팅 매뉴얼, 쿠팡 파트너스, Linktree, YouTube OAuth 설정 가이드를 확인하세요.",

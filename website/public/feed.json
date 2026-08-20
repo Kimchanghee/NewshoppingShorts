@@ -12,6 +12,15 @@
   ],
   "items": [
     {
+      "id": "https://shoppingshorts.store/notice/release-source-v1.5.72/index.html",
+      "url": "https://shoppingshorts.store/notice/release-source-v1.5.72/index.html",
+      "title": "SSMaker v1.5.72 반응형 UI 프리뷰",
+      "summary": "다양한 모니터 크기와 Windows 화면 배율에서 텍스트와 버튼이 가려지지 않도록 데스크톱 앱과 공식 웹사이트의 반응형 레이아웃을 전면 개선했습니다.",
+      "content_text": "다양한 모니터 크기와 Windows 화면 배율에서 텍스트와 버튼이 가려지지 않도록 데스크톱 앱과 공식 웹사이트의 반응형 레이아웃을 전면 개선했습니다.",
+      "date_published": "2026-08-20T15:00:00.000Z",
+      "date_modified": "2026-08-20T15:00:00.000Z"
+    },
+    {
       "id": "https://shoppingshorts.store/notice/release-source-v1.5.71/index.html",
       "url": "https://shoppingshorts.store/notice/release-source-v1.5.71/index.html",
       "title": "SSMaker v1.5.71 소스 프리뷰",

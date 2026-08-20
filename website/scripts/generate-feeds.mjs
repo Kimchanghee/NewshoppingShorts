@@ -8,9 +8,16 @@ const FEED_DESCRIPTION =
   "SSMaker 업데이트, 초기 세팅 매뉴얼, 쿠팡 파트너스, Linktree, YouTube OAuth, Google Cloud 설정 가이드 모음";
 const RELEASES_API = "https://api.github.com/repos/Kimchanghee/NewshoppingShorts/releases?per_page=20";
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN || process.env.GH_TOKEN || "";
-const FEED_UPDATED = "2026-04-30T00:00:00.000Z";
+const FEED_UPDATED = "2026-08-21T00:00:00.000+09:00";
 
 const staticItems = [
+  {
+    title: "SSMaker v1.5.72 반응형 UI 프리뷰",
+    url: `${SITE_URL}/notice/release-source-v1.5.72/index.html`,
+    summary:
+      "다양한 모니터 크기와 Windows 화면 배율에서 텍스트와 버튼이 가려지지 않도록 데스크톱 앱과 공식 웹사이트의 반응형 레이아웃을 전면 개선했습니다.",
+    date: "2026-08-21T00:00:00.000+09:00",
+  },
   {
     title: "신규 구독 1개월 추가 제공 이벤트",
     url: `${SITE_URL}/notice/spring-2026-new-subscriber-extra-month/index.html`,
@@ -221,7 +228,9 @@ function renderJsonFeed(items) {
 }
 
 const releaseItems = await fetchReleaseItems();
-const items = sortItems([...staticItems, ...releaseItems]);
+const items = sortItems([...staticItems, ...releaseItems]).filter(
+  (item, index, all) => all.findIndex((candidate) => candidate.url === item.url) === index,
+);
 const publicDir = path.join(process.cwd(), "public");
 
 fs.writeFileSync(path.join(publicDir, "feed.xml"), renderRss(items), "utf8");

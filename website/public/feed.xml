@@ -5,8 +5,15 @@
     <link>https://shoppingshorts.store/notice/index.html</link>
     <description>SSMaker 업데이트, 초기 세팅 매뉴얼, 쿠팡 파트너스, Linktree, YouTube OAuth, Google Cloud 설정 가이드 모음</description>
     <language>ko-KR</language>
-    <lastBuildDate>Thu, 30 Apr 2026 00:00:00 GMT</lastBuildDate>
+    <lastBuildDate>Thu, 20 Aug 2026 15:00:00 GMT</lastBuildDate>
     <atom:link href="https://shoppingshorts.store/feed.xml" rel="self" type="application/rss+xml" />
+    <item>
+      <title>SSMaker v1.5.72 반응형 UI 프리뷰</title>
+      <link>https://shoppingshorts.store/notice/release-source-v1.5.72/index.html</link>
+      <guid isPermaLink="true">https://shoppingshorts.store/notice/release-source-v1.5.72/index.html</guid>
+      <pubDate>Thu, 20 Aug 2026 15:00:00 GMT</pubDate>
+      <description>다양한 모니터 크기와 Windows 화면 배율에서 텍스트와 버튼이 가려지지 않도록 데스크톱 앱과 공식 웹사이트의 반응형 레이아웃을 전면 개선했습니다.</description>
+    </item>
     <item>
       <title>SSMaker v1.5.71 소스 프리뷰</title>
       <link>https://shoppingshorts.store/notice/release-source-v1.5.71/index.html</link>

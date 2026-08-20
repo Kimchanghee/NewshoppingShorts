@@ -25,6 +25,13 @@ const NOTICE_SLUGS = [
   "gemini-api-guide",
 ];
 
+const CURRENT_RELEASE_ROUTE = {
+  loc: "/notice/release-source-v1.5.72/index.html",
+  changefreq: "weekly",
+  priority: "0.72",
+  lastmod: "2026-08-21",
+};
+
 const baseRoutes = [
   { loc: "/", changefreq: "daily", priority: "1.0" },
   { loc: "/notice/index.html", changefreq: "weekly", priority: "0.8" },
@@ -79,8 +86,9 @@ const releaseRoutes = await fetchReleaseRoutes();
 const routes = [
   ...baseRoutes.map((route) => ({ ...route, lastmod: today })),
   ...noticeRoutes,
+  CURRENT_RELEASE_ROUTE,
   ...releaseRoutes,
-];
+].filter((route, index, all) => all.findIndex((candidate) => candidate.loc === route.loc) === index);
 
 const xml = `<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
