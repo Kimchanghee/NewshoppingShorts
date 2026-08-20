@@ -26,10 +26,11 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QPushButton,
     QCheckBox, QTextEdit, QFrame, QWidget, QScrollArea, QApplication
 )
-from PyQt6.QtCore import Qt, pyqtSignal, QUrl
+from PyQt6.QtCore import QSize, Qt, pyqtSignal, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
 
 from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
+from ui.responsive import fit_window_to_available
 from utils.logging_config import get_logger
 
 logger = get_logger(__name__)
@@ -423,8 +424,11 @@ class LinktreeSetupDialog(QDialog):
         self.ds = get_design_system()
         c = get_color
         self.setWindowTitle("Linktree 자동 등록 간편 설정")
-        self.setMinimumWidth(580)
-        self.setMinimumHeight(560)
+        fit_window_to_available(
+            self,
+            QSize(660, 680),
+            QSize(320, 300),
+        )
         self.setStyleSheet(
             f"QDialog {{ background-color: {c('background')}; color: {c('text_primary')}; }}"
         )

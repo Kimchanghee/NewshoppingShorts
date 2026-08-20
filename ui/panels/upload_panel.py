@@ -8,16 +8,17 @@ hashtags), and YouTube-specific comment auto-upload settings.
 import re
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from PyQt6.QtWidgets import (
-    QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QFrame, QVBoxLayout, QHBoxLayout, QBoxLayout, QLabel, QPushButton,
     QScrollArea, QWidget, QSlider, QCheckBox, QTextEdit, QFileDialog, QLineEdit,
-    QStackedWidget, QInputDialog, QApplication
+    QStackedWidget, QInputDialog, QApplication, QSizePolicy
 )
-from PyQt6.QtCore import Qt, QObject, QThread, pyqtSignal, QUrl
+from PyQt6.QtCore import Qt, QObject, QSize, QThread, pyqtSignal, QUrl
 from PyQt6.QtGui import QFont, QDesktopServices
 
 from ui.design_system_v2 import get_design_system, checkbox_qss
 from ui.components.base_widget import ThemedMixin
 from ui.components.social_auth_card import SocialAuthCard, PLATFORM_CONFIG
+from ui.responsive import fit_window_to_available
 from managers.settings_manager import get_settings_manager
 from user_facing_errors import sanitize_user_message
 
@@ -821,6 +822,7 @@ class UploadPanel(QFrame, ThemedMixin):
         main_body = QWidget(content)
         main_body.setStyleSheet("background-color: transparent; border: none;")
         body_layout = QHBoxLayout(main_body)
+        self._channel_body_layout = body_layout
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(12)
 
@@ -830,7 +832,8 @@ class UploadPanel(QFrame, ThemedMixin):
         # YouTube·Instagram·TikTok는 공식 API 자동 업로드. Threads/X는 준비 중.
         self._platform_order = ["youtube", "instagram", "tiktok", "threads", "x"]
         self._coming_soon_channels = {"threads", "x"}
-        body_layout.addWidget(self._create_channel_sidebar(main_body))
+        self._channel_sidebar = self._create_channel_sidebar(main_body)
+        body_layout.addWidget(self._channel_sidebar)
 
         self._channel_stack = QStackedWidget(main_body)
         self._channel_stack.setStyleSheet("background-color: transparent; border: none;")
@@ -873,6 +876,7 @@ class UploadPanel(QFrame, ThemedMixin):
         self._channel_index["x"] = self._channel_stack.count()
         self._channel_stack.addWidget(x_page)
 
+        self._channel_stack_card = stack_card
         body_layout.addWidget(stack_card, 1)
         content_layout.addWidget(main_body, 1)
 
@@ -882,6 +886,27 @@ class UploadPanel(QFrame, ThemedMixin):
         main_layout.addWidget(scroll)
         self._refresh_channel_tab_labels()
         self._set_active_channel("youtube")
+
+    def resizeEvent(self, event):  # noqa: N802 - Qt API
+        """Stack the channel chooser above settings on narrow content areas."""
+        super().resizeEvent(event)
+        if not hasattr(self, "_channel_body_layout"):
+            return
+        narrow = event.size().width() < 820
+        self._channel_body_layout.setDirection(
+            QBoxLayout.Direction.TopToBottom
+            if narrow
+            else QBoxLayout.Direction.LeftToRight
+        )
+        if narrow:
+            self._channel_sidebar.setMinimumWidth(0)
+            self._channel_sidebar.setMaximumWidth(16777215)
+            self._channel_sidebar.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Preferred,
+            )
+        else:
+            self._channel_sidebar.setFixedWidth(228)
 
     def _create_intro_card(self, parent: Optional[QWidget] = None) -> QFrame:
         """Top summary card explaining workflow and channel switching."""
@@ -2187,12 +2212,22 @@ class UploadPanel(QFrame, ThemedMixin):
         dialog = QDialog(self)
         dialog.setWindowTitle("유튜브 채널 연결")
         dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
-        dialog.setFixedSize(560, 500)
+        fit_window_to_available(dialog, QSize(560, 500), QSize(340, 280))
         dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
-        layout = QVBoxLayout(dialog)
+        root_layout = QVBoxLayout(dialog)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        dialog_scroll = QScrollArea(dialog)
+        dialog_scroll.setWidgetResizable(True)
+        dialog_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        dialog_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog_body = QWidget(dialog_scroll)
+        layout = QVBoxLayout(dialog_body)
         layout.setSpacing(12)
         layout.setContentsMargins(24, 20, 24, 20)
+        dialog_scroll.setWidget(dialog_body)
+        root_layout.addWidget(dialog_scroll)
 
         inst = QLabel(
             "채널 이름을 직접 적을 필요 없이, 구글 인증 파일(JSON)만 올리면 돼요.\n\n"
@@ -2531,12 +2566,22 @@ class UploadPanel(QFrame, ThemedMixin):
 
         dialog = QDialog(self)
         dialog.setWindowTitle("TikTok 채널 연결 (공식 API)")
-        dialog.setFixedSize(580, 470)
+        fit_window_to_available(dialog, QSize(580, 470), QSize(340, 280))
         dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
-        layout = QVBoxLayout(dialog)
+        root_layout = QVBoxLayout(dialog)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        dialog_scroll = QScrollArea(dialog)
+        dialog_scroll.setWidgetResizable(True)
+        dialog_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        dialog_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog_body = QWidget(dialog_scroll)
+        layout = QVBoxLayout(dialog_body)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(9)
+        dialog_scroll.setWidget(dialog_body)
+        root_layout.addWidget(dialog_scroll)
 
         inst = QLabel(
             "TikTok 공식 Content Posting API로 연결합니다.\n\n"
@@ -2717,12 +2762,22 @@ class UploadPanel(QFrame, ThemedMixin):
 
         dialog = QDialog(self)
         dialog.setWindowTitle(f"{platform_name} 채널 연결")
-        dialog.setFixedSize(540, 300)
+        fit_window_to_available(dialog, QSize(540, 300), QSize(320, 240))
         dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
-        layout = QVBoxLayout(dialog)
+        root_layout = QVBoxLayout(dialog)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        dialog_scroll = QScrollArea(dialog)
+        dialog_scroll.setWidgetResizable(True)
+        dialog_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        dialog_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog_body = QWidget(dialog_scroll)
+        layout = QVBoxLayout(dialog_body)
         layout.setContentsMargins(20, 18, 20, 18)
         layout.setSpacing(10)
+        dialog_scroll.setWidget(dialog_body)
+        root_layout.addWidget(dialog_scroll)
 
         inst = QLabel(
             "1) '로그인 페이지 열기'를 눌러 웹에서 로그인하고 허용까지 끝내세요.\n"
@@ -2859,12 +2914,22 @@ class UploadPanel(QFrame, ThemedMixin):
         dialog = QDialog(self)
         dialog.setWindowTitle("인스타그램 채널 연결 (공식 API)")
         dialog.setWindowFlag(Qt.WindowType.WindowCloseButtonHint, False)
-        dialog.setFixedSize(560, 430)
+        fit_window_to_available(dialog, QSize(560, 430), QSize(340, 280))
         dialog.setStyleSheet(f"background-color: {c.background}; color: {c.text_primary};")
 
-        layout = QVBoxLayout(dialog)
+        root_layout = QVBoxLayout(dialog)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        dialog_scroll = QScrollArea(dialog)
+        dialog_scroll.setWidgetResizable(True)
+        dialog_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        dialog_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        dialog_body = QWidget(dialog_scroll)
+        layout = QVBoxLayout(dialog_body)
         layout.setSpacing(10)
         layout.setContentsMargins(24, 20, 24, 20)
+        dialog_scroll.setWidget(dialog_body)
+        root_layout.addWidget(dialog_scroll)
 
         inst = QLabel(
             "인스타그램 공식 API(Meta)로 릴스를 자동 게시하려면 아래 3가지가 필요해요.\n\n"

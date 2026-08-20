@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QApplication,
@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
 
 from core.video.batch.api_key_recovery import is_google_drive_permission_error
 from ui.design_system_v2 import get_color, get_design_system
+from ui.responsive import fit_window_to_available
 from user_facing_errors import friendly_error_message, friendly_error_title
 from utils.logging_config import get_logger
 
@@ -151,12 +152,24 @@ class ApiKeyErrorDialog(QDialog):
         )
         content.addWidget(self._build_guidance(body, is_drive_permission))
         content.addLayout(self._build_actions())
-        shell.addWidget(body)
+        body_scroll = QScrollArea(surface)
+        body_scroll.setObjectName("dialogBodyScroll")
+        body_scroll.setWidgetResizable(True)
+        body_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        body_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        body_scroll.setStyleSheet(
+            "QScrollArea#dialogBodyScroll { background: transparent; border: none; }"
+        )
+        body_scroll.setWidget(body)
+        shell.addWidget(body_scroll)
 
         self.adjustSize()
-        screen = self.screen() or QApplication.primaryScreen()
-        available_width = screen.availableGeometry().width() if screen else 560
-        self.setFixedWidth(min(560, max(420, available_width - 48)))
+        fit_window_to_available(
+            self,
+            QSize(560, min(620, self.sizeHint().height())),
+            QSize(300, 280),
+        )
         self.retry_btn.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
 
     def _build_title_bar(self, parent: QFrame) -> QFrame:
@@ -279,7 +292,7 @@ class ApiKeyErrorDialog(QDialog):
         self.retry_btn.setDefault(True)
         actions.addWidget(self.retry_btn)
 
-        secondary = QHBoxLayout()
+        secondary = QVBoxLayout()
         secondary.setSpacing(10)
         self.settings_btn = self._action_button(
             "설정에서 API 키 추가",
@@ -337,7 +350,7 @@ class ApiKeyErrorDialog(QDialog):
         row = QHBoxLayout()
         row.setSpacing(12)
         label = QLabel(f"{label_text}:", self)
-        label.setFixedWidth(90)
+        label.setMinimumWidth(72)
         label.setStyleSheet(
             f"color: {get_color('text_primary')}; background: transparent; "
             "border: none; font-weight: bold;"

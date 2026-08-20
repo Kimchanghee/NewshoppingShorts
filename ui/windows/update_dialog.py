@@ -3,7 +3,7 @@
 
 import re
 
-from PyQt6.QtCore import Qt, QTimer, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, QTimer, pyqtSignal
 from PyQt6.QtGui import QFont, QFontDatabase
 from PyQt6.QtWidgets import (
     QApplication,
@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
 )
 
 from ui.design_system_v2 import get_color
+from ui.responsive import fit_window_to_available
 from user_facing_errors import sanitize_user_message
 
 
@@ -91,7 +92,11 @@ def _setup_window(widget: QWidget) -> None:
         Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint
     )
     widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-    widget.setFixedSize(widget.WIN_W, widget.WIN_H)
+    fit_window_to_available(
+        widget,
+        QSize(widget.WIN_W, widget.WIN_H),
+        QSize(300, 240),
+    )
     widget.setWindowTitle("SSMaker 업데이트")
     widget.setAccessibleName("SSMaker 업데이트")
 
@@ -425,7 +430,7 @@ class UpdateCompleteDialog(_UpdateSurface):
         self.confirm_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.confirm_btn.setFont(_font(11, QFont.Weight.DemiBold))
         self.confirm_btn.setFixedHeight(48)
-        self.confirm_btn.setMinimumWidth(320)
+        self.confirm_btn.setMinimumWidth(200)
         self.confirm_btn.setStyleSheet(_button_style(self.COLORS, primary=True))
         self.confirm_btn.clicked.connect(self._on_confirm)
         layout.addWidget(self.confirm_btn)

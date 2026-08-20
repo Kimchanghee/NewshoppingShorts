@@ -5,12 +5,13 @@ Modern Startup Check UI for PyQt6
 from PyQt6 import QtCore, QtGui, QtWidgets
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
-    QMainWindow, QWidget, QFrame, QVBoxLayout, QHBoxLayout,
-    QLabel, QProgressBar
+    QMainWindow, QWidget, QFrame, QVBoxLayout, QGridLayout,
+    QLabel, QProgressBar, QScrollArea, QSizePolicy
 )
 from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color
+from ui.responsive import fit_window_to_available
 from user_facing_errors import sanitize_user_message
 
 
@@ -33,8 +34,9 @@ class ChecklistItem(QFrame):
 
     def _setup_ui(self):
         ds = get_design_system()
-        self.setFixedHeight(42)
-        layout = QHBoxLayout(self)
+        self.setMinimumHeight(52)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        layout = QGridLayout(self)
         layout.setContentsMargins(
             ds.spacing.space_3,  # 12px
             ds.spacing.space_1,  # 8px
@@ -45,32 +47,35 @@ class ChecklistItem(QFrame):
         self.status_icon = QLabel(StatusIcon.WAITING)
         self.status_icon.setFixedWidth(28)
         self.status_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self.status_icon)
+        layout.addWidget(self.status_icon, 0, 0, 2, 1)
 
         self.title_label = QLabel(f"{self.icon_emoji} {self.title_text}")
-        self.title_label.setFixedWidth(180)
+        self.title_label.setWordWrap(True)
         self.title_label.setStyleSheet(
             f"font-size: {ds.typography.size_xs}px; "
             f"font-weight: {ds.typography.weight_bold}; "
             f"color: {get_color('text_secondary')};"
         )
-        layout.addWidget(self.title_label)
+        layout.addWidget(self.title_label, 0, 1)
 
         self.desc_label = QLabel(self.description_text)
+        self.desc_label.setWordWrap(True)
         self.desc_label.setStyleSheet(
             f"font-size: {ds.typography.size_2xs}px; "
             f"color: {get_color('text_muted')};"
         )
-        layout.addWidget(self.desc_label, 1)
+        layout.addWidget(self.desc_label, 1, 1, 1, 2)
 
         self.status_text = QLabel("대기")
-        self.status_text.setFixedWidth(70)
+        self.status_text.setMinimumWidth(64)
+        self.status_text.setWordWrap(True)
         self.status_text.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.status_text.setStyleSheet(
             f"font-size: {ds.typography.size_xs}px; "
             f"color: {get_color('text_muted')};"
         )
-        layout.addWidget(self.status_text)
+        layout.addWidget(self.status_text, 0, 2)
+        layout.setColumnStretch(1, 1)
         
         self.setStyleSheet(
             f"background-color: {get_color('surface_variant')}; "
@@ -120,39 +125,61 @@ class ChecklistItem(QFrame):
 class ModernProcessUi:
     def setupUi(self, window: QMainWindow):
         ds = get_design_system()
-        window.setFixedSize(620, 560)
+        fit_window_to_available(
+            window,
+            QtCore.QSize(620, 560),
+            QtCore.QSize(360, 340),
+        )
         window.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         window.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
 
         self.mainwidget = QWidget(window)
         self.frame = QFrame(self.mainwidget)
-        self.frame.setGeometry(QtCore.QRect(10, 10, 600, 540))
         self.frame.setStyleSheet(
             f"background-color: {get_color('background')}; "
             f"border-radius: {ds.radius.xl}px;"
         )
 
+        root_layout = QVBoxLayout(self.mainwidget)
+        root_layout.setContentsMargins(10, 10, 10, 10)
+        root_layout.addWidget(self.frame)
+
+        frame_layout = QVBoxLayout(self.frame)
+        frame_layout.setContentsMargins(0, 0, 0, 14)
+        frame_layout.setSpacing(10)
+
         # Shadow removed for cleaner UI
 
         self.headerFrame = QFrame(self.frame)
-        self.headerFrame.setGeometry(QtCore.QRect(0, 0, 600, 90))
+        self.headerFrame.setMinimumHeight(82)
         self.headerFrame.setStyleSheet(
             f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
             f"stop:0 {get_color('primary')}, stop:1 {get_color('secondary')}); "
             f"border-radius: {ds.radius.xl}px;"
         )
 
+        header_layout = QVBoxLayout(self.headerFrame)
+        header_layout.setContentsMargins(18, 18, 18, 12)
+        header_layout.addStretch(1)
         self.statusLabel = QLabel("시스템 점검 중...", self.headerFrame)
-        self.statusLabel.setGeometry(QtCore.QRect(0, 50, 600, 30))
         self.statusLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.statusLabel.setWordWrap(True)
         self.statusLabel.setStyleSheet(
             f"color: white; "
             f"font-size: {ds.typography.size_sm}px;"
         )
+        header_layout.addWidget(self.statusLabel)
+        frame_layout.addWidget(self.headerFrame)
 
-        self.checklistFrame = QFrame(self.frame)
-        self.checklistFrame.setGeometry(QtCore.QRect(20, 105, 560, 360))
+        checklist_scroll = QScrollArea(self.frame)
+        checklist_scroll.setWidgetResizable(True)
+        checklist_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        checklist_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        checklist_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        checklist_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        self.checklistFrame = QFrame()
         layout = QVBoxLayout(self.checklistFrame)
+        layout.setContentsMargins(16, 0, 16, 0)
         layout.setSpacing(ds.spacing.space_2)  # 8px spacing between items
         
         self.checkItems = {}
@@ -171,9 +198,15 @@ class ModernProcessUi:
             item = ChecklistItem(item_id, icon, title, desc)
             self.checkItems[item_id] = item
             layout.addWidget(item)
+        layout.addStretch(1)
+        checklist_scroll.setWidget(self.checklistFrame)
+        frame_layout.addWidget(checklist_scroll, 1)
 
+        progress_row = QGridLayout()
+        progress_row.setContentsMargins(20, 0, 20, 0)
+        progress_row.setHorizontalSpacing(10)
         self.progressBar = QProgressBar(self.frame)
-        self.progressBar.setGeometry(QtCore.QRect(20, 480, 560, 14))
+        self.progressBar.setMinimumHeight(14)
         self.progressBar.setStyleSheet(f"""
             QProgressBar {{
                 background-color: {get_color('surface_variant')};
@@ -185,13 +218,18 @@ class ModernProcessUi:
                 border-radius: {ds.radius.sm}px;
             }}
         """)
+        progress_row.addWidget(self.progressBar, 0, 0)
         
         self.percentLabel = QLabel("0%", self.frame)
-        self.percentLabel.setGeometry(QtCore.QRect(530, 500, 50, 20))
+        self.percentLabel.setMinimumWidth(48)
+        self.percentLabel.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.percentLabel.setStyleSheet(
             f"font-size: {ds.typography.size_sm}px; "
             f"color: {get_color('text_secondary')};"
         )
+        progress_row.addWidget(self.percentLabel, 0, 1)
+        progress_row.setColumnStretch(0, 1)
+        frame_layout.addLayout(progress_row)
 
         window.setCentralWidget(self.mainwidget)
 
