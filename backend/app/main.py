@@ -8,6 +8,7 @@ import json
 import asyncio
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from collections.abc import Mapping
 from contextlib import asynccontextmanager
@@ -18,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from typing import Optional
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from slowapi.errors import RateLimitExceeded
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.responses import Response
@@ -795,6 +796,47 @@ async def get_app_version():
         }
     """
     return _get_effective_app_version_info()
+
+
+def _is_official_installer_download_url(download_url: object) -> bool:
+    """Allow only version-matched EXE assets from the official release repository."""
+    try:
+        parsed = urllib.parse.urlsplit(str(download_url or "").strip())
+        if (
+            parsed.scheme.lower() != "https"
+            or parsed.hostname != "github.com"
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+            or parsed.port not in (None, 443)
+        ):
+            return False
+    except ValueError:
+        return False
+
+    match = re.fullmatch(
+        r"/Kimchanghee/NewshoppingShorts/releases/download/"
+        r"v(?P<version>[0-9]+\.[0-9]+\.[0-9]+)/"
+        r"SSMaker_Setup_v(?P=version)\.exe",
+        parsed.path,
+        flags=re.IGNORECASE,
+    )
+    return match is not None
+
+
+@app.get("/app/download/latest")
+async def download_latest_stable_installer():
+    """Redirect website visitors to the verified latest stable EXE asset."""
+    version_info = _get_effective_app_version_info()
+    download_url = str(version_info.get("download_url") or "").strip()
+    if not _is_official_installer_download_url(download_url):
+        raise HTTPException(status_code=503, detail="최신 일반 설치 파일을 확인하고 있습니다. 잠시 후 다시 시도해 주세요.")
+    return RedirectResponse(
+        url=download_url,
+        status_code=307,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/free/lately/")

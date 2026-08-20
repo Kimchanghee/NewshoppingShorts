@@ -34,7 +34,7 @@ describe("download choices", () => {
     expect(gtag).toHaveBeenCalledWith("event", "download_click", {
       placement: "hero",
       channel: "direct_installer",
-      version: "1.5.64",
+      version: "latest-stable",
     });
   });
 });

@@ -1,5 +1,5 @@
 import { Button } from "@/components/ui/button";
-import { DIRECT_DOWNLOAD_URL, DIRECT_INSTALLER_VERSION, MS_STORE_URL } from "@/constants/release";
+import { DIRECT_DOWNLOAD_URL, DIRECT_INSTALLER_CHANNEL, MS_STORE_URL } from "@/constants/release";
 import { gaEvent } from "@/lib/ga4";
 import { cn } from "@/lib/utils";
 import { Download, Store } from "lucide-react";
@@ -53,12 +53,12 @@ export function DownloadChoices({
               href={DIRECT_DOWNLOAD_URL}
               target="_blank"
               rel="noopener noreferrer"
-              aria-label={`일반 설치 파일 받기, 버전 ${DIRECT_INSTALLER_VERSION}(새 창)`}
+              aria-label="최신 안정판 일반 설치 파일 받기(새 창)"
               onClick={() =>
                 gaEvent("download_click", {
                   placement,
                   channel: "direct_installer",
-                  version: DIRECT_INSTALLER_VERSION,
+                  version: DIRECT_INSTALLER_CHANNEL,
                 })
               }
             >
@@ -67,7 +67,7 @@ export function DownloadChoices({
             </a>
           </Button>
           <span className="text-center text-xs text-muted-foreground">
-            기존 일반판 사용자용 · .exe v{DIRECT_INSTALLER_VERSION}
+            기존 일반판 사용자용 · 최신 안정판 .exe 자동 연결
           </span>
         </div>
       </div>

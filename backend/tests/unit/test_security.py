@@ -414,6 +414,41 @@ class TestAuthentication:
         assert response.json()["version"] == "1.5.53"
         assert response.json()["file_hash"] == "2" * 64
 
+    def test_latest_installer_redirect_uses_verified_official_release(self, client, monkeypatch):
+        from app import main
+
+        download_url = (
+            "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/"
+            "v1.5.64/SSMaker_Setup_v1.5.64.exe"
+        )
+        monkeypatch.setattr(
+            main,
+            "_get_effective_app_version_info",
+            lambda: {"version": "1.5.64", "download_url": download_url},
+        )
+
+        response = client.get("/app/download/latest", follow_redirects=False)
+
+        assert response.status_code == 307
+        assert response.headers["location"] == download_url
+        assert "no-store" in response.headers["cache-control"]
+
+    def test_latest_installer_redirect_rejects_untrusted_or_mismatched_urls(self, client, monkeypatch):
+        from app import main
+
+        for download_url in (
+            "https://evil.example/SSMaker_Setup_v1.5.64.exe",
+            "https://github.com/Kimchanghee/NewshoppingShorts/releases/download/"
+            "v1.5.64/SSMaker_Setup_v1.5.70.exe",
+        ):
+            monkeypatch.setattr(
+                main,
+                "_get_effective_app_version_info",
+                lambda download_url=download_url: {"download_url": download_url},
+            )
+            response = client.get("/app/download/latest", follow_redirects=False)
+            assert response.status_code == 503
+
     def test_version_update_fails_when_metadata_cannot_be_persisted(self, client, monkeypatch):
         """CI must not receive a false success when the shared write fails."""
         from app import main
