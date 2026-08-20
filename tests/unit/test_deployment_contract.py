@@ -45,6 +45,17 @@ def test_vercel_custom_build_preserves_declared_output_directory():
     assert package["scripts"]["build"]
 
 
+def test_admin_dashboard_uses_its_own_vercel_build_contract():
+    config = json.loads(
+        (ROOT / "program-admin-dashboard/vercel.json").read_text(encoding="utf-8")
+    )
+    assert config["framework"] == "nextjs"
+    assert config["buildCommand"] == "npm run build"
+    assert config["installCommand"].startswith("npm ci")
+    assert "backend/" not in json.dumps(config)
+    assert "website/" not in json.dumps(config)
+
+
 def test_vercel_function_requirements_match_backend_requirements():
     def normalized(relative: str) -> list[str]:
         return [
