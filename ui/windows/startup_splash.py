@@ -8,11 +8,13 @@ import os
 import sys
 from pathlib import Path
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontDatabase, QLinearGradient, QPainter, QPen
 from PyQt6.QtWidgets import QApplication, QLabel, QProgressBar, QVBoxLayout, QWidget
 
 from ui.theme_manager import get_theme_manager
+from ui.responsive import fit_window_to_available
+from utils.app_identity import load_app_identity
 from user_facing_errors import sanitize_user_message
 
 
@@ -105,8 +107,14 @@ class StartupSplash(QWidget):
 
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.WindowStaysOnTopHint)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
-        # Keep splash compact, but large enough so text/controls never overlap.
-        self.setFixedSize(460, 360)
+        # Clamp the splash to the usable logical desktop at high Windows DPI.
+        fitted = fit_window_to_available(
+            self,
+            QSize(460, 360),
+            QSize(300, 250),
+        )
+        self.setFixedSize(fitted)
+        self._compact = fitted.width() < 420 or fitted.height() < 330
 
         self._status_text = "프로그램을 준비하고 있습니다"
         self._load_fonts()
@@ -125,20 +133,24 @@ class StartupSplash(QWidget):
 
     def _setup_ui(self):
         self.container = GradientWidget(self)
-        self.container.setGeometry(10, 10, 440, 340)
+        self.container.setGeometry(10, 10, self.width() - 20, self.height() - 20)
 
         layout = QVBoxLayout(self.container)
-        layout.setContentsMargins(30, 24, 30, 24)
-        layout.setSpacing(8)
+        side = 18 if self._compact else 30
+        vertical = 14 if self._compact else 24
+        layout.setContentsMargins(side, vertical, side, vertical)
+        layout.setSpacing(5 if self._compact else 8)
 
         self.logo = AnimatedLogo()
+        if self._compact:
+            self.logo.setFixedSize(56, 56)
+            self.logo.setFont(QFont("Pretendard", 18, QFont.Weight.Bold))
         layout.addWidget(self.logo, alignment=Qt.AlignmentFlag.AlignCenter)
-        layout.addSpacing(10)
+        layout.addSpacing(4 if self._compact else 10)
 
         self.title_label = QLabel("쇼핑 쇼츠 메이커")
-        self.title_label.setFont(QFont("Pretendard", 22, QFont.Weight.ExtraBold))
+        self.title_label.setFont(QFont("Pretendard", 17 if self._compact else 22, QFont.Weight.ExtraBold))
         self.title_label.setMinimumHeight(34)
-        self.title_label.setMaximumHeight(46)
         self.title_label.setWordWrap(True)
         self.title_label.setContentsMargins(0, 0, 0, 0)
         self.title_label.setStyleSheet(
@@ -155,7 +167,7 @@ class StartupSplash(QWidget):
         self.subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         layout.addWidget(self.subtitle_label)
 
-        layout.addSpacing(12)
+        layout.addSpacing(5 if self._compact else 12)
 
         self.progress_bar = QProgressBar()
         self.progress_bar.setFixedHeight(8)
@@ -188,12 +200,15 @@ class StartupSplash(QWidget):
         self.status_label = QLabel(self._status_text)
         self.status_label.setFont(QFont("Pretendard", 11))
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.status_label.setWordWrap(True)
         self.status_label.setStyleSheet(f"color: {self.COLORS['secondary']}; background: transparent;")
         layout.addWidget(self.status_label)
 
         layout.addStretch()
 
-        version_label = QLabel(f"v{self._get_version()}")
+        identity = load_app_identity()
+        version_label = QLabel(identity.display_metadata)
+        version_label.setAccessibleDescription(identity.accessible_description)
         version_label.setFont(QFont("Pretendard", 9))
         version_label.setStyleSheet(f"color: {self.COLORS['border']}; background: transparent;")
         version_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -215,7 +230,13 @@ class StartupSplash(QWidget):
             return
 
         container_w = self.container.width()
-        target_container_h = required_h + 4
+        screen = self.screen() or QApplication.primaryScreen()
+        max_window_h = (
+            max(1, screen.availableGeometry().height() - 20)
+            if screen
+            else required_h + 20
+        )
+        target_container_h = min(required_h + 4, max_window_h - 20)
         target_window_h = target_container_h + 20  # container y-offset top/bottom
 
         self.setFixedSize(self.width(), target_window_h)

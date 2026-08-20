@@ -181,10 +181,15 @@ class Login(QMainWindow, Ui_LoginWindow):
         return "1.0.0"
 
     def _apply_version_label(self) -> None:
-        """Apply dynamic app version text to login UI."""
+        """Apply dynamic app version and update date to login UI."""
         if hasattr(self, "versionLabel"):
-            version = self._read_app_version()
-            self.versionLabel.setText(f"v{version}")
+            from utils.app_identity import load_app_identity
+
+            identity = load_app_identity()
+            self.versionLabel.setText(identity.display_metadata)
+            self.versionLabel.setAccessibleDescription(
+                identity.accessible_description
+            )
 
     def _fallback_port(self) -> int:
         """

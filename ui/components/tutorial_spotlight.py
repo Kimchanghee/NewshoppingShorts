@@ -11,7 +11,7 @@ from PyQt6.QtCore import (
 from PyQt6.QtWidgets import QWidget
 from PyQt6.QtGui import QPainter, QPainterPath, QColor, QPen, QBrush
 
-from ui.design_system_v2 import get_design_system
+from ui.design_system_v2 import get_color, get_design_system
 
 
 class TutorialSpotlight(QWidget):
@@ -155,8 +155,8 @@ class TutorialSpotlight(QWidget):
         painter = QPainter(self)
 
         # 어두운 오버레이 색상
-        overlay_color = QColor("#0F172A")
-        overlay_color.setAlpha(200)
+        overlay_color = QColor("#2A1B19")
+        overlay_color.setAlpha(168)
 
         # 리사이즈 중에는 간소화된 렌더링 (안티앨리어싱 + 글로우 생략)
         if self._is_resizing:
@@ -171,8 +171,8 @@ class TutorialSpotlight(QWidget):
         # 스포트라이트 테두리 (글로우 효과)
         if not self._spotlight_rect.isEmpty():
             # 외부 글로우
-            glow_color = QColor("#3B82F6")
-            glow_color.setAlpha(100)
+            glow_color = QColor(get_color("primary"))
+            glow_color.setAlpha(115)
             painter.setPen(QPen(glow_color, 4))
             painter.drawRoundedRect(
                 self._spotlight_rect.adjusted(-2, -2, 2, 2),
@@ -180,7 +180,7 @@ class TutorialSpotlight(QWidget):
             )
 
             # 내부 테두리
-            painter.setPen(QPen(QColor("#3B82F6"), 2))
+            painter.setPen(QPen(QColor(get_color("primary")), 2))
             painter.drawRoundedRect(self._spotlight_rect, 12, 12)
 
     def mousePressEvent(self, event):

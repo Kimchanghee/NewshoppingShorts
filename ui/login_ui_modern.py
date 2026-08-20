@@ -31,6 +31,7 @@ from PyQt6.QtGui import QDesktopServices, QFont, QIcon, QPixmap
 from ui.design_system_v2 import get_design_system, ColorPalette
 from ui.components.custom_dialog import show_info, show_warning, show_error, show_success
 from ui.responsive import bounded_size
+from utils.app_identity import load_app_identity
 from user_facing_errors import sanitize_user_message
 
 # Initialize design system and ALWAYS use light palette for login
@@ -286,7 +287,9 @@ class ModernLoginUi:
         self.versionLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.versionLabel.setFont(QFont(FONT_FAMILY, ds.typography.size_2xs))
         self.versionLabel.setStyleSheet("color: rgba(255,255,255,0.5); background: transparent;")
-        self.versionLabel.setText(f"v{_read_app_version()}")
+        identity = load_app_identity()
+        self.versionLabel.setText(identity.display_metadata)
+        self.versionLabel.setAccessibleDescription(identity.accessible_description)
         left_layout.addWidget(self.versionLabel)
 
         self.rightFrame = QFrame(self.centralwidget)
