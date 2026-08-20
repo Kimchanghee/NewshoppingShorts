@@ -56,4 +56,4 @@ def test_store_credentials_can_be_validated_without_building_or_submitting():
     assert "validate-store-access:" in workflow
     assert "inputs.validate_store_access == true" in workflow
     assert "inputs.validate_store_access != true" in workflow
-    assert "msstore apps get 9P43TQHLP8WH" in workflow
+    assert "msstore apps get 9P43TQHLP8WH --verbose" in workflow

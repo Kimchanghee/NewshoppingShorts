@@ -86,7 +86,7 @@ jobs:
 
     - name: Verify SSMaker Store product access
       shell: pwsh
-      run: msstore apps get 9P43TQHLP8WH
+      run: msstore apps get 9P43TQHLP8WH --verbose
 
   build-store-package:
     if: github.event_name == 'push' || inputs.validate_store_access != true
