@@ -649,6 +649,9 @@ jobs:
         VERSION: ${{ needs.build.outputs.version }}
         FILE_HASH: ${{ needs.build.outputs.file_hash }}
         REPOSITORY: ${{ github.repository }}
+        # GitHub's Windows runner can otherwise select cp1252 for Python's
+        # redirected stdout, which cannot print the Korean release notes.
+        PYTHONUTF8: "1"
         RELEASE_NOTES_SUMMARY: 안정성과 사용성을 개선했습니다.
         APP_VERSION_API_BASE_URL: ${{ secrets.APP_VERSION_API_BASE_URL }}
         APP_VERSION_UPDATE_API_KEY: ${{ secrets.APP_VERSION_UPDATE_API_KEY }}

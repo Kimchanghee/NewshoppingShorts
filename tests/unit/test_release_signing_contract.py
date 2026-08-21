@@ -334,6 +334,7 @@ def test_api_update_verifies_all_three_public_metadata_contracts():
     assert 'raw_contracts["check"].get("latest_version")' in workflow
     assert 'for key in ("download_url", "release_notes", "file_hash")' in workflow
     assert "all(contract == expected_contract for contract in verified_contracts.values())" in workflow
+    assert 'PYTHONUTF8: "1"' in workflow
 
 
 def test_release_workflows_never_publish_internal_commit_notes_to_customers():
