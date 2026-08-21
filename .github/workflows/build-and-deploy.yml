@@ -136,10 +136,9 @@ jobs:
         PYTHONPATH: ${{ github.workspace }}
       run: |
         import os
-        from utils.authenticode import PUBLIC_RELEASE_SIGNER_THUMBPRINTS, TRANSITION_BRIDGE_VERSION
+        from utils.authenticode import TRANSITION_BRIDGE_VERSION
         with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
             output.write(f"transition_bridge_version={TRANSITION_BRIDGE_VERSION.strip().lstrip('vV')}\n")
-            output.write(f"has_public_signer_pins={'true' if PUBLIC_RELEASE_SIGNER_THUMBPRINTS else 'false'}\n")
 
     - name: Resolve immutable release policy
       id: release_policy
@@ -149,7 +148,6 @@ jobs:
         REF_TYPE: ${{ github.ref_type }}
         REF_NAME: ${{ github.ref_name }}
         BAKED_TRANSITION_BRIDGE_VERSION: ${{ steps.baked_release.outputs.transition_bridge_version }}
-        HAS_BAKED_PUBLIC_SIGNER_PINS: ${{ steps.baked_release.outputs.has_public_signer_pins }}
       run: |
         if ($env:EVENT_NAME -eq "push" -and $env:REF_TYPE -eq "tag") {
           if ($env:REF_NAME -notmatch '^v(?<version>[0-9]+\.[0-9]+\.[0-9]+)$') {
@@ -158,8 +156,7 @@ jobs:
           $version = $Matches.version
           $publish = "true"
           $bakedBridge = ($env:BAKED_TRANSITION_BRIDGE_VERSION ?? "").Trim().TrimStart("v")
-          $hasPublicPins = ($env:HAS_BAKED_PUBLIC_SIGNER_PINS ?? "").Trim().ToLowerInvariant() -eq "true"
-          if ($bakedBridge -and $version -eq $bakedBridge -and $hasPublicPins) {
+          if ($bakedBridge -and $version -eq $bakedBridge) {
             $signingMode = "integrity-bridge"
           } else {
             $signingMode = "public"
@@ -593,6 +590,9 @@ jobs:
           1. 설치 파일을 실행하면 기존 설치를 감지합니다.
           2. 일반적으로는 `업데이트(Update)`를 선택하면 됩니다.
           3. 시작 오류를 겪은 경우에는 `재설치(Reinstall)`를 선택하세요.
+
+          ### 서명 검증
+          ${{ needs.build.outputs.signing_mode == 'public' && 'Windows 공개 신뢰 코드서명, 타임스탬프, 서명자 고정 검증을 통과했습니다.' || '이 버전은 Microsoft Store 심사 전에 제공하는 정확한 버전 제한 직접 설치 전환판입니다. SHA256, 고정 서명자, 타임스탬프, 실제 설치 후 링크 테스트를 통과했지만 Windows 보호 화면이 표시될 수 있습니다.' }}
 
           ### SHA256
           `${{ needs.build.outputs.file_hash }}`

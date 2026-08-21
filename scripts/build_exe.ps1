@@ -129,7 +129,7 @@ function Assert-AuthenticodeArtifact {
   if ([string]$signature.Status -notin @("Valid", "UnknownError")) {
     throw "$Label integrity-bridge signature is invalid: $($signature.Status)."
   }
-  Write-Warning "$Label is an integrity-bridge candidate only; it is not public trust and must not be published."
+  Write-Warning "$Label uses integrity-bridge trust; publication is allowed only for the exact baked transition version."
 }
 
 $Root = (Resolve-Path (Join-Path $PSScriptRoot "..")).Path

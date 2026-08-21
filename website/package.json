@@ -1,7 +1,7 @@
 {
   "name": "ssmaker-website",
   "private": true,
-  "version": "1.5.73",
+  "version": "1.5.74",
   "type": "module",
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

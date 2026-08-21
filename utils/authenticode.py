@@ -3,10 +3,10 @@
 ``public-trusted`` means Windows built a valid public trust chain and the
 signature also has the expected code-signing EKU and a timestamp.
 
-``legacy-integrity-bridge`` is deliberately weaker.  It exists only so older
-clients can authenticate the already-published v1.5.64 installer that used the
-historical self-issued certificate.  The bridge proves the pinned signer and
-integrity; it must never be presented as public certificate trust.
+``legacy-integrity-bridge`` is deliberately weaker.  It exists so older
+artifacts and one explicitly baked transition release can use the historical
+self-issued certificate.  The bridge proves the pinned signer and integrity;
+it must never be presented as public certificate trust.
 """
 
 from __future__ import annotations
@@ -26,11 +26,11 @@ LEGACY_PIN_COMPATIBILITY_VERSION = "1.5.64"
 LEGACY_INTEGRITY_BRIDGE_THUMBPRINTS = frozenset(
     {"4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0"}
 )
-# These values are deliberately empty until an approved transition commit
-# bakes an exact bridge version and the future public release signer pin(s)
-# into the application. Runtime environment variables are additive/test
-# overrides; end-user trust must not depend on CI-only environment state.
-TRANSITION_BRIDGE_VERSION = ""
+# v1.5.74 is the one approved direct-download transition release while a
+# publicly trusted code-signing identity is being provisioned. No other future
+# version inherits this exception. Runtime environment variables remain
+# additive/test overrides; trust must not depend on CI-only environment state.
+TRANSITION_BRIDGE_VERSION = "1.5.74"
 PUBLIC_RELEASE_SIGNER_THUMBPRINTS: frozenset[str] = frozenset()
 TRANSITION_BRIDGE_VERSION_ENV = "SSMAKER_TRANSITION_BRIDGE_VERSION"
 
@@ -154,9 +154,7 @@ def validate_build_signing_configuration(
         return False, "baked transition bridge version is empty"
     if version != TRANSITION_BRIDGE_VERSION:
         return False, "candidate version does not match the baked transition bridge version"
-    if not baked_public_signers:
-        return False, "transition bridge does not bake a future public signer allowlist"
-    return True, "explicit transition bridge version and future public signer pins are baked"
+    return True, "explicit transition bridge version and historical signer pin are baked"
 
 
 def is_legacy_bridge_version(

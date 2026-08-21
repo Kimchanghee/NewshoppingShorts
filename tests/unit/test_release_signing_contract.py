@@ -139,7 +139,7 @@ def test_build_policy_defaults_to_no_public_release_authority():
     assert "baked public release signer allowlist is empty" in reason
 
 
-def test_build_policy_requires_baked_transition_and_future_public_pin(monkeypatch):
+def test_build_policy_allows_only_the_exact_baked_transition(monkeypatch):
     monkeypatch.setattr(authenticode, "TRANSITION_BRIDGE_VERSION", "1.6.0")
     monkeypatch.setattr(
         authenticode,
@@ -159,9 +159,28 @@ def test_build_policy_requires_baked_transition_and_future_public_pin(monkeypatc
     )
 
     assert bridge_ok is True
-    assert "future public signer pins are baked" in bridge_reason
+    assert "historical signer pin" in bridge_reason
     assert public_ok is True
     assert "baked public release signer" in public_reason
+
+
+def test_v1574_is_the_only_baked_integrity_bridge_release():
+    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.74"
+
+    approved, _ = validate_build_signing_configuration(
+        "integrity-bridge",
+        "1.5.74",
+        LEGACY_THUMBPRINT,
+    )
+    next_version, reason = validate_build_signing_configuration(
+        "integrity-bridge",
+        "1.5.75",
+        LEGACY_THUMBPRINT,
+    )
+
+    assert approved is True
+    assert next_version is False
+    assert "does not match" in reason
 
 
 def test_build_uses_rfc3161_and_inno_named_sign_tool_contract():
@@ -359,8 +378,8 @@ def test_release_workflow_global_monotonic_gate_and_exact_baked_bridge_contract(
     assert "Reject non-monotonic release publication" in workflow
     assert "Refusing to publish version" in workflow
     assert "TRANSITION_BRIDGE_VERSION" in workflow
-    assert "PUBLIC_RELEASE_SIGNER_THUMBPRINTS" in workflow
-    assert "$bakedBridge -and $version -eq $bakedBridge -and $hasPublicPins" in workflow
+    assert "$bakedBridge -and $version -eq $bakedBridge" in workflow
+    assert "$hasPublicPins" not in workflow
     assert workflow.index("Reject non-monotonic release publication") < workflow.index(
         "Create draft Release with verified local assets"
     )
