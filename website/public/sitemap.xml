@@ -91,6 +91,12 @@
     <priority>0.72</priority>
   </url>
   <url>
+    <loc>https://shoppingshorts.store/notice/release-v1.5.80/index.html</loc>
+    <lastmod>2026-08-21</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.72</priority>
+  </url>
+  <url>
     <loc>https://shoppingshorts.store/notice/release-v1.5.79/index.html</loc>
     <lastmod>2026-08-21</lastmod>
     <changefreq>weekly</changefreq>
@@ -194,12 +200,6 @@
   </url>
   <url>
     <loc>https://shoppingshorts.store/notice/release-v1.5.59/index.html</loc>
-    <lastmod>2026-08-12</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.72</priority>
-  </url>
-  <url>
-    <loc>https://shoppingshorts.store/notice/release-v1.5.58/index.html</loc>
     <lastmod>2026-08-12</lastmod>
     <changefreq>weekly</changefreq>
     <priority>0.72</priority>
