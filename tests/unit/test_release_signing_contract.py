@@ -164,17 +164,17 @@ def test_build_policy_allows_only_the_exact_baked_transition(monkeypatch):
     assert "baked public release signer" in public_reason
 
 
-def test_v1578_is_the_only_baked_integrity_bridge_release():
-    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.78"
+def test_v1579_is_the_only_baked_integrity_bridge_release():
+    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.79"
 
     approved, _ = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.78",
+        "1.5.79",
         LEGACY_THUMBPRINT,
     )
     next_version, reason = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.79",
+        "1.5.80",
         LEGACY_THUMBPRINT,
     )
 
@@ -274,6 +274,15 @@ def test_workflow_installs_package_and_directly_verifies_signed_uninstaller():
 
     assert '"/VERYSILENT"' in workflow
     assert '"/VERIFYPACKAGE"' in workflow
+    assert "$installProcess = Start-Process" in workflow
+    assert "-Wait" in workflow
+    assert "-PassThru" in workflow
+    assert "$installProcess.ExitCode" in workflow
+    assert "$LASTEXITCODE" not in workflow[
+        workflow.index("$installProcess = Start-Process") : workflow.index(
+            '$installedApp = Join-Path $installRoot "ssmaker.exe"'
+        )
+    ]
     assert 'Filter "unins*.exe"' in workflow
     assert 'Assert-SigningGate $uninstaller "installed Inno uninstaller"' in workflow
     assert "& $signtool verify /pa /all /v $Path" in workflow
