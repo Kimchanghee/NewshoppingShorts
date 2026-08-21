@@ -12,6 +12,15 @@
   ],
   "items": [
     {
+      "id": "https://shoppingshorts.store/notice/release-v1.5.79/index.html",
+      "url": "https://shoppingshorts.store/notice/release-v1.5.79/index.html",
+      "title": "Release v1.5.79",
+      "summary": "SSMaker v1.5.79 안정성과 사용성을 개선했습니다. 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. 서명 검증 이 버전은 Microsoft Store 심사 전에 제공하는 정확한 버전 제한 직접 설치 전환판입니다. SHA256, 고정 서…",
+      "content_text": "SSMaker v1.5.79 안정성과 사용성을 개선했습니다. 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. 서명 검증 이 버전은 Microsoft Store 심사 전에 제공하는 정확한 버전 제한 직접 설치 전환판입니다. SHA256, 고정 서…",
+      "date_published": "2026-08-21T05:28:03.000Z",
+      "date_modified": "2026-08-21T05:28:03.000Z"
+    },
+    {
       "id": "https://shoppingshorts.store/notice/release-source-v1.5.72/index.html",
       "url": "https://shoppingshorts.store/notice/release-source-v1.5.72/index.html",
       "title": "SSMaker v1.5.72 반응형 UI 프리뷰",
@@ -181,15 +190,6 @@
       "content_text": "SSMaker v1.5.58 Fix queue deletion and clarify service responsibility 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 379d427cd7e94c0e2ab576118a5f8b56…",
       "date_published": "2026-08-12T16:36:58.000Z",
       "date_modified": "2026-08-12T16:36:58.000Z"
-    },
-    {
-      "id": "https://shoppingshorts.store/notice/release-v1.5.57/index.html",
-      "url": "https://shoppingshorts.store/notice/release-v1.5.57/index.html",
-      "title": "Release v1.5.57",
-      "summary": "SSMaker v1.5.57 SSMaker v1.5.57 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 0cf704001d3e033cb518899a5800f2315ae09751ea8a65b9da2ba7832c42acee Full …",
-      "content_text": "SSMaker v1.5.57 SSMaker v1.5.57 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 0cf704001d3e033cb518899a5800f2315ae09751ea8a65b9da2ba7832c42acee Full …",
-      "date_published": "2026-08-12T15:50:21.000Z",
-      "date_modified": "2026-08-12T15:50:21.000Z"
     },
     {
       "id": "https://shoppingshorts.store/notice/spring-2026-new-subscriber-extra-month/index.html",

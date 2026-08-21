@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { DownloadChoices } from "@/components/DownloadChoices";
@@ -15,6 +16,14 @@ import {
 afterEach(() => cleanup());
 
 describe("download choices", () => {
+  it("keeps the no-JavaScript fallback on the same immutable direct installer", () => {
+    const staticHtml = readFileSync("index.html", "utf8");
+
+    expect(staticHtml).toContain(`href="${DIRECT_DOWNLOAD_URL}"`);
+    expect(staticHtml).toContain(`v${DIRECT_INSTALLER_VERSION} 일반 설치 파일 받기`);
+    expect(staticHtml).not.toContain("releases/download/source-v");
+  });
+
   it("offers the Microsoft Store and the public direct installer as distinct choices", () => {
     render(<DownloadChoices placement="test" />);
 
