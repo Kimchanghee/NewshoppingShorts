@@ -26,11 +26,11 @@ LEGACY_PIN_COMPATIBILITY_VERSION = "1.5.64"
 LEGACY_INTEGRITY_BRIDGE_THUMBPRINTS = frozenset(
     {"4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0"}
 )
-# v1.5.76 is the one approved direct-download transition release while a
+# v1.5.77 is the one approved direct-download transition release while a
 # publicly trusted code-signing identity is being provisioned. No other future
 # version inherits this exception. Runtime environment variables remain
 # additive/test overrides; trust must not depend on CI-only environment state.
-TRANSITION_BRIDGE_VERSION = "1.5.76"
+TRANSITION_BRIDGE_VERSION = "1.5.77"
 PUBLIC_RELEASE_SIGNER_THUMBPRINTS: frozenset[str] = frozenset()
 TRANSITION_BRIDGE_VERSION_ENV = "SSMAKER_TRANSITION_BRIDGE_VERSION"
 

@@ -6,10 +6,12 @@ backend/tests/unit/test_billing_crypto.py:generic-api-key:26
 backend/tests/unit/test_computer_use_bridge.py:generic-api-key:15
 backend/tests/unit/test_settings_validation.py:generic-api-key:56
 backend/tests/unit/test_security.py:generic-api-key:46
-.github/workflows/build-and-deploy.yml:generic-api-key:150
+.github/workflows/build-and-deploy.yml:generic-api-key:94
 docs/IMPROVEMENTS.md:generic-api-key:639
 docs/IMPROVEMENTS.md:generic-api-key:797
 tests/integration/test_video_processing_pipeline.py:generic-api-key:139
 tests/unit/test_tiktok_manager.py:generic-api-key:72
 tests/unit/test_tiktok_manager.py:generic-api-key:96
 tests/unit/test_validators.py:generic-api-key:64
+utils/release_assets.py:generic-api-key:17
+utils/release_assets.py:generic-api-key:27
