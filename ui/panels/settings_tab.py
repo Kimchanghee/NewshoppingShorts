@@ -4502,9 +4502,25 @@ class SettingsTab(QWidget, ThemedMixin):
             key_value = key_input.text().strip()
             if not key_value:
                 slot = i + 1
-                key_value = str(SecretsManager.get_api_key(f"gemini_api_{slot}") or "").strip()
-                if not key_value and slot == 1:
-                    key_value = str(SecretsManager.get_api_key("gemini") or "").strip()
+                try:
+                    key_value = str(
+                        SecretsManager.get_api_key(f"gemini_api_{slot}") or ""
+                    ).strip()
+                    if not key_value and slot == 1:
+                        key_value = str(
+                            SecretsManager.get_api_key("gemini") or ""
+                        ).strip()
+                except Exception as exc:
+                    # A broken or temporarily unavailable OS credential backend
+                    # must not make the Save button silently do nothing.  Keep
+                    # processing user-entered keys and leave unreadable empty
+                    # slots untouched; omitted slots are never deletion requests.
+                    logger.warning(
+                        "[Settings] Could not read saved Gemini key slot %s: %s",
+                        slot,
+                        type(exc).__name__,
+                    )
+                    continue
                 if key_value and not is_valid_gemini_key(key_value):
                     key_value = ""
                 if not key_value:
@@ -4576,8 +4592,6 @@ class SettingsTab(QWidget, ThemedMixin):
             # limited to the explicit clear-all action.
                 
         except Exception as e:
-            from utils.logging_config import get_logger
-            logger = get_logger(__name__)
             logger.error(f"[Settings] API 키 저장 중 오류 발생: {e}")
             show_error(
                 self,
