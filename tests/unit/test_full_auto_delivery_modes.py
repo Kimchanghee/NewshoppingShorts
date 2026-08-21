@@ -117,6 +117,49 @@ def test_full_auto_ui_accepts_multiple_partner_links_without_internal_controls(m
     assert "한 줄에 하나씩" in panel.partner_links_input.accessibleDescription()
 
 
+def test_partner_text_change_shares_one_parse_result_for_display_and_count(monkeypatch):
+    from ui.panels import sourcing_panel
+
+    panel = _build_panel(monkeypatch, _Settings(youtube_connected=False))
+    first = "https://link.coupang.com/a/FirstCase"
+    second = "https://link.coupa.ng/a/SecondCase"
+    raw = f"첫 상품: [{first}]\n둘째 상품: {second}"
+    calls = []
+    real_parser = sourcing_panel.parse_coupang_partner_links
+
+    def recording_parser(value):
+        calls.append(value)
+        return real_parser(value)
+
+    monkeypatch.setattr(sourcing_panel, "parse_coupang_partner_links", recording_parser)
+
+    panel.partner_links_input.setPlainText(raw)
+    QT_APP.processEvents()
+
+    assert calls == [raw]
+    assert panel.url_input.text() == first
+    assert panel._extract_next_links() == [second]
+    assert panel.next_links_count_label.text() == "2개"
+
+
+def test_invalid_partner_input_never_populates_hidden_delivery_fields(monkeypatch):
+    panel = _build_panel(monkeypatch, _Settings(youtube_connected=False))
+
+    panel.partner_links_input.setPlainText(
+        "https://link.coupang.com/a/good?query=1"
+    )
+    QT_APP.processEvents()
+
+    assert panel.url_input.text() == ""
+    assert panel.next_links_input.toPlainText() == ""
+    assert panel.next_links_count_label.text() == "0개"
+
+    panel._on_start_platform_video()
+
+    assert "단축 링크 형식" in panel.results_label.text()
+    assert panel._running is False
+
+
 def test_partner_link_batch_advances_to_the_next_item_automatically(monkeypatch):
     panel = _build_panel(monkeypatch, _Settings(youtube_connected=False))
     links = [

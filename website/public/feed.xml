@@ -11,8 +11,8 @@
       <title>SSMaker v1.5.72 반응형 UI 프리뷰</title>
       <link>https://shoppingshorts.store/notice/release-source-v1.5.72/index.html</link>
       <guid isPermaLink="true">https://shoppingshorts.store/notice/release-source-v1.5.72/index.html</guid>
-      <pubDate>Thu, 20 Aug 2026 15:00:00 GMT</pubDate>
-      <description>다양한 모니터 크기와 Windows 화면 배율에서 텍스트와 버튼이 가려지지 않도록 데스크톱 앱과 공식 웹사이트의 반응형 레이아웃을 전면 개선했습니다.</description>
+      <pubDate>Thu, 20 Aug 2026 19:00:45 GMT</pubDate>
+      <description>주요 변경 800×600부터 초광폭 모니터까지 앱 창을 리사이즈·최대화할 수 있도록 고정 비율을 제거했습니다. 상단 계정 정보, 모드 카드, 설정·업로드, 진행·대기열, 튜토리얼과 OAuth/업데이트 대화상자의 줄바꿈·스크롤·패널 전환을 정비했습니다. 공식 웹사이트의 홈, 공지, 문의, 개인정보, 404, 내비게이션과 다운로드 버튼을 모바일·태블릿·데스크톱 및 브라우저 확대에 맞게 개선했습…</description>
     </item>
     <item>
       <title>SSMaker v1.5.71 소스 프리뷰</title>
@@ -146,13 +146,6 @@
       <guid isPermaLink="true">https://shoppingshorts.store/notice/release-v1.5.57/index.html</guid>
       <pubDate>Wed, 12 Aug 2026 15:50:21 GMT</pubDate>
       <description>SSMaker v1.5.57 SSMaker v1.5.57 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 0cf704001d3e033cb518899a5800f2315ae09751ea8a65b9da2ba7832c42acee Full …</description>
-    </item>
-    <item>
-      <title>Release v1.5.56</title>
-      <link>https://shoppingshorts.store/notice/release-v1.5.56/index.html</link>
-      <guid isPermaLink="true">https://shoppingshorts.store/notice/release-v1.5.56/index.html</guid>
-      <pubDate>Tue, 11 Aug 2026 06:39:25 GMT</pubDate>
-      <description>SSMaker v1.5.56 Rename header and show installed release metadata 설치 방법 1. 설치 파일을 실행하면 기존 설치를 감지합니다. 2. 일반적으로는 업데이트(Update)를 선택하면 됩니다. 3. 시작 오류를 겪은 경우에는 재설치(Reinstall)를 선택하세요. SHA256 5982db8bad92cced5eb8aa65fa0591b749bd…</description>
     </item>
     <item>
       <title>신규 구독 1개월 추가 제공 이벤트</title>

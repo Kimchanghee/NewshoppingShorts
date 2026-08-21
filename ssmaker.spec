@@ -14,6 +14,7 @@ from config.font_catalog import (
 block_cipher = None
 project_root = os.path.abspath('.')
 windows_version_info = os.path.join(project_root, 'build_staging', 'windows_version_info.txt')
+build_manifest = os.path.join(project_root, 'build_staging', 'build_manifest.json')
 
 # Guardrail: shipping builds are validated only on Python 3.11.
 # Prevent accidental releases from unsupported interpreters (e.g. 3.14),
@@ -99,6 +100,9 @@ datas = [
     ('version.json', '.'),
     ('browser-extension', 'browser-extension'),
 ]
+if not os.path.isfile(build_manifest):
+    raise SystemExit(f"[spec] ERROR: build manifest is missing: {build_manifest}")
+datas.append((build_manifest, '.'))
 
 
 def append_data_unique(data_list, src, dst):

@@ -9,6 +9,37 @@ import logging
 import traceback
 
 
+def run_coupang_link_contract_smoke() -> int:
+    """Write the deterministic Coupang-link contract report without UI startup."""
+    import json
+
+    from utils.url_security import build_coupang_partner_link_contract_report
+
+    report_path = os.environ.get(
+        "SSMAKER_COUPANG_LINK_CONTRACT_REPORT",
+        "",
+    ).strip()
+    if not report_path:
+        return 2
+
+    report = build_coupang_partner_link_contract_report()
+    try:
+        report_dir = os.path.dirname(os.path.abspath(report_path))
+        if report_dir:
+            os.makedirs(report_dir, exist_ok=True)
+        with open(report_path, "w", encoding="utf-8") as report_file:
+            json.dump(report, report_file, ensure_ascii=False, indent=2)
+    except OSError:
+        return 2
+    return 0 if report.get("ok") is True else 1
+
+
+# This diagnostic must remain ahead of PyQt, login, dotenv and runtime setup.
+# Frozen and installed builds use it as a non-interactive release gate.
+if __name__ == "__main__" and "--coupang-link-contract-smoke" in sys.argv:
+    sys.exit(run_coupang_link_contract_smoke())
+
+
 def _refuse_interrupted_protected_overlay() -> None:
     """Prevent stale native overlays from shadowing source after a hard stop."""
 

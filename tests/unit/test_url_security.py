@@ -1,15 +1,23 @@
 # -*- coding: utf-8 -*-
 """Network boundary validation tests."""
 
+from dataclasses import FrozenInstanceError
+
 import pytest
 
 from utils.url_security import (
+    COUPANG_PARTNER_LINK_CONTRACT_ID,
+    MAX_PARTNER_LINK_HTTP_TOKENS,
+    PartnerLinkParseResult,
+    _collect_http_tokens,
+    build_coupang_partner_link_contract_report,
     extract_coupang_partner_links,
     is_coupang_partner_link,
     is_official_coupang_url,
     is_public_http_url,
     is_trusted_service_url,
     normalize_coupang_partner_link,
+    parse_coupang_partner_links,
 )
 
 
@@ -70,6 +78,129 @@ def test_coupang_partner_link_rejects_multiple_urls_in_single_input():
 
     assert normalize_coupang_partner_link(combined) == ""
     assert not is_coupang_partner_link(combined)
+
+
+def test_partner_link_parse_result_preserves_case_and_is_immutable():
+    url = "https://link.coupang.com/a/f8i3PuVSqi"
+    raw = f"\ufeff\u200b  {url}  \u2060"
+
+    parsed = parse_coupang_partner_links(raw)
+
+    assert parsed == PartnerLinkParseResult(
+        links=(url,),
+        reason_code="ok",
+        raw_length=len(raw),
+        boundary_format_character_count=3,
+    )
+    with pytest.raises(FrozenInstanceError):
+        parsed.reason_code = "invalid_partner_link"
+
+
+@pytest.mark.parametrize(
+    ("raw", "reason_code"),
+    [
+        ("https://link.coupang.com/a/good?next=1", "invalid_partner_link"),
+        ("https://link.coupang.com/a/good?", "invalid_partner_link"),
+        ("https://link.coupang.com/a/good#fragment", "invalid_partner_link"),
+        ("https://link.coupang.com/a/good#", "invalid_partner_link"),
+        ("https://link.coupang.com/a/good.evil", "invalid_partner_link"),
+        ("https://link.coupang.com./a/good", "unsupported_url"),
+        ("https://link.coupang.com/a/go\u200bod", "invalid_partner_link"),
+        ("https://link.coupang.com/a/go od", "invalid_partner_link"),
+        ("https://link.coupang.com/a/go\nod", "invalid_partner_link"),
+        ("https://link.coupang.com/a/go\nod 설명", "invalid_partner_link"),
+        (
+            "https://link.coupang.com/a/go\nod "
+            "https://link.coupang.com/a/other",
+            "mixed_http_urls",
+        ),
+        (
+            "https://evil.example/?next=https://link.coupang.com/a/good",
+            "mixed_http_urls",
+        ),
+        (
+            "https://link.coupang.com/a/good https://example.com/other",
+            "mixed_http_urls",
+        ),
+    ],
+)
+def test_partner_parser_rejects_the_mandatory_malicious_corpus(raw, reason_code):
+    parsed = parse_coupang_partner_links(raw)
+
+    assert parsed.links == ()
+    assert parsed.reason_code == reason_code
+
+
+def test_partner_parser_accepts_decorated_links_and_deduplicates_in_order():
+    first = "https://link.coupang.com/a/FirstCase9"
+    second = "https://link.coupa.ng/a/second_Case-8"
+    raw = (
+        f"첫 번째: [상품 보기]({first}).\n"
+        f"두 번째: <{second}> 그리고 중복 {first}!"
+    )
+
+    parsed = parse_coupang_partner_links(raw)
+
+    assert parsed.reason_code == "ok"
+    assert parsed.links == (first, second)
+    assert extract_coupang_partner_links(raw) == [first, second]
+    assert normalize_coupang_partner_link(raw) == ""
+
+
+@pytest.mark.parametrize(
+    ("raw", "reason_code"),
+    [
+        ("", "empty"),
+        ("링크가 없습니다", "unsupported_url"),
+        ("https://www.coupang.com/vp/products/123", "normal_coupang_product"),
+        ("http://link.coupang.com/a/code", "invalid_partner_link"),
+        ("https://link.coupang.com.evil.example/a/code", "unsupported_url"),
+    ],
+)
+def test_partner_parser_reports_actionable_single_input_reasons(raw, reason_code):
+    assert parse_coupang_partner_links(raw).reason_code == reason_code
+
+
+def test_partner_parser_enforces_size_and_http_token_limits_in_priority_order():
+    oversized = "https://link.coupang.com/a/good" + (
+        "x" * 65_536
+    )
+    assert parse_coupang_partner_links(oversized).reason_code == "input_too_large"
+    assert parse_coupang_partner_links(" " * 70_000).reason_code == "empty"
+
+    too_many = "\n".join(
+        f"https://link.coupang.com/a/code{index}"
+        for index in range(MAX_PARTNER_LINK_HTTP_TOKENS + 1)
+    )
+    assert parse_coupang_partner_links(too_many).reason_code == "too_many_links"
+
+
+def test_http_token_collection_stops_at_the_overflow_sentinel():
+    malicious = ("https://" * 8_000)[:65_536]
+
+    tokens = _collect_http_tokens(malicious)
+
+    assert len(tokens) == MAX_PARTNER_LINK_HTTP_TOKENS + 1
+    assert parse_coupang_partner_links(malicious).reason_code == "too_many_links"
+
+
+def test_partner_contract_report_is_stable_and_self_validating():
+    report = build_coupang_partner_link_contract_report()
+
+    assert list(report) == ["schema_version", "contract_id", "ok", "cases"]
+    assert report["schema_version"] == 1
+    assert report["contract_id"] == COUPANG_PARTNER_LINK_CONTRACT_ID
+    assert report["ok"] is True
+    assert report["cases"][0] == {
+        "id": "reported_partner_link",
+        "accepted": True,
+        "links": ["https://link.coupang.com/a/f8i3PuVSqi"],
+        "reason_code": "ok",
+    }
+    assert all(
+        list(case) == ["id", "accepted", "links", "reason_code"]
+        for case in report["cases"]
+    )
 
 
 def test_public_url_validator_rejects_private_network_targets():

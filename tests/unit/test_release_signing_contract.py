@@ -229,7 +229,9 @@ def test_workflow_forces_tag_publication_policy_and_blocks_bridge_publication():
     assert "signing_mode:" in workflow
     assert '$publish = "true"' in workflow
     assert '$signingMode = "public"' in workflow
-    assert "workflow_dispatch is candidate-only; only an existing pushed tag may publish" in workflow
+    assert "workflow_dispatch:" not in workflow
+    assert "Direct installer builds require an immutable vMAJOR.MINOR.PATCH tag push" in workflow
+    assert "environment: production-release-signing" in workflow
     assert "Public signing mode rejects self-issued certificates" in workflow
     assert "Release gate requires a nonempty expected signer thumbprint" in workflow
     assert "validate_build_signing_configuration" in workflow
@@ -250,6 +252,20 @@ def test_workflow_installs_package_and_directly_verifies_signed_uninstaller():
     assert "& $signtool verify /pa /all /v $Path" in workflow
     assert "ShouldLaunchInstalledApp" in installer
     assert "ParamStr(I)" in installer
+
+
+def test_installed_link_contract_gate_runs_after_signing_and_before_assets():
+    workflow = (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
+        encoding="utf-8"
+    )
+
+    signing = workflow.index('Assert-SigningGate $installedApp "installed application"')
+    smoke = workflow.index("coupang_link_contract_installed.json", signing)
+    hash_asset = workflow.index("Compute installer SHA256", smoke)
+    assert signing < smoke < hash_asset
+    assert '"--coupang-link-contract-smoke"' in workflow
+    assert "WaitForExit(30000)" in workflow
+    assert "publication_allowed=true and clean_tree=true" in workflow
 
 
 def test_release_and_api_follow_signature_and_asset_hash_gates():
@@ -315,8 +331,8 @@ def test_release_workflow_pins_actions_tools_and_never_interpolates_signing_secr
     assert "python-version: '3.11.9'" in workflow
     assert "hashFiles('requirements-release.lock')" in workflow
     assert "choco install innosetup --version=" in workflow
-    assert "choco install tesseract --version=" in workflow
-    assert workflow.count("--require-checksums --fail-on-unfound") == 2
+    assert "./scripts/install_pinned_tesseract.ps1" in workflow
+    assert workflow.count("--require-checksums --fail-on-unfound") == 1
     assert '"${{ secrets.SIGN_CERT_' not in workflow
     assert "$env:SIGN_CERT_PFX_BASE64" in workflow
     assert 'raise SystemExit("APP_VERSION_UPDATE_HMAC_KEY is required")' in workflow

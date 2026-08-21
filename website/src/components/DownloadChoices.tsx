@@ -39,7 +39,7 @@ export function DownloadChoices({
         >
           v{LATEST_VERIFIED_BUILD_VERSION}
         </a>
-        <span> · {LATEST_VERIFIED_BUILD_DATE} 업데이트 · Windows 빌드 완료 · Microsoft Store 제출 준비 중</span>
+        <span> · {LATEST_VERIFIED_BUILD_DATE} 업데이트 · Windows 정식 빌드</span>
       </p>
       <div
         className={cn("grid w-full gap-3", !stacked && "sm:grid-cols-2")}
@@ -65,7 +65,7 @@ export function DownloadChoices({
             </a>
           </Button>
           <span className="text-center text-xs font-medium leading-relaxed text-primary">
-            권장 · 자동 업데이트 · 앱 최신 v{LATEST_VERIFIED_BUILD_VERSION} ({LATEST_VERIFIED_BUILD_DATE})
+            Store 심사·등록 상태에 따라 최신 버전 반영이 늦을 수 있습니다
           </span>
         </div>
 
@@ -90,7 +90,7 @@ export function DownloadChoices({
             </a>
           </Button>
           <span className="text-center text-xs text-muted-foreground">
-            v{DIRECT_INSTALLER_VERSION} · {DIRECT_INSTALLER_RELEASE_DATE} 공개 · 기존 일반판 사용자용 .exe
+            최신 정식판 v{DIRECT_INSTALLER_VERSION} · {DIRECT_INSTALLER_RELEASE_DATE} 공개 · Windows .exe
           </span>
         </div>
       </div>

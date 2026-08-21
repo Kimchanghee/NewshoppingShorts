@@ -1,89 +1,81 @@
-"""
-Faster-Whisper 모델 사전 다운로드 및 로컬 패키징 스크립트
-Build Preparation Script
+"""Download and verify immutable Faster-Whisper release assets."""
 
-1. Faster-Whisper 모델을 미리 다운로드합니다.
-2. 다운로드된 모델을 프로젝트 로컬 폴더(faster_whisper_models)로 복사합니다.
-3. 이 폴더는 PyInstaller 빌드 시 포함되어 오프라인에서도 작동합니다.
-"""
+from __future__ import annotations
 
+import argparse
 import logging
-import os
-import sys
 from pathlib import Path
+import sys
 
-# 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from utils.release_assets import (  # noqa: E402
+    WHISPER_MODEL_ASSETS,
+    verify_whisper_model_assets,
+)
+
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-def _find_model_files(model_dir: Path):
-    """모델 디렉토리에서 model.bin 위치를 찾는다 (플랫 / HF 캐시 구조 모두 지원)."""
-    if (model_dir / "model.bin").exists():
-        return model_dir
-    for entry in model_dir.iterdir():
-        if entry.name.startswith("models--") and entry.is_dir():
-            snapshots = entry / "snapshots"
-            if snapshots.is_dir():
-                for snap in snapshots.iterdir():
-                    if snap.is_dir() and (snap / "model.bin").exists():
-                        return snap
-    return None
 
+def download_and_bundle_models(
+    *,
+    project_root: Path = PROJECT_ROOT,
+    verify_only: bool = False,
+) -> bool:
+    bundled_root = project_root / "faster_whisper_models"
+    bundled_root.mkdir(parents=True, exist_ok=True)
 
-def download_and_bundle_models():
-    """Faster-Whisper 모델들을 다운로드하고 로컬로 복사"""
-    logger.info("=" * 60)
-    logger.info("Faster-Whisper 모델 준비 시작 (Build Preparation)")
-    logger.info("=" * 60)
-
-    try:
-        from faster_whisper import WhisperModel
-        logger.info("[OK] faster_whisper 모듈 확인됨")
-    except ImportError:
-        logger.error("[오류] faster-whisper 패키지가 없습니다. 설치하세요: pip install faster-whisper")
-        return False
-
-    # 다운로드할 모델 목록 (base는 필수)
-    models_to_download = ["tiny", "base"]
-    
-    # 프로젝트 루트 내 모델 저장 경로
-    bundled_base_dir = Path("faster_whisper_models")
-    bundled_base_dir.mkdir(exist_ok=True)
-
-    for model_name in models_to_download:
-        logger.info(f"\n[작업] {model_name} 모델 처리 중...")
-        
+    if not verify_only:
         try:
-            # 1. 모델 다운로드 (캐시 사용)
-            # download_root를 지정하여 해당 폴더에 바로 다운로드되게 시도
-            local_model_path = bundled_base_dir / model_name
-            
-            logger.info(f"  - 모델 다운로드/로드 중: {model_name}")
-            model = WhisperModel(
-                model_name,
-                device="cpu",
-                compute_type="int8",
-                download_root=str(local_model_path)
-            )
-            
-            # 2. 파일 확인 (플랫 구조 또는 HuggingFace 캐시 구조)
-            resolved_path = _find_model_files(local_model_path)
-            if resolved_path:
-                logger.info(f"  ✅ {model_name} 모델 확인됨: {resolved_path}")
-            else:
-                logger.warning(f"  ⚠️ {model_name} 모델 파일(model.bin)을 찾을 수 없습니다.")
-                
-            del model
-
-        except Exception as e:
-            logger.error(f"  ❌ {model_name} 모델 처리 실패: {e}")
+            from huggingface_hub import snapshot_download
+        except ImportError:
+            logger.error("huggingface-hub is required to download release models")
             return False
 
-    logger.info("\n" + "=" * 60)
-    logger.info("모든 모델 준비 완료! (faster_whisper_models/)")
-    logger.info("=" * 60)
+        for model_name, identity in WHISPER_MODEL_ASSETS.items():
+            expected_files = identity["files"]
+            assert isinstance(expected_files, dict)
+            logger.info(
+                "Downloading %s from %s@%s",
+                model_name,
+                identity["repo_id"],
+                identity["revision"],
+            )
+            try:
+                snapshot_download(
+                    repo_id=str(identity["repo_id"]),
+                    revision=str(identity["revision"]),
+                    allow_patterns=list(expected_files),
+                    local_dir=str(bundled_root / model_name),
+                )
+            except Exception as exc:
+                logger.error("Pinned %s model download failed: %s", model_name, exc)
+                return False
+
+    try:
+        projection = verify_whisper_model_assets(bundled_root)
+    except (OSError, ValueError) as exc:
+        logger.error("%s", exc)
+        return False
+    logger.info("Verified immutable Whisper assets: %s", projection)
     return True
 
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--verify-only",
+        action="store_true",
+        help="Verify existing model files without network access.",
+    )
+    args = parser.parse_args()
+    return 0 if download_and_bundle_models(verify_only=args.verify_only) else 1
+
+
 if __name__ == "__main__":
-    success = download_and_bundle_models()
-    sys.exit(0 if success else 1)
+    raise SystemExit(main())

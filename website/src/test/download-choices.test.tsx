@@ -3,7 +3,9 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DownloadChoices } from "@/components/DownloadChoices";
 import {
   DIRECT_DOWNLOAD_URL,
+  DIRECT_INSTALLER_CHANNEL,
   DIRECT_INSTALLER_RELEASE_DATE,
+  DIRECT_INSTALLER_VERSION,
   LATEST_VERIFIED_BUILD_DATE,
   LATEST_VERIFIED_BUILD_VERSION,
   LATEST_VERIFIED_RELEASE_URL,
@@ -26,11 +28,11 @@ describe("download choices", () => {
       "href",
       LATEST_VERIFIED_RELEASE_URL,
     );
-    expect(screen.getAllByText(/v1\.5\.70/).length).toBeGreaterThan(0);
-    expect(screen.getByText(new RegExp(`권장 · 자동 업데이트 · 앱 최신 v${LATEST_VERIFIED_BUILD_VERSION}`))).toBeInTheDocument();
+    expect(screen.getAllByText(new RegExp(`v${DIRECT_INSTALLER_VERSION.replaceAll(".", "\\.")}`)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/Store 심사·등록 상태에 따라 최신 버전 반영이 늦을 수 있습니다/)).toBeInTheDocument();
     expect(screen.getAllByText(new RegExp(LATEST_VERIFIED_BUILD_DATE.replaceAll(".", "\\."))).length).toBeGreaterThan(0);
-    expect(screen.getByText(new RegExp(DIRECT_INSTALLER_RELEASE_DATE.replaceAll(".", "\\.")))).toBeInTheDocument();
-    expect(screen.getByText(/현재 안전하게 공개된 일반 설치 파일은 v1\.5\.70/)).toBeInTheDocument();
+    expect(screen.getAllByText(new RegExp(DIRECT_INSTALLER_RELEASE_DATE.replaceAll(".", "\\."))).length).toBeGreaterThan(0);
+    expect(screen.getByText(new RegExp(`현재 안전하게 공개된 일반 설치 파일은 v${DIRECT_INSTALLER_VERSION.replaceAll(".", "\\.")}`))).toBeInTheDocument();
   });
 
   it("records the selected distribution channel without changing the existing event name", () => {
@@ -48,8 +50,8 @@ describe("download choices", () => {
     expect(gtag).toHaveBeenCalledWith("event", "download_click", {
       placement: "hero",
       channel: "direct_installer",
-      distribution: "manual-direct",
-      version: "1.5.70",
+      distribution: DIRECT_INSTALLER_CHANNEL,
+      version: DIRECT_INSTALLER_VERSION,
     });
   });
 });

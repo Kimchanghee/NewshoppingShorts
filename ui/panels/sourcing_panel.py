@@ -19,13 +19,12 @@ from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
 from ui.components.automation_readiness import AutomationReadinessCard
-from ui.components.custom_dialog import show_warning
 from utils.logging_config import get_logger
 from utils.url_security import (
+    MAX_PARTNER_LINK_HTTP_TOKENS,
+    PartnerLinkParseResult,
     extract_coupang_partner_links,
-    is_coupang_partner_link,
-    is_official_coupang_url,
-    normalize_coupang_partner_link,
+    parse_coupang_partner_links,
 )
 from utils.auth_helpers import extract_user_id
 from managers.work_quota import DurableWorkReservation
@@ -886,20 +885,32 @@ class SourcingPanel(QWidget):
             self.upload_timer_summary.setEnabled(enabled)
         self._update_upload_timer_summary()
 
-    def _current_coupang_link_count(self) -> int:
+    def _current_coupang_link_count(
+        self,
+        parse_result: Optional[PartnerLinkParseResult] = None,
+    ) -> int:
+        if parse_result is not None:
+            return len(parse_result.links)
         if hasattr(self, "partner_links_input"):
-            return len(self._extract_partner_links(self.partner_links_input.toPlainText()))
+            return len(
+                parse_coupang_partner_links(
+                    self.partner_links_input.toPlainText()
+                ).links
+            )
         if not hasattr(self, "url_input"):
             return 0
-        return 1 if is_coupang_partner_link(self.url_input.text().strip()) else 0
+        return len(parse_coupang_partner_links(self.url_input.text()).links)
 
-    def _update_next_links_count(self):
-        total_count = self._current_coupang_link_count()
+    def _update_next_links_count(
+        self,
+        parse_result: Optional[PartnerLinkParseResult] = None,
+    ):
+        total_count = self._current_coupang_link_count(parse_result)
         if hasattr(self, "next_links_count_label"):
             self.next_links_count_label.setText(f"{total_count}개")
-        self._update_upload_timer_summary()
+        self._update_upload_timer_summary(total_count=total_count)
 
-    def _update_upload_timer_summary(self):
+    def _update_upload_timer_summary(self, total_count: Optional[int] = None):
         if not hasattr(self, "upload_timer_summary"):
             return
         hours = (
@@ -907,7 +918,8 @@ class SourcingPanel(QWidget):
             if hasattr(self, "upload_interval_spin")
             else self._load_upload_interval_hours()
         )
-        total_count = self._current_coupang_link_count()
+        if total_count is None:
+            total_count = self._current_coupang_link_count()
         if not (hasattr(self, "chk_upload") and self.chk_upload.isChecked()):
             self.upload_timer_summary.setText("YouTube 자동 업로드를 켜면 링크마다 타이머가 적용됩니다.")
             return
@@ -933,19 +945,30 @@ class SourcingPanel(QWidget):
     def _sync_partner_links_from_input(self) -> None:
         if not hasattr(self, "partner_links_input"):
             return
-        links = self._extract_partner_links(self.partner_links_input.toPlainText())
+        parse_result = parse_coupang_partner_links(
+            self.partner_links_input.toPlainText()
+        )
+        links = list(parse_result.links)
+        self._partner_links_parse_result = parse_result
         if not self._running and not getattr(self, "_partner_batch_active", False):
             self.url_input.setText(links[0] if links else "")
             self.next_links_input.setPlainText("\n".join(links[1:]))
-        self._update_next_links_count()
+        self._update_next_links_count(parse_result)
 
-    def _set_partner_links_display(self, links: List[str]) -> None:
+    def _set_partner_links_display(
+        self,
+        links: List[str],
+        parse_result: Optional[PartnerLinkParseResult] = None,
+    ) -> None:
         if not hasattr(self, "partner_links_input"):
             return
         self.partner_links_input.blockSignals(True)
         self.partner_links_input.setPlainText("\n".join(links))
         self.partner_links_input.blockSignals(False)
-        self._update_next_links_count()
+        if parse_result is None:
+            parse_result = parse_coupang_partner_links("\n".join(links))
+        self._partner_links_parse_result = parse_result
+        self._update_next_links_count(parse_result)
 
     def _extract_next_links(self) -> List[str]:
         if not hasattr(self, "next_links_input"):
@@ -1075,30 +1098,32 @@ class SourcingPanel(QWidget):
                 if hasattr(self, "partner_links_input")
                 else self.url_input.text()
             )
-            links = SourcingPanel._extract_partner_links(raw_links)
-            if not links:
+            parse_result = parse_coupang_partner_links(raw_links)
+            if parse_result.reason_code != "ok":
                 self.results_label.setText(
-                    self._partner_link_error_message(raw_links)
-                    if str(raw_links or "").strip()
-                    else "쿠팡 파트너스 상품 링크를 한 줄에 하나씩 붙여넣어 주세요."
+                    self._partner_link_error_message(parse_result)
                 )
                 self.results_label.setStyleSheet(f"color: {get_color('error')};")
                 return
+            links = list(parse_result.links)
+            url = links[0]
             if hasattr(self, "partner_links_input") and hasattr(self, "next_links_input"):
                 self._partner_batch_active = True
                 self._partner_batch_total = len(links)
                 self._partner_batch_completed = 0
-                self.url_input.setText(links[0])
+                self.url_input.setText(url)
                 self.next_links_input.setPlainText("\n".join(links[1:]))
-                self._set_partner_links_display(links)
-
-        raw_url = self.url_input.text()
-        url = normalize_coupang_partner_link(raw_url)
-        if not url:
-            self._partner_batch_active = False
-            self.results_label.setText(self._partner_link_error_message(raw_url))
-            self.results_label.setStyleSheet(f"color: {get_color('error')};")
-            return
+                self._set_partner_links_display(links, parse_result=parse_result)
+        else:
+            parse_result = parse_coupang_partner_links(self.url_input.text())
+            if parse_result.reason_code != "ok" or len(parse_result.links) != 1:
+                self._partner_batch_active = False
+                self.results_label.setText(
+                    self._partner_link_error_message(parse_result)
+                )
+                self.results_label.setStyleSheet(f"color: {get_color('error')};")
+                return
+            url = parse_result.links[0]
         self.url_input.setText(url)
         if self._running:
             return
@@ -1427,16 +1452,45 @@ class SourcingPanel(QWidget):
             self.search_recovery_frame.setVisible(bool(visible))
 
     @staticmethod
-    def _partner_link_error_message(url: str) -> str:
-        if is_official_coupang_url(url) and not is_coupang_partner_link(url):
+    def _partner_link_error_message(
+        value: object | PartnerLinkParseResult,
+    ) -> str:
+        parsed = (
+            value
+            if isinstance(value, PartnerLinkParseResult)
+            else parse_coupang_partner_links(value)
+        )
+        if parsed.reason_code == "empty":
+            return "쿠팡 파트너스 상품 링크를 한 줄에 하나씩 붙여넣어 주세요."
+        if parsed.reason_code == "normal_coupang_product":
             return (
                 "일반 쿠팡 상품 링크는 사용할 수 없습니다.\n"
                 "원인: 이 주소에는 쿠팡 파트너스 수익 추적 정보가 없습니다.\n"
                 "해결: 쿠팡 파트너스에서 생성한 https://link.coupang.com/... 링크를 입력해 주세요."
             )
+        if parsed.reason_code == "mixed_http_urls":
+            return (
+                "쿠팡 파트너스 링크와 함께 다른 주소 또는 잘못된 주소가 들어 있습니다.\n"
+                "해결: 공식 파트너스 단축 링크만 남기고 다시 입력해 주세요."
+            )
+        if parsed.reason_code == "input_too_large":
+            return (
+                "붙여넣은 내용이 너무 깁니다.\n"
+                "해결: 쿠팡 파트너스 링크만 나누어 입력해 주세요."
+            )
+        if parsed.reason_code == "too_many_links":
+            return (
+                f"한 번에 {MAX_PARTNER_LINK_HTTP_TOKENS}개를 초과하는 링크는 처리할 수 없습니다.\n"
+                "해결: 링크 목록을 나누어 입력해 주세요."
+            )
+        if parsed.reason_code == "invalid_partner_link":
+            return (
+                "쿠팡 파트너스 단축 링크 형식이 올바르지 않습니다.\n"
+                "해결: 링크 뒤의 추가 경로, 물음표·# 문자 또는 숨은 문자를 제거해 주세요."
+            )
         return (
-            "올바른 쿠팡 파트너스 링크가 아닙니다.\n"
-            "해결: https://link.coupang.com/... 형식의 공식 파트너스 링크를 입력해 주세요."
+            "지원하지 않는 웹 주소입니다.\n"
+            "해결: https://link.coupang.com/... 형식의 공식 파트너스 링크만 입력해 주세요."
         )
 
     def _retry_last_search(self) -> None:

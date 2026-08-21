@@ -37,6 +37,46 @@ function Invoke-Native {
   }
 }
 
+function Get-CoupangLinkContractProjection {
+  param(
+    [Parameter(Mandatory = $true)][string]$Path,
+    [string]$ExpectedContractId = ""
+  )
+
+  if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) {
+    throw "Coupang link contract smoke report was not created: $Path"
+  }
+  $report = Get-Content -LiteralPath $Path -Raw | ConvertFrom-Json
+  if ($report.schema_version -ne 1) {
+    throw "Unsupported Coupang link contract schema in ${Path}: $($report.schema_version)"
+  }
+  if ([string]::IsNullOrWhiteSpace([string]$report.contract_id)) {
+    throw "Coupang link contract report has no contract_id: $Path"
+  }
+  if ($ExpectedContractId -and $report.contract_id -ne $ExpectedContractId) {
+    throw "Coupang link contract ID mismatch in ${Path}: expected $ExpectedContractId, got $($report.contract_id)"
+  }
+  if ($report.ok -ne $true) {
+    throw "Coupang link contract smoke failed: $Path"
+  }
+  $stableCases = @(
+    $report.cases | ForEach-Object {
+      [ordered]@{
+        id = [string]$_.id
+        accepted = [bool]$_.accepted
+        links = @($_.links)
+        reason_code = [string]$_.reason_code
+      }
+    }
+  )
+  return ([ordered]@{
+    schema_version = [int]$report.schema_version
+    contract_id = [string]$report.contract_id
+    ok = [bool]$report.ok
+    cases = $stableCases
+  } | ConvertTo-Json -Depth 20 -Compress)
+}
+
 function Assert-AuthenticodeArtifact {
   param(
     [Parameter(Mandatory = $true)][string]$Path,
@@ -209,6 +249,11 @@ try {
     (Join-Path $Root "scripts\materialize_whisper_models.py")
   )
 
+  Invoke-Native "[1.55/5] Verifying pinned faster-whisper model revisions and hashes..." $Python @(
+    (Join-Path $Root "scripts\download_whisper_models.py"),
+    "--verify-only"
+  )
+
   Write-Host "`n[1.7/5] Staging Tesseract OCR runtime (for end-user OCR/blur)..."
   $stageRoot = Join-Path $Root "build_staging\tesseract"
   Remove-Item -Path $stageRoot -Recurse -Force -ErrorAction SilentlyContinue
@@ -296,10 +341,46 @@ try {
     "--licenses-dir", (Join-Path $Root "resources\licenses")
   )
 
+  # Run the parser contract from checked-in source before freezing anything.
+  # The stable projection becomes the reference for frozen and installed EXEs.
+  $sourceLinkContractReport = Join-Path $Root "build\coupang_link_contract_source.json"
+  New-Item -ItemType Directory -Path (Split-Path $sourceLinkContractReport -Parent) -Force | Out-Null
+  Remove-Item -LiteralPath $sourceLinkContractReport -Force -ErrorAction SilentlyContinue
+  $previousLinkContractReport = $env:SSMAKER_COUPANG_LINK_CONTRACT_REPORT
+  try {
+    $env:SSMAKER_COUPANG_LINK_CONTRACT_REPORT = $sourceLinkContractReport
+    Invoke-Native "[1.92/5] Running source Coupang link contract smoke test..." $Python @(
+      (Join-Path $Root "ssmaker.py"),
+      "--coupang-link-contract-smoke"
+    )
+  } finally {
+    $env:SSMAKER_COUPANG_LINK_CONTRACT_REPORT = $previousLinkContractReport
+  }
+  $sourceLinkProjection = Get-CoupangLinkContractProjection -Path $sourceLinkContractReport
+  $sourceLinkContractData = Get-Content -LiteralPath $sourceLinkContractReport -Raw | ConvertFrom-Json
+
+  # Capture Git and external CI identity only after the tracked-tree policy can
+  # be evaluated. Untracked files are intentionally neither read nor changed.
+  $buildManifest = Join-Path $Root "build_staging\build_manifest.json"
+  Invoke-Native "[1.94/5] Generating build provenance manifest..." $Python @(
+    (Join-Path $Root "scripts\generate_build_manifest.py"),
+    "--project-root", $Root,
+    "--version-json", $versionJson,
+    "--output", $buildManifest
+  )
+  $buildManifestData = Get-Content -LiteralPath $buildManifest -Raw | ConvertFrom-Json
+  if ($buildManifestData.url_contract_id -ne $sourceLinkContractData.contract_id) {
+    throw "Build manifest URL contract ID does not match the source smoke report."
+  }
+  if ($buildManifestData.url_contract_schema_version -ne $sourceLinkContractData.schema_version) {
+    throw "Build manifest URL contract schema does not match the source smoke report."
+  }
+
   $windowsVersionInfo = Join-Path $Root "build_staging\windows_version_info.txt"
   Invoke-Native "[1.95/5] Generating Windows executable metadata..." $Python @(
     (Join-Path $Root "scripts\generate_windows_version_info.py"),
     "--version-json", $versionJson,
+    "--build-manifest", $buildManifest,
     "--output", $windowsVersionInfo
   )
 
@@ -339,6 +420,70 @@ try {
   if (-not (Test-Path $ssmakerExe)) {
     throw "Build output missing: ${ssmakerExe}"
   }
+
+  $distBuildManifest = Join-Path $distDir "build_manifest.json"
+  if (-not (Test-Path -LiteralPath $distBuildManifest -PathType Leaf)) {
+    throw "Frozen application is missing build_manifest.json: $distBuildManifest"
+  }
+  $stagingManifestHash = (Get-FileHash -LiteralPath $buildManifest -Algorithm SHA256).Hash
+  $distManifestHash = (Get-FileHash -LiteralPath $distBuildManifest -Algorithm SHA256).Hash
+  if ($stagingManifestHash -ne $distManifestHash) {
+    throw "Frozen build manifest differs from the source staging manifest."
+  }
+
+  if ($buildManifestData.whisper_assets.verified -ne $true) {
+    throw "Build manifest does not contain verified immutable Whisper assets."
+  }
+  foreach ($modelProperty in $buildManifestData.whisper_assets.models.PSObject.Properties) {
+    foreach ($fileProperty in $modelProperty.Value.files.PSObject.Properties) {
+      $frozenModelFile = Join-Path $distDir (
+        "faster_whisper_models\$($modelProperty.Name)\$($fileProperty.Name)"
+      )
+      if (-not (Test-Path -LiteralPath $frozenModelFile -PathType Leaf)) {
+        throw "Frozen Whisper asset is missing: $frozenModelFile"
+      }
+      $actualHash = (Get-FileHash -LiteralPath $frozenModelFile -Algorithm SHA256).Hash.ToLowerInvariant()
+      if ($actualHash -ne ([string]$fileProperty.Value).ToLowerInvariant()) {
+        throw "Frozen Whisper asset hash mismatch: $frozenModelFile"
+      }
+    }
+  }
+
+  $tesseractProperties = @($buildManifestData.tesseract_assets.files.PSObject.Properties)
+  if ($tesseractProperties.Count -eq 0) {
+    throw "Build manifest does not contain captured Tesseract assets."
+  }
+  foreach ($fileProperty in $tesseractProperties) {
+    $frozenTesseractFile = Join-Path $distDir (
+      "tesseract\$($fileProperty.Name.Replace('/', '\'))"
+    )
+    if (-not (Test-Path -LiteralPath $frozenTesseractFile -PathType Leaf)) {
+      throw "Frozen Tesseract asset is missing: $frozenTesseractFile"
+    }
+    $actualHash = (Get-FileHash -LiteralPath $frozenTesseractFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    if ($actualHash -ne ([string]$fileProperty.Value).ToLowerInvariant()) {
+      throw "Frozen Tesseract asset hash mismatch: $frozenTesseractFile"
+    }
+  }
+
+  $frozenLinkContractReport = Join-Path $Root "build\coupang_link_contract_frozen.json"
+  Remove-Item -LiteralPath $frozenLinkContractReport -Force -ErrorAction SilentlyContinue
+  $previousLinkContractReport = $env:SSMAKER_COUPANG_LINK_CONTRACT_REPORT
+  try {
+    $env:SSMAKER_COUPANG_LINK_CONTRACT_REPORT = $frozenLinkContractReport
+    Invoke-Native "[2.08/5] Running frozen Coupang link contract smoke test..." $ssmakerExe @(
+      "--coupang-link-contract-smoke"
+    )
+  } finally {
+    $env:SSMAKER_COUPANG_LINK_CONTRACT_REPORT = $previousLinkContractReport
+  }
+  $frozenLinkProjection = Get-CoupangLinkContractProjection `
+    -Path $frozenLinkContractReport `
+    -ExpectedContractId ([string]$sourceLinkContractData.contract_id)
+  if ($frozenLinkProjection -cne $sourceLinkProjection) {
+    throw "Source and frozen Coupang link contract reports are not structurally identical."
+  }
+  Write-Host "OK: source and frozen Coupang link contract smoke reports match."
 
   # Fail closed if a protected module entered PYZ as bytecode, if a native
   # module is absent, or if source prompt/algorithm literals are recoverable
@@ -418,6 +563,7 @@ try {
     # ── Core ──
     "ssmaker.exe",
     "version.json",
+    "build_manifest.json",
     "browser-extension\manifest.json",
     "browser-extension\service_worker.js",
 

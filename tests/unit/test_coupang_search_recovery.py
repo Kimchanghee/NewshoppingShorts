@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit
+from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit, QTextEdit
 
 
 QT_APP = QApplication.instance() or QApplication([])
@@ -91,6 +91,73 @@ def test_platform_start_normalizes_invisible_clipboard_prefix_before_validation(
 
     assert panel.url_input.text() == expected
     assert panel.results_label.text() == ""
+
+
+def test_platform_start_uses_one_shared_parse_result_per_action(monkeypatch):
+    from ui.panels import sourcing_panel
+
+    expected = "https://link.coupang.com/a/f8i3PuVSqi"
+    calls = []
+    real_parser = sourcing_panel.parse_coupang_partner_links
+
+    def recording_parser(raw):
+        calls.append(raw)
+        return real_parser(raw)
+
+    monkeypatch.setattr(sourcing_panel, "parse_coupang_partner_links", recording_parser)
+    panel = SimpleNamespace(
+        url_input=QLineEdit(),
+        results_label=QLabel(),
+        _partner_link_error_message=sourcing_panel.SourcingPanel._partner_link_error_message,
+        _running=True,
+    )
+    panel.url_input.setText(f"\ufeff {expected}")
+    qt_input_value = panel.url_input.text()
+
+    sourcing_panel.SourcingPanel._on_start_platform_video(panel)
+
+    assert calls == [qt_input_value]
+    assert panel.url_input.text() == expected
+
+
+def test_platform_start_rejects_mixed_urls_without_forwarding_partial_link():
+    from ui.panels.sourcing_panel import SourcingPanel
+
+    partner_input = QTextEdit()
+    partner_input.setPlainText(
+        "https://link.coupang.com/a/good https://example.com/tracker"
+    )
+    panel = SimpleNamespace(
+        partner_links_input=partner_input,
+        url_input=QLineEdit(),
+        next_links_input=QTextEdit(),
+        results_label=QLabel(),
+        _partner_link_error_message=SourcingPanel._partner_link_error_message,
+    )
+
+    SourcingPanel._on_start_platform_video(panel)
+
+    assert panel.url_input.text() == ""
+    assert panel.next_links_input.toPlainText() == ""
+    assert "다른 주소 또는 잘못된 주소" in panel.results_label.text()
+
+
+def test_partner_link_errors_distinguish_invalid_mixed_and_unsupported_inputs():
+    from ui.panels.sourcing_panel import SourcingPanel
+
+    invalid = SourcingPanel._partner_link_error_message(
+        "https://link.coupang.com/a/good?query=1"
+    )
+    mixed = SourcingPanel._partner_link_error_message(
+        "https://link.coupang.com/a/good https://example.com"
+    )
+    unsupported = SourcingPanel._partner_link_error_message(
+        "https://example.com/not-coupang"
+    )
+
+    assert "단축 링크 형식" in invalid
+    assert "다른 주소 또는 잘못된 주소" in mixed
+    assert "지원하지 않는 웹 주소" in unsupported
 
 
 def test_full_automation_accepts_all_reported_links_from_decorated_paste():
