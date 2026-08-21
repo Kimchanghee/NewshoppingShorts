@@ -164,17 +164,17 @@ def test_build_policy_allows_only_the_exact_baked_transition(monkeypatch):
     assert "baked public release signer" in public_reason
 
 
-def test_v1577_is_the_only_baked_integrity_bridge_release():
-    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.77"
+def test_v1578_is_the_only_baked_integrity_bridge_release():
+    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.78"
 
     approved, _ = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.77",
+        "1.5.78",
         LEGACY_THUMBPRINT,
     )
     next_version, reason = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.78",
+        "1.5.79",
         LEGACY_THUMBPRINT,
     )
 
@@ -187,9 +187,9 @@ def test_build_uses_rfc3161_and_inno_named_sign_tool_contract():
     build = (ROOT / "scripts" / "build_exe.ps1").read_text(encoding="utf-8-sig")
     installer = (ROOT / "installer.iss").read_text(encoding="utf-8-sig")
 
-    assert '"/tr", "https://timestamp.digicert.com"' in build
+    assert '"/tr", "http://timestamp.digicert.com"' in build
     assert '"/td", "SHA256"' in build
-    assert "/fd SHA256 /tr https://timestamp.digicert.com /td SHA256" in build
+    assert "/fd SHA256 /tr http://timestamp.digicert.com /td SHA256" in build
     assert '"/DSignToolAvailable"' in build
     assert '"/Sssmaker=$innoSignCommand"' in build
     assert "SignTool=ssmaker" in installer
