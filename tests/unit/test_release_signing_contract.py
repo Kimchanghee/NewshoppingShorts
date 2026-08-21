@@ -164,17 +164,17 @@ def test_build_policy_allows_only_the_exact_baked_transition(monkeypatch):
     assert "baked public release signer" in public_reason
 
 
-def test_v1575_is_the_only_baked_integrity_bridge_release():
-    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.75"
+def test_v1576_is_the_only_baked_integrity_bridge_release():
+    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.76"
 
     approved, _ = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.75",
+        "1.5.76",
         LEGACY_THUMBPRINT,
     )
     next_version, reason = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.76",
+        "1.5.77",
         LEGACY_THUMBPRINT,
     )
 
@@ -200,12 +200,16 @@ def test_build_uses_rfc3161_and_inno_named_sign_tool_contract():
 
 def test_build_public_gate_is_fail_closed_and_checks_expected_identity():
     build = (ROOT / "scripts" / "build_exe.ps1").read_text(encoding="utf-8-sig")
+    runtime_policy = (ROOT / "utils" / "authenticode.py").read_text(encoding="utf-8")
 
     assert "SIGN_CERT_THUMBPRINT is required for direct-download release builds" in build
     assert "signer mismatch" in build
     assert "Code Signing EKU" in build
-    assert 'if ($SigningMode -eq "public" -or $ekuOids.Count -gt 0)' in build
-    assert "exact pinned integrity-bridge signer without an EKU extension" in build
+    assert "ForEach-Object { [string]$_.ObjectId }" in build
+    assert "ObjectId.Value" not in build
+    assert "ForEach-Object { [string]$_.ObjectId })" in runtime_policy
+    assert "ObjectId.Value" not in runtime_policy
+    assert "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop" in runtime_policy
     assert "TimeStamperCertificate" in build
     assert 'if ([string]$signature.Status -ne "Valid")' in build
     assert "UnknownError is not accepted in public mode" in build
@@ -254,8 +258,8 @@ def test_workflow_forces_tag_publication_and_scopes_bridge_to_baked_version():
     assert "Direct installer builds require an immutable vMAJOR.MINOR.PATCH tag push" in workflow
     assert "environment: production-release-signing" in workflow
     assert "Public signing mode rejects self-issued certificates" in workflow
-    assert 'if ($env:SIGNING_MODE -eq "public" -or $ekuOids.Count -gt 0)' in workflow
-    assert "exact pinned integrity-bridge signer has no EKU extension" in workflow
+    assert "ForEach-Object { [string]$_.ObjectId }" in workflow
+    assert "ObjectId.Value" not in workflow
     assert "Release gate requires a nonempty expected signer thumbprint" in workflow
     assert "validate_build_signing_configuration" in workflow
     assert "if: needs.build.outputs.publish == 'true'" in workflow

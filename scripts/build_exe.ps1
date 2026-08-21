@@ -99,13 +99,10 @@ function Assert-AuthenticodeArtifact {
   $codeSigningEku = "1.3.6.1.5.5.7.3.3"
   $ekuOids = @(
     $signature.SignerCertificate.EnhancedKeyUsageList |
-      ForEach-Object { [string]$_.ObjectId.Value }
+      ForEach-Object { [string]$_.ObjectId }
   )
   if ($codeSigningEku -notin $ekuOids) {
-    if ($SigningMode -eq "public" -or $ekuOids.Count -gt 0) {
-      throw "$Label signer certificate is missing the Code Signing EKU ($codeSigningEku)."
-    }
-    Write-Warning "$Label uses the exact pinned integrity-bridge signer without an EKU extension."
+    throw "$Label signer certificate is missing the Code Signing EKU ($codeSigningEku)."
   }
   if ($null -eq $signature.TimeStamperCertificate) {
     throw "$Label signature is missing its trusted RFC 3161 timestamp."

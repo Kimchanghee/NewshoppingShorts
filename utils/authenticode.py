@@ -26,11 +26,11 @@ LEGACY_PIN_COMPATIBILITY_VERSION = "1.5.64"
 LEGACY_INTEGRITY_BRIDGE_THUMBPRINTS = frozenset(
     {"4FE575D5119B0FC5DAFB6C1684B2968D340EE8F0"}
 )
-# v1.5.75 is the one approved direct-download transition release while a
+# v1.5.76 is the one approved direct-download transition release while a
 # publicly trusted code-signing identity is being provisioned. No other future
 # version inherits this exception. Runtime environment variables remain
 # additive/test overrides; trust must not depend on CI-only environment state.
-TRANSITION_BRIDGE_VERSION = "1.5.75"
+TRANSITION_BRIDGE_VERSION = "1.5.76"
 PUBLIC_RELEASE_SIGNER_THUMBPRINTS: frozenset[str] = frozenset()
 TRANSITION_BRIDGE_VERSION_ENV = "SSMAKER_TRANSITION_BRIDGE_VERSION"
 
@@ -283,6 +283,7 @@ def _powershell_evidence_script(file_path: str) -> str:
     escaped_path = file_path.replace("'", "''")
     return (
         "$ErrorActionPreference='Stop'; "
+        "Import-Module Microsoft.PowerShell.Security -ErrorAction Stop; "
         f"$sig=Get-AuthenticodeSignature -LiteralPath '{escaped_path}'; "
         "if ($null -eq $sig) { Write-Output '{}'; exit 0 }; "
         "$thumb=''; $subject=''; $issuer=''; $eku=@(); "
@@ -291,7 +292,7 @@ def _powershell_evidence_script(file_path: str) -> str:
         "$subject=[string]$sig.SignerCertificate.Subject; "
         "$issuer=[string]$sig.SignerCertificate.Issuer; "
         "$eku=@($sig.SignerCertificate.EnhancedKeyUsageList | "
-        "ForEach-Object { [string]$_.ObjectId.Value }) }; "
+        "ForEach-Object { [string]$_.ObjectId }) }; "
         "$timestampPresent=($null -ne $sig.TimeStamperCertificate); "
         "$timestampSubject=''; if ($timestampPresent) { "
         "$timestampSubject=[string]$sig.TimeStamperCertificate.Subject }; "
@@ -326,10 +327,24 @@ def verify_authenticode(
             "invalid: Authenticode verification is available only on Windows",
         )
 
+    windows_root = Path(os.environ.get("SystemRoot") or r"C:\Windows")
+    powershell = windows_root / "System32" / "WindowsPowerShell" / "v1.0" / "powershell.exe"
+    powershell_command = str(powershell) if powershell.is_file() else "powershell.exe"
+    powershell_env = os.environ.copy()
+    # PowerShell 7 prepends its own module directories when it launches the
+    # desktop app. Passing those paths into Windows PowerShell 5 can make the
+    # built-in Security module fail with duplicate TypeData errors. Restrict
+    # this security subprocess to the standard Windows PowerShell locations.
+    module_paths = [
+        Path(os.environ.get("ProgramFiles") or r"C:\Program Files") / "WindowsPowerShell" / "Modules",
+        windows_root / "System32" / "WindowsPowerShell" / "v1.0" / "Modules",
+    ]
+    powershell_env["PSModulePath"] = ";".join(str(path) for path in module_paths)
+
     try:
         proc = subprocess.run(
             [
-                "powershell",
+                powershell_command,
                 "-NoProfile",
                 "-NonInteractive",
                 "-Command",
@@ -340,6 +355,7 @@ def verify_authenticode(
             timeout=timeout,
             check=False,
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            env=powershell_env,
         )
     except Exception as exc:
         return AuthenticodeVerification(

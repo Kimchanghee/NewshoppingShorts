@@ -238,12 +238,9 @@ jobs:
         }
 
         $codeSigningEku = "1.3.6.1.5.5.7.3.3"
-        $ekuOids = @($installed.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId.Value })
+        $ekuOids = @($installed.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId })
         if ($codeSigningEku -notin $ekuOids) {
-          if ($env:SIGNING_MODE -eq "public" -or $ekuOids.Count -gt 0) {
-            throw "Expected signer does not contain the Code Signing EKU ($codeSigningEku)."
-          }
-          Write-Warning "The exact pinned integrity-bridge signer has no EKU extension; accepting only for the baked transition version."
+          throw "Expected signer does not contain the Code Signing EKU ($codeSigningEku)."
         }
         if ($env:SIGNING_MODE -eq "public" -and $installed.Subject -eq $installed.Issuer) {
           throw "Public signing mode rejects self-issued certificates."
@@ -299,12 +296,9 @@ jobs:
           if ($actualThumb -ne $expectedThumb) {
             throw "$Label signer mismatch (expected $expectedThumb, got $actualThumb)."
           }
-          $ekuOids = @($sig.SignerCertificate.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId.Value })
+          $ekuOids = @($sig.SignerCertificate.EnhancedKeyUsageList | ForEach-Object { [string]$_.ObjectId })
           if ("1.3.6.1.5.5.7.3.3" -notin $ekuOids) {
-            if ($env:SIGNING_MODE -eq "public" -or $ekuOids.Count -gt 0) {
-              throw "$Label signer is missing the Code Signing EKU."
-            }
-            Write-Warning "$Label uses the exact pinned integrity-bridge signer without an EKU extension."
+            throw "$Label signer is missing the Code Signing EKU."
           }
           if ($null -eq $sig.TimeStamperCertificate) {
             throw "$Label is missing a trusted timestamp."
