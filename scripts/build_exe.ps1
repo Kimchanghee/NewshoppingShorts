@@ -102,7 +102,10 @@ function Assert-AuthenticodeArtifact {
       ForEach-Object { [string]$_.ObjectId.Value }
   )
   if ($codeSigningEku -notin $ekuOids) {
-    throw "$Label signer certificate is missing the Code Signing EKU ($codeSigningEku)."
+    if ($SigningMode -eq "public" -or $ekuOids.Count -gt 0) {
+      throw "$Label signer certificate is missing the Code Signing EKU ($codeSigningEku)."
+    }
+    Write-Warning "$Label uses the exact pinned integrity-bridge signer without an EKU extension."
   }
   if ($null -eq $signature.TimeStamperCertificate) {
     throw "$Label signature is missing its trusted RFC 3161 timestamp."

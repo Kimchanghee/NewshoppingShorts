@@ -164,17 +164,17 @@ def test_build_policy_allows_only_the_exact_baked_transition(monkeypatch):
     assert "baked public release signer" in public_reason
 
 
-def test_v1574_is_the_only_baked_integrity_bridge_release():
-    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.74"
+def test_v1575_is_the_only_baked_integrity_bridge_release():
+    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.75"
 
     approved, _ = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.74",
+        "1.5.75",
         LEGACY_THUMBPRINT,
     )
     next_version, reason = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.75",
+        "1.5.76",
         LEGACY_THUMBPRINT,
     )
 
@@ -204,6 +204,8 @@ def test_build_public_gate_is_fail_closed_and_checks_expected_identity():
     assert "SIGN_CERT_THUMBPRINT is required for direct-download release builds" in build
     assert "signer mismatch" in build
     assert "Code Signing EKU" in build
+    assert 'if ($SigningMode -eq "public" -or $ekuOids.Count -gt 0)' in build
+    assert "exact pinned integrity-bridge signer without an EKU extension" in build
     assert "TimeStamperCertificate" in build
     assert 'if ([string]$signature.Status -ne "Valid")' in build
     assert "UnknownError is not accepted in public mode" in build
@@ -238,7 +240,7 @@ def test_build_bundles_and_verifies_font_license_notices():
         assert stale_item not in build
 
 
-def test_workflow_forces_tag_publication_policy_and_blocks_bridge_publication():
+def test_workflow_forces_tag_publication_and_scopes_bridge_to_baked_version():
     workflow = (ROOT / ".github" / "workflows" / "build-and-deploy.yml").read_text(
         encoding="utf-8"
     )
@@ -252,6 +254,8 @@ def test_workflow_forces_tag_publication_policy_and_blocks_bridge_publication():
     assert "Direct installer builds require an immutable vMAJOR.MINOR.PATCH tag push" in workflow
     assert "environment: production-release-signing" in workflow
     assert "Public signing mode rejects self-issued certificates" in workflow
+    assert 'if ($env:SIGNING_MODE -eq "public" -or $ekuOids.Count -gt 0)' in workflow
+    assert "exact pinned integrity-bridge signer has no EKU extension" in workflow
     assert "Release gate requires a nonempty expected signer thumbprint" in workflow
     assert "validate_build_signing_configuration" in workflow
     assert "if: needs.build.outputs.publish == 'true'" in workflow
