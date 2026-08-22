@@ -160,6 +160,48 @@ def test_invalid_partner_input_never_populates_hidden_delivery_fields(monkeypatc
     assert panel._running is False
 
 
+def test_missing_ai_client_disables_start_and_never_consumes_partner_queue(monkeypatch):
+    settings = _Settings(youtube_connected=False)
+    panel = _build_panel(monkeypatch, settings)
+    panel.gui.genai_client = None
+    panel.gui.model_provider = SimpleNamespace(gemini_client=None)
+    links = [
+        "https://link.coupang.com/a/first",
+        "https://link.coupang.com/a/second",
+        "https://link.coupang.com/a/third",
+    ]
+    panel.partner_links_input.setPlainText("\n".join(links))
+    QT_APP.processEvents()
+    panel._sync_delivery_ui()
+
+    assert panel.btn_start.isEnabled() is False
+    assert panel.btn_start.text() == "Gemini API 키 설정 후 시작 가능"
+
+    panel._on_start_platform_video()
+
+    assert panel._running is False
+    assert panel._partner_batch_active is False
+    assert panel.partner_links_input.toPlainText() == "\n".join(links)
+    assert panel.next_links_count_label.text() == "3개"
+    assert "실제로 등록되지 않았습니다" in panel.results_label.text()
+
+
+def test_readiness_does_not_treat_empty_provider_placeholder_as_vertex(monkeypatch):
+    from ui.components.automation_readiness import AutomationReadinessCard
+
+    panel = _build_panel(monkeypatch, _Settings(youtube_connected=False))
+    panel.gui.genai_client = None
+    panel.gui.model_provider = SimpleNamespace(gemini_client=None)
+
+    ready, detail = AutomationReadinessCard(
+        gui=panel.gui
+    )._ai_status()
+
+    assert ready is False
+    assert "Gemini API 키" in detail
+    assert "Vertex AI 엔진이 준비" not in detail
+
+
 def test_partner_link_batch_advances_to_the_next_item_automatically(monkeypatch):
     panel = _build_panel(monkeypatch, _Settings(youtube_connected=False))
     links = [

@@ -256,6 +256,7 @@ def _failure(
     action: str,
     *,
     retriable: bool = True,
+    can_choose_other_product: bool = True,
     diagnostics: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     return {
@@ -263,7 +264,7 @@ def _failure(
         "cause": str(cause or "").strip(),
         "action": str(action or "").strip(),
         "retriable": bool(retriable),
-        "can_choose_other_product": True,
+        "can_choose_other_product": bool(can_choose_other_product),
         "diagnostics": dict(diagnostics or {}),
         "blocked_stages": list(_BLOCKED_DELIVERY_STAGES),
     }
@@ -675,6 +676,22 @@ async def run_platform_sourcing(
         keywords = await _convert_keywords(product_name, gemini_client)
         queries = build_queries(product_name, keywords)
         report["keywords"], report["queries"] = keywords, queries
+        if not queries:
+            report["failure"] = _failure(
+                "keyword_conversion_unavailable",
+                "Gemini API 키가 없어 상품명을 해외 검색어로 변환하지 못했습니다.",
+                "설정에서 Gemini API 키를 등록한 뒤 같은 대기열을 다시 시작해 주세요.",
+                retriable=False,
+                can_choose_other_product=False,
+            )
+            report["error"] = (
+                "AI 검색어를 준비하지 못했어요.\n"
+                "Gemini API 키를 등록한 뒤 다시 시작해 주세요.\n"
+                "남은 상품 대기열은 그대로 보존됩니다."
+            )
+            report["blocked_stages"] = list(report["failure"]["blocked_stages"])
+            _emit(progress, "keyword_convert", report["error"], 0.0)
+            return report
         relevance_references = [
             product_name,
             str(keywords.get("chinese") or ""),

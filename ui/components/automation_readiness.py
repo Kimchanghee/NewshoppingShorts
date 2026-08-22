@@ -38,6 +38,22 @@ STATUS_MISSING = "missing"    # 필요한데 미설정(빨강 ✗) → 시작 �
 STATUS_OPTIONAL = "optional"  # 선택 항목 미설정(주황 ⚠) → 안내만
 STATUS_SKIPPED = "skipped"    # 이번 실행에서 사용 안 함(회색 ○)
 
+AI_KEY_MISSING_DETAIL = (
+    "Gemini API 키가 실제로 등록되지 않았습니다. "
+    "설정에서 Gemini API 키를 등록해 주세요."
+)
+
+
+def has_ready_ai_client(gui) -> bool:
+    """Return whether this process can actually call Gemini.
+
+    ``model_provider`` is always constructed during normal startup, including
+    when it contains no API key.  Treating that placeholder as a usable Vertex
+    engine produced a false green readiness state and let an empty-keyword
+    batch consume every queued product.
+    """
+    return getattr(gui, "genai_client", None) is not None
+
 
 class AutomationReadinessCard(QFrame):
     """풀 자동화에 필요한 연동 상태를 보여주는 체크리스트 카드."""
@@ -358,11 +374,9 @@ class AutomationReadinessCard(QFrame):
     def _ai_status(self) -> Tuple[bool, str]:
         """AI 분석 엔진(Vertex/Gemini) 준비 여부."""
         gui = self._gui
-        if getattr(gui, "genai_client", None) is not None:
+        if has_ready_ai_client(gui):
             return True, "AI 분석 엔진이 준비되었습니다."
-        if getattr(gui, "model_provider", None) is not None:
-            return True, "기본 Vertex AI 엔진이 준비되었습니다."
-        return False, "AI 키가 설정되지 않았습니다. 설정에서 Gemini API 키를 등록하세요."
+        return False, AI_KEY_MISSING_DETAIL
 
     def _youtube_status(self) -> Tuple[str, str]:
         """YouTube 채널 연결/계정 검증 상태."""

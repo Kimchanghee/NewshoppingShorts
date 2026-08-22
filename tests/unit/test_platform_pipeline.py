@@ -242,6 +242,39 @@ def test_convert_keywords_falls_back_to_rules_without_client():
     assert kw.get("english")
 
 
+def test_empty_keyword_conversion_stops_before_browser_and_preserves_batch(
+    monkeypatch, tmp_path
+):
+    from core.sourcing import platform_shorts_searcher
+
+    async def empty_keywords(_product_name, _client):
+        return {"chinese": "", "english": ""}
+
+    async def fail_browser():
+        pytest.fail("empty keywords must not launch the platform browser")
+
+    async def fail_search(*_args, **_kwargs):
+        pytest.fail("empty keywords must not start platform search")
+
+    monkeypatch.setattr(pp, "_convert_keywords", empty_keywords)
+    monkeypatch.setattr(platform_shorts_searcher, "start_browser", fail_browser)
+    monkeypatch.setattr(platform_shorts_searcher, "search_platform_shorts", fail_search)
+
+    report = asyncio.run(
+        pp.run_platform_sourcing(
+            "https://link.coupang.com/a/f8i3PuVSqi",
+            output_dir=str(tmp_path),
+            product_name_hint="새로운 한글 전용 상품",
+        )
+    )
+
+    assert report["ok"] is False
+    assert report["queries"] == []
+    assert report["failure"]["code"] == "keyword_conversion_unavailable"
+    assert report["failure"]["can_choose_other_product"] is False
+    assert "대기열은 그대로 보존" in report["error"]
+
+
 # ── reeditor: ffmpeg 명령 생성 ──
 
 def test_reedit_cmd_default_has_audio_and_no_speed(tmp_path):

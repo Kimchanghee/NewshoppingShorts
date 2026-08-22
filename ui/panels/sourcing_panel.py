@@ -18,7 +18,11 @@ from PyQt6.QtCore import Qt, pyqtSignal, QTimer
 from PyQt6.QtGui import QFont
 
 from ui.design_system_v2 import get_design_system, get_color, checkbox_qss
-from ui.components.automation_readiness import AutomationReadinessCard
+from ui.components.automation_readiness import (
+    AI_KEY_MISSING_DETAIL,
+    AutomationReadinessCard,
+    has_ready_ai_client,
+)
 from utils.logging_config import get_logger
 from utils.url_security import (
     MAX_PARTNER_LINK_HTTP_TOKENS,
@@ -720,6 +724,18 @@ class SourcingPanel(QWidget):
                 self.btn_start.setText("자동화 시작")
             return
 
+        if not has_ready_ai_client(self.gui):
+            self.delivery_outcome_label.setText(AI_KEY_MISSING_DETAIL)
+            self.delivery_outcome_label.setStyleSheet(
+                f"color: {get_color('warning')};"
+            )
+            if hasattr(self, "btn_start") and not self._running:
+                self.btn_start.setEnabled(False)
+                self.btn_start.setText("Gemini API 키 설정 후 시작 가능")
+                self.btn_start.setToolTip(AI_KEY_MISSING_DETAIL)
+                self._apply_button_style(disabled=True)
+            return
+
         if not self._is_upload_mode():
             self.delivery_outcome_label.setText(
                 "✓ 현재 저장된 음성·자막 설정으로 영상 파일까지 자동 제작합니다. 외부 서비스에는 올리지 않습니다."
@@ -1126,6 +1142,14 @@ class SourcingPanel(QWidget):
             url = parse_result.links[0]
         self.url_input.setText(url)
         if self._running:
+            return
+        if not has_ready_ai_client(self.gui):
+            self._partner_batch_active = False
+            if hasattr(self, "partner_links_input"):
+                self.partner_links_input.setEnabled(True)
+            self.results_label.setText(AI_KEY_MISSING_DETAIL)
+            self.results_label.setStyleSheet(f"color: {get_color('error')};")
+            self._update_delivery_status()
             return
         # YouTube 모드에서만 채널 연결을 필수로 검증한다. Linktree는 선택이며
         # 연결/발행 실패가 제작이나 업로드를 막지 않는다.
