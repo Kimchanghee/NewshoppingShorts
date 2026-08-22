@@ -183,8 +183,8 @@ class LinktreeManager:
             except Exception as exc:
                 issues.append(f"Linktree 브라우저 자동 발행을 준비하지 못했습니다: {exc}")
             issues.append(
-                "Linktree 자동 발행이 켜져 있지만 Webhook URL이 없습니다. "
-                "설정 > Coupang/Linktree 자동화에서 Webhook URL을 연결하거나 "
+                "Linktree 자동 발행이 켜져 있지만 카드 생성 권한을 가진 Webhook URL이 없습니다. "
+                "설정 > Coupang/Linktree 자동화에서 검증된 사용자 소유 Webhook URL을 연결하거나 "
                 "Linktree 자동 발행 체크를 끄고 다시 실행하세요."
             )
         elif not re.match(r"^https?://", webhook_url, re.IGNORECASE):

@@ -2,8 +2,10 @@
 """
 Linktree 자동 발행 간편 설정 (PyQt6)
 
-Linktree는 공식 '자동 등록 API'가 없어, 자동 발행은 웹훅(Make/Zapier/n8n 등)을
-통해 이뤄진다. 일반 사용자가 이 개념을 몰라도 한 번만 따라 하면 연결되도록,
+Linktree는 공식 범용 '자동 등록 API'가 없다. 자동 발행은 Linktree 카드를
+실제로 추가할 수 있는 사용자 소유 연동 엔드포인트가 있을 때만 웹훅으로 이뤄진다.
+단순 Make/Zapier/n8n Webhook 수신기만으로는 Linktree 카드가 추가되지 않는다.
+일반 사용자가 이 개념을 몰라도 잘못된 연결을 완료로 오인하지 않도록,
 단계별 안내 + 예시 데이터 복사 + 테스트 발행 + 저장을 한 화면에 모았다.
 
 구성:
@@ -105,8 +107,8 @@ class LinktreeSetupPanel(QWidget):
 
         intro = QLabel(
             "공개 Linktree 주소는 프로필을 보여 주는 용도일 뿐, 상품 카드를 추가할 권한이 없습니다. "
-            "실제 자동 상품 등록을 켜려면 Make·Zapier·n8n 등에서 만든 Webhook과 "
-            "Linktree 카드 추가 시나리오를 반드시 연결해야 합니다."
+            "실제 자동 상품 등록을 켜려면 Linktree 계정에 카드를 추가할 권한을 가진 "
+            "사용자 소유 연동 엔드포인트가 필요합니다. 단순 Webhook URL만으로는 연결되지 않습니다."
         )
         intro.setWordWrap(True)
         intro.setFont(QFont(ds.typography.font_family_primary, ds.typography.size_sm))
@@ -139,9 +141,8 @@ class LinktreeSetupPanel(QWidget):
         step2 = self._step_box("2단계", "자동 등록 주소(Webhook) 연결")
         s2 = step2.body
         s2_desc = QLabel(
-            "Make·Zapier·n8n 같은 서비스에서 ‘Webhook’을 만들면 주소가 하나 생겨요. "
-            "그 주소를 아래에 붙여넣으세요. 자동 등록할 때 이 주소로 아래 예시 같은 정보가 전달돼요. "
-            "Webhook을 받는 자동화 시나리오에서 Linktree 카드 추가 단계까지 활성화하고, "
+            "이 주소는 Linktree 카드를 실제로 추가할 권한이 있는 사용자 소유 연동이어야 해요. "
+            "Make·Zapier·n8n의 단순 Webhook 수신기는 해당하지 않습니다. 연동이 Linktree 카드를 생성하고, "
             "thumbnail_url을 카드의 사용자 지정 썸네일 이미지에 연결해야 상품 사진도 함께 표시됩니다."
         )
         s2_desc.setWordWrap(True)

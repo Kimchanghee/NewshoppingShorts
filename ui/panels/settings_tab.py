@@ -48,6 +48,33 @@ def is_valid_gemini_key(key: str) -> bool:
     """Accept both legacy Standard (AIza…) and new Auth (AQ.…) Gemini keys."""
     key = (key or "").strip()
     return bool(GEMINI_API_KEY_PATTERN.match(key) or GEMINI_AUTH_KEY_PATTERN.match(key))
+
+
+def classify_linktree_setup_status(
+    profile_ready: bool,
+    auto_publish_enabled: bool,
+    webhook_ready: bool,
+) -> tuple[bool, bool, str]:
+    """Return ``(connected, warning, detail)`` for the Linktree status chip.
+
+    A public profile URL only proves where links should be displayed.  It does
+    not grant SSMaker permission to create cards.  Report a full connection
+    only when automatic publishing is enabled and a webhook endpoint is
+    configured; otherwise keep the profile-only state visibly incomplete.
+    """
+    if not profile_ready:
+        return False, False, ""
+    if auto_publish_enabled and webhook_ready:
+        return True, False, "자동 등록"
+
+    missing = []
+    if not webhook_ready:
+        missing.append("Webhook 미설정")
+    if not auto_publish_enabled:
+        missing.append("자동 등록 꺼짐")
+    return False, True, " · ".join(missing)
+
+
 LINKTREE_SIGNUP_URL = "https://linktr.ee/register"
 LINKTREE_ADMIN_URL = "https://linktr.ee/admin/links"
 TIKTOK_LOGIN_URL = "https://www.tiktok.com/login"
@@ -666,7 +693,8 @@ class SettingsTab(QWidget, ThemedMixin):
 
         automation_intro = QLabel(
             "Linktree 공개 주소는 영상에 링크 모음을 표시하는 용도이며 상품을 자동 등록하지 않습니다. "
-            "실제 자동 상품 등록에는 Webhook URL과 Make/Zapier/n8n의 Linktree 카드 추가 시나리오가 반드시 필요합니다."
+            "실제 자동 상품 등록에는 Linktree 카드를 추가할 권한을 가진 사용자 소유 연동 엔드포인트가 필요합니다. "
+            "단순 Make/Zapier/n8n Webhook URL만으로는 Linktree 카드가 추가되지 않습니다."
         )
         automation_intro.setWordWrap(True)
         automation_intro.setStyleSheet(
@@ -2335,19 +2363,19 @@ class SettingsTab(QWidget, ThemedMixin):
         c = self.ds.colors
 
         def set_chip(chip: QLabel, title: str, ok: bool, detail: str = "", warn: bool = False):
+            if warn:
+                chip.setText(f"{title} · 점검 필요{(' (' + detail + ')') if detail else ''}")
+                chip.setStyleSheet(
+                    f"padding: 5px 10px; border-radius: {self.ds.radius.full}px; "
+                    f"border: 1px solid {c.warning}; background: {c.warning}22; color: {c.warning}; font-weight: 600;"
+                )
+                return
             if ok:
                 detail_suffix = f" ({detail})" if detail else ""
                 chip.setText(f"{title} · 연결됨{detail_suffix}")
                 chip.setStyleSheet(
                     f"padding: 5px 10px; border-radius: {self.ds.radius.full}px; "
                     f"border: 1px solid {c.success}; background: {c.success}22; color: {c.success}; font-weight: 600;"
-                )
-                return
-            if warn:
-                chip.setText(f"{title} · 점검 필요{(' (' + detail + ')') if detail else ''}")
-                chip.setStyleSheet(
-                    f"padding: 5px 10px; border-radius: {self.ds.radius.full}px; "
-                    f"border: 1px solid {c.warning}; background: {c.warning}22; color: {c.warning}; font-weight: 600;"
                 )
                 return
             chip.setText(f"{title} · 미연결")
@@ -2380,13 +2408,17 @@ class SettingsTab(QWidget, ThemedMixin):
         linktree_profile_ready = self._is_linktree_profile_ready()
         linktree_auto_enabled = bool(getattr(self, "linktree_auto_checkbox", None) and self.linktree_auto_checkbox.isChecked())
         linktree_webhook_ready = bool(getattr(self, "linktree_webhook_input", None) and self.linktree_webhook_input.text().strip())
-        linktree_warn = linktree_auto_enabled and not linktree_webhook_ready
+        linktree_connected, linktree_warn, linktree_detail = classify_linktree_setup_status(
+            linktree_profile_ready,
+            linktree_auto_enabled,
+            linktree_webhook_ready,
+        )
         set_chip(
             self.setup_chip_linktree,
             "Linktree",
-            linktree_profile_ready,
-            detail="Webhook 필요" if linktree_warn else "",
-            warn=linktree_warn and linktree_profile_ready,
+            linktree_connected,
+            detail=linktree_detail,
+            warn=linktree_warn,
         )
 
     def _refresh_setup_assistant_status(self):
@@ -2416,7 +2448,9 @@ class SettingsTab(QWidget, ThemedMixin):
             # 틱톡 비활성화: 틱톡 단계 제외
             return ["precheck", *youtube_steps, *instagram_steps, *threads_steps, "final_verify"]
         if scope == "linktree":
-            return ["precheck", *linktree_steps, "final_verify"]
+            # Linktree profile/webhook setup is independent from Gemini.  A
+            # Linktree-only assistant must not stall on an unrelated API key.
+            return [*linktree_steps, "final_verify"]
         return [
             "precheck",
             *youtube_steps,
