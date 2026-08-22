@@ -45,8 +45,14 @@ EXAMPLE_PAYLOAD = {
     "url": "https://link.coupang.com/a/abcd123",
     "description": "이 게시물은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.",
     "source_url": "https://www.coupang.com/vp/products/...",
+    "thumbnail_url": "https://thumbnail.coupangcdn.com/.../product.jpg",
     "platform": "coupang",
-    "extra": {"channel": "shopping_shorts_maker", "publish_index": 1, "display_number": "[001]"},
+    "extra": {
+        "channel": "shopping_shorts_maker",
+        "publish_index": 1,
+        "display_number": "[001]",
+        "thumbnail_url": "https://thumbnail.coupangcdn.com/.../product.jpg",
+    },
 }
 
 
@@ -135,7 +141,8 @@ class LinktreeSetupPanel(QWidget):
         s2_desc = QLabel(
             "Make·Zapier·n8n 같은 서비스에서 ‘Webhook’을 만들면 주소가 하나 생겨요. "
             "그 주소를 아래에 붙여넣으세요. 자동 등록할 때 이 주소로 아래 예시 같은 정보가 전달돼요. "
-            "Webhook을 받는 자동화 시나리오에서 Linktree 카드 추가 단계까지 활성화해야 실제 등록됩니다."
+            "Webhook을 받는 자동화 시나리오에서 Linktree 카드 추가 단계까지 활성화하고, "
+            "thumbnail_url을 카드의 사용자 지정 썸네일 이미지에 연결해야 상품 사진도 함께 표시됩니다."
         )
         s2_desc.setWordWrap(True)
         s2_desc.setStyleSheet(f"color: {c('text_muted')}; font-size: 12px; border: none; background: transparent; padding-bottom: 3px;")
@@ -163,7 +170,7 @@ class LinktreeSetupPanel(QWidget):
         self.payload_view = QTextEdit()
         self.payload_view.setReadOnly(True)
         self.payload_view.setPlainText(json.dumps(EXAMPLE_PAYLOAD, ensure_ascii=False, indent=2))
-        self.payload_view.setFixedHeight(120)
+        self.payload_view.setFixedHeight(170)
         self.payload_view.setStyleSheet(
             f"QTextEdit {{ background-color: {c('surface_variant')}; color: {c('text_primary')}; "
             f"border: 1px solid {c('border_light')}; border-radius: {self.ds.radius.sm}px; "

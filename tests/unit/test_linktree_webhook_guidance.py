@@ -53,4 +53,7 @@ def test_linktree_setup_says_public_profile_does_not_auto_publish(monkeypatch):
     assert "공개 주소만으로는 자동 등록되지 않아요" in text
     assert "실제 자동 상품 등록" in text
     assert "Webhook" in text
+    assert "thumbnail_url" in text
+    assert "상품 사진" in text
+    assert "thumbnail_url" in panel.payload_view.toPlainText()
     assert panel.auto_publish_checkbox.isChecked() is False

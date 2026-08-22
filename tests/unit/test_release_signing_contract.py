@@ -164,17 +164,17 @@ def test_build_policy_allows_only_the_exact_baked_transition(monkeypatch):
     assert "baked public release signer" in public_reason
 
 
-def test_v1581_is_the_only_baked_integrity_bridge_release():
-    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.81"
+def test_v1582_is_the_only_baked_integrity_bridge_release():
+    assert authenticode.TRANSITION_BRIDGE_VERSION == "1.5.82"
 
     approved, _ = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.81",
+        "1.5.82",
         LEGACY_THUMBPRINT,
     )
     next_version, reason = validate_build_signing_configuration(
         "integrity-bridge",
-        "1.5.82",
+        "1.5.83",
         LEGACY_THUMBPRINT,
     )
 

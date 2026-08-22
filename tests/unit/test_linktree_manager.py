@@ -190,6 +190,34 @@ def test_publish_link_uses_browser_fallback_without_webhook(monkeypatch):
     assert called["profile_url"] == "https://linktr.ee/example"
 
 
+def test_product_thumbnail_is_not_silently_dropped_by_browser_fallback(monkeypatch):
+    def fail_publish_link_via_visible_browser(**_kwargs):
+        raise AssertionError("text-only browser fallback must not create this card")
+
+    monkeypatch.setattr(
+        "managers.linktree_browser_publisher.browser_publish_enabled", lambda: True
+    )
+    monkeypatch.setattr(
+        "managers.linktree_browser_publisher.publish_link_via_visible_browser",
+        fail_publish_link_via_visible_browser,
+    )
+    manager = _make_manager(
+        {
+            "webhook_url": "",
+            "api_key": "",
+            "profile_url": "https://linktr.ee/example",
+            "auto_publish": True,
+        }
+    )
+
+    assert manager.publish_link(
+        title="장난감",
+        url="https://link.coupang.com/a/toy",
+        thumbnail_url="https://thumbnail.coupangcdn.com/toy.jpg",
+        extra={"thumbnail_required": True},
+    ) is False
+
+
 def test_publish_link_does_not_use_browser_fallback_by_default(monkeypatch):
     def fail_publish_link_via_visible_browser(**_kwargs):
         raise AssertionError("visible browser fallback must not run unless explicitly enabled")
@@ -228,11 +256,21 @@ def test_publish_link_returns_false_on_http_failure(monkeypatch):
 def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
     captured = {}
 
-    def _fake_publish_link(self, title, url, description="", source_url="", extra=None, timeout_seconds=None):
+    def _fake_publish_link(
+        self,
+        title,
+        url,
+        description="",
+        source_url="",
+        thumbnail_url="",
+        extra=None,
+        timeout_seconds=None,
+    ):
         captured["title"] = title
         captured["url"] = url
         captured["description"] = description
         captured["source_url"] = source_url
+        captured["thumbnail_url"] = thumbnail_url
         captured["extra"] = extra
         return True
 
@@ -245,6 +283,7 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
         product_name="테스트 상품명",
         coupang_url="https://link.coupang.com/a/abc",
         source_url="https://www.coupang.com/vp/products/1",
+        thumbnail_url="//thumbnail.coupangcdn.com/product.jpg",
     )
 
     assert ok is True
@@ -253,8 +292,61 @@ def test_publish_coupang_link_builds_expected_defaults(monkeypatch, tmp_path):
     assert len(captured["title"]) <= LinktreeManager.MAX_PRODUCT_TITLE_LENGTH
     assert captured["description"] == COUPANG_AFFILIATE_DISCLOSURE
     assert captured["source_url"] == "https://www.coupang.com/vp/products/1"
+    assert captured["thumbnail_url"] == "https://thumbnail.coupangcdn.com/product.jpg"
     assert captured["extra"]["channel"] == "shopping_shorts_maker"
     assert captured["extra"]["display_number"] == "[001]"
+    assert captured["extra"]["thumbnail_url"] == "https://thumbnail.coupangcdn.com/product.jpg"
+    assert captured["extra"]["thumbnail_required"] is True
+
+
+def test_publish_link_sends_safe_thumbnail_to_webhook(monkeypatch):
+    captured = {}
+
+    def _fake_post(url, json, headers, timeout):
+        captured.update(json)
+        return _DummyResponse(status_code=204)
+
+    monkeypatch.setattr("managers.linktree_manager.requests.post", _fake_post)
+    manager = _make_manager(
+        {
+            "webhook_url": "https://example.com/hook",
+            "api_key": "",
+            "profile_url": "",
+            "auto_publish": True,
+        }
+    )
+
+    assert manager.publish_link(
+        title="장난감",
+        url="https://link.coupang.com/a/abc",
+        thumbnail_url="//thumbnail.coupangcdn.com/toy.jpg",
+    ) is True
+    assert captured["thumbnail_url"] == "https://thumbnail.coupangcdn.com/toy.jpg"
+
+
+def test_publish_link_drops_untrusted_thumbnail_from_webhook(monkeypatch):
+    captured = {}
+
+    def _fake_post(url, json, headers, timeout):
+        captured.update(json)
+        return _DummyResponse(status_code=200)
+
+    monkeypatch.setattr("managers.linktree_manager.requests.post", _fake_post)
+    manager = _make_manager(
+        {
+            "webhook_url": "https://example.com/hook",
+            "api_key": "",
+            "profile_url": "",
+            "auto_publish": True,
+        }
+    )
+
+    assert manager.publish_link(
+        title="장난감",
+        url="https://link.coupang.com/a/abc",
+        thumbnail_url="https://coupangcdn.com.evil.example/steal",
+    ) is True
+    assert captured["thumbnail_url"] == ""
 
 
 def test_publish_coupang_link_rejects_english_sourcing_keyword(monkeypatch):
@@ -284,7 +376,16 @@ def test_publish_coupang_link_rejects_english_sourcing_keyword(monkeypatch):
 def test_publish_coupang_link_with_metadata_returns_matching_number(monkeypatch, tmp_path):
     captured = {}
 
-    def _fake_publish_link(self, title, url, description="", source_url="", extra=None, timeout_seconds=None):
+    def _fake_publish_link(
+        self,
+        title,
+        url,
+        description="",
+        source_url="",
+        thumbnail_url="",
+        extra=None,
+        timeout_seconds=None,
+    ):
         captured["title"] = title
         captured["url"] = url
         captured["description"] = description

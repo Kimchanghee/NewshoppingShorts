@@ -126,6 +126,9 @@ def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
     original_url = str(result.get("coupang_url") or "").strip()
     deep_link = str(result.get("deep_link") or "").strip()
     product_name = str(product_info.get("name") or "").strip()
+    product_thumbnail_url = str(
+        product_info.get("image") or product_info.get("image_url") or ""
+    ).strip()
     description = str(result.get("description") or "").strip()
 
     if not matched_item and not product_name and not original_url:
@@ -134,6 +137,7 @@ def _resolve_sourcing_context(app, url: str) -> Dict[str, str]:
     return {
         "product_name": product_name,
         "product_info": product_name or description,
+        "product_thumbnail_url": product_thumbnail_url,
         "source_url": original_url,
         "coupang_deep_link": deep_link,
         "matched_title": str(matched_item.get("title") or "").strip(),
@@ -1938,6 +1942,9 @@ def _process_single_video(app, url, current_number, total_urls):
                                                     product_name=product_name,
                                                     coupang_url=coupang_link,
                                                     source_url=original_source_url or url,
+                                                    thumbnail_url=sourcing_context.get(
+                                                        "product_thumbnail_url", ""
+                                                    ),
                                                 )
                                                 linktree_ok = bool(linktree_result.get("ok"))
                                                 if linktree_ok:
@@ -1947,6 +1954,9 @@ def _process_single_video(app, url, current_number, total_urls):
                                                     product_name=product_name,
                                                     coupang_url=coupang_link,
                                                     source_url=original_source_url or url,
+                                                    thumbnail_url=sourcing_context.get(
+                                                        "product_thumbnail_url", ""
+                                                    ),
                                                 )
                                             logger.info(
                                                 "[Automation] Linktree publish after render: %s",

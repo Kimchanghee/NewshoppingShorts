@@ -1294,6 +1294,9 @@ class SourcingPanel(QWidget):
                 return
 
             product_name = str((report.get("product_info") or {}).get("name") or "")
+            product_thumbnail_url = str(
+                (report.get("product_info") or {}).get("image") or ""
+            ).strip()
             hit = report.get("hit") or {}
             edited = report.get("final_video") or ""
             deep_link = str(report.get("deep_link") or "")
@@ -1348,6 +1351,7 @@ class SourcingPanel(QWidget):
                             product_name=product_name,
                             coupang_url=purchase_url,
                             source_url=coupang_url,
+                            thumbnail_url=product_thumbnail_url,
                         )
                         if ok:
                             linktree_url = lm.get_profile_url()
@@ -1804,6 +1808,9 @@ class SourcingPanel(QWidget):
                             product_name=product_name,
                             coupang_url=publish_url,
                             source_url=pipeline.coupang_url,
+                            thumbnail_url=str(
+                                (pipeline.product_info or {}).get("image") or ""
+                            ).strip(),
                         )
                         logger.info("[SourcingPanel] Linktree publish: %s", "성공" if ok else "실패")
                     else:

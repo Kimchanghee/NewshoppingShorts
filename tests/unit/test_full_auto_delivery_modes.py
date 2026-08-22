@@ -420,6 +420,95 @@ def test_direct_platform_upload_continues_when_optional_linktree_is_disconnected
     assert "complete" in events
 
 
+def test_direct_platform_passes_coupang_product_thumbnail_to_linktree(
+    monkeypatch, tmp_path
+):
+    from ui.panels.sourcing_panel import SourcingPanel
+
+    video = tmp_path / "edited.mp4"
+    video.write_bytes(b"video")
+    published = {}
+
+    class _Reservation:
+        finalized = False
+
+        def mark_pending_finalize(self):
+            return None
+
+        def finalize(self):
+            self.finalized = True
+            return {"success": True, "reservation_status": "completed"}
+
+        def complete_delivery(self):
+            return None
+
+        def can_release(self):
+            return False
+
+    monkeypatch.setattr(
+        "ui.panels.sourcing_panel.DurableWorkReservation.begin",
+        lambda *_args, **_kwargs: (
+            _Reservation(),
+            {"success": True, "reservation_status": "reserved"},
+        ),
+    )
+
+    thumbnail = "https://thumbnail.coupangcdn.com/toys/cute-bear.jpg"
+
+    async def _pipeline(*_args, **_kwargs):
+        return {
+            "ok": True,
+            "product_info": {"name": "귀여운 장난감", "image": thumbnail},
+            "hit": {"platform": "douyin"},
+            "final_video": str(video),
+            "auto_publish_safe": True,
+            "requires_review": False,
+            "deep_link": "https://link.coupang.com/a/toy",
+            "purchase_url": "https://link.coupang.com/a/toy",
+            "render_integrity": {"ok": True},
+        }
+
+    monkeypatch.setattr("core.sourcing.platform_pipeline.run_platform_sourcing", _pipeline)
+
+    class _ConnectedLinktree:
+        def is_connected(self):
+            return True
+
+        def publish_coupang_link(self, **kwargs):
+            published.update(kwargs)
+            return True
+
+        def get_profile_url(self):
+            return "https://linktr.ee/mongletoy"
+
+    monkeypatch.setattr(
+        "managers.linktree_manager.get_linktree_manager",
+        lambda: _ConnectedLinktree(),
+    )
+
+    panel = SimpleNamespace(
+        _on_pipeline_progress=lambda *_args: None,
+        _safe_set_results=lambda _text: None,
+        _reset_start_button=lambda: None,
+    )
+    youtube = SimpleNamespace(add_to_upload_queue=lambda **_kwargs: True)
+
+    SourcingPanel._run_platform_pipeline(
+        panel,
+        "https://link.coupang.com/a/toy",
+        0.9,
+        True,
+        True,
+        None,
+        youtube,
+        "42",
+        "platform:https://link.coupang.com/a/toy",
+    )
+
+    assert published["product_name"] == "귀여운 장난감"
+    assert published["thumbnail_url"] == thumbnail
+
+
 @pytest.mark.parametrize(
     "safety_fields",
     [

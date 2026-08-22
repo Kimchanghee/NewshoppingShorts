@@ -7,9 +7,10 @@ For app-side automation we send payloads to a user-provided webhook endpoint.
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
-import re
+from urllib.parse import urlsplit
 
 import requests
 
@@ -31,6 +32,36 @@ class LinktreeManager:
 
     DEFAULT_TIMEOUT_SECONDS = 12
     MAX_PRODUCT_TITLE_LENGTH = 40
+    _THUMBNAIL_HOST_SUFFIX = "coupangcdn.com"
+
+    @classmethod
+    def _normalize_thumbnail_url(cls, value: str) -> str:
+        """Return a safe HTTPS Coupang product thumbnail, or an empty string.
+
+        Product image URLs are sent to a user-controlled webhook and may later
+        be fetched by an automation provider.  Restrict them to Coupang's CDN
+        so an untrusted scraped URL cannot become an SSRF target downstream.
+        """
+        normalized = str(value or "").strip()
+        if normalized.startswith("//"):
+            normalized = "https:" + normalized
+        try:
+            parsed = urlsplit(normalized)
+            host = (parsed.hostname or "").encode("idna").decode("ascii").lower().rstrip(".")
+            if (
+                parsed.scheme.lower() != "https"
+                or not (
+                    host == cls._THUMBNAIL_HOST_SUFFIX
+                    or host.endswith(f".{cls._THUMBNAIL_HOST_SUFFIX}")
+                )
+                or parsed.username is not None
+                or parsed.password is not None
+                or parsed.port not in (None, 443)
+            ):
+                return ""
+        except (TypeError, ValueError, UnicodeError):
+            return ""
+        return normalized
 
     @staticmethod
     def _has_hangul(text: str) -> bool:
@@ -195,6 +226,7 @@ class LinktreeManager:
         url: str,
         description: str = "",
         source_url: str = "",
+        thumbnail_url: str = "",
         extra: Optional[Dict[str, Any]] = None,
         timeout_seconds: Optional[int] = None,
     ) -> bool:
@@ -209,6 +241,15 @@ class LinktreeManager:
             target_url = str(url or "").strip()
             if not target_url:
                 logger.warning("[Linktree] Empty target URL. Skipping publish.")
+                return False
+            normalized_thumbnail_url = self._normalize_thumbnail_url(thumbnail_url)
+            if normalized_thumbnail_url and bool(
+                (extra or {}).get("thumbnail_required", False)
+            ):
+                logger.warning(
+                    "[Linktree] Product thumbnail publishing requires a webhook mapping; "
+                    "the visible-browser fallback would create a text-only card."
+                )
                 return False
             try:
                 from managers.linktree_browser_publisher import (
@@ -248,6 +289,7 @@ class LinktreeManager:
             "url": target_url,
             "description": str(description or "").strip(),
             "source_url": str(source_url or "").strip(),
+            "thumbnail_url": self._normalize_thumbnail_url(thumbnail_url),
             "platform": "coupang",
             "created_at_utc": datetime.now(timezone.utc).isoformat(),
         }
@@ -321,6 +363,7 @@ class LinktreeManager:
         product_name: str,
         coupang_url: str,
         source_url: str = "",
+        thumbnail_url: str = "",
     ) -> Dict[str, Any]:
         """Publish Coupang deep-link payload and return numbering metadata.
 
@@ -366,15 +409,19 @@ class LinktreeManager:
         number = self.format_publish_index(index)
         title = self._build_numbered_product_title(product_name, index)
         description = COUPANG_AFFILIATE_DISCLOSURE
+        normalized_thumbnail_url = self._normalize_thumbnail_url(thumbnail_url)
         ok = self.publish_link(
             title=title,
             url=coupang_url,
             description=description,
             source_url=source_url,
+            thumbnail_url=normalized_thumbnail_url,
             extra={
                 "channel": "shopping_shorts_maker",
                 "publish_index": index,
                 "display_number": number,
+                "thumbnail_url": normalized_thumbnail_url,
+                "thumbnail_required": bool(normalized_thumbnail_url),
             },
         )
         if ok:
@@ -386,14 +433,22 @@ class LinktreeManager:
             "title": title,
             "url": coupang_url,
             "description": description,
+            "thumbnail_url": normalized_thumbnail_url,
         }
 
-    def publish_coupang_link(self, product_name: str, coupang_url: str, source_url: str = "") -> bool:
+    def publish_coupang_link(
+        self,
+        product_name: str,
+        coupang_url: str,
+        source_url: str = "",
+        thumbnail_url: str = "",
+    ) -> bool:
         """Publish Coupang deep-link payload for the generated product."""
         result = self.publish_coupang_link_with_metadata(
             product_name=product_name,
             coupang_url=coupang_url,
             source_url=source_url,
+            thumbnail_url=thumbnail_url,
         )
         ok = bool(result.get("ok"))
         return ok
